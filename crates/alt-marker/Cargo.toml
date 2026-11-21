@@ -1,0 +1,12 @@
+[package]
+name = "alt-marker"
+description = "alt marker file: a small state kept in two checksummed slots, changed in place under a lock of its own"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alt-hash.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+alt-os.workspace = true

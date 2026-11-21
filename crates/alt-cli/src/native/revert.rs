@@ -44,7 +44,7 @@ impl NativeRepo<'_> {
         self.ensure_topic_branch_or_unborn("revert")?;
         self.ensure_no_merge_in_progress("revert")?;
         self.ensure_clean("revert")?;
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let todo = revs
             .iter()
             .map(|r| {
@@ -70,7 +70,8 @@ impl NativeRepo<'_> {
                 );
             }
             let head = self.branch_tip("revert --continue")?;
-            let tree = self.staged_tree()?;
+            let head_tree = self.commit_tree(head)?;
+            let tree = self.staged_tree(Some(head_tree))?;
             let msg = self.revert_message(current, state.mainline)?;
             let commit = self.commit_revert(head, tree, &msg)?;
             self.report_revert(commit, &msg, json, out)?;
@@ -166,7 +167,7 @@ impl NativeRepo<'_> {
             return Ok(Reverted::Conflicted(conflicts));
         }
         let entries: Vec<WorkEntry> = resolved.into_iter().filter_map(|r| r.entry).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let tree = self.store_tree(&entries)?;
         let old = index_entries(&self.index()?);
         self.preflight_checkout(&old, &entries)?;
         let intent = self.prepare_checkout(&old, &entries)?;

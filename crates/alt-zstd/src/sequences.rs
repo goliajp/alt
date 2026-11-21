@@ -48,13 +48,36 @@ const SLOT: [usize; 3] = [0, 1 << LL_MAX_LOG, 2 << LL_MAX_LOG];
 
 const FIELDS: [Field; 3] = [Field::LiteralLength, Field::Offset, Field::MatchLength];
 
-fn predefined() -> &'static SequenceDecoder {
-    static TABLES: OnceLock<SequenceDecoder> = OnceLock::new();
+/// The accuracy logs of the predefined distributions, in stream order.
+const DEFAULT_LOG: [u32; 3] = [LL_DEFAULT_LOG, OF_DEFAULT_LOG, ML_DEFAULT_LOG];
+
+/// Where each predefined table starts in [`predefined`].
+const DEFAULT_AT: [usize; 3] = [
+    0,
+    1 << LL_DEFAULT_LOG,
+    (1 << LL_DEFAULT_LOG) + (1 << OF_DEFAULT_LOG),
+];
+
+const DEFAULT_LEN: usize = DEFAULT_AT[2] + (1 << ML_DEFAULT_LOG);
+
+/// The tables of the predefined distributions one after the other, each as
+/// long as its accuracy log makes it, with next states as they are in its
+/// slot of a decoder's array. Kept this short they are built and held in
+/// little more than a kilobyte.
+fn predefined() -> &'static [Entry; DEFAULT_LEN] {
+    static TABLES: OnceLock<[Entry; DEFAULT_LEN]> = OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut tables = SequenceDecoder::new();
-        tables.build(0, &LL_DEFAULT, LL_DEFAULT_LOG);
-        tables.build(1, &OF_DEFAULT, OF_DEFAULT_LOG);
-        tables.build(2, &ML_DEFAULT, ML_DEFAULT_LOG);
+        let mut tables = [Entry::default(); DEFAULT_LEN];
+        for (i, norm) in [&LL_DEFAULT[..], &OF_DEFAULT[..], &ML_DEFAULT[..]]
+            .into_iter()
+            .enumerate()
+        {
+            let fixed = FIELDS[i].fixed();
+            let table = &mut tables[DEFAULT_AT[i]..];
+            build_table::<64>(norm, DEFAULT_LOG[i], table, SLOT[i] as u16, |code| {
+                fixed[code % 64]
+            });
+        }
         tables
     })
 }
@@ -122,9 +145,9 @@ impl SequenceDecoder {
             let rest = &src[at..];
             match (modes >> (6 - 2 * i)) & 3 {
                 0 => {
-                    let log = predefined().logs[i];
-                    let range = SLOT[i]..SLOT[i] + (1 << log);
-                    self.entries[range.clone()].copy_from_slice(&predefined().entries[range]);
+                    let log = DEFAULT_LOG[i];
+                    let table = &predefined()[DEFAULT_AT[i]..DEFAULT_AT[i] + (1 << log)];
+                    self.entries[SLOT[i]..SLOT[i] + (1 << log)].copy_from_slice(table);
                     self.logs[i] = log;
                 }
                 1 => {

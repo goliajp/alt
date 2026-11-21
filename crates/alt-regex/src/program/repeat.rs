@@ -1,0 +1,83 @@
+//! A repetition as the copies it is made of.
+
+use super::{Compiler, Inst, nullable};
+use crate::Error;
+use crate::syntax::Node;
+
+/// Whether something that may match nothing is repeated without bound.
+pub(super) fn cyclic(node: &Node) -> bool {
+    match node {
+        Node::Repeat(inner, _, None) => nullable(inner) || cyclic(inner),
+        Node::Repeat(inner, ..) | Node::Group(inner, _) => cyclic(inner),
+        Node::Concat(items) | Node::Alt(items) => items.iter().any(cyclic),
+        _ => false,
+    }
+}
+
+impl Compiler {
+    /// One of the copies a repetition is made of. The C library marks
+    /// a group that a repetition may leave out, the first such copy
+    /// only and with it the copy before, unless that is the only one;
+    /// a copy made of another loses the marks inside it.
+    fn copy(&mut self, inner: &Node, next: u32, marked: bool, made: bool) -> Result<u32, Error> {
+        let outside = self.copied;
+        self.copied = outside || made;
+        let entry = match inner {
+            Node::Group(body, number) if marked && !outside && nullable(body) => {
+                let close = self.push(Inst::SaveOpt(2 * number + 1, next))?;
+                let body = self.node(body, close)?;
+                self.push(Inst::Save(2 * number, body))
+            }
+            _ => self.node(inner, next),
+        };
+        self.copied = outside;
+        entry
+    }
+
+    pub(super) fn repeat(
+        &mut self,
+        inner: &Node,
+        min: u32,
+        max: Option<u32>,
+        next: u32,
+    ) -> Result<u32, Error> {
+        let mut entry = match max {
+            // the loop: once more, or on. A turn that takes nothing
+            // comes back to the choice with no byte consumed
+            None => {
+                let split = self.push(Inst::Split(next, next))?;
+                let body = self.copy(inner, split, true, min > 0)?;
+                self.insts[split as usize] = Inst::Split(body, next);
+                split
+            }
+            // the optional copies, wired as the C library wires them:
+            // of fewer copies than there may be, the last ones are the
+            // ones taken, each entered only behind the one before it
+            Some(max) => {
+                let mut bodies = Vec::new();
+                let mut behind = next;
+                for copy in (min..max).rev() {
+                    let first = copy == min;
+                    behind = self.copy(inner, behind, first, !first || min > 0)?;
+                    bodies.push(behind);
+                }
+                bodies.reverse();
+                let mut entry = next;
+                for (at, body) in bodies.iter().enumerate() {
+                    let without = bodies.get(at + 1).copied().unwrap_or(next);
+                    let with = if at == 0 { *body } else { entry };
+                    entry = self.push(Inst::Split(with, without))?;
+                }
+                entry
+            }
+        };
+        // of two copies or more that must be there the last is marked
+        // too, when others may follow it
+        let more = max != Some(min);
+        for copy in (0..min).rev() {
+            let marked = more && min >= 2 && copy == min - 1;
+            entry = self.copy(inner, entry, marked, copy > 0)?;
+        }
+        Ok(entry)
+    }
+}

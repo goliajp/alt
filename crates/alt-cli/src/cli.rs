@@ -202,18 +202,20 @@ pub enum Command {
         path: String,
         /// Revision to start the walk from (default `HEAD`).
         rev: Option<String>,
-        /// Trace lines moved within the file to where they were before.
-        #[arg(short = 'M')]
-        moves: bool,
+        /// Trace lines moved within the file. A number against the letter
+        /// is how many letters and digits they must carry (20 if absent).
+        #[arg(short = 'M', action = attached)]
+        moves: Vec<String>,
         /// Accepted for command lines written before renames were always
         /// followed; it changes nothing.
         #[arg(long = "follow")]
         follow: bool,
         /// Trace lines copied from files changed in the same commit; twice,
         /// from any file when the blamed file is created; three times, from
-        /// any file in every commit. Implies -M.
-        #[arg(short = 'C', action = count)]
-        copies: u8,
+        /// any file in every commit. Implies -M. A number against the
+        /// letter works as for -M (40 if absent).
+        #[arg(short = 'C', action = attached)]
+        copies: Vec<String>,
     },
     /// Show or change the metadata recorded with a commit (kept in git
     /// notes under refs/notes/alt/meta; the commit itself never changes)
@@ -450,6 +452,15 @@ pub enum Command {
         #[arg(long, global = true)]
         json: bool,
     },
+    /// Read and verify every record the repository stores: each chunk,
+    /// blob and object against its hash, each index against the file it
+    /// indexes, the whole operation log, and the refs against a replay of
+    /// that log. Exits non-zero at the first record that fails.
+    Fsck {
+        /// Emit the record counts as a JSON object
+        #[arg(long)]
+        json: bool,
+    },
     /// Verify the `alt-sig` header on one or more commit objects.
     /// With no args, walks the current branch's commit chain back to root
     /// (newest first). Each row is one of:
@@ -660,98 +671,6 @@ pub struct CatFileArgs {
     #[arg(short = 'p', group = "op")]
     pretty: bool,
     object: String,
-}
-
-/// `alt ci validate` — load every requested workflow.toml (or scan
-/// `.alt/ci/*/workflow.toml` when `paths` is empty), run the
-/// parser + linter, and print one diagnostic per line. Returns a
-/// non-zero exit code when any diagnostic is an error; warnings alone
-/// still exit 0. Repository-agnostic: this is a file-tier lint, not a
-/// store operation, so `alt ci validate` works in any directory.
-pub fn ci_validate<W: Write>(
-    cwd: &Path,
-    paths: &[std::path::PathBuf],
-    json: bool,
-    out: &mut W,
-) -> Res<u8> {
-    use crate::ci;
-
-    let files: Vec<std::path::PathBuf> = if paths.is_empty() {
-        let mut found = Vec::new();
-        let ci_dir = cwd.join(".alt").join("ci");
-        if let Ok(read) = std::fs::read_dir(&ci_dir) {
-            for entry in read.flatten() {
-                let candidate = entry.path().join("workflow.toml");
-                if candidate.is_file() {
-                    found.push(candidate);
-                }
-            }
-            found.sort();
-        }
-        if found.is_empty() {
-            writeln!(
-                out,
-                "no workflow.toml files found under .alt/ci/<name>/workflow.toml"
-            )?;
-            return Ok(0);
-        }
-        found
-    } else {
-        paths.to_vec()
-    };
-
-    let mut error_count = 0usize;
-    for file in &files {
-        let display = file.display().to_string();
-        let src = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(e) => {
-                if json {
-                    let row = crate::json::Json::Object(vec![
-                        ("file", crate::json::Json::str(&display)),
-                        ("severity", crate::json::Json::str("error")),
-                        (
-                            "message",
-                            crate::json::Json::str(format!("cannot read: {e}")),
-                        ),
-                    ]);
-                    row.write(out)?;
-                    writeln!(out)?;
-                } else {
-                    writeln!(out, "{display}: error: cannot read: {e}")?;
-                }
-                error_count += 1;
-                continue;
-            }
-        };
-        let (wf, mut diags) = ci::parse_workflow(&src);
-        diags.extend(ci::lint(&wf));
-        for diag in diags {
-            let (line, col) = diag.at.resolve(&src);
-            if diag.severity == ci::Severity::Error {
-                error_count += 1;
-            }
-            if json {
-                let row = crate::json::Json::Object(vec![
-                    ("file", crate::json::Json::str(&display)),
-                    ("line", crate::json::Json::Num(line as i64)),
-                    ("col", crate::json::Json::Num(col as i64)),
-                    ("severity", crate::json::Json::str(diag.severity.as_str())),
-                    ("message", crate::json::Json::str(&diag.message)),
-                ]);
-                row.write(out)?;
-                writeln!(out)?;
-            } else {
-                writeln!(
-                    out,
-                    "{display}:{line}:{col}: {sev}: {msg}",
-                    sev = diag.severity.as_str(),
-                    msg = diag.message
-                )?;
-            }
-        }
-    }
-    Ok(if error_count > 0 { 1 } else { 0 })
 }
 
 #[derive(Subcommand, Debug)]
@@ -1140,6 +1059,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Identity { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
+            | Command::Fsck { .. }
     )
 }
 
@@ -1207,6 +1127,11 @@ pub fn mutates_command(cmd: &Command) -> bool {
                 | Command::Export { .. }
         );
     }
+    native_mutates(cmd)
+}
+
+/// Whether a native command writes: all of them do but the pure reads.
+fn native_mutates(cmd: &Command) -> bool {
     !matches!(
         cmd,
         Command::Request { .. }
@@ -1215,6 +1140,7 @@ pub fn mutates_command(cmd: &Command) -> bool {
             | Command::Diff { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
+            | Command::Fsck { .. }
             | Command::Commit { validate: true, .. }
             | Command::Branch {
                 name: None,
@@ -1509,7 +1435,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
                 return Err("one of -t, -s or -p is required".into());
             }
         }
-        Command::Log(args) => log_cmd::run(out, repo, args.clone().map_rev(at_head))?,
+        Command::Log(args) => log_cmd::run(out, repo, args.clone().map_rev(at_head), &at.head)?,
         Command::Show { rev, json } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));
             // `<rev>:<path>` selects a blob at `path` as of commit
@@ -1524,7 +1450,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
                 return Ok(());
             }
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
-            crate::log_cmd::run(out, repo, args)?;
+            crate::log_cmd::run(out, repo, args, &at.head)?;
         }
         Command::Blame {
             path,
@@ -1533,10 +1459,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             copies,
             follow: _,
         } => {
-            let options = crate::blame::Options {
-                moves: *moves || *copies > 0,
-                copies: *copies,
-            };
+            let options = crate::blame::Options::of(moves, copies);
             at.blame(out, repo, path, rev.as_deref(), options)?;
         }
         Command::Config {
@@ -1558,7 +1481,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             if !repo.is_native() {
                 return Err("export needs a .alt store; run inside one (see 'alt import')".into());
             }
-            let report = alt_export::export_git(repo.git_dir(), target)?;
+            let report = crate::native::export_git(repo.git_dir(), target)?;
             writeln!(
                 out,
                 "exported {} objects, {} refs{} into {}",
@@ -1584,17 +1507,18 @@ pub fn run_on_store<W: Write>(
     store: &mut Store,
     repo: &Repository,
     cwd: &Path,
-    id: Identity,
+    id: &Identity,
     request_id: Option<alt_refs::IdemKey>,
     out: &mut W,
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
+        Command::Fsck { json } => crate::fsck::run(store, *json, out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here
             // attributes each operation; it is not a ref transaction dedup key.
-            let mut repo = NativeRepo::attach(store, coord, id, request_id);
+            let mut repo = NativeRepo::attach(store, coord, id.clone(), request_id);
             run_native(&mut repo, c, out)
         }
         c => {
@@ -1605,14 +1529,11 @@ pub fn run_on_store<W: Write>(
     }
 }
 
-fn resolve(repo: &Repository, spec: &str) -> Result<ObjectId, String> {
-    repo.rev_parse(spec)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| {
-            format!(
-                "ambiguous argument '{spec}': unknown revision or path not in the working tree."
-            )
-        })
+fn resolve(repo: &Repository, spec: &str) -> Res<ObjectId> {
+    repo.rev_parse(spec)?.ok_or_else(|| {
+        format!("ambiguous argument '{spec}': unknown revision or path not in the working tree.")
+            .into()
+    })
 }
 
 /// `cat-file -p`: blobs/commits/tags verbatim, trees in ls-tree-like shape.
@@ -1624,12 +1545,11 @@ fn pretty_print<W: Write>(
 ) -> Res<()> {
     match obj.kind {
         ObjectKind::Tree => {
-            let quotepath = repo
-                .config()
+            let quotepath = crate::git_settings::repository(repo)?
                 .get_bool("core", None, "quotepath")
                 .transpose()?
                 .unwrap_or(true);
-            let tree = Tree::parse(&obj.data, repo.algo())?;
+            let tree = Tree::parse(&obj.data, repo.algo()?)?;
             for entry in &tree.entries {
                 write!(
                     out,

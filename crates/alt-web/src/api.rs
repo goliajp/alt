@@ -1009,7 +1009,7 @@ fn read_tree(repo: &Repository, oid: &ObjectId) -> Result<Tree, ApiError> {
             raw.kind
         )));
     }
-    Tree::parse(&raw.data, repo.algo()).map_err(|e| ApiError::Internal(format!("tree {oid}: {e}")))
+    Tree::parse(&raw.data, oid.algo()).map_err(|e| ApiError::Internal(format!("tree {oid}: {e}")))
 }
 
 /// Flatten a tree to `(path, blob_oid)` pairs by walking subtrees,

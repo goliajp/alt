@@ -23,12 +23,15 @@ mod ignore;
 mod kind;
 mod scan;
 mod snapshot;
+mod stored;
 #[cfg(unix)]
 mod untracked;
 #[cfg(unix)]
 mod walk;
 #[cfg(target_os = "linux")]
 mod watch;
+
+pub use stored::unstored_blob;
 
 pub use cachetree::Staged;
 #[cfg(unix)]

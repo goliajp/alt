@@ -1,0 +1,514 @@
+//! Parsing POSIX basic and extended regular expressions, with the GNU
+//! operators (`\w`, `\s`, `\b`, `\<` and their kin) that the C library
+//! accepts in both.
+
+use crate::budget::Budget;
+use crate::class::ByteSet;
+use crate::program::MAX_INSTS;
+use crate::{Error, Options, Syntax, utf8};
+
+mod atoms;
+mod interval;
+mod tree;
+
+pub use tree::{Look, Node, Shape};
+
+/// The deepest nesting of groups and of repetitions, counted together:
+/// no walk of the tree goes deeper, and the stack of a thread that
+/// asked for none holds a walk nearly twice as deep.
+const MAX_DEPTH: u32 = 400;
+/// The most groups a pattern may have.
+pub const MAX_GROUPS: u32 = 0x7fff;
+/// The longest pattern read, in bytes.
+pub const MAX_PATTERN: usize = 1 << 18;
+
+struct Parser<'a> {
+    pat: &'a [u8],
+    at: usize,
+    opts: Options,
+    groups: u32,
+    /// the groups open around what is being read
+    depth: u32,
+    /// how deep the groups and repetitions nest in what was last read
+    tall: u32,
+    /// the places of the sets of characters read so far
+    places: usize,
+    /// the bytes the tree read so far holds
+    budget: Budget,
+    /// the groups whose closing parenthesis has been read
+    complete: Vec<u32>,
+    /// whether a period was read, and whether something the C library
+    /// cannot match byte by byte in a UTF-8 text
+    period: bool,
+    complex: bool,
+    strays: bool,
+    /// see [`utf8::period`]
+    loose: bool,
+    /// a back-reference may be written somewhere in the pattern
+    refers: bool,
+}
+
+/// Parses `pat` into its tree and the number of groups in it.
+#[cfg(test)]
+pub fn parse(pat: &[u8], opts: Options) -> Result<(Node, u32), Error> {
+    parse_shaped(pat, opts).map(|(node, groups, _)| (node, groups))
+}
+
+/// As [`parse`], with the shape of the pattern.
+pub fn parse_shaped(pat: &[u8], opts: Options) -> Result<(Node, u32, Shape), Error> {
+    if pat.len() > MAX_PATTERN {
+        return Err(Error::TooBig);
+    }
+    let read = |loose: bool| {
+        let mut p = Parser {
+            pat,
+            at: 0,
+            opts,
+            groups: 0,
+            depth: 0,
+            tall: 0,
+            places: 0,
+            budget: Budget::default(),
+            complete: Vec::new(),
+            period: false,
+            complex: opts.ignore_case,
+            strays: false,
+            loose,
+            refers: pat
+                .windows(2)
+                .any(|pair| pair[0] == b'\\' && (b'1'..=b'9').contains(&pair[1])),
+        };
+        let node = p.alternation()?;
+        if p.at < pat.len() {
+            return Err(Error::Paren);
+        }
+        let shape = Shape {
+            budget: p.budget,
+            apart: opts.utf8 && p.complex,
+            strays: p.strays,
+        };
+        Ok((node, p.groups, shape, p.period))
+    };
+    let (node, groups, shape, period) = read(false)?;
+    if opts.utf8 && period && !shape.apart {
+        // the two readings are not held at once
+        drop(node);
+        return read(true).map(|(node, groups, shape, _)| (node, groups, shape));
+    }
+    Ok((node, groups, shape))
+}
+
+impl<'a> Parser<'a> {
+    fn ere(&self) -> bool {
+        self.opts.syntax == Syntax::Extended
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.pat.get(self.at).copied()
+    }
+
+    fn rest(&self) -> &'a [u8] {
+        &self.pat[self.at..]
+    }
+
+    fn at_alt(&self) -> bool {
+        match self.ere() {
+            true => self.peek() == Some(b'|'),
+            false => self.rest().starts_with(b"\\|"),
+        }
+    }
+
+    fn at_close(&self) -> bool {
+        self.depth > 0
+            && match self.ere() {
+                true => self.peek() == Some(b')'),
+                false => self.rest().starts_with(b"\\)"),
+            }
+    }
+
+    fn alternation(&mut self) -> Result<Node, Error> {
+        let before = self.complete.len();
+        let mut branches = Vec::new();
+        let first = self.concat()?;
+        self.budget.push(&mut branches, first)?;
+        let mut tall = self.tall;
+        while self.at_alt() {
+            self.at += if self.ere() { 1 } else { 2 };
+            // as in the C library, a branch cannot refer to a group of
+            // a branch beside it
+            let beside = self.complete.split_off(before);
+            let branch = self.concat()?;
+            self.budget.push(&mut branches, branch)?;
+            self.complete.extend(beside);
+            tall = tall.max(self.tall);
+        }
+        self.tall = tall;
+        // the C library tries a first branch of nothing behind the second
+        if branches.len() > 1 && branches[0].nothing() {
+            branches.swap(0, 1);
+        }
+        Ok(match branches.len() {
+            1 => {
+                self.budget.give(branches.capacity() * size_of::<Node>());
+                branches.pop().expect("one branch")
+            }
+            _ => Node::Alt(branches),
+        })
+    }
+
+    fn concat(&mut self) -> Result<Node, Error> {
+        let mut items = Vec::new();
+        let mut tall = 0;
+        while self.at < self.pat.len() && !self.at_alt() && !self.at_close() {
+            let fresh = items.is_empty();
+            self.tall = 0;
+            let atom = self.atom(fresh)?;
+            if let Node::Class(block) = &atom {
+                // a program holds every place of every set
+                self.places += block.places.len();
+                if self.places > MAX_INSTS {
+                    return Err(Error::TooBig);
+                }
+            }
+            // what a group holds was counted as it was read
+            if !matches!(atom, Node::Group(..)) {
+                self.budget.take(atom.held())?;
+            }
+            let item = match atom {
+                Node::Look(_) => atom,
+                _ => self.repeats(atom)?,
+            };
+            self.budget.push(&mut items, item)?;
+            tall = tall.max(self.tall);
+        }
+        self.tall = tall;
+        Ok(match items.len() {
+            0 => Node::Empty,
+            1 => {
+                self.budget.give(items.capacity() * size_of::<Node>());
+                items.pop().expect("one item")
+            }
+            _ => Node::Concat(items),
+        })
+    }
+
+    fn repeats(&mut self, mut atom: Node) -> Result<Node, Error> {
+        loop {
+            let rest = self.rest();
+            let (skip, bounds) = match (self.ere(), rest) {
+                (_, [b'*', ..]) => (1, Some((0, None))),
+                (true, [b'+', ..]) => (1, Some((1, None))),
+                (true, [b'?', ..]) => (1, Some((0, Some(1)))),
+                (true, [b'{', ..]) => (1, None),
+                (false, [b'\\', b'+', ..]) => (2, Some((1, None))),
+                (false, [b'\\', b'?', ..]) => (2, Some((0, Some(1)))),
+                (false, [b'\\', b'{', ..]) => (2, None),
+                _ => return Ok(atom),
+            };
+            self.at += skip;
+            let (min, max) = match bounds {
+                Some(bounds) => bounds,
+                None => self.interval()?,
+            };
+            // as in the C library, a basic expression takes no star and
+            // no interval behind another repetition
+            if !self.ere() && matches!(self.rest(), [b'*', ..] | [b'\\', b'{', ..]) {
+                return Err(Error::Repeat);
+            }
+            atom = match atom {
+                // no repetition of nothing is more than nothing
+                Node::Empty => Node::Empty,
+                _ if max == Some(0) => Node::Empty,
+                _ if (min, max) == (1, Some(1)) => atom,
+                // `*`, `+` and `?` behind one another are one of them,
+                // but for where the groups inside come to lie, and for
+                // where the C library ends its walk through a match
+                // with back-references
+                Node::Repeat(inner, low @ 0..=1, high @ (None | Some(1)))
+                    if min <= 1
+                        && matches!(max, None | Some(1))
+                        && !inner.grouped()
+                        && !self.refers =>
+                {
+                    let once = high.is_some() && max.is_some();
+                    Node::Repeat(inner, low * min, once.then_some(1))
+                }
+                _ => {
+                    self.tall += 1;
+                    if self.depth + self.tall > MAX_DEPTH {
+                        return Err(Error::TooBig);
+                    }
+                    self.budget.take(size_of::<Node>())?;
+                    Node::Repeat(Box::new(atom), min, max)
+                }
+            };
+        }
+    }
+
+    /// What the literal that the byte just read begins matches.
+    fn literal(&mut self, b: u8) -> Node {
+        if self.opts.utf8 {
+            let (node, len) = utf8::literal(&self.pat[self.at - 1..], self.opts.ignore_case);
+            self.at += len - 1;
+            self.strays |= (0x80..=0xbf).contains(&b);
+            return node;
+        }
+        let mut set = ByteSet::byte(b);
+        if self.opts.ignore_case {
+            set.fold_case();
+        }
+        Node::Set(set)
+    }
+
+    fn start(&self) -> Node {
+        Node::Look(match self.opts.newline {
+            true => Look::LineStart,
+            false => Look::TextStart,
+        })
+    }
+
+    fn end(&self) -> Node {
+        Node::Look(match self.opts.newline {
+            true => Look::LineEnd,
+            false => Look::TextEnd,
+        })
+    }
+
+    fn any(&mut self) -> Node {
+        if self.opts.utf8 {
+            self.period = true;
+            return utf8::period(self.opts.newline, self.loose);
+        }
+        let mut set = ByteSet::full();
+        set.remove(0);
+        if self.opts.newline {
+            set.remove(b'\n');
+        }
+        Node::Set(set)
+    }
+
+    fn atom(&mut self, fresh: bool) -> Result<Node, Error> {
+        let b = self.pat[self.at];
+        if b == b'\\' {
+            return self.escape();
+        }
+        self.at += 1;
+        if self.ere() {
+            return match b {
+                b'(' => self.group(),
+                b'*' | b'+' | b'?' | b'{' => Err(Error::Repeat),
+                b'^' => Ok(self.start()),
+                b'$' => Ok(self.end()),
+                b'.' => Ok(self.any()),
+                b'[' => self.bracket(),
+                _ => Ok(self.literal(b)),
+            };
+        }
+        // in a basic expression an anchor is one only at the edge of a
+        // branch: a circumflex behind another anchor stands for itself
+        let last = matches!(self.rest(), [] | [b'\\', b')' | b'|', ..]);
+        match b {
+            b'^' if fresh => Ok(self.start()),
+            b'$' if last => Ok(self.end()),
+            b'.' => Ok(self.any()),
+            b'[' => self.bracket(),
+            _ => Ok(self.literal(b)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ere(pat: &str) -> Result<(Node, u32), Error> {
+        parse(pat.as_bytes(), Options::default())
+    }
+
+    fn bre(pat: &str) -> Result<(Node, u32), Error> {
+        let opts = Options {
+            syntax: Syntax::Basic,
+            ..Options::default()
+        };
+        parse(pat.as_bytes(), opts)
+    }
+
+    fn lit(b: u8) -> Node {
+        Node::Set(ByteSet::byte(b))
+    }
+
+    #[test]
+    fn groups_are_numbered_by_their_opening_parenthesis() {
+        let (node, groups) = ere("(a(b))|(c)").unwrap();
+        assert_eq!(groups, 3);
+        let inner = Node::Group(Box::new(lit(b'b')), 2);
+        let first = Node::Group(Box::new(Node::Concat(vec![lit(b'a'), inner])), 1);
+        let third = Node::Group(Box::new(lit(b'c')), 3);
+        assert_eq!(node, Node::Alt(vec![first, third]));
+    }
+
+    #[test]
+    fn intervals_take_every_form_and_refuse_the_malformed() {
+        let repeat = |min, max| Node::Repeat(Box::new(lit(b'a')), min, max);
+        assert_eq!(ere("a{2}").unwrap().0, repeat(2, Some(2)));
+        assert_eq!(ere("a{2,}").unwrap().0, repeat(2, None));
+        assert_eq!(ere("a{2,5}").unwrap().0, repeat(2, Some(5)));
+        assert_eq!(ere("a{,5}").unwrap().0, repeat(0, Some(5)));
+        assert_eq!(bre("a\\{2,5\\}").unwrap().0, repeat(2, Some(5)));
+        assert_eq!(ere("a{5,2}"), Err(Error::Brace));
+        assert_eq!(ere("a{x}"), Err(Error::Brace));
+        assert_eq!(ere("a{2"), Err(Error::Brace));
+        assert_eq!(ere("a{40000}"), Err(Error::TooBig));
+    }
+
+    #[test]
+    fn a_repetition_needs_something_to_repeat_in_an_extended_expression() {
+        for pat in ["*a", "a|*b", "(+a)", "^*", "{2}"] {
+            assert_eq!(ere(pat), Err(Error::Repeat), "{pat}");
+        }
+        // in a basic expression such a star stands for itself
+        let star = Node::Repeat(Box::new(lit(b'*')), 0, None);
+        assert_eq!(bre("**").unwrap().0, star);
+        let anchored = Node::Concat(vec![Node::Look(Look::TextStart), lit(b'*')]);
+        assert_eq!(bre("^*").unwrap().0, anchored);
+    }
+
+    #[test]
+    fn basic_expressions_anchor_only_at_the_edges() {
+        let (node, _) = bre("a^b$c").unwrap();
+        let bytes = b"a^b$c".map(lit).to_vec();
+        assert_eq!(node, Node::Concat(bytes));
+        let (node, groups) = bre("\\(^a$\\)").unwrap();
+        let inner = vec![
+            Node::Look(Look::TextStart),
+            lit(b'a'),
+            Node::Look(Look::TextEnd),
+        ];
+        assert_eq!(node, Node::Group(Box::new(Node::Concat(inner)), 1));
+        assert_eq!(groups, 1);
+        // and the operators of extended expressions are ordinary there
+        let (node, groups) = bre("(a|b)+").unwrap();
+        assert_eq!(groups, 0);
+        assert_eq!(node, Node::Concat(b"(a|b)+".map(lit).to_vec()));
+    }
+
+    #[test]
+    fn a_basic_expression_takes_no_star_or_interval_behind_a_repetition() {
+        let refused = [
+            "^[a-z ]**(",
+            "a*\\{1,2\\}",
+            "a\\+*",
+            "a\\{1,2\\}\\{3\\}",
+            "a\\{0\\}*",
+            "***",
+        ];
+        for pat in refused {
+            assert_eq!(bre(pat), Err(Error::Repeat), "{pat}");
+        }
+        for pat in [
+            "a*\\+",
+            "a*\\?",
+            "a\\+\\?",
+            "a\\{1,2\\}\\+",
+            "^**",
+            "\\(a*\\)*",
+        ] {
+            assert!(bre(pat).is_ok(), "{pat}");
+        }
+        assert!(ere("a*{1,2}{3}*").is_ok());
+    }
+
+    #[test]
+    fn a_circumflex_anchors_a_basic_expression_only_where_a_branch_begins() {
+        let start = Node::Look(Look::TextStart);
+        let caret = lit(b'^');
+        assert_eq!(
+            bre("^^").unwrap().0,
+            Node::Concat(vec![start.clone(), caret.clone()])
+        );
+        let word = Node::Look(Look::WordBoundary);
+        assert_eq!(
+            bre("\\b^").unwrap().0,
+            Node::Concat(vec![word, caret.clone()])
+        );
+        let first = Node::Look(Look::WordStart);
+        assert_eq!(
+            bre("\\<^").unwrap().0,
+            Node::Concat(vec![first, caret.clone()])
+        );
+        let twice = Node::Repeat(Box::new(caret), 1, Some(2));
+        assert_eq!(
+            bre("^^\\{1,2\\}").unwrap().0,
+            Node::Concat(vec![start.clone(), twice])
+        );
+        let branches = Node::Alt(vec![lit(b'a'), Node::Concat(vec![start, lit(b'b')])]);
+        assert_eq!(bre("a\\|^b").unwrap().0, branches);
+        assert_eq!(bre("^\\{1,2\\}"), Err(Error::Repeat));
+    }
+
+    #[test]
+    fn bracket_expressions_read_ranges_classes_and_literal_brackets() {
+        let set = |pat: &str| match ere(pat).unwrap().0 {
+            Node::Set(set) => set,
+            other => panic!("{pat}: {other:?}"),
+        };
+        assert_eq!(set("[]a]"), ByteSet::of(b"]a"));
+        assert_eq!(set("[a-c-]"), ByteSet::of(b"abc-"));
+        assert_eq!(set("[\\n]"), ByteSet::of(b"\\n"));
+        assert_eq!(set("[[:digit:]x]").len(), 11);
+        assert_eq!(set("[[.-.]-0]"), ByteSet::of(b"-./0"));
+        assert_eq!(set("[^]a]").len(), 254);
+        assert_eq!(set("[^[:space:]]").len(), 250);
+        assert_eq!(ere("[b-a]"), Err(Error::Range));
+        assert_eq!(ere("[a"), Err(Error::Bracket));
+        assert_eq!(ere("[[:nope:]]"), Err(Error::Class));
+        assert_eq!(ere("[[.ab.]]"), Err(Error::Collate));
+    }
+
+    #[test]
+    fn parentheses_must_pair_except_a_lone_closing_one_in_an_extended_expression() {
+        assert_eq!(ere("(a"), Err(Error::Paren));
+        assert_eq!(
+            ere("a)").unwrap().0,
+            Node::Concat(vec![lit(b'a'), lit(b')')])
+        );
+        assert_eq!(bre("a\\)"), Err(Error::Paren));
+        assert_eq!(ere("a\\"), Err(Error::Escape));
+        let again = Node::Concat(vec![Node::Group(Box::new(lit(b'a')), 1), Node::BackRef(1)]);
+        assert_eq!(ere("(a)\\1").unwrap().0, again);
+        assert_eq!(bre("\\(a\\)\\1").unwrap().0, again);
+        // only to a group that is complete
+        for pat in ["\\1(a)", "(a\\1)", "(a)\\2", "\\1", "(a)|b\\1"] {
+            assert_eq!(ere(pat), Err(Error::BackReference), "{pat}");
+        }
+    }
+
+    #[test]
+    fn ignoring_case_widens_literals_and_brackets() {
+        let opts = Options {
+            ignore_case: true,
+            ..Options::default()
+        };
+        let (node, _) = parse(b"a[x-z]1", opts).unwrap();
+        let sets = [&b"aA"[..], b"xyzXYZ", b"1"].map(|s| Node::Set(ByteSet::of(s)));
+        assert_eq!(node, Node::Concat(sets.to_vec()));
+        // a range is read in upper case, as the text is
+        let set = |pat: &str| parse(pat.as_bytes(), opts).map(|(node, _)| node);
+        let letters = Node::Set(ByteSet::class(b"alpha").unwrap());
+        assert_eq!(set("[A-z]"), Ok(letters.clone()));
+        assert_eq!(set("[a-Z]"), Ok(letters.clone()));
+        assert_eq!(set("[[:lower:]]"), Ok(letters));
+        assert_eq!(set("[_-z]"), Err(Error::Range));
+        assert_eq!(set("[y-_]"), Ok(Node::Set(ByteSet::of(b"yzYZ[\\]^_"))));
+    }
+
+    #[test]
+    fn a_hyphen_inside_brackets_ends_a_range_or_is_refused() {
+        for pat in ["[a-b-c]", "[[:alpha:]-z]", "[[=a=]-z]", "[a-a-z]"] {
+            assert_eq!(ere(pat), Err(Error::Range), "{pat}");
+        }
+        for pat in ["[--z]", "[^-z]", "[a-z-]", "[[:alpha:]-]", "[]-a]", "[%--]"] {
+            assert!(ere(pat).is_ok(), "{pat}");
+        }
+    }
+}

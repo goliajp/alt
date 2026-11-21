@@ -60,7 +60,7 @@ fn pool() -> &'static Pool {
         for index in 0..workers {
             std::thread::Builder::new()
                 .name(format!("alt-worker-{index}"))
-                .spawn(move || pool.work())
+                .spawn(alt_os::stack::covered(move || pool.work()))
                 .expect("starting a worker thread");
         }
         pool

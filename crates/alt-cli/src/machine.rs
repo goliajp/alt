@@ -5,9 +5,7 @@ use std::ffi::OsString;
 use alt_args::{ErrorKind, Matches, Parser};
 use alt_json::{Value, json};
 
-use crate::cli::Cli;
-use crate::daemon::Response;
-use bindings::canonical_matches;
+use crate::{cli::Cli, daemon::Response};
 pub use kinds::{PATHS_FAILED, PATHS_IGNORED, PATHS_UNKNOWN};
 
 mod bindings;
@@ -110,7 +108,7 @@ impl Failure {
 
 pub struct Parsed {
     pub cli: Cli,
-    pub normalized: Value,
+    matches: Matches,
     pub json: bool,
 }
 
@@ -137,7 +135,8 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
             }
         }
     }
-    let matches = alt_args::parse(Cli::COMMAND, words).map_err(|error| match error.kind {
+    let words = crate::log_count::with_count_option(words);
+    let matches = alt_args::parse(Cli::command(), words).map_err(|error| match error.kind {
         ErrorKind::Help | ErrorKind::Version => Response {
             exit_code: 0,
             stdout: error.to_string().into_bytes(),
@@ -147,8 +146,8 @@ pub fn parse(args: Vec<OsString>) -> Result<Parsed, Response> {
     })?;
     Ok(Parsed {
         cli: Cli::from_matches(&matches),
-        normalized: canonical_matches(&matches),
         json: matches_json(&matches),
+        matches,
     })
 }
 
@@ -219,6 +218,19 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
     if error.is::<alt_flow::FlowError>() {
         return Failure::usage(error.to_string());
     }
+    if writing {
+        Failure::unknown(causes(error))
+    } else {
+        Failure {
+            exit_code: 128,
+            ..Failure::refusal("execution_error", causes(error))
+        }
+    }
+}
+
+/// What `error` says, then what each of its causes says: the outer errors
+/// of the storage layers only name the layer.
+pub fn causes(error: &(dyn std::error::Error + 'static)) -> String {
     let mut messages = vec![error.to_string()];
     let mut source = error.source();
     while let Some(error) = source {
@@ -228,14 +240,7 @@ pub fn from_error(error: &(dyn std::error::Error + 'static), writing: bool) -> F
         }
         source = error.source();
     }
-    if writing {
-        Failure::unknown(messages.join(": "))
-    } else {
-        Failure {
-            exit_code: 128,
-            ..Failure::refusal("execution_error", messages.join(": "))
-        }
-    }
+    messages.join(": ")
 }
 
 pub fn bytes_value(bytes: &[u8]) -> Value {
@@ -360,14 +365,14 @@ mod tests {
         };
         let plain = parse_args(&["alt", "workspace", "add", "task", "/tmp/task"]);
         assert!(!plain.json);
-        assert_eq!(plain.normalized["values"]["json"], json!([hex(b"false")]));
+        assert_eq!(plain.normalized()["values"]["json"], json!([hex(b"false")]));
         let before = parse_args(&["alt", "workspace", "--json", "add", "task", "/tmp/task"]);
         let after = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
         assert!(before.json && after.json);
         let repeated = parse_args(&["alt", "workspace", "add", "task", "/tmp/task", "--json"]);
-        assert_eq!(repeated.normalized, after.normalized);
-        assert_eq!(after.normalized["values"]["json"], json!([hex(b"true")]));
-        assert_ne!(plain.normalized, after.normalized);
+        assert_eq!(repeated.normalized(), after.normalized());
+        assert_eq!(after.normalized()["values"]["json"], json!([hex(b"true")]));
+        assert_ne!(plain.normalized(), after.normalized());
         let runner = parse_args(&["alt", "runner", "execute", "spec.json", "--json"]);
         assert!(runner.json);
     }

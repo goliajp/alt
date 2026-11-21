@@ -96,6 +96,7 @@ dependencies = [
  "alt-portable",
  "alt-provenance",
  "alt-refs",
+ "alt-regex",
  "alt-remote-protocol",
  "alt-repo",
  "alt-repository-service",
@@ -353,6 +354,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-marker"
+version = "0.1.0"
+dependencies = [
+ "alt-hash",
+ "alt-os",
+]
+
+[[package]]
 name = "alt-merge"
 version = "0.1.0"
 dependencies = [
@@ -366,6 +375,7 @@ dependencies = [
  "alt-git-codec",
  "alt-git-pack",
  "alt-hash",
+ "alt-marker",
  "alt-os",
  "alt-prism",
  "alt-prism-deflate",
@@ -380,6 +390,7 @@ name = "alt-oplog"
 version = "0.1.0"
 dependencies = [
  "alt-hash",
+ "alt-marker",
  "alt-os",
 ]
 
@@ -491,6 +502,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-regex"
+version = "0.1.0"
+dependencies = [
+ "alt-bytes",
+]
+
+[[package]]
 name = "alt-remote-protocol"
 version = "0.1.0"
 dependencies = [
@@ -510,6 +528,7 @@ dependencies = [
  "alt-git-config",
  "alt-git-pack",
  "alt-git-refs",
+ "alt-hash",
  "alt-import",
  "alt-odb",
  "alt-os",
@@ -727,6 +746,9 @@ dependencies = [
 [[package]]
 name = "alt-threads"
 version = "0.1.0"
+dependencies = [
+ "alt-os",
+]
 
 [[package]]
 name = "alt-treediff"

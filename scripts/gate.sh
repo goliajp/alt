@@ -37,6 +37,10 @@ are errors. The package class takes no scope/profile options and does not build
 Rust code. Workspace/release checks belong on a remote runner.
 Corpus runs ignored library and integration tests; --test restricts it to that
 integration target. Filters apply to both kinds when no target is selected.
+A corpus run that reaches alt-cli needs ALT_OLD_BIN: an alt built from the
+previous release, which its mixed-version tests run against this build.
+A package with an ignored test marked "needs --release" has its corpus run
+built with --release.
 EOF
 }
 
@@ -54,7 +58,7 @@ case "$class" in
     lint|unit|it|corpus|package|all) ;;
     *) die "unknown class: $class" ;;
 esac
-package='' scope='' target='' filter='' exact='' release='' help=''
+package='' scope='' target='' filter='' exact='' release='' help='' excluded=''
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -p|--package)
@@ -188,11 +192,26 @@ run_tests() {
         set -- --tests
     fi
     [ -z "$release" ] || set -- "$@" --release
+    for skipped in $excluded; do set -- "$@" --exclude "$skipped"; done
     set -- "$@" --
     [ "$kind" != corpus ] || set -- "$@" --ignored
     [ -z "$exact" ] || set -- "$@" --exact
     [ -z "$filter" ] || set -- "$@" "$filter"
     scoped_cargo test "$@"
+}
+
+# whether this corpus run reaches alt-cli's tests against an older alt
+needs_old_bin() {
+    case "$package" in ''|alt-cli) ;; *) return 1 ;; esac
+    case "$target" in ''|it) ;; *) return 1 ;; esac
+    case "$filter" in ''|*mixed_versions*) ;; *) return 1 ;; esac
+}
+
+# Packages with an ignored test whose reason says it needs --release: the
+# corpus class builds these optimized, whatever profile the rest uses.
+release_packages() {
+    grep -rl --include='*.rs' '#\[ignore = ".*needs --release"\]' crates |
+        sed -n 's|^crates/\([^/]*\)/.*|\1|p' | sort -u
 }
 
 run_corpus() {
@@ -203,7 +222,24 @@ run_corpus() {
         # Resolve overrides too, before Cargo changes the working directory.
         ALT_CORPUS=$(cd "$ALT_CORPUS" && pwd -P) || exit 2
         export ALT_CORPUS
-        run_tests corpus
+        if needs_old_bin; then
+            [ -n "${ALT_OLD_BIN:-}" ] && [ -x "$ALT_OLD_BIN" ] ||
+                die "corpus: set ALT_OLD_BIN to an alt built from the previous release (the mixed_versions tests run it)"
+            ALT_OLD_BIN=$(cd "$(dirname "$ALT_OLD_BIN")" && pwd -P)/$(basename "$ALT_OLD_BIN")
+            export ALT_OLD_BIN
+        fi
+        optimized=$(release_packages)
+        if [ -n "$package" ]; then
+            case " $(echo $optimized) " in *" $package "*) release=1 ;; esac
+            run_tests corpus
+        elif [ -n "$release" ]; then
+            run_tests corpus
+        else
+            excluded=$optimized
+            run_tests corpus
+            excluded='' release=1
+            for package in $optimized; do run_tests corpus; done
+        fi
     )
 }
 

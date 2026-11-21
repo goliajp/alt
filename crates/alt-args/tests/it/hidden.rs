@@ -1,51 +1,32 @@
 //! A hidden subcommand is parsed like any other and never shown.
 
-use alt_args::{Arg, Command, ErrorKind, Item, Kind, parse};
+#![allow(dead_code)]
 
-static TOOL: Command = Command {
-    name: "tool",
-    about: "",
-    version: "",
-    help_subcommand: true,
-    hidden: false,
-    items: &[
-        Item::Arg(Arg {
-            id: "verbose",
-            short: Some('v'),
-            ..Arg::NEW
-        }),
-        Item::Subcommands,
-    ],
-    subcommands: &[
-        Command {
-            name: "status",
-            about: "Show the state",
-            version: "",
-            help_subcommand: false,
-            hidden: false,
-            items: &[],
-            subcommands: &[],
-        },
-        Command {
-            name: "statuz",
-            about: "Answer the shell",
-            version: "",
-            help_subcommand: false,
-            hidden: true,
-            items: &[Item::Arg(Arg {
-                id: "word",
-                long: "word",
-                value_name: "WORD",
-                kind: Kind::Single,
-                ..Arg::NEW
-            })],
-            subcommands: &[],
-        },
-    ],
-};
+use alt_args::{ErrorKind, Parser, Subcommand, parse};
+
+#[derive(Parser)]
+#[command(name = "tool")]
+struct Tool {
+    #[arg(short = 'v')]
+    verbose: bool,
+    #[command(subcommand)]
+    command: Op,
+}
+
+#[derive(Subcommand)]
+enum Op {
+    /// Show the state
+    Status,
+    /// Answer the shell
+    #[command(hide)]
+    Statuz {
+        #[arg(long)]
+        word: Option<String>,
+    },
+}
 
 fn refused(line: &str) -> String {
-    let error = parse(&TOOL, line.split(' ').map(String::from))
+    let error = parse(Tool::command(), line.split(' ').map(String::from))
         .err()
         .unwrap();
     error.to_string()
@@ -54,11 +35,11 @@ fn refused(line: &str) -> String {
 #[test]
 fn a_hidden_subcommand_runs() {
     let words = "tool statuz --word here".split(' ').map(String::from);
-    let matches = parse(&TOOL, words).unwrap_or_else(|e| panic!("{e}"));
+    let matches = parse(Tool::command(), words).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(matches.sub().name(), "statuz");
     assert_eq!(matches.sub().one("word"), Some("here"));
     let words = "tool statuz --help".split(' ').map(String::from);
-    let help = parse(&TOOL, words).err().unwrap();
+    let help = parse(Tool::command(), words).err().unwrap();
     assert_eq!(help.kind, ErrorKind::Help);
     assert!(help.to_string().contains("Usage: tool statuz [OPTIONS]"));
 }

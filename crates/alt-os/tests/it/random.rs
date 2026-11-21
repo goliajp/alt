@@ -1,6 +1,5 @@
 use alt_os::random;
 
-#[test]
 fn two_fills_differ() {
     let (mut first, mut second) = ([0u8; 32], [0u8; 32]);
     random::fill(&mut first);
@@ -9,7 +8,6 @@ fn two_fills_differ() {
     assert_ne!(first, [0u8; 32]);
 }
 
-#[test]
 fn every_length_is_filled_to_the_end() {
     random::fill(&mut []);
     // lengths around the 256-byte limit of one macOS request, and odd ones
@@ -26,7 +24,6 @@ fn every_length_is_filled_to_the_end() {
     }
 }
 
-#[test]
 fn bytes_take_many_values() {
     let mut bytes = [0u8; 4096];
     random::fill(&mut bytes);
@@ -37,3 +34,9 @@ fn bytes_take_many_values() {
     // 4096 uniform bytes miss a given value with probability e^-16
     assert!(seen.iter().filter(|seen| **seen).count() > 250);
 }
+
+tests![
+    two_fills_differ,
+    every_length_is_filled_to_the_end,
+    bytes_take_many_values,
+];

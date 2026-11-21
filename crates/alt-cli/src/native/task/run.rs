@@ -92,7 +92,7 @@ impl NativeRepo<'_> {
         {
             return Err(refused("run collection response record mismatch"));
         }
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             if op.payload.first() != Some(&TASK_OPERATION)
                 || !completion.operations.contains(&op.id.to_string())
             {
@@ -113,7 +113,7 @@ impl NativeRepo<'_> {
     pub(super) fn local_collected_evidence_complete(&self, evidence: &Evidence) -> Res<bool> {
         let id = evidence.id()?;
         // Read without reopening the store lock already held by the caller.
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             if op.payload.first() != Some(&TASK_OPERATION) {
                 continue;
             }
@@ -213,7 +213,7 @@ impl NativeRepo<'_> {
                 "runner scratch must be outside existing repositories",
             ));
         }
-        if self.store.algo != HashAlgo::Sha1 {
+        if self.store.algo()? != HashAlgo::Sha1 {
             return Err(refused("runner source snapshot currently requires SHA-1"));
         }
         // Request IDs are scoped to a repository/workspace; transport paths
@@ -242,7 +242,7 @@ impl NativeRepo<'_> {
             snapshot.odb.put(*oid, ObjectKind::Blob, &object.data)?;
         }
         snapshot.odb.flush()?;
-        save_index(&root.join(".alt/index"), &self.index()?, self.store.algo)?;
+        save_index(&root.join(".alt/index"), &self.index()?, self.store.algo()?)?;
         drop(snapshot);
         let control = root.join(alt_runner::CONTROL);
         fs::create_dir(&control)?;

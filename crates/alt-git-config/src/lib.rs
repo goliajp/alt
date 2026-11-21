@@ -25,6 +25,16 @@ pub struct Entry {
     pub key: String,
     /// `None` for the valueless boolean shorthand (`[x] flag`).
     pub value: Option<BString>,
+    /// `None` for an entry that was not loaded from a file.
+    pub origin: Option<Origin>,
+}
+
+/// Where a variable was read: the file, and the line of it the variable
+/// begins on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub file: std::sync::Arc<Path>,
+    pub line: usize,
 }
 
 impl Entry {
@@ -32,6 +42,8 @@ impl Entry {
     pub fn display_key(&self) -> String {
         match &self.subsection {
             Some(sub) => format!("{}.{}.{}", self.section, sub, self.key),
+            // a variable written before any section
+            None if self.section.is_empty() => self.key.clone(),
             None => format!("{}.{}", self.section, self.key),
         }
     }
@@ -67,6 +79,14 @@ impl Config {
             && e.key == key
     }
 
+    /// The entry a variable is read from: the last one, like git.
+    pub fn entry(&self, section: &str, subsection: Option<&[u8]>, key: &str) -> Option<&Entry> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| Self::is_match(e, section, subsection, key))
+    }
+
     /// Last value wins, like git. `Some(None)` = valueless true shorthand.
     pub fn get(
         &self,
@@ -74,10 +94,7 @@ impl Config {
         subsection: Option<&[u8]>,
         key: &str,
     ) -> Option<Option<&BStr>> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|e| Self::is_match(e, section, subsection, key))
+        self.entry(section, subsection, key)
             .map(|e| e.value.as_ref().map(|v| v.as_bstr()))
     }
 
@@ -163,6 +180,11 @@ pub enum ConfigError {
     Syntax(&'static str),
     Value(&'static str),
     IncludeDepth,
+    /// A line of a file that is no configuration.
+    Line(usize, std::path::PathBuf),
+    /// An included path in a home directory nobody has, and the file
+    /// that includes it.
+    IncludePath(String, std::path::PathBuf),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -172,6 +194,13 @@ impl std::fmt::Display for ConfigError {
             Self::Syntax(v) => write!(f, "config syntax: {v}"),
             Self::Value(v) => write!(f, "config value: {v}"),
             Self::IncludeDepth => write!(f, "include depth exceeds {}", include::MAX_INCLUDE_DEPTH),
+            Self::Line(line, file) => {
+                write!(f, "bad config line {line} in file {}", file.display())
+            }
+            Self::IncludePath(path, file) => {
+                let file = file.display();
+                write!(f, "could not expand include path '{path}' in file {file}")
+            }
         }
     }
 }

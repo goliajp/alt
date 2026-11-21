@@ -5,10 +5,12 @@
 //! toward "any state-changing op is reversible".
 
 use std::path::Path;
-use std::process::{Command, Output};
+
+pub(super) use super::crash_fixture::remove_final_log_frame;
+use std::process::Output;
 
 pub(super) fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -239,17 +241,9 @@ fn recovery_missing_completion_survives_restart_and_blocks_mutation() {
     ok(alt(root, &["init", "."]));
     std::fs::write(root.join("f"), "staged").unwrap();
     ok(alt(root, &["add", "f"]));
-    let path = root.join(".alt/oplog/log");
-    let bytes = std::fs::read(&path).unwrap();
-    let mut cursor = 5;
-    let mut last = 5;
-    while cursor < bytes.len() {
-        last = cursor;
-        let n = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + n + 8;
-    }
     // Reproduce a crash after atomic index replacement, before completion.
-    std::fs::write(&path, &bytes[..last]).unwrap();
+    remove_final_log_frame(root);
+    let path = root.join(".alt/oplog/log");
     let before = index_bytes(root);
     let log_before = std::fs::read(&path).unwrap();
     ok(alt(root, &["status", "--json"]));
@@ -285,7 +279,7 @@ fn recovery_workspace_name_reuse_cannot_claim_the_old_instance() {
     ok(alt(&peer, &["add", "f"]));
     let completion = {
         let log = alt_oplog::OpLog::open(&root.join(".alt/oplog")).unwrap();
-        log.ops().last().unwrap().payload.clone()
+        log.ops().unwrap().last().unwrap().payload.clone()
     };
     let id_path = root.join(".alt/workspaces/peer/workspace-id");
     let previous_id = std::fs::read(&id_path).unwrap();
@@ -337,19 +331,6 @@ fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
     let restored = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
     assert_eq!(restored.entries.len(), 1);
     assert_eq!(restored.entries[0].stage(), 1);
-}
-
-pub(super) fn remove_final_log_frame(root: &Path) {
-    let path = root.join(".alt/oplog/log");
-    let bytes = std::fs::read(&path).unwrap();
-    let mut cursor = 5;
-    let mut last = 5;
-    while cursor < bytes.len() {
-        last = cursor;
-        let len = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + len + 8;
-    }
-    std::fs::write(path, &bytes[..last]).unwrap();
 }
 
 #[test]
@@ -459,10 +440,10 @@ fn recovery_reads_the_frozen_legacy_frame_chain_without_rewriting_it() {
         let refs = alt_refs::RefStore::open(dir.path()).unwrap();
         assert!(refs.len() >= 3);
         assert_eq!(
-            refs.last_op().unwrap().payload,
+            refs.last_op().unwrap().unwrap().payload,
             include_bytes!("fixtures/legacy-index-v1.bin")
         );
-        assert!(refs.oplog().ops().len() >= 6);
+        assert!(refs.oplog().ops().unwrap().len() >= 6);
     }
     assert_eq!(std::fs::read(oplog_dir.join("log")).unwrap(), bytes);
 }
@@ -587,7 +568,7 @@ fn ref_undo_refuses_legacy_missing_or_unknown_effects_without_mutation() {
         ok(alt(root, &["add", "."]));
         ok(alt(root, &["commit", "-m", "base"]));
         let mut refs = alt_refs::RefStore::open(root.join(".alt")).unwrap();
-        let tx = alt_refs::parse_tx(&refs.last_op().unwrap().payload)
+        let tx = alt_refs::parse_tx(&refs.last_op().unwrap().unwrap().payload)
             .unwrap()
             .unwrap();
         let mut context: alt_json::Value = alt_json::from_slice(&tx.context.unwrap()).unwrap();

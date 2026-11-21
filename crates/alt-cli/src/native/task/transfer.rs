@@ -770,7 +770,7 @@ impl NativeRepo<'_> {
             }
             self.store.odb.put(oid, object.kind, &bytes)?;
         }
-        self.store.odb.flush()?;
+        self.store.odb.flush_synced()?;
         write_json(
             &directory.join("origin.json"),
             &PublishedOrigin {

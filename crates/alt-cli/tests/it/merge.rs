@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -175,4 +175,42 @@ fn conflict_then_resolve_and_commit() {
     let target = out.path().join("exported");
     ok(alt(root, &["export", target.to_str().unwrap()]));
     assert!(git(&target, &["fsck", "--strict"]).status.success());
+}
+
+#[test]
+fn commit_is_refused_while_a_conflict_is_unresolved() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    let write = |body: &str| {
+        for file in ["f.txt", "g.txt"] {
+            std::fs::write(root.join(file), body).unwrap();
+        }
+        ok(alt(root, &["add", "."]));
+        ok(alt(root, &["commit", "-m", body.trim()]));
+    };
+    write("base\n");
+    ok(alt(root, &["branch", "feat"]));
+    write("ours\n");
+    ok(alt(root, &["switch", "feat"]));
+    write("theirs\n");
+    ok(alt(root, &["switch", "main"]));
+    assert!(!alt(root, &["merge", "feat"]).status.success());
+
+    // one of the two conflicts resolved: the other would leave the tree
+    std::fs::write(root.join("f.txt"), "resolved\n").unwrap();
+    ok(alt(root, &["add", "f.txt"]));
+    let refused = alt(root, &["commit", "-m", "half"]);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(said.contains("unmerged paths remain"), "{said}");
+    assert!(ok(alt(root, &["status"])).contains("Unmerged paths:"));
+
+    std::fs::write(root.join("g.txt"), "resolved\n").unwrap();
+    ok(alt(root, &["add", "g.txt"]));
+    ok(alt(root, &["commit", "-m", "merged"]));
+    let commit = ok(alt(root, &["cat-file", "-p", "HEAD"]));
+    let tree = ok(alt(root, &["cat-file", "-p", &commit[5..45]]));
+    assert!(tree.contains("f.txt") && tree.contains("g.txt"), "{tree}");
+    assert_eq!(commit.matches("\nparent ").count(), 2, "{commit}");
 }

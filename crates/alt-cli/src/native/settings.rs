@@ -1,6 +1,8 @@
 //! The repository's git-style configuration, as kept with the store.
 
 use super::*;
+pub(super) use crate::git_settings::fatal;
+use crate::git_settings::user_excludes;
 
 /// The files outside the working tree that a scan of it goes by.
 pub(super) struct ScanInputs {
@@ -16,9 +18,8 @@ pub(super) struct ScanInputs {
 impl NativeRepo<'_> {
     pub(super) fn scan_inputs(&self) -> Res<ScanInputs> {
         let (settings, mut files) = self.settings_listed()?;
-        let (global, info) = self.attribute_files(&settings)?;
-        files.extend(global);
-        files.push(info);
+        files.extend(self.user_attributes(&settings)?);
+        files.push(self.info_attributes());
         let by_branch = settings.entries.iter().any(|e| {
             let asks = |cond: &BString| cond.starts_with(b"onbranch:");
             e.section == "includeif" && e.subsection.as_ref().is_some_and(asks)
@@ -93,26 +94,22 @@ impl NativeRepo<'_> {
         }
     }
 
-    /// The attribute files outside the working tree: the user's, which
-    /// `core.attributesFile` names, and the repository's own.
-    pub(super) fn attribute_files(
+    /// The user's attributes file, which `core.attributesFile` names.
+    pub(super) fn user_attributes(
         &self,
         settings: &alt_git_config::Config,
-    ) -> Res<(Option<PathBuf>, PathBuf)> {
-        let user = match named_file(settings, "attributesfile")? {
-            Some(named) => named.map(|named| self.root.join(named)),
-            None => std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-                .map(|config| config.join("git").join("attributes")),
-        };
-        let info = self.store.alt_dir.join("git-import/info/attributes");
-        Ok((user, info))
+    ) -> Res<Option<PathBuf>> {
+        crate::git_settings::user_attributes(settings, Some(&self.root))
     }
 
-    /// The configuration file of this repository with its includes
-    /// resolved; empty when the repository has none.
+    /// The repository's own attributes file.
+    pub(super) fn info_attributes(&self) -> PathBuf {
+        self.store.alt_dir.join("git-import/info/attributes")
+    }
+
+    /// The configuration that applies in this repository, includes
+    /// resolved: the system's, the user's, and on top the repository's
+    /// own file.
     pub(super) fn settings(&self) -> Res<alt_git_config::Config> {
         Ok(self.settings_listed()?.0)
     }
@@ -122,28 +119,25 @@ impl NativeRepo<'_> {
     fn settings_listed(&self) -> Res<(alt_git_config::Config, Vec<PathBuf>)> {
         let dir = self.store.alt_dir.join("git-import");
         let file = dir.join("config");
-        if !file.is_file() {
-            return Ok((alt_git_config::Config::default(), vec![file]));
-        }
         let branch = self.head_branch().ok().and_then(|full| {
             let short = full.strip_prefix("refs/heads/")?;
             Some(BString::from(short.as_bytes().to_vec()))
         });
+        let (mut entries, mut files) =
+            crate::git_settings::outer_listed(Some(dir.clone()), branch.clone())?;
+        if !file.is_file() {
+            files.push(file);
+            return Ok((alt_git_config::Config { entries }, files));
+        }
         let ctx = alt_git_config::IncludeContext {
             git_dir: Some(dir),
             branch,
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home: crate::git_settings::home(),
         };
-        Ok(alt_git_config::Config::load_listing(&file, &ctx)?)
-    }
-}
-
-/// The user's ignore file as it is named: a relative path is one in the
-/// working tree.
-fn user_excludes(settings: &alt_git_config::Config) -> Res<Option<PathBuf>> {
-    match named_file(settings, "excludesfile")? {
-        Some(named) => Ok(named),
-        None => Ok(alt_worktree::default_excludes_file()),
+        let (own, read) = alt_git_config::Config::load_listing(&file, &ctx)?;
+        entries.extend(own.entries);
+        files.extend(read);
+        Ok((alt_git_config::Config { entries }, files))
     }
 }
 
@@ -165,32 +159,6 @@ pub(super) fn ensure_exclude_files(
     Ok(())
 }
 
-/// The file the setting `key` of the `core` section names, as git
-/// reads it: `None` when it is not set, no file when it is set to
-/// nothing. A relative path is one in the working tree. A key without
-/// a value is an error, and so is a home directory that is not known.
-fn named_file(settings: &alt_git_config::Config, key: &str) -> Res<Option<Option<PathBuf>>> {
-    match settings.get("core", None, key) {
-        None => Ok(None),
-        Some(None) => {
-            let missing = format!("error: missing value for 'core.{key}'\n");
-            crate::diagnostics::emit(missing.as_bytes())?;
-            Err(fatal(format!("bad config variable 'core.{key}'")))
-        }
-        Some(Some(path)) if path.is_empty() => Ok(Some(None)),
-        Some(Some(path)) => Ok(Some(Some(expand_user(path)?))),
-    }
-}
-
-/// A failure that changed nothing, with the exit status git has for it.
-pub(super) fn fatal(message: String) -> Box<dyn std::error::Error> {
-    let refusal = crate::machine::Failure::refusal("execution_error", message);
-    Box::new(crate::machine::Failure {
-        exit_code: 128,
-        ..refusal
-    })
-}
-
 /// What the system calls `error`, as git says it: without its number.
 pub(super) fn reason(error: &std::io::Error) -> String {
     let said = error.to_string();
@@ -198,27 +166,4 @@ pub(super) fn reason(error: &std::io::Error) -> String {
         Some(at) => said[..at].to_owned(),
         None => said,
     }
-}
-
-/// A path from the configuration, as git expands it: `~/` stands for the
-/// home directory, `~name/` for that of the user `name`.
-fn expand_user(path: &[u8]) -> Res<PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    let plain = |bytes: &[u8]| PathBuf::from(std::ffi::OsStr::from_bytes(bytes));
-    let Some(named) = path.strip_prefix(b"~") else {
-        return Ok(plain(path));
-    };
-    let (user, rest) = match named.iter().position(|b| *b == b'/') {
-        Some(at) => (&named[..at], &named[at + 1..]),
-        None => (named, &b""[..]),
-    };
-    let home = match user.is_empty() {
-        true => std::env::var_os("HOME").map(PathBuf::from),
-        false => alt_os::users::home_of(&std::ffi::CString::new(user)?)?,
-    };
-    let unknown = || {
-        let path = String::from_utf8_lossy(path);
-        fatal(format!("failed to expand user dir in: '{path}'"))
-    };
-    Ok(home.ok_or_else(unknown)?.join(plain(rest)))
 }

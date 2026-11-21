@@ -81,7 +81,7 @@ impl PrismStore {
     /// of `data`) regardless of which tier it lands in.
     pub fn put(&mut self, data: &[u8]) -> Result<BlobId, PrismStoreError> {
         let id = BlobId::of(data);
-        if self.tier1.contains(id) || self.blobs.contains(id) {
+        if self.tier1.contains(id) || self.blobs.contains(id)? {
             return Ok(id); // already stored, either tier
         }
         match self.registry.decompose_verified(data) {
@@ -124,8 +124,8 @@ impl PrismStore {
         Ok(data)
     }
 
-    pub fn contains(&self, id: BlobId) -> bool {
-        self.tier1.contains(id) || self.blobs.contains(id)
+    pub fn contains(&self, id: BlobId) -> Result<bool, PrismStoreError> {
+        Ok(self.tier1.contains(id) || self.blobs.contains(id)?)
     }
 
     /// Whether `id` is stored decomposed (Tier 1) rather than verbatim.

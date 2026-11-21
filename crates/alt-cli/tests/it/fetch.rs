@@ -33,7 +33,7 @@ use alt_odb::NativeOdb;
 use crate::wire_test_server;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -163,7 +163,7 @@ fn alt_fetch_round_trips_against_git_upload_pack() {
     assert!(!server_oids.is_empty(), "server repo has no objects?");
     for oid in &server_oids {
         assert!(
-            odb.contains(oid),
+            odb.contains(oid).unwrap(),
             "alt odb missing object {oid} that server has"
         );
     }

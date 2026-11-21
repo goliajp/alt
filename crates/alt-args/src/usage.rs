@@ -3,7 +3,7 @@
 use crate::scope::Scope;
 
 fn finish(scope: &Scope, mut line: String) -> String {
-    if !scope.subcommand_names().is_empty() {
+    if scope.has_subcommands() {
         line += " <COMMAND>";
     }
     line

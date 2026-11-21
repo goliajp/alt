@@ -2,4 +2,26 @@
 
 mod blob_store;
 mod chunk_store;
+mod compact_readers;
 mod corpus_blobs;
+mod damaged_log;
+mod index_gap;
+mod index_runs;
+mod index_stores;
+mod stale_index;
+mod synced_tail;
+mod tail_basis;
+mod torn_payload;
+
+/// A log known to be synced as far as `len`, opened by the holder of the
+/// lock its writers append under: what does not read past that length is
+/// an append that never finished, and is cut off.
+fn synced(len: u64) -> alt_store::Tail {
+    alt_store::Tail::judged_by(move |_, _| alt_store::Basis::Boundary(len)).locked()
+}
+
+/// A chunk store opened as [`synced`] to `len` says.
+fn open_synced(dir: &std::path::Path, len: u64) -> alt_store::ChunkStore {
+    let options = alt_store::Options::default();
+    alt_store::ChunkStore::open_known(dir, options, None, synced(len)).unwrap()
+}

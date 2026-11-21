@@ -2,6 +2,7 @@
 mod cli;
 mod complete;
 mod counted;
+mod description;
 mod hidden;
 mod hints;
 mod optional_value;

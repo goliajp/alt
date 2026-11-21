@@ -26,6 +26,10 @@ pub(super) struct Planned {
     pub(super) files: std::collections::HashMap<Vec<u8>, (u32, String)>,
 }
 
+/// What a scan found, the moment it began, and the converter it read
+/// files with when it read any.
+pub(super) type Scanned<R> = (R, alt_worktree::Clock, Option<convert::Converter>);
+
 /// What `status` and the commands that ask the same questions work from.
 pub(super) struct TreeState {
     pub(super) snapshot: Snapshot,
@@ -44,7 +48,7 @@ impl NativeRepo<'_> {
     /// built from this index, else a new one that takes over what the old
     /// one knows about unchanged entries.
     pub(super) fn worktree_snapshot(&self) -> Res<Snapshot> {
-        let algo = self.store.algo;
+        let algo = self.store.algo()?;
         let path = self.snapshot_path();
         let prior = HELD.get(&path).or_else(|| {
             let read = Snapshot::load(&path, algo)?;
@@ -88,13 +92,15 @@ impl NativeRepo<'_> {
     /// [`scan_delta`](Self::scan_delta) over `within` and what lies beneath
     /// those paths, the whole tree when there are none. Also returns the
     /// moment the scan began: a file changed before it can be recorded as
-    /// unchanged.
+    /// unchanged. And the converter, when a file had to be read: what
+    /// goes on to store or show the files converts with the same one, so
+    /// that a filter runs once for a file.
     pub(super) fn scan_delta_within(
         &self,
         snapshot: &mut Snapshot,
         untracked: Untracked,
         within: &[&[u8]],
-    ) -> Res<(Delta, alt_worktree::Clock)> {
+    ) -> Res<Scanned<Delta>> {
         self.scanning(untracked, within, |options, settings| {
             // a watched tree holds its answer with directories as one path
             let held = matches!(untracked, Untracked::No | Untracked::Normal);
@@ -118,7 +124,7 @@ impl NativeRepo<'_> {
         untracked: Untracked,
         within: &[&[u8]],
         scan: impl FnOnce(&ScanOptions<'_>, (&[&Path], &[u8])) -> Res<R>,
-    ) -> Res<(R, alt_worktree::Clock)> {
+    ) -> Res<Scanned<R>> {
         // built when the first file has to be read
         let tools: OnceCell<Res<(Option<PathMatcher>, convert::Converter)>> = OnceCell::new();
         let get = || {
@@ -149,17 +155,16 @@ impl NativeRepo<'_> {
             clock,
         };
         let found = scan(&options, (files.as_slice(), inputs.branch.as_slice()));
-        let converted = match tools.into_inner() {
-            Some(tools) => tools.and_then(|(_, attrs)| attrs.check()),
-            None => Ok(()),
-        };
+        let made = tools.into_inner().transpose();
+        let converted = made.and_then(|tools| match tools {
+            Some((_, attrs)) => attrs.check().map(|()| Some(attrs)),
+            None => Ok(None),
+        });
         if found.is_err() || converted.is_err() {
             // a file that could not be compared is in no answer worth holding
             watching::forget(&self.root);
         }
-        let found = found?;
-        converted?;
-        Ok((found, clock))
+        Ok((found?, clock, converted?))
     }
 
     /// After this process put the index of `next` where that of `prior`
@@ -181,7 +186,7 @@ impl NativeRepo<'_> {
     /// with the stat of each file the checkout wrote. A file written in the
     /// current tick of the clock is left out and read by the next scan.
     pub(super) fn snapshot_checked_out(&self, index: &[u8]) -> Res<()> {
-        let algo = self.store.algo;
+        let algo = self.store.algo()?;
         let mut written = std::mem::take(&mut *self.written.borrow_mut());
         // only where this is the index the planned checkout ends with do
         // the files it wrote hold what the entries name
@@ -237,6 +242,39 @@ impl NativeRepo<'_> {
             staged,
             delta,
         })
+    }
+
+    /// The files staged over what HEAD has that `named` names and whose
+    /// blob the store does not hold: staged before records that were
+    /// never synced were cut. What HEAD has as the index has it is stored.
+    pub(super) fn staged_unstored(
+        &self,
+        snapshot: &mut Snapshot,
+        index: &Index,
+        named: &dyn Fn(&[u8]) -> bool,
+    ) -> Res<Vec<BString>> {
+        // asking the store about a few entries is less than walking HEAD,
+        // which reads a tree for every directory with something staged
+        const FEW: usize = 32;
+        let files = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
+        let few: Vec<&IndexEntry> = index.entries.iter().filter(files).take(FEW + 1).collect();
+        let mut lost = Vec::new();
+        if few.len() <= FEW {
+            for entry in few {
+                if !self.store.odb.contains(&entry.oid)? {
+                    lost.push(entry.path.clone());
+                }
+            }
+            return Ok(lost);
+        }
+        snapshot.fill_trees();
+        let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
+        for new in staged.into_iter().filter_map(|s| s.new) {
+            if new.mode != 0o160000 && named(&new.path) && !self.store.odb.contains(&new.oid)? {
+                lost.push(new.path);
+            }
+        }
+        Ok(lost)
     }
 
     /// HEAD to index alone.

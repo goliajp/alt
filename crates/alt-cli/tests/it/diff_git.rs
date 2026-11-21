@@ -116,3 +116,43 @@ fn diff_cached_pairs_a_renamed_file_as_git_does() {
     );
     assert!(ours.contains("deleted file mode 100644"), "{ours}");
 }
+
+#[test]
+fn diff_cached_json_reports_a_renamed_file_once_with_where_it_was() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let root = dir.path();
+    ok(alt(root, &["init", "."]));
+    let body: String = (0..40).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(root.join("old.txt"), &body).unwrap();
+    std::fs::write(root.join("keep.txt"), "keep\n").unwrap();
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "base"]));
+    std::fs::remove_file(root.join("old.txt")).unwrap();
+    std::fs::write(
+        root.join("new.txt"),
+        body.replace("line 7\n", "line seven\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join("keep.txt"), "kept\n").unwrap();
+    ok(alt(root, &["add", "."]));
+
+    let json = ok(alt(root, &["diff", "--cached", "--json"]));
+    let doc: alt_json::Value = alt_json::from_str(&json).unwrap();
+    let files = doc["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{json}");
+    let (plain, renamed) = (&files[0], &files[1]);
+    assert_eq!(plain["path"], "keep.txt");
+    assert_eq!(plain["status"], "modified");
+    // a file that was not renamed has no fields about renaming
+    assert!(
+        !json.split("new.txt").next().unwrap().contains("old_path"),
+        "{json}"
+    );
+    assert_eq!(renamed["path"], "new.txt");
+    assert_eq!(renamed["old_path"], "old.txt");
+    assert_eq!(renamed["status"], "renamed");
+    let similarity = renamed["similarity"].as_i64().unwrap();
+    assert!((90..100).contains(&similarity), "{json}");
+    assert_eq!(renamed["hunks"].as_array().unwrap().len(), 1);
+    assert_ne!(renamed["old_oid"], renamed["new_oid"]);
+}

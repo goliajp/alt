@@ -46,7 +46,7 @@ impl NativeRepo<'_> {
                     &self.store.odb,
                     public.clone(),
                     &config,
-                    self.store.algo,
+                    self.store.algo()?,
                 )?;
                 crate::durable::write(&origin_path, alt_json::to_vec(&origin)?)?;
                 origin
@@ -147,7 +147,7 @@ impl NativeRepo<'_> {
         // Reconstruct without changing the store; the captured source entries
         // and canonical candidate tree must describe exactly the same bytes.
         let tree = ObjectId::from_hex(candidate.tree.as_bytes())?;
-        let candidate_entries = flatten_tree(&self.store.odb, tree, self.store.algo)?;
+        let candidate_entries = flatten_tree(&self.store.odb, tree, self.store.algo()?)?;
         if index != candidate_entries {
             return Err(refused(
                 "candidate tree differs from the current selected index",
@@ -366,9 +366,9 @@ impl NativeRepo<'_> {
         if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
             bytes = signed;
         }
-        let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
+        let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
         self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
-        self.store.odb.flush()?;
+        self.store.odb.flush_synced()?;
         let note = self.meta_for(&message, tree, &[before_oid], &notes::MetaInput::default())?;
         let note_change = self.note_change(commit, &note)?;
         if note_change.old.as_ref().map(alt_delivery::render) != expected_notes {
@@ -443,7 +443,7 @@ impl NativeRepo<'_> {
             .store
             .refs
             .oplog()
-            .ops()
+            .ops()?
             .iter()
             .filter(|op| {
                 requests::operation_request(op).ok().flatten().as_deref()
@@ -608,7 +608,7 @@ impl NativeRepo<'_> {
             ));
         }
         let mut found = None;
-        for op in self.store.refs.oplog().ops() {
+        for op in self.store.refs.oplog().ops()? {
             let Some(tx) = alt_refs::parse_tx(&op.payload)? else {
                 continue;
             };

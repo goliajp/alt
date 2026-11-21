@@ -4,10 +4,10 @@
 //! byte as before — the gates are silent until policy says otherwise.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 pub(crate) fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", principal_id)
@@ -24,7 +24,7 @@ pub(crate) fn alt_as(repo: &Path, args: &[&str], principal_id: &str) -> Output {
 /// Human/USER, which is "operator" — the policies tested below target
 /// `agent:*`, so this principal is unconstrained).
 pub(crate) fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "operator")

@@ -31,7 +31,27 @@ pub const FORWARDED_ENV: &[&str] = &[
     "VISUAL",
     "EDITOR",
     "ALT_NO_CREDENTIAL_HELPER",
+    // where the configuration outside the repository lies
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    // which character set texts are in
+    "LC_ALL",
+    "LC_CTYPE",
+    "LANG",
 ];
+
+/// Where the C library of this process looks for locales, as the daemon
+/// writes it beside its socket: `LOCPATH` in hexadecimal, nothing when
+/// it is not set. A locale is found by the path of the process that asks
+/// for it, so a daemon answers only callers whose path is its own.
+pub fn locale_path() -> String {
+    let path = std::env::var_os("LOCPATH").unwrap_or_default();
+    let bytes = path.as_encoded_bytes().iter();
+    bytes.map(|byte| format!("{byte:02x}")).collect()
+}
 
 /// A client-chosen idempotency token: 16 bytes, unique per command invocation
 /// and stable across that invocation's retries. The daemon stamps it on the
@@ -105,7 +125,7 @@ fn bad(msg: &'static str) -> io::Error {
 
 impl Request {
     pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(512);
         out.extend_from_slice(&(self.args.len() as u32).to_le_bytes());
         for a in &self.args {
             put_bytes(&mut out, a.as_bytes());
@@ -160,38 +180,55 @@ impl Request {
         };
         Ok(Request { args, cwd, env, id })
     }
-
-    /// Builds a request from the current process's argv tail, cwd, the
-    /// forwarded env vars that are set, and an optional idempotency `id` (set
-    /// by the client for a non-idempotent write, `None` for a read).
-    pub fn from_env(args: Vec<String>, id: Option<RequestId>) -> io::Result<Request> {
-        let cwd = std::env::current_dir()?;
-        let env = FORWARDED_ENV
-            .iter()
-            .filter_map(|&k| std::env::var(k).ok().map(|v| (k.to_owned(), v)))
-            .collect();
-        Ok(Request { args, cwd, env, id })
-    }
 }
 
-/// Writes a length-prefixed frame to `w`.
+/// The variables of [`FORWARDED_ENV`] this process has, in the order it
+/// holds them; one whose value is not UTF-8 is left out.
+pub fn forwarded_env() -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    alt_os::env::each(|name, value| {
+        let forwarded = FORWARDED_ENV.iter().find(|key| key.as_bytes() == name);
+        if let (Some(key), Ok(value)) = (forwarded, std::str::from_utf8(value))
+            && !env.iter().any(|(seen, _)| seen == key)
+        {
+            env.push(((*key).to_owned(), value.to_owned()));
+        }
+    });
+    env
+}
+
+/// Writes a length-prefixed frame to `w`: the length and the payload in
+/// one write where the writer takes both.
 pub fn write_frame(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let length = u32::try_from(payload.len())
-        .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?;
-    w.write_all(&length.to_le_bytes())?;
-    w.write_all(payload)?;
+        .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?
+        .to_le_bytes();
+    let written = w.write_vectored(&[io::IoSlice::new(&length), io::IoSlice::new(payload)])?;
+    match written.checked_sub(length.len()) {
+        Some(of_payload) => w.write_all(&payload[of_payload..])?,
+        None => {
+            w.write_all(&length[written..])?;
+            w.write_all(payload)?;
+        }
+    }
     w.flush()
 }
+
+/// How much of a frame is given room before any of it has arrived.
+const FIRST_ROOM: u64 = 64 << 10;
 
 /// Reads one length-prefixed frame from `r`.
 pub fn read_frame(r: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len)?;
     let len = u64::from(u32::from_le_bytes(len));
-    // grow with the bytes that actually arrive, so a length prefix alone
-    // cannot make the peer allocate up to 4 GiB
-    let mut payload = Vec::new();
-    r.take(len).read_to_end(&mut payload)?;
+    // a frame of ordinary size is read whole in one call; beyond that the
+    // room grows with the bytes that actually arrive, so a length prefix
+    // alone cannot make the peer allocate up to 4 GiB
+    let mut payload = vec![0; len.min(FIRST_ROOM) as usize];
+    r.read_exact(&mut payload)?;
+    r.take(len - payload.len() as u64)
+        .read_to_end(&mut payload)?;
     if payload.len() as u64 != len {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -217,6 +254,23 @@ mod tests {
             id: Some([7u8; 16]),
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
+    }
+
+    #[test]
+    fn the_forwarded_variables_are_those_the_process_has_by_name() {
+        let mut by_name: Vec<(String, String)> = FORWARDED_ENV
+            .iter()
+            .filter_map(|&key| std::env::var(key).ok().map(|value| (key.to_owned(), value)))
+            .collect();
+        let mut forwarded = forwarded_env();
+        // a test run has a home and a user at least
+        assert!(
+            forwarded.iter().any(|(key, _)| key == "HOME"),
+            "{forwarded:?}"
+        );
+        by_name.sort();
+        forwarded.sort();
+        assert_eq!(forwarded, by_name);
     }
 
     #[test]
@@ -287,6 +341,54 @@ mod tests {
         let mut cursor = std::io::Cursor::new(buf);
         let got = read_frame(&mut cursor).unwrap();
         assert_eq!(got, payload);
+    }
+
+    /// Takes at most `self.1` bytes of each write.
+    struct Trickle(Vec<u8>, usize);
+
+    impl Write for Trickle {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let taken = bytes.len().min(self.1);
+            self.0.extend_from_slice(&bytes[..taken]);
+            Ok(taken)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_frame_is_whole_however_little_each_write_takes() {
+        let payload: Vec<u8> = (0..200u8).collect();
+        for at_once in [1, 3, 4, 5, 150, 204, 1000] {
+            let mut out = Trickle(Vec::new(), at_once);
+            write_frame(&mut out, &payload).unwrap();
+            assert_eq!(out.0[..4], 200u32.to_le_bytes(), "{at_once}");
+            assert_eq!(read_frame(&mut io::Cursor::new(out.0)).unwrap(), payload);
+        }
+    }
+
+    /// Counts the reads that reach it.
+    struct Counted<R>(R, usize);
+
+    impl<R: Read> Read for Counted<R> {
+        fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
+            self.1 += 1;
+            self.0.read(into)
+        }
+    }
+
+    #[test]
+    fn a_frame_of_ordinary_size_is_read_in_two_calls() {
+        for size in [0, 10, 31, 32, 33, 200, 5000, 60_000] {
+            let payload = vec![7u8; size];
+            let mut framed = Vec::new();
+            write_frame(&mut framed, &payload).unwrap();
+            let mut counted = Counted(io::Cursor::new(framed), 0);
+            assert_eq!(read_frame(&mut counted).unwrap(), payload);
+            assert!(counted.1 <= 2, "{size} bytes took {} reads", counted.1);
+        }
     }
 
     #[test]

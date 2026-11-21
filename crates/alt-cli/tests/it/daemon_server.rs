@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use alt_cli::daemon::{self, Request, Response};
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -472,7 +472,7 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
 
     let log = OpLog::open(&root.join(".alt/oplog")).unwrap();
     let mut seen: Vec<String> = Vec::new();
-    for op in log.ops() {
+    for op in log.ops().unwrap() {
         let (p, _verb) = Principal::parse_actor(&op.actor);
         if p.kind == PrincipalKind::Agent {
             seen.push(p.id);
@@ -575,7 +575,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
             .map(|tree| {
                 std::thread::spawn(move || {
                     std::fs::write(tree.join("f.txt"), format!("round {r}\n")).unwrap();
-                    let add = Command::new(env!("CARGO_BIN_EXE_alt"))
+                    let add = crate::alt_command()
                         .current_dir(&tree)
                         .env("ALT_NO_DAEMON", "1")
                         .env("GIT_AUTHOR_NAME", "tester")
@@ -585,7 +585,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
                         .status()
                         .unwrap();
                     assert!(add.success(), "add failed");
-                    let commit = Command::new(env!("CARGO_BIN_EXE_alt"))
+                    let commit = crate::alt_command()
                         .current_dir(&tree)
                         .env("ALT_NO_DAEMON", "1")
                         .env("GIT_AUTHOR_NAME", "tester")
@@ -831,8 +831,6 @@ fn daemon_picks_up_policy_edits_on_the_next_request() {
 /// (the gate fires before any oplog/idempotency state is touched).
 #[test]
 fn daemon_enforces_capability_policy_for_restricted_agent() {
-    use alt_oplog::OpLog;
-
     let repo = alt_os::temp::tempdir().unwrap();
     let root = repo.path();
     ok(alt(root, &["init", "."]));
@@ -843,7 +841,7 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
     std::fs::write(root.join(".alt/policy"), "agent:rover -> read-only\n").unwrap();
 
     let d = Daemon::start(&root.join(".alt"));
-    let oplen_before = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+    let oplen_before = super::op_log::op_count(root);
 
     // restricted agent's write goes through the daemon socket — denied
     let env = vec![
@@ -868,7 +866,7 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
 
     // the rejected write left no op log entry — zero on-disk side effect
     drop(d);
-    let oplen_after = OpLog::open(&root.join(".alt/oplog")).unwrap().ops().len();
+    let oplen_after = super::op_log::op_count(root);
     assert_eq!(
         oplen_after, oplen_before,
         "denied write must not append any op"

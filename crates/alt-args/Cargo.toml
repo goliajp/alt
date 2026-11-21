@@ -1,6 +1,6 @@
 [package]
 name = "alt-args"
-description = "Command-line argument parsing from static tables, with no dependencies"
+description = "Command-line argument parsing from descriptions kept as text, with no dependencies"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

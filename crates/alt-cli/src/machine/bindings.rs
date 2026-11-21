@@ -3,11 +3,19 @@
 use alt_args::Matches;
 use alt_json::{Value, json};
 
-use super::{hex, matches_json};
+use super::{Parsed, hex, matches_json};
+
+impl Parsed {
+    /// The arguments in the one form every spelling of them shares. Only a
+    /// write binds its request to it, so it is built on demand.
+    pub fn normalized(&self) -> Value {
+        canonical_matches(&self.matches)
+    }
+}
 
 /// The argument values a durable request is bound to. Stored bindings are
 /// compared with this on a retry, so its shape must never change.
-pub(super) fn canonical_matches(matches: &Matches) -> Value {
+fn canonical_matches(matches: &Matches) -> Value {
     let mut args = std::collections::BTreeMap::new();
     for entry in matches.entries() {
         if matches!(entry.id, "request_id" | "workspace") {

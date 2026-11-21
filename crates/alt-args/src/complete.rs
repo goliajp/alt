@@ -7,9 +7,11 @@
 //!
 //! [`parse`]: crate::parse
 
+use crate::arg::Arg;
 use crate::level::{Level, State, Step};
 use crate::scope::{Letter, Scope, split_long};
-use crate::spec::{Arg, Command, Kind};
+use crate::settings::Kind;
+use crate::spec::Command;
 use crate::{help, validate};
 
 /// One thing to offer, with its line of help.
@@ -27,7 +29,7 @@ pub enum Completion {
     /// a value of `arg`, whose candidates the caller knows from its
     /// `possible` and `hint`
     Value {
-        arg: &'static Arg,
+        arg: Arg,
         /// the part of the word that belongs to the value
         prefix: String,
         /// what stands before the value in the same word (`--name=`,
@@ -40,7 +42,7 @@ pub enum Completion {
 /// `current` may be one past the end for a word not yet begun. A line
 /// that is already wrong before the cursor is read as far as it makes
 /// sense.
-pub fn complete(command: &'static Command, words: &[String], current: usize) -> Vec<Completion> {
+pub fn complete(command: Command, words: &[String], current: usize) -> Vec<Completion> {
     if current == 0 {
         return Vec::new();
     }
@@ -69,7 +71,7 @@ fn help_names(scope: &Scope, names: &[String]) -> Vec<Completion> {
     let Some((name, rest)) = names.split_first() else {
         return subcommands(scope, false).into_iter().collect();
     };
-    match scope.command.subcommands.iter().find(|c| c.name == name) {
+    match scope.command.subcommand(name) {
         Some(command) => help_names(&scope.child(command), rest),
         None => Vec::new(),
     }
@@ -90,7 +92,7 @@ fn subcommands(scope: &Scope, with_help: bool) -> Option<Completion> {
     (!candidates.is_empty()).then_some(Completion::Subcommands(candidates))
 }
 
-fn value(arg: &'static Arg, prefix: &str, attached: Option<&str>) -> Completion {
+fn value(arg: Arg, prefix: &str, attached: Option<&str>) -> Completion {
     Completion::Value {
         arg,
         prefix: prefix.to_owned(),
@@ -124,8 +126,8 @@ fn options(level: &Level, word: &str, cluster: &[&'static str]) -> Option<Comple
     }
     given.extend(cluster);
     let mut candidates = Vec::new();
-    for arg in scope.slots.iter().map(|slot| slot.arg) {
-        let repeats = matches!(arg.kind, Kind::Count | Kind::Multiple);
+    for arg in scope.slots.iter().map(|slot| &slot.arg) {
+        let repeats = matches!(arg.kind, Kind::Count | Kind::Attached | Kind::Multiple);
         if arg.is_positional()
             || (given.contains(&arg.id) && !repeats)
             || !validate::clashes(scope, arg.id, &given).is_empty()
@@ -137,7 +139,7 @@ fn options(level: &Level, word: &str, cluster: &[&'static str]) -> Option<Comple
             spellings.push(format!("{word}{short}"));
         }
         if word.len() == 1 || word.starts_with("--") {
-            let longs = [arg.long, arg.alias].into_iter();
+            let longs = [arg.long, arg.alias()].into_iter();
             spellings.extend(
                 longs
                     .filter(|name| !name.is_empty())
@@ -146,7 +148,7 @@ fn options(level: &Level, word: &str, cluster: &[&'static str]) -> Option<Comple
         }
         candidates.extend(spellings.into_iter().map(|value| Candidate {
             value,
-            help: arg.help,
+            help: arg.help(),
         }));
     }
     (!candidates.is_empty()).then_some(Completion::Options(candidates))
@@ -185,7 +187,8 @@ fn short(level: &Level, word: &str) -> Vec<Completion> {
             Letter::Unknown(_) if offset == 0 => {
                 return hyphen_value(level, word).into_iter().collect();
             }
-            Letter::Unknown(_) => return Vec::new(),
+            // what follows the letter is its own text, not more letters
+            Letter::Unknown(_) | Letter::Attached(..) => return Vec::new(),
         }
     }
     // a lone `-` is a value to the parser

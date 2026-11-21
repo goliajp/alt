@@ -41,6 +41,8 @@ struct Found {
     clock: alt_worktree::Clock,
     /// the paths left alone because an ignore rule hides them
     hidden: Vec<BString>,
+    /// the converter the scan read files with, if it read any
+    attrs: Option<convert::Converter>,
 }
 
 impl NativeRepo<'_> {
@@ -104,14 +106,17 @@ impl NativeRepo<'_> {
         let embedded = self.take_embedded(&mut delta, &named)?;
         let advice = embedded::warning(&embedded, &self.settings()?)?;
 
-        let plan = plan(&before, &delta, mode.renormalize, &named);
+        // a staged file whose blob went with records that were never
+        // synced is stored again, though its stat is the one it was staged with
+        let lost = self.staged_unstored(&mut snapshot, &before, &named)?;
+        let plan = plan(&before, &delta, &lost, mode.renormalize, &named);
         self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged
         let none = index_of(Vec::new());
         let staged_now = if mode.renormalize { &none } else { &before };
         let mut entries = plan.entries;
         let store::Stored { stats, blocked } =
-            self.stage_files(&plan.taken, &delta, staged_now, &mut entries)?;
+            self.stage_files(&plan.taken, &delta, staged_now, &mut entries, found.attrs)?;
         // what could not be stored stays as it was staged
         let kept = before.entries.iter().filter(|e| blocked.contains(&e.path));
         entries.extend(kept.cloned());
@@ -152,7 +157,8 @@ impl NativeRepo<'_> {
         if !tracked_only {
             named::ensure_walkable(specs)?;
         }
-        let (mut delta, clock) = self.scan_delta_within(snapshot, mode.untracked(), within)?;
+        let (mut delta, clock, attrs) =
+            self.scan_delta_within(snapshot, mode.untracked(), within)?;
         let known = match (mode.renormalize, mode.update) {
             (true, _) => named::Known::Tracked,
             (false, true) => named::Known::TrackedOrError,
@@ -176,6 +182,7 @@ impl NativeRepo<'_> {
             delta,
             clock,
             hidden,
+            attrs,
         })
     }
 
@@ -218,9 +225,9 @@ impl NativeRepo<'_> {
             self.keep_snapshot(snapshot);
             return Ok(());
         }
-        let mut next = Snapshot::of_index(&after, &[], self.store.algo, Some(snapshot));
+        let mut next = Snapshot::of_index(&after, &[], self.store.algo()?, Some(snapshot));
         self.write_index_transaction(before, after, touched, None)?;
-        let raw = self.store.algo.raw_len();
+        let raw = self.store.algo()?.raw_len();
         next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
         for (path, stat) in stats {
             next.settle_path(&path, stat, clock);

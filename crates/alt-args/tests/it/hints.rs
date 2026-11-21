@@ -1,4 +1,4 @@
-//! `#[arg(hint = ...)]` and `#[command(hide)]` reach the tables.
+//! `#[arg(hint = ...)]` and `#[command(hide)]` reach the description.
 #![allow(dead_code)]
 
 use alt_args::{Hint, Item, Parser, Subcommand};
@@ -32,11 +32,12 @@ enum Op {
 
 #[test]
 fn hints_are_recorded_per_argument() {
-    let Item::Group(_, items) = &Tool::COMMAND.subcommands[0].items[0] else {
+    let open = Tool::command().subcommand("open").unwrap();
+    let Some(Item::Group(_, items)) = open.items().next() else {
         panic!()
     };
-    let hints = items.iter().map(|item| match item {
-        Item::Arg(arg) => (arg.id, arg.hint),
+    let hints = items.map(|item| match item {
+        Item::Arg(arg) => (arg.id, arg.hint()),
         _ => panic!(),
     });
     assert_eq!(
@@ -53,7 +54,7 @@ fn hints_are_recorded_per_argument() {
 
 #[test]
 fn hide_marks_the_subcommand() {
-    let commands = Tool::COMMAND.subcommands.iter();
+    let commands = Tool::command().subcommands();
     assert_eq!(
         commands.map(|c| (c.name, c.hidden)).collect::<Vec<_>>(),
         [("open", false), ("answer", true), ("show", false)]

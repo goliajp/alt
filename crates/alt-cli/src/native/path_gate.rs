@@ -34,7 +34,7 @@ impl NativeRepo<'_> {
             Some(old) => self.commit_entries(old)?,
             None => Vec::new(),
         };
-        let now = flatten_tree(&self.store.odb, tree, self.store.algo)?;
+        let now = flatten_tree(&self.store.odb, tree, self.store.algo()?)?;
         self.ensure_difference_allowed(&was, &now)
     }
 

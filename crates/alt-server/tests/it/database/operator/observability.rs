@@ -41,7 +41,7 @@ impl ObservedServer {
     }
     fn call(&self, method: &str, path: &str, token: Option<&str>, bytes: &[u8]) -> ureq::Response {
         let mut request =
-            ureq::request(method, &format!("{}{path}", self.url)).timeout(Duration::from_secs(5));
+            ureq::request(method, &format!("{}{path}", self.url)).timeout(Duration::from_secs(20));
         if method == "POST" {
             request = request.set("Content-Type", "application/json");
         }
@@ -219,7 +219,7 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
         &future().to_string(),
     ]);
     let mut config = Config::read(&db.config).unwrap();
-    config.http.work_timeout_ms = 1000;
+    config.http.database_statement_timeout_ms = 60_000;
     config.limits.object_bytes = 20_000_000;
     std::fs::write(&db.config, alt_json::to_vec(&config).unwrap()).unwrap();
     let mut store = Store::open(
@@ -339,8 +339,8 @@ fn request_observations_preserve_late_commits_and_current_metrics_authority() {
             .status(),
         200
     );
-    // Repository row lock is after the HTTP credential preflight. The HTTP
-    // deadline expires while the real publication worker remains alive.
+    // Repository row lock is after the HTTP credential preflight and outlasts the
+    // HTTP deadline, which expires while the real publication worker remains alive.
     let mut blocker = Client::connect(&db.dsn).unwrap();
     let mut transaction = blocker.transaction().unwrap();
     transaction

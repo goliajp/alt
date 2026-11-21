@@ -83,7 +83,13 @@ enum Op {
         name: Option<String>,
     },
     #[command(hide)]
-    Answer { word: Option<String> },
+    Answer {
+        word: Option<String>,
+        #[arg(short = 'C', action = attached)]
+        context: Vec<String>,
+        #[arg(short = 'q')]
+        quiet: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -125,7 +131,7 @@ fn show(found: Vec<Completion>) -> Vec<String> {
 /// line ends in a space.
 fn at(line: &str) -> Vec<String> {
     let words: Vec<String> = line.split(' ').map(String::from).collect();
-    show(complete(Tool::COMMAND, &words, words.len() - 1))
+    show(complete(Tool::command(), &words, words.len() - 1))
 }
 
 const COMMANDS: &str = "commit switch run grep remote stash";
@@ -136,7 +142,7 @@ fn subcommands_are_offered_where_one_is_expected() {
     assert_eq!(at("tool "), [listed.as_str()]);
     assert_eq!(at("tool sw"), [listed.as_str()]);
     assert_eq!(at("tool remote "), ["commands: add list"]);
-    let found = complete(Tool::COMMAND, &["tool".to_owned()], 1);
+    let found = complete(Tool::command(), &["tool".to_owned()], 1);
     let [Completion::Subcommands(candidates)] = found.as_slice() else {
         panic!()
     };
@@ -173,20 +179,20 @@ fn a_positional_and_subcommands_are_offered_together() {
 #[test]
 fn the_cursor_may_be_anywhere() {
     let words: Vec<String> = "tool switch main".split(' ').map(String::from).collect();
-    assert!(complete(Tool::COMMAND, &words, 0).is_empty());
+    assert!(complete(Tool::command(), &words, 0).is_empty());
     assert_eq!(
-        show(complete(Tool::COMMAND, &words, 1)),
+        show(complete(Tool::command(), &words, 1)),
         [format!("commands: {COMMANDS} help")]
     );
     assert_eq!(
-        show(complete(Tool::COMMAND, &words, 2)),
+        show(complete(Tool::command(), &words, 2)),
         ["value branch [main]"]
     );
-    assert_eq!(show(complete(Tool::COMMAND, &words, 3)), ["value dir []"]);
-    assert_eq!(show(complete(Tool::COMMAND, &words, 9)), ["value dir []"]);
-    assert!(complete(Tool::COMMAND, &[], 0).is_empty());
+    assert_eq!(show(complete(Tool::command(), &words, 3)), ["value dir []"]);
+    assert_eq!(show(complete(Tool::command(), &words, 9)), ["value dir []"]);
+    assert!(complete(Tool::command(), &[], 0).is_empty());
     assert_eq!(
-        show(complete(Tool::COMMAND, &[], 1)),
+        show(complete(Tool::command(), &[], 1)),
         [format!("commands: {COMMANDS} help")]
     );
 }

@@ -48,17 +48,20 @@ impl NativeRepo<'_> {
             .filter(|ch| ch.old.is_some() || show_added)
             .collect();
 
-        if json {
-            return self.diff_json(&changes, disk, semantic, out);
-        }
+        let settings = self.settings()?;
+        let info = self.store.alt_dir.join("git-import/info/attributes");
         let style = Style {
-            quotepath: self
-                .settings()?
+            quotepath: settings
                 .get_bool("core", None, "quotepath")
                 .transpose()?
                 .unwrap_or(true),
-            abbrev: Some(self.store.odb.abbrev()),
+            abbrev: Some(self.store.odb.abbrev()?),
+            sections: crate::funcname::Sections::new(Some(&self.root), &info, &settings)?,
         };
+        if json {
+            let pairs = self.pairs(&changes, cached)?;
+            return self.diff_json(&pairs, disk, semantic, &style.sections, out);
+        }
         let mut buf = Vec::new();
         for pair in self.pairs(&changes, cached)? {
             // a path that changed kind (file, symlink, submodule) is shown
@@ -150,22 +153,30 @@ impl NativeRepo<'_> {
     /// for; the field is `null` otherwise (including non-`--semantic` runs).
     fn diff_json(
         &self,
-        changes: &[alt_worktree::Change],
+        pairs: &[Pair<'_>],
         disk: Option<&Worktree>,
         semantic: bool,
+        sections: &crate::funcname::Sections,
         out: &mut impl Write,
     ) -> Res<()> {
         use crate::json::Json;
-        let mut files = Vec::with_capacity(changes.len());
-        for ch in changes {
+        let mut files = Vec::with_capacity(pairs.len());
+        for ch in pairs {
             let old_bytes = self.side_bytes(ch.old, None)?;
             let new_bytes = self.side_bytes(ch.new, disk)?;
+            let renamed = ch.old_path != ch.new_path;
             let status = match (ch.old, ch.new) {
                 (None, _) => "added",
                 (_, None) => "deleted",
+                _ if renamed => "renamed",
                 _ => "modified",
             };
-            let binary = alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes);
+            let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
+            let paths = [
+                ch.old.filter(regular).map(|_| ch.old_path.as_bytes()),
+                ch.new.filter(regular).map(|_| ch.new_path.as_bytes()),
+            ];
+            let binary = sections.binary(paths, &old_bytes, &new_bytes)?;
             let hunks = if binary {
                 Vec::new()
             } else {
@@ -203,7 +214,7 @@ impl NativeRepo<'_> {
                 Json::Null
             };
             let ast_diff_field = if semantic && !binary {
-                ast_diff_json(ch.path.as_bytes(), &old_bytes, &new_bytes)
+                ast_diff_json(ch.new_path.as_bytes(), &old_bytes, &new_bytes)
             } else {
                 Json::Null
             };
@@ -213,7 +224,16 @@ impl NativeRepo<'_> {
                 Some(w) => Json::str(format!("{:06o}", w.mode)),
                 None => Json::Null,
             };
-            let rest = [
+            let mut fields = crate::json::path(ch.new_path);
+            // a renamed file says where it was and how alike the two are
+            if renamed {
+                fields.push(("old_path", Json::str(ch.old_path)));
+            }
+            if renamed && std::str::from_utf8(ch.old_path).is_err() {
+                let hex = crate::machine::hex(ch.old_path);
+                fields.push(("old_path_bytes", Json::str(hex)));
+            }
+            fields.extend([
                 ("status", Json::str(status)),
                 ("old_oid", oid(ch.old)),
                 ("new_oid", oid(ch.new)),
@@ -225,9 +245,14 @@ impl NativeRepo<'_> {
                 ("perceptual_diff", perceptual_diff_field),
                 ("part_diff", part_diff_field),
                 ("ast_diff", ast_diff_field),
-            ];
-            let file = crate::json::path(ch.path).into_iter().chain(rest);
-            files.push(Json::Object(file.collect()));
+            ]);
+            if renamed {
+                let similarity = ch
+                    .similarity
+                    .map_or(Json::Null, |s| Json::Num(i64::from(s)));
+                fields.push(("similarity", similarity));
+            }
+            files.push(Json::Object(fields));
         }
         let doc = Json::Object(vec![
             ("schema_version", Json::Num(1)),
@@ -267,6 +292,13 @@ impl NativeRepo<'_> {
         }
         let old_bytes = self.side_bytes(pair.old, None)?;
         let new_bytes = self.side_bytes(pair.new, disk)?;
+        let regular = |w: &&WorkEntry| w.mode & 0o170000 == 0o100000;
+        let paths = [
+            pair.old.filter(regular).map(|_| pair.old_path.as_bytes()),
+            pair.new.filter(regular).map(|_| pair.new_path.as_bytes()),
+        ];
+        let sections = &style.sections;
+        let binary = sections.binary(paths, &old_bytes, &new_bytes)?;
 
         // when --semantic is set and we have a parser for this path,
         // render the AST-level summary in place of the unified hunks. A
@@ -274,8 +306,7 @@ impl NativeRepo<'_> {
         // diff body — the caller never loses signal, only sometimes the
         // semantic resolution.
         if semantic
-            && !alt_diff::is_binary(&old_bytes)
-            && !alt_diff::is_binary(&new_bytes)
+            && !binary
             && let Some(lang) = lang_for(path.as_bytes())
             && let (Ok(old_s), Ok(new_s)) = (
                 std::str::from_utf8(&old_bytes),
@@ -292,8 +323,7 @@ impl NativeRepo<'_> {
         // `summary_for_path` (.json content-detect + .toml explicit).
         // Parse failures fall through to the line diff — no signal loss.
         if semantic
-            && !alt_diff::is_binary(&old_bytes)
-            && !alt_diff::is_binary(&new_bytes)
+            && !binary
             && let Ok(path_str) = std::str::from_utf8(path.as_bytes())
             && let Some(structured) =
                 alt_diff::structured::summary_for_path(path_str, &old_bytes, &new_bytes)
@@ -302,7 +332,7 @@ impl NativeRepo<'_> {
             return Ok(());
         }
 
-        if alt_diff::is_binary(&old_bytes) || alt_diff::is_binary(&new_bytes) {
+        if binary {
             // git-compat line first (existing tests + muscle memory key off
             // this exact wording); then a chunk-diff summary so the
             // human view answers "how much is genuinely shared" too.
@@ -349,7 +379,7 @@ impl NativeRepo<'_> {
 
         // the file header belongs to the hunks: none without them
         let mut hunks = Vec::new();
-        if alt_diff::write_unified(&mut hunks, &old_bytes, &new_bytes, 3) {
+        if sections.write_hunks(&mut hunks, paths, &old_bytes, &new_bytes)? {
             header.write_hunk_names(buf, style)?;
             buf.extend_from_slice(&hunks);
         }

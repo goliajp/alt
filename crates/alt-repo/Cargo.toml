@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 alt-git-codec.workspace = true
+alt-hash.workspace = true
 alt-odb.workspace = true
 alt-refs.workspace = true
 alt-git-config.workspace = true

@@ -42,18 +42,14 @@ impl NativeRepo<'_> {
         if self.bisect_in_progress() {
             return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
         }
-        let tree = self.staged_tree()?;
-
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
+        let head_tree = parent.map(|p| self.commit_tree(p)).transpose()?;
+        let tree = self.staged_tree(head_tree)?;
         let merging = self.merge_head()?;
         // a commit that changes nothing is almost always a mistake (a
         // forgotten `add`); git refuses it too, merges aside
-        if let Some(p) = parent
-            && merging.is_none()
-            && !opts.allow_empty
-            && self.commit_tree(p)? == tree
-        {
+        if head_tree == Some(tree) && merging.is_none() && !opts.allow_empty {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "nothing to commit: the index matches HEAD (use --allow-empty to \
@@ -140,7 +136,7 @@ impl NativeRepo<'_> {
                 .to_owned(),
         };
 
-        let tree = self.staged_tree()?;
+        let tree = self.staged_tree(prev.tree())?;
         if !opts.no_verify {
             self.run_precommit()?;
         }
@@ -238,9 +234,20 @@ impl NativeRepo<'_> {
         Ok(precommit::check(&changes))
     }
 
-    /// The index's stage-0 entries written out as a tree.
-    pub(super) fn staged_tree(&mut self) -> Res<ObjectId> {
-        let staged = index_entries(&self.index()?);
+    /// The index's stage-0 entries written out as a tree. Refused while a
+    /// conflict is unresolved: a tree without its path would delete the file.
+    /// The blob of every entry that `base`, the tree of a commit, does not
+    /// have is looked up first: the index can name one that was never stored.
+    pub(super) fn staged_tree(&mut self, base: Option<ObjectId>) -> Res<ObjectId> {
+        let index = self.index()?;
+        if index.entries.iter().any(|e| e.stage() > 0) {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "unmerged paths remain: resolve the conflicts and `alt add` them first",
+            )
+            .into());
+        }
+        let staged = index_entries(&index);
         if staged.is_empty() {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -248,7 +255,16 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        Ok(write_tree(&mut self.store.odb, &staged, self.store.algo)?)
+        let tree = self.store_tree(&staged)?;
+        let algo = self.store.algo()?;
+        if let Some((path, blob)) = alt_worktree::unstored_blob(&self.store.odb, tree, base, algo)?
+        {
+            return Err(format!(
+                "index entry {path} names blob {blob}, which is not stored: add the file again"
+            )
+            .into());
+        }
+        Ok(tree)
     }
 
     /// Stores a commit (signed when the sign policy asks for it) and moves
@@ -271,7 +287,7 @@ impl NativeRepo<'_> {
         if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
             bytes = signed;
         }
-        let commit = ObjectId::hash_object(self.store.algo, ObjectKind::Commit, &bytes);
+        let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
         self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
         self.store.odb.flush()?;
         let note = self.meta_for(c.message, c.tree, c.parents, meta)?;

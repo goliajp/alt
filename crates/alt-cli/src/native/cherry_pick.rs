@@ -11,7 +11,7 @@ impl NativeRepo<'_> {
     /// 3-way merge stops in conflict (caller maps to exit code 1).
     pub fn cherry_pick(&mut self, rev: &str, json: bool, out: &mut impl Write) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("cherry-pick")?;
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let target_oid = repo
             .rev_parse(rev)?
             .ok_or_else(|| settings::fatal(format!("bad revision '{rev}'")))?;
@@ -58,12 +58,14 @@ impl NativeRepo<'_> {
             return Ok(true);
         }
 
+        // read through `repo` before the store starts its write batch
+        let head_commit = repo.read_commit(&head_oid)?;
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let algo = self.store.algo()?;
+        let tree = write_tree(&mut self.store.odb, &entries, algo)?;
 
         // Did the cherry-pick actually change anything? If the resulting
         // tree matches HEAD's, there's nothing to commit.
-        let head_commit = repo.read_commit(&head_oid)?;
         if head_commit.tree() == Some(tree) {
             writeln!(
                 out,
@@ -93,15 +95,7 @@ impl NativeRepo<'_> {
             when,
             tz: "+0000",
         };
-        let original_msg = String::from_utf8_lossy(target_commit.message().as_slice()).into_owned();
-        let mut msg = original_msg;
-        if !msg.ends_with('\n') {
-            msg.push('\n');
-        }
-        if !msg.ends_with("\n\n") {
-            msg.push('\n');
-        }
-        msg.push_str(&format!("(cherry picked from commit {target_oid})\n"));
+        let msg = picked_message(target_commit.message().as_slice(), target_oid);
 
         let commit = write_commit(
             &mut self.store.odb,
@@ -110,7 +104,7 @@ impl NativeRepo<'_> {
             &author_sig,
             &committer,
             &msg,
-            self.store.algo,
+            algo,
         )?;
         self.store.odb.flush()?;
         self.advance_branch_checkout(&head_ref, head_oid, commit, &old, &entries)?;
@@ -138,6 +132,19 @@ impl NativeRepo<'_> {
         }
         Ok(false)
     }
+}
+
+/// The picked commit's message, ending in the trailer that names it.
+fn picked_message(original: &[u8], picked: ObjectId) -> String {
+    let mut msg = String::from_utf8_lossy(original).into_owned();
+    if !msg.ends_with('\n') {
+        msg.push('\n');
+    }
+    if !msg.ends_with("\n\n") {
+        msg.push('\n');
+    }
+    msg.push_str(&format!("(cherry picked from commit {picked})\n"));
+    msg
 }
 
 /// Parse a git ident line ("Name <email> <epoch> <tz>") into a

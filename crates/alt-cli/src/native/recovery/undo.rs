@@ -4,16 +4,14 @@
 use super::*;
 
 impl NativeRepo<'_> {
-    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        self.ensure_writable("undo")?;
-        self.lock_workspace()?;
-        self.ensure_no_pending_recovery()?;
-        let workspace = self.workspace_identity()?;
+    /// The last operation of the log, or the checkout its completion
+    /// closes.
+    fn last_undoable(&self) -> Res<alt_oplog::Op> {
         let mut last = self
             .store
             .refs
             .oplog()
-            .ops()
+            .ops()?
             .last()
             .ok_or_else(|| {
                 crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
@@ -33,23 +31,32 @@ impl NativeRepo<'_> {
                 .store
                 .refs
                 .oplog()
-                .ops()
+                .ops()?
                 .iter()
                 .find(|op| op.id.to_string() == done.prepared)
                 .ok_or("missing checkout intent")?
                 .clone();
         }
+        Ok(last)
+    }
+
+    pub fn undo(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        self.ensure_writable("undo")?;
+        self.lock_workspace()?;
+        self.ensure_no_pending_recovery()?;
+        let workspace = self.workspace_identity()?;
+        let last = self.last_undoable()?;
         use crate::json::Json;
         let mut fields = vec![("undone", Json::Bool(true))];
         match last.payload.first() {
             Some(&COMPLETE) => {
                 let done: Completion = decode(&last.payload, COMPLETE)?;
-                let prepared = self.store.refs.oplog().ops().iter()
+                let prepared = self.store.refs.oplog().ops()?.iter()
                     .find(|op| op.id.to_string() == done.prepared).ok_or("missing recovery intent")?;
                 let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
                 if intent.workspace != workspace { return Err(crate::machine::Failure::refusal("precondition_failed", "last operation belongs to a different workspace instance; select its workspace").into()); }
                 if intent.version != 1 || done.version != 1 { return Err(crate::machine::Failure::refusal("unsupported_record", "unsupported recovery record").into()); }
-                if hash(&canonical_index(self.index()?, self.store.algo)) != intent.after {
+                if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.after {
                     return Err(crate::machine::Failure::refusal("precondition_failed", "recovery precondition failed: index changed").into());
                 }
                 self.check_guards(&intent.worktree)?;
@@ -79,6 +86,7 @@ impl NativeRepo<'_> {
                 fields.push(("refs", Json::Array(tx.changes.iter().map(|c| Json::str(&c.name)).collect())));
                 self.undo_scoped_refs(&last)?;
             },
+            Some(&ABANDON) => return Err(crate::machine::Failure::refusal("precondition_failed", "nothing to undo: the last operation was abandoned").into()),
             Some(&crate::index_tx::PAYLOAD_INDEX_TX) => return Err(crate::machine::Failure::refusal("unsupported_record", "legacy operation lacks workspace ownership and recovery prestate; automatic undo refused").into()),
             _ => return Err(crate::machine::Failure::refusal("unsupported_record", "unknown or incomplete operation; automatic undo refused").into()),
         }

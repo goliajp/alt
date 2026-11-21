@@ -103,6 +103,20 @@ pub struct PathAttributes {
     pub ident: bool,
     /// the name of the filter driver the content goes through
     pub filter: Option<Vec<u8>>,
+    pub diff: DiffAttribute,
+}
+
+/// What the `diff` attribute says of a path.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DiffAttribute {
+    #[default]
+    Unspecified,
+    /// `-diff`: compared as binary
+    Unset,
+    /// `diff`: compared as text whatever is in it
+    Set,
+    /// the name of the diff driver the path is compared with
+    Named(Vec<u8>),
 }
 
 /// One attributes file.
@@ -224,6 +238,12 @@ pub fn lookup<'a>(
         filter: match state(b"filter") {
             Some(State::Value(name)) => Some(name),
             _ => None,
+        },
+        diff: match state(b"diff") {
+            Some(State::Value(name)) => DiffAttribute::Named(name),
+            Some(State::Set) => DiffAttribute::Set,
+            Some(State::Unset) => DiffAttribute::Unset,
+            _ => DiffAttribute::Unspecified,
         },
     }
 }
@@ -582,6 +602,7 @@ mod tests {
                 conversion: Conversion::Binary,
                 ident: false,
                 filter: None,
+                diff: DiffAttribute::Unspecified,
             }
         );
     }

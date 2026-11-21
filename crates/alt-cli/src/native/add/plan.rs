@@ -62,10 +62,12 @@ fn above(path: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 /// The paths stored from the working tree: what the scan found changed,
-/// new or conflicted, or with `renormalize` every tracked file named.
+/// new or conflicted and the files of `lost` that are there, or with
+/// `renormalize` every tracked file named.
 fn taken<'a>(
     before: &'a Index,
     delta: &'a Delta,
+    lost: &'a [BString],
     renormalize: bool,
     named: &dyn Fn(&[u8]) -> bool,
 ) -> Vec<&'a BString> {
@@ -78,23 +80,28 @@ fn taken<'a>(
             .filter(again)
             .map(|e| &e.path)
             .collect(),
-        false => changed
-            .chain(&delta.untracked)
-            .chain(&delta.unmerged)
-            .collect(),
+        false => {
+            let found = changed.chain(&delta.untracked).chain(&delta.unmerged);
+            let mut taken: Vec<&BString> = found.collect();
+            let listed: HashSet<&BString> = taken.iter().copied().chain(&delta.deleted).collect();
+            taken.extend(lost.iter().filter(|path| !listed.contains(path)));
+            taken
+        }
     }
 }
 
 /// Works out from the scan `delta` which paths are taken from the working
-/// tree and which entries of `before` go. With `renormalize` every tracked
+/// tree and which entries of `before` go: `lost` are staged files whose
+/// blob is not stored, taken as they are. With `renormalize` every tracked
 /// file among the named paths is taken, and nothing else is touched.
 pub(super) fn plan<'a>(
     before: &'a Index,
     delta: &'a Delta,
+    lost: &'a [BString],
     renormalize: bool,
     named: &dyn Fn(&[u8]) -> bool,
 ) -> Plan<'a> {
-    let taken = taken(before, delta, renormalize, named);
+    let taken = taken(before, delta, lost, renormalize, named);
     let deleted: &[BString] = match renormalize {
         true => &[],
         false => &delta.deleted,

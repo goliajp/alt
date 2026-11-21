@@ -702,7 +702,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
             Some(&context),
         )
         .unwrap();
-    let op_bytes = refs.oplog().get(&op).unwrap().body().unwrap();
+    let op_bytes = refs.oplog().get(&op).unwrap().unwrap().body().unwrap();
     let records = vec![
         selected_record(&task, &mut payload),
         selected_record(&manifest, &mut payload),

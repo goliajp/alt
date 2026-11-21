@@ -7,7 +7,8 @@
 //! direct CLI uses — the daemon is just another reader/writer).
 //!
 //! Concurrency: a multi-threaded accept loop. Each connection is served
-//! on its own thread, but the held `(Store, Repository)` is wrapped in one
+//! on a thread of its own, one that waits for a connection or a new one
+//! ([`Workers`]), but the held `(Store, Repository)` is wrapped in one
 //! `Mutex`, so request *execution* is serialized while connection accept and
 //! response write-back run concurrently (a slow request never blocks accepting
 //! the next connection). The in-process `Mutex` is load-bearing: `flock` does
@@ -29,6 +30,9 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(unix)]
 fn main() -> std::process::ExitCode {
+    // every request allocates and frees the same few megabytes again;
+    // what one large request needed is given back
+    alt_os::heap::keep_freed_up_to(4 << 20, 32 << 20);
     match unix::run() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
@@ -52,6 +56,7 @@ mod unix {
     use alt_cli::group_commit::GroupCommit;
     use alt_cli::machine::{self, Failure};
     use alt_cli::native::{Identity, Store, StoreSink};
+    use alt_cli::workers::Workers;
     use alt_repo::Repository;
 
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -70,17 +75,16 @@ mod unix {
             .nth(1)
             .map(PathBuf::from)
             .ok_or("usage: altd <alt-dir>")?;
+        if alt_odb::reading_past_damage() {
+            return Err("altd holds its store open for writers: unset ALT_READ_PAST_DAMAGE".into());
+        }
         let sock_path = alt_dir.join("daemon.sock");
 
         let listener = bind(&sock_path)?;
-        // Drop a small metadata file alongside the socket so clients can
-        // tell whether the daemon is still the same `altd` binary they
-        // have on disk. The next `alt` invocation reads this, compares
-        // against its own `altd`'s mtime + size, and kills+respawns us
-        // when the binary moved on (cargo install path). Best-effort —
-        // a write failure just disables the auto-reload, never the
-        // daemon itself.
-        let _ = write_meta(&alt_dir);
+        // tells clients which `altd` this is and what it declares: one
+        // whose own `altd` is another build stops this daemon and starts
+        // its own
+        let _ = alt_cli::daemon_meta::write(&alt_dir);
         // the held store serves native commands; the held repository serves
         // git-layer reads (`log`) — both opened once and refreshed per request,
         // and shared across request threads behind one Mutex
@@ -99,16 +103,20 @@ mod unix {
         let shared: Shared = Arc::new(Mutex::new((store, repo)));
         let group = Arc::new(GroupCommit::new());
 
-        let idle_ms = std::env::var("ALT_DAEMON_IDLE_MS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_IDLE_MS);
+        let idle_ms = idle_ms();
 
         // count of requests accepted but not yet fully served. Incremented in
         // this thread before the worker spawns (so an immediate idle poll can't
         // race past an in-flight request), decremented when the worker is done.
         let active = Arc::new(AtomicUsize::new(0));
-        let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
+        let served = Arc::clone(&active);
+        let mut workers = Workers::new(move |stream| {
+            alt_os::stack::cover_thread();
+            if let Err(e) = serve(&shared, &group, &sink, stream) {
+                eprintln!("altd: request error: {e}");
+            }
+            served.fetch_sub(1, Ordering::SeqCst);
+        });
 
         // serve until an idle window with no request in flight, then exit and
         // let the next client respawn us. A slow request runs on its own thread,
@@ -118,56 +126,24 @@ mod unix {
             match accept_with_timeout(&listener, idle_ms)? {
                 Some(stream) => {
                     active.fetch_add(1, Ordering::SeqCst);
-                    let shared = Arc::clone(&shared);
-                    let group = Arc::clone(&group);
-                    let sink = Arc::clone(&sink);
-                    let active = Arc::clone(&active);
-                    workers.push(std::thread::spawn(move || {
-                        if let Err(e) = serve(&shared, &group, &sink, stream) {
-                            eprintln!("altd: request error: {e}");
-                        }
-                        active.fetch_sub(1, Ordering::SeqCst);
-                    }));
-                    // reap finished workers so the handle vec stays bounded
-                    workers.retain(|h| !h.is_finished());
+                    workers.give(stream);
                 }
                 None if active.load(Ordering::SeqCst) == 0 => break,
                 None => {} // idle window elapsed but a request is still in flight
             }
         }
-        // join any worker still finishing its write-back before we tear down
-        for h in workers {
-            let _ = h.join();
-        }
+        // any thread still finishing its write-back ends before we tear down
+        workers.finish();
         let _ = std::fs::remove_file(&sock_path);
         Ok(())
     }
 
-    /// Records the running daemon's identity next to its socket: pid +
-    /// `altd` path + the binary's mtime-nanos + size. Clients compare
-    /// these against their own `altd` and kill+respawn on mismatch
-    /// (the fix for "cargo install upgraded the binary but
-    /// the old daemon still answers"). Best-effort: any io failure
-    /// disables auto-reload without affecting the daemon's lifecycle.
-    fn write_meta(alt_dir: &Path) -> Option<()> {
-        let altd = std::env::current_exe().ok()?;
-        let meta = std::fs::metadata(&altd).ok()?;
-        let mtime_nanos = meta
-            .modified()
-            .ok()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_nanos();
-        let size = meta.len();
-        let pid = std::process::id();
-        let altd_str = altd.display().to_string();
-        let content = format!("{pid}\n{altd_str}\n{mtime_nanos}\n{size}\n");
-        let path = alt_dir.join("daemon.meta");
-        // Write atomically via tmp + rename so a client can never read
-        // a torn meta during the swap.
-        let tmp = path.with_extension("meta.tmp");
-        std::fs::write(&tmp, content).ok()?;
-        std::fs::rename(&tmp, &path).ok()
+    /// How long to wait for a request before exiting.
+    fn idle_ms() -> i32 {
+        std::env::var("ALT_DAEMON_IDLE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_IDLE_MS)
     }
 
     /// Binds the listening socket, self-healing a stale socket file and bowing
@@ -217,6 +193,28 @@ mod unix {
         }
     }
 
+    /// What a request is answered when what it wrote could not be synced.
+    fn not_durable(execution: &Execution, causes: String) -> daemon::Response {
+        Failure::unknown(format!("durability: {causes}")).response(
+            execution.parsed.json,
+            execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
+        )
+    }
+
+    /// Takes in what other processes wrote before a command runs on the
+    /// store this daemon holds; for a command that only reads the files are
+    /// left as they are.
+    fn bring_up(
+        store: &mut Store,
+        repo: &mut Repository,
+        writing: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match writing {
+            true => store.settle().and_then(|()| Ok(repo.refresh()?)),
+            false => store.follow().and_then(|()| Ok(repo.follow()?)),
+        }
+    }
+
     /// Reads one request, runs it against the held store/repo, writes back.
     /// Framing I/O happens outside the lock; only `handle` (refresh + dispatch)
     /// holds it, so the serialized section is the store work, not the wire I/O.
@@ -254,19 +252,20 @@ mod unix {
         let (response, operations, ticket, barrier_ok) = {
             let mut guard = shared.lock().expect("daemon store mutex poisoned");
             let (store, repo) = &mut *guard;
-            let refreshed = store
-                .refresh()
-                .and_then(|()| repo.refresh().map_err(Into::into));
+            let refreshed = bring_up(store, repo, execution.writing);
+            // operations that were never synced and name objects which are
+            // not stored are left out by a process that opens the store
+            // for this one command: the client, when it gets no answer
+            if !execution.writing && refreshed.is_ok() && store.holds_unconfirmed()? {
+                return Ok(());
+            }
             let (mut response, operations) = match refreshed {
                 Ok(()) => execution.on_store(store, repo),
                 Err(error) => (execution.failure(error.as_ref()), Vec::new()),
             };
             let mut barrier_ok = true;
             if let Err(error) = store.odb_mut().flush_pending() {
-                response = Failure::unknown(format!("durability: {error}")).response(
-                    execution.parsed.json,
-                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
-                );
+                response = not_durable(&execution, machine::causes(&error));
                 barrier_ok = false;
             }
             let ticket = execution.writing.then(|| group.assign());
@@ -278,10 +277,7 @@ mod unix {
                 .transpose()
             {
                 Ok(_) => execution.publish(response, operations),
-                Err(error) => Failure::unknown(format!("durability: {error}")).response(
-                    execution.parsed.json,
-                    execution.id.as_ref().map(|id| machine::hex(id)).as_deref(),
-                ),
+                Err(error) => not_durable(&execution, error),
             }
         } else {
             response

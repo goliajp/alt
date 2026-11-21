@@ -41,11 +41,11 @@ alt show
 alt show HEAD~1 --json
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Show":["726576","6a736f6e"],"json":["74727565"],"rev":["484541447e31"]}},"name":"show"},"values":{}}
 alt blame f.txt HEAD -M
-{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","726576","6d6f766573"],"follow":["66616c7365"],"moves":["74727565"],"path":["662e747874"],"rev":["48454144"]}},"name":"blame"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","726576","6d6f766573"],"follow":["66616c7365"],"moves":[""],"path":["662e747874"],"rev":["48454144"]}},"name":"blame"},"values":{}}
 alt blame f.txt -C -C
-{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","636f70696573","636f70696573"],"copies":["74727565","74727565"],"follow":["66616c7365"],"moves":["66616c7365"],"path":["662e747874"]}},"name":"blame"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","636f70696573","636f70696573"],"copies":["",""],"follow":["66616c7365"],"path":["662e747874"]}},"name":"blame"},"values":{}}
 alt blame f.txt --follow
-{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","666f6c6c6f77"],"follow":["74727565"],"moves":["66616c7365"],"path":["662e747874"]}},"name":"blame"},"values":{}}
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Blame":["70617468","666f6c6c6f77"],"follow":["74727565"],"path":["662e747874"]}},"name":"blame"},"values":{}}
 alt meta show
 {"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"],"rev":["48454144"]}},"name":"show"},"values":{}},"name":"meta"},"values":{}}
 alt meta show abc --json

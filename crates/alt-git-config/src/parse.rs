@@ -5,7 +5,37 @@ use crate::{ConfigError, Entry};
 /// Parses one config file's syntax into entries, in order. No include
 /// processing here — `include.path` lines come out as plain entries.
 pub fn parse_file(data: &[u8]) -> Result<Vec<Entry>, ConfigError> {
-    Parser { data, pos: 0 }.run()
+    let located = parse_located(data).map_err(|(_, what)| ConfigError::Syntax(what))?;
+    Ok(located.into_iter().map(|(_, entry)| entry).collect())
+}
+
+/// As [`parse_file`]; an entry and an error come with the number of the
+/// line they are on.
+pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<(usize, Entry)>, (usize, &'static str)> {
+    // as git reads a file: no byte order mark, and a line may end in CR LF
+    let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
+    let mut text = Vec::with_capacity(data.len());
+    for (at, &b) in data.iter().enumerate() {
+        if b != b'\r' || data.get(at + 1) != Some(&b'\n') {
+            text.push(b);
+        }
+    }
+    let mut parser = Parser {
+        data: &text,
+        pos: 0,
+    };
+    parser.run().map_err(|error| {
+        let ConfigError::Syntax(what) = error else {
+            unreachable!("the parser reports syntax only")
+        };
+        let before = &text[..parser.pos.saturating_sub(1).min(text.len())];
+        (1 + before.iter().filter(|&&b| b == b'\n').count(), what)
+    })
+}
+
+/// What git's parser skips as blank.
+fn is_space(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
 }
 
 struct Parser<'a> {
@@ -20,9 +50,10 @@ struct SectionCtx {
 }
 
 impl<'a> Parser<'a> {
-    fn run(mut self) -> Result<Vec<Entry>, ConfigError> {
+    fn run(&mut self) -> Result<Vec<(usize, Entry)>, ConfigError> {
         let mut out = Vec::new();
         let mut ctx: Option<SectionCtx> = None;
+        let (mut line, mut counted) = (1, 0);
         loop {
             self.skip_ws_comments_and_newlines();
             let Some(byte) = self.peek() else {
@@ -31,16 +62,23 @@ impl<'a> Parser<'a> {
             if byte == b'[' {
                 ctx = Some(self.parse_section_header()?);
             } else {
-                let here = ctx
-                    .clone()
-                    .ok_or(ConfigError::Syntax("variable before any section header"))?;
+                // as in git, a variable before any section has no section
+                let here = ctx.clone().unwrap_or(SectionCtx {
+                    section: String::new(),
+                    subsection: None,
+                });
+                let newline = |b: &&u8| **b == b'\n';
+                line += self.data[counted..self.pos].iter().filter(newline).count();
+                counted = self.pos;
                 let (key, value) = self.parse_variable()?;
-                out.push(Entry {
+                let entry = Entry {
                     section: here.section,
                     subsection: here.subsection,
                     key,
                     value,
-                });
+                    origin: None,
+                };
+                out.push((line, entry));
             }
         }
     }
@@ -53,6 +91,9 @@ impl<'a> Parser<'a> {
                 .next()
                 .ok_or(ConfigError::Syntax("unterminated section header"))?
             {
+                b']' if name.is_empty() => {
+                    return Err(ConfigError::Syntax("empty section name"));
+                }
                 b']' => {
                     // possibly legacy `[section.subsection]`: lowercased
                     // wholesale, split at the first dot
@@ -91,7 +132,6 @@ impl<'a> Parser<'a> {
                             c => sub.push(c),
                         }
                     }
-                    self.skip_inline_ws();
                     if self.next() != Some(b']') {
                         return Err(ConfigError::Syntax("expected ] after subsection"));
                     }
@@ -132,10 +172,6 @@ impl<'a> Parser<'a> {
                 // valueless boolean: `[x] flag`
                 Ok((key, None))
             }
-            Some(b'#') | Some(b';') => {
-                self.skip_to_newline();
-                Ok((key, None))
-            }
             Some(b'=') => {
                 self.pos += 1;
                 let value = self.parse_value()?;
@@ -169,7 +205,7 @@ impl<'a> Parser<'a> {
                     self.skip_to_newline();
                     break;
                 }
-                b' ' | b'\t' | b'\r' if !quoted => {
+                _ if is_space(c) && !quoted => {
                     if !out.is_empty() {
                         pending.push(c);
                     }
@@ -183,10 +219,8 @@ impl<'a> Parser<'a> {
                 b'\\' => {
                     flush(&mut out, &mut pending);
                     self.pos += 1;
-                    let esc = self
-                        .next()
-                        .ok_or(ConfigError::Syntax("dangling backslash in value"))?;
-                    match esc {
+                    // the end of the file ends a line as a newline does
+                    match self.next().unwrap_or(b'\n') {
                         b'\n' => {} // line continuation
                         b'n' => out.push(b'\n'),
                         b't' => out.push(b'\t'),
@@ -234,7 +268,7 @@ impl<'a> Parser<'a> {
     fn skip_ws_comments_and_newlines(&mut self) {
         loop {
             match self.peek() {
-                Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') => self.pos += 1,
+                Some(b) if is_space(b) => self.pos += 1,
                 Some(b'#') | Some(b';') => self.skip_to_newline(),
                 _ => return,
             }
@@ -300,10 +334,58 @@ mod tests {
 
     #[test]
     fn rejects_malformed_input() {
-        assert!(parse_file(b"key = before section\n").is_err());
+        assert!(parse_file(b"[]\na = 1\n").is_err());
+        assert!(parse_file(b"[x \"y\" ]\na = 1\n").is_err());
+        assert!(parse_file(b"[x]\nflag # said\n").is_err());
+        assert!(parse_file(b"[x]\na_b = 1\n").is_err());
         assert!(parse_file(b"[unterminated\n").is_err());
         assert!(parse_file(b"[x]\na = \"open\n").is_err());
         assert!(parse_file(b"[x]\na = bad\\zescape\n").is_err());
         assert!(parse_file(b"[x]\n1leading = digit\n").is_err());
+    }
+
+    #[test]
+    fn what_git_reads_is_read() {
+        // a byte order mark, lines that end in CR LF, also behind a backslash
+        let got = entries("\u{feff}[a]\r\nflag\r\nx = 1\r\ny = a\\\r\nb\r\n");
+        let v = |i: usize| got[i].value.as_ref().map(|v| v.to_string());
+        assert_eq!(got.len(), 3);
+        assert_eq!(
+            (v(0), v(1), v(2)),
+            (None, Some("1".into()), Some("ab".into()))
+        );
+        // a variable before any section, which no lookup finds
+        let got = entries("x = 1\n[a]\ny = 2\n");
+        assert_eq!((got[0].section.as_str(), got[0].key.as_str()), ("", "x"));
+        assert_eq!(got[1].section, "a");
+        // a backslash that ends the file, and a tab before a subsection
+        assert_eq!(
+            entries("[a]\nx = 1\\")[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .to_string(),
+            "1"
+        );
+        let got = entries("[a]\nx = \u{b}1\n[b\t\"c\"] y = 2\n");
+        assert_eq!(got[0].value.as_ref().unwrap().to_string(), "\u{b}1");
+        assert_eq!(got[1].subsection.as_ref().unwrap().to_string(), "c");
+    }
+
+    #[test]
+    fn an_error_names_the_line_git_names() {
+        for (text, line) in [
+            ("[core\n", 1),
+            ("[a]\nx = 1\n[b]\ny = \"open\n", 4),
+            ("[a]\n\n1x = 2\n", 3),
+            ("[a]\nflag ; said\n", 2),
+            ("[a]\r\nx = 1\r\ny = bad\\z\r\n", 3),
+        ] {
+            assert_eq!(
+                parse_located(text.as_bytes()).unwrap_err().0,
+                line,
+                "{text:?}"
+            );
+        }
     }
 }

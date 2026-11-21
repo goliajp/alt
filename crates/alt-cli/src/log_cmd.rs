@@ -104,10 +104,12 @@ impl LogArgs {
     }
 }
 
+/// `head` is the ref that stands for `HEAD` in this workspace.
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     args: LogArgs,
+    head: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let start = repo
         .rev_parse(&args.rev)?
@@ -118,19 +120,20 @@ pub fn run(
         return run_json(out, repo, start, limit);
     }
 
-    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
+    let notes = crate::meta::Notes::of(repo)?;
     let mut first = true;
     let mut converted = Vec::new();
-    // one for the whole log: it learns which ids share a prefix as it goes
-    let style = crate::patch::style(repo)?;
-    for item in repo.rev_walk(start)?.take(limit) {
-        let (oid, _) = item?;
-        let obj = repo.read_object(&oid)?.expect("walked oid exists");
-        let payload = reencode(&obj.data, &mut converted);
+    // one for the whole log, made by the first patch: a log without
+    // patches reads neither the config nor the size of the store
+    let mut style = None;
+    let mut walk = repo.rev_walk(start)?;
+    for item in std::iter::from_fn(|| walk.next_with_data()).take(limit) {
+        let (oid, _, data) = item?;
+        let payload = reencode(&data, &mut converted);
         match args.pretty.as_str() {
             // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
-            "oneline" => match note_message(repo, notes, oid)? {
+            "oneline" => match crate::meta::Notes::message(&notes, repo, oid)? {
                 Some(m) => write_oneline(out, &oid, format!("\n\n{m}").as_bytes())?,
                 None => write_oneline(out, &oid, &payload)?,
             },
@@ -141,33 +144,35 @@ pub fn run(
             }
         }
         if args.patch {
-            // as in git, a blank line sets a patch apart from every header
-            // but the one-line one, and a combined diff from any header
-            use crate::patch::Section;
-            let mut patch = Vec::new();
-            let shown = crate::patch::write_commit(&mut patch, repo, &oid, args.combined, &style)?;
-            if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
-                out.write_all(b"\n")?;
-            }
-            out.write_all(&patch)?;
+            write_patch(out, repo, &args, &oid, head, &mut style)?;
         }
     }
     Ok(())
 }
 
-/// The message a commit's metadata note puts in place of its own, if any.
-fn note_message(
-    repo: &Repository,
-    notes: Option<ObjectId>,
-    oid: ObjectId,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let Some(notes) = notes else {
-        return Ok(None);
+/// One commit's patch, after its header; makes `style` if no patch has yet.
+fn write_patch<'r>(
+    out: &mut impl Write,
+    repo: &'r Repository,
+    args: &LogArgs,
+    oid: &ObjectId,
+    head: &str,
+    style: &mut Option<crate::file_header::Style<'r>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // as in git, a blank line sets a patch apart from every header
+    // but the one-line one, and a combined diff from any header
+    use crate::patch::Section;
+    let mut patch = Vec::new();
+    let style = match &*style {
+        Some(style) => style,
+        None => style.insert(crate::patch::style(repo, head)?),
     };
-    let read = |id: ObjectId| -> crate::meta::ReadResult {
-        Ok(repo.read_object(&id)?.map(|o| (o.kind, o.data.to_vec())))
-    };
-    Ok(crate::meta::find(&read, repo.algo(), notes, oid)?.and_then(|m| m.message))
+    let shown = crate::patch::write_commit(&mut patch, repo, oid, args.combined, style)?;
+    if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
+        out.write_all(b"\n")?;
+    }
+    out.write_all(&patch)?;
+    Ok(())
 }
 
 /// `log --json`: `{schema_version, commits:[{oid, tree, parents, author,
@@ -181,12 +186,10 @@ fn run_json(
     limit: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::json::Json;
-    let notes = repo.resolve_ref(crate::meta::NOTES_REF)?;
+    let notes = crate::meta::Notes::of(repo)?;
     let mut commits = Vec::new();
     for item in repo.rev_walk(start)?.take(limit) {
-        let (oid, _) = item?;
-        let obj = repo.read_object(&oid)?.expect("walked oid exists");
-        let commit = alt_git_codec::Commit::parse(&obj.data)?;
+        let (oid, commit) = item?;
         let opt = |v: Option<&alt_bytes::BStr>| match v {
             Some(s) => Json::str(s),
             None => Json::Null,
@@ -207,7 +210,7 @@ fn run_json(
             ("message", Json::str(commit.message())),
             (
                 "note_message",
-                note_message(repo, notes, oid)?.map_or(Json::Null, Json::str),
+                crate::meta::Notes::message(&notes, repo, oid)?.map_or(Json::Null, Json::str),
             ),
         ]));
     }

@@ -160,7 +160,7 @@ fn usage_names_the_program_as_it_was_called() {
 /// What each level recorded, as `id=value,value` in order.
 fn recorded(line: &str) -> Vec<String> {
     let words = line.split(' ').map(String::from);
-    let matches = alt_args::parse(Cli::COMMAND, words).unwrap_or_else(|e| panic!("{e}"));
+    let matches = alt_args::parse(Cli::command(), words).unwrap_or_else(|e| panic!("{e}"));
     let mut level = Some(&matches);
     let mut lines = Vec::new();
     while let Some(matches) = level {

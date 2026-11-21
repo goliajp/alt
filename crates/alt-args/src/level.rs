@@ -2,8 +2,9 @@
 
 use crate::error::{Error, ErrorKind};
 use crate::matches::Matched;
-use crate::scope::{Letter, Scope, split_long};
-use crate::spec::{Command, Kind};
+use crate::scope::Scope;
+use crate::settings::Kind;
+use crate::spec::Command;
 use crate::suggest::similar;
 use crate::{help, usage, validate};
 
@@ -35,7 +36,7 @@ pub(crate) enum Step {
     /// the word is `help`; the words after it name a command
     Help,
     /// the word names a subcommand; the words after it are its own
-    Subcommand(&'static Command),
+    Subcommand(Command),
 }
 
 impl<'a> Level<'a> {
@@ -58,7 +59,7 @@ impl<'a> Level<'a> {
                 if word == "help" && command.help_subcommand {
                     return Ok(Step::Help);
                 }
-                if let Some(command) = command.subcommands.iter().find(|c| c.name == word) {
+                if let Some(command) = command.subcommand(word) {
                     return Ok(Step::Subcommand(command));
                 }
             }
@@ -102,29 +103,30 @@ impl<'a> Level<'a> {
     }
 
     /// Records one appearance of a slot with its values.
-    fn record(&mut self, at: usize, values: Vec<String>) -> Result<(), Error> {
+    pub(crate) fn record(&mut self, at: usize, values: Vec<String>) -> Result<(), Error> {
         let slot = &self.scope.slots[at];
-        let arg = slot.arg;
+        let arg = &slot.arg;
         if values.is_empty() {
             return Err(Error::missing_value(arg));
         }
         let seen = self.entries.iter().any(|entry| entry.id == arg.id);
-        if seen && !matches!(arg.kind, Kind::Multiple | Kind::Count) {
+        if seen && !matches!(arg.kind, Kind::Multiple | Kind::Count | Kind::Attached) {
             return Err(Error::repeated(self.scope, arg));
         }
         self.entry(arg.id);
-        for group in [slot.owner, arg.group] {
+        for group in [slot.owner, arg.group()] {
             if !group.is_empty() {
                 self.entry(group).values.push(arg.id.to_owned());
             }
         }
         for value in values {
-            if !arg.possible.is_empty() && !arg.possible.contains(&value.as_str()) {
-                let close = similar(&value, arg.possible.iter().copied()).pop();
+            if let Err(reason) = arg.check(&value) {
+                let possible = arg.possible();
+                if possible.is_empty() || possible.contains(&value) {
+                    return Err(Error::invalid_value(&value, arg, &reason));
+                }
+                let close = similar(&value, possible.iter()).pop();
                 return Err(Error::not_possible(&value, arg, close));
-            }
-            if let Some(Err(reason)) = arg.check.map(|check| check(&value)) {
-                return Err(Error::invalid_value(&value, arg, &reason));
             }
             self.entry(arg.id).values.push(value);
         }
@@ -154,7 +156,7 @@ impl<'a> Level<'a> {
     }
 
     /// The help or version text, which ends parsing like an error.
-    fn builtin(&self, kind: Kind) -> Error {
+    pub(crate) fn builtin(&self, kind: Kind) -> Error {
         let command = self.scope.command;
         match kind {
             Kind::Version => Error::new(
@@ -165,122 +167,12 @@ impl<'a> Level<'a> {
         }
     }
 
-    fn pass_as_value(&self, word: &str) -> Option<String> {
-        (!self.trailing && self.scope.has_positionals())
-            .then(|| format!("to pass '{word}' as a value, use '-- {word}'"))
-    }
-
-    /// `--name` or `--name=value`; false when the word is a value instead.
-    fn long(&mut self, word: &str, rest: &[String]) -> Result<bool, Error> {
-        let (name, attached) = split_long(word);
-        let Some(at) = self.scope.long(name) else {
-            return match self.takes_hyphen_values() {
-                true => Ok(false),
-                false => Err(self.unknown_long(name, rest)),
-            };
-        };
-        let arg = self.scope.slots[at].arg;
-        if arg.is_builtin() {
-            self.settle()?;
-            return Err(self.builtin(arg.kind));
-        }
-        match (arg.takes_value(), attached) {
-            (false, Some(value)) => {
-                let mut used = self.given();
-                used.retain(|id| self.scope.find(id).is_some_and(|slot| !slot.arg.required));
-                used.push(arg.id);
-                let usage = usage::narrowed(self.scope, &usage::required(self.scope), &used);
-                return Err(Error::unexpected_value(value, arg, usage));
-            }
-            (false, None) => {
-                self.settle()?;
-                self.record(at, vec!["true".to_owned()])?;
-            }
-            (true, Some(value)) => {
-                self.settle()?;
-                self.record(at, vec![value.to_owned()])?;
-            }
-            (true, None) if !arg.missing.is_empty() => {
-                self.settle()?;
-                self.record(at, vec![arg.missing.to_owned()])?;
-            }
-            (true, None) => {
-                self.settle()?;
-                self.pending = Some((at, Vec::new()));
-                self.state = State::Value;
-            }
-        }
-        Ok(true)
-    }
-
-    fn unknown_long(&mut self, name: &str, rest: &[String]) -> Error {
-        let _ = self.settle();
-        let word = format!("--{name}");
-        let scope = self.scope;
-        let mut used = self.given();
-        let mut tips = Vec::new();
-        if let Some(close) = similar(name, scope.longs()).pop() {
-            tips.push(format!("a similar argument exists: '--{close}'"));
-            if let Some(at) = scope.long(close) {
-                used.push(scope.slots[at].arg.id);
-            }
-        } else if let Some((command, close)) = in_subcommand(scope, name, rest) {
-            tips.push(format!("'{command} --{close}' exists"));
-        } else {
-            tips.extend(self.pass_as_value(&word));
-        }
-        let usage = usage::narrowed(scope, &usage::required(scope), &used);
-        Error::unknown_argument(&word, &tips, usage)
-    }
-
-    /// `-abc`, where a letter that takes a value ends the cluster.
-    fn short(&mut self, word: &str) -> Result<bool, Error> {
-        for (offset, letter) in self.scope.cluster(word) {
-            match letter {
-                Letter::Unknown(letter) => {
-                    if offset == 0 && self.takes_hyphen_values() {
-                        return Ok(false);
-                    }
-                    let _ = self.settle();
-                    let word = format!("-{letter}");
-                    let tips: Vec<String> = self.pass_as_value(&word).into_iter().collect();
-                    return Err(Error::unknown_argument(
-                        &word,
-                        &tips,
-                        usage::full(self.scope),
-                    ));
-                }
-                Letter::Flag(at) => {
-                    self.settle()?;
-                    let arg = self.scope.slots[at].arg;
-                    if arg.is_builtin() {
-                        return Err(self.builtin(arg.kind));
-                    }
-                    self.record(at, vec!["true".to_owned()])?;
-                }
-                Letter::Valued(at, attached) => {
-                    self.settle()?;
-                    let missing = self.scope.slots[at].arg.missing;
-                    match attached {
-                        Some(value) => self.record(at, vec![value.to_owned()])?,
-                        None if !missing.is_empty() => self.record(at, vec![missing.to_owned()])?,
-                        None => {
-                            self.pending = Some((at, Vec::new()));
-                            self.state = State::Value;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(true)
-    }
-
     fn positional(&mut self, word: String) -> Result<(), Error> {
         let Some(at) = self.next_positional() else {
             let _ = self.settle();
             return Err(self.unexpected(&word));
         };
-        let arg = self.scope.slots[at].arg;
+        let arg = &self.scope.slots[at].arg;
         self.trailing |= arg.trailing;
         match &mut self.pending {
             Some((open, values)) if *open == at && arg.kind == Kind::Multiple => values.push(word),
@@ -300,7 +192,7 @@ impl<'a> Level<'a> {
 
     /// A word no positional is left for.
     fn unexpected(&self, word: &str) -> Error {
-        if !self.scope.subcommand_names().is_empty() {
+        if self.scope.has_subcommands() {
             let close = similar(word, self.scope.listed_subcommand_names());
             if !close.is_empty() || !self.scope.has_positionals() {
                 return Error::unknown_subcommand(self.scope, word, &close);
@@ -308,26 +200,4 @@ impl<'a> Level<'a> {
         }
         Error::unknown_argument(word, &[], usage::full(self.scope))
     }
-}
-
-/// A subcommand named later on the line that has a long option close to
-/// `name`.
-fn in_subcommand(
-    scope: &Scope,
-    name: &str,
-    rest: &[String],
-) -> Option<(&'static str, &'static str)> {
-    let mut best: Option<(usize, &'static str, &'static str)> = None;
-    for command in scope.listed_subcommands() {
-        let Some(at) = rest.iter().position(|word| word == command.name) else {
-            continue;
-        };
-        let Some(close) = similar(name, scope.child(command).longs()).pop() else {
-            continue;
-        };
-        if best.is_none_or(|(other, _, _)| at < other) {
-            best = Some((at, command.name, close));
-        }
-    }
-    best.map(|(_, command, close)| (command, close))
 }

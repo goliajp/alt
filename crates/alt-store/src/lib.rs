@@ -21,25 +21,50 @@
 
 mod blob;
 mod blobmap;
+mod check;
 /// Lineage delta codec (zstd ref-prefix / patch-from). Public as a
 /// primitive — reused by the store's encode/decode and benched directly.
 pub mod delta;
+mod durable;
+mod fresh;
+pub mod held;
 mod idx;
+mod index;
+mod indexing;
+mod node;
 mod pack;
+mod packs;
+mod passed;
+mod past;
+pub mod reclog;
+mod run_write;
+pub mod runs;
+mod settle;
+mod tail;
 
 pub use blob::{BlobOptions, BlobSink, BlobStore, StoreCheckpoint};
+pub use check::StoreChecked;
+pub use durable::ChunkSink;
+pub use pack::with_shared_lock;
+pub use packs::Known;
+pub use passed::Passed;
+pub use past::{PassedDamage, passed_damage, reading_past_damage};
+pub use tail::{Basis, Tail};
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt;
-use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use alt_hash::IdMap;
 use alt_os::map::Mmap;
 
+use index::{ChunkIndex, Location};
 use pack::{ENC_DELTA, ENC_RAW, ENC_ZSTD, REC_HEADER_LEN, RecordHeader};
+use packs::{Active, idx_path, list_pack_seqs, pack_path};
 
 /// Write-side cap on lineage-delta chain length. Later re-encoding of a
 /// base can stretch an existing chain past this — the cap is a cost
@@ -53,10 +78,15 @@ const DELTA_CACHE_BUDGET: usize = 64 << 20;
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
+    /// an index run could not be written; the logs it would index are whole
+    IndexWrite(std::io::Error),
     Format(&'static str),
     NotFound(ChunkId),
     BlobNotFound(BlobId),
-    Corrupt { id: ChunkId, reason: &'static str },
+    Corrupt {
+        id: ChunkId,
+        reason: &'static str,
+    },
     TooLarge(usize),
 }
 
@@ -64,6 +94,7 @@ impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(_) => f.write_str("io"),
+            Self::IndexWrite(_) => f.write_str("index run not written"),
             Self::Format(v) => write!(f, "store format: {v}"),
             Self::NotFound(v) => write!(f, "chunk {v} not found"),
             Self::BlobNotFound(v) => write!(f, "blob {v} not found"),
@@ -76,7 +107,7 @@ impl std::fmt::Display for StoreError {
 impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(e) => Some(e),
+            Self::Io(e) | Self::IndexWrite(e) => Some(e),
             _ => None,
         }
     }
@@ -229,30 +260,9 @@ impl Verify {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Location {
-    seq: u32,
-    offset: u64,
-}
-
-struct Sealed {
-    map: Mmap,
-}
-
-struct Active {
-    seq: u32,
-    /// Cursor sits at `len`; appends only ever move it forward.
-    write: File,
-    /// Separate handle for positioned reads so the cursor stays the writer's.
-    read: File,
-    len: u64,
-    /// Records appended to this pack, in file order — becomes the idx at seal.
-    entries: Vec<(ChunkId, u64)>,
-}
-
 /// Bounded, insertion-order cache of resolved delta bases.
 struct DeltaCache {
-    map: HashMap<ChunkId, Arc<Vec<u8>>>,
+    map: IdMap<ChunkId, Arc<Vec<u8>>>,
     order: VecDeque<ChunkId>,
     bytes: usize,
 }
@@ -260,7 +270,7 @@ struct DeltaCache {
 impl DeltaCache {
     fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            map: IdMap::default(),
             order: VecDeque::new(),
             bytes: 0,
         }
@@ -304,29 +314,45 @@ pub struct ChunkCheckpoint {
     pack_len: u64,
 }
 
+impl ChunkCheckpoint {
+    /// The active pack's sequence number and length at the checkpoint.
+    pub fn pack(&self) -> (u32, u64) {
+        (self.pack_seq, self.pack_len)
+    }
+
+    fn location(&self) -> Location {
+        Location {
+            seq: self.pack_seq,
+            offset: self.pack_len,
+        }
+    }
+}
+
 /// Content-addressed chunk storage over a directory of altpack files.
 pub struct ChunkStore {
     dir: PathBuf,
     opts: Options,
-    sealed: HashMap<u32, Sealed>,
+    /// sealed packs by sequence number, mapped on first read
+    sealed: BTreeMap<u32, OnceLock<Mmap>>,
     active: Active,
-    index: HashMap<ChunkId, Location>,
+    index: ChunkIndex,
+    /// whether this handle appended anything a drop should still fsync
+    unsynced: bool,
     counters: Counters,
     cache: Mutex<DeltaCache>,
+    /// see [`fresh`]: the lock opens run under, and this store reloaded
+    open_lock: Option<PathBuf>,
+    newer: OnceLock<Box<ChunkStore>>,
+    /// whether the index keeps the locations it finds (a long-lived handle)
+    keep: bool,
+    /// what a pack that does not read to its end means
+    tail: Tail,
 }
 
 /// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
 /// fsyncs to open the concurrency race window for investigation.
 pub fn relaxed_durability() -> bool {
     std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
-}
-
-fn pack_path(dir: &Path, seq: u32) -> PathBuf {
-    dir.join(format!("pack-{seq:08}.altpack"))
-}
-
-fn idx_path(dir: &Path, seq: u32) -> PathBuf {
-    dir.join(format!("pack-{seq:08}.altidx"))
 }
 
 /// Total on-disk bytes of the given pack files.
@@ -338,198 +364,13 @@ fn pack_bytes(dir: &Path, seqs: &[u32]) -> Result<u64, StoreError> {
     Ok(total)
 }
 
-/// An off-write-path fsync handle for the chunk store's active pack (see
-/// [`ChunkStore::sink`]). Holds only the pack directory; it re-opens the
-/// highest-seq (active) pack on each `fsync`, so a roll between calls is handled
-/// by construction.
-pub struct ChunkSink {
-    dir: PathBuf,
-}
-
-impl ChunkSink {
-    /// Fsyncs the active pack. A read+write handle (we only fsync, never write)
-    /// is opened fresh so this needs no shared state with the live `ChunkStore`.
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        if let Some(seq) = list_pack_seqs(&self.dir)?.into_iter().max() {
-            let f = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(pack_path(&self.dir, seq))?;
-            f.sync_all()?;
-        }
-        Ok(())
-    }
-}
-
-fn list_pack_seqs(dir: &Path) -> Result<Vec<u32>, StoreError> {
-    let mut seqs = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let name = entry?.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if let Some(seq) = name
-            .strip_prefix("pack-")
-            .and_then(|s| s.strip_suffix(".altpack"))
-            .and_then(|s| s.parse::<u32>().ok())
-        {
-            seqs.push(seq);
-        }
-    }
-    seqs.sort_unstable();
-    Ok(seqs)
-}
-
-/// Opens (or creates) the active pack: validates the header, scans for the
-/// valid record prefix, and truncates any torn tail so the writer starts at
-/// a clean offset.
-fn open_active(path: &Path, create: bool) -> Result<Active, StoreError> {
-    if create {
-        // create-new can lose a race to another process bringing the same
-        // fresh store up; if it already exists, fall through and open it.
-        match OpenOptions::new().create_new(true).write(true).open(path) {
-            Ok(mut write) => {
-                write.write_all(&pack::file_header())?;
-                write.sync_all()?;
-                let read = File::open(path)?;
-                return Ok(Active {
-                    seq: 0, // caller fills in
-                    write,
-                    read,
-                    len: pack::HEADER_LEN as u64,
-                    entries: Vec::new(),
-                });
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    let read = File::open(path)?;
-    let size = read.metadata()?.len();
-    let (recs, valid_len) = if size == 0 {
-        (Vec::new(), 0)
-    } else {
-        let map = unsafe { Mmap::map(&read)? };
-        if (size as usize) < pack::HEADER_LEN {
-            // a crash between create and the header fsync can leave a short
-            // file; anything that is not a header prefix is foreign
-            if pack::file_header().starts_with(&map[..]) {
-                (Vec::new(), 0)
-            } else {
-                return Err(StoreError::Format("bad altpack header"));
-            }
-        } else {
-            pack::scan(&map)?
-        }
-    };
-
-    let mut write = OpenOptions::new().write(true).open(path)?;
-    if valid_len == 0 {
-        write.set_len(0)?;
-        write.write_all(&pack::file_header())?;
-        write.sync_all()?;
-        return Ok(Active {
-            seq: 0,
-            write,
-            read,
-            len: pack::HEADER_LEN as u64,
-            entries: Vec::new(),
-        });
-    }
-    if valid_len < size {
-        write.set_len(valid_len)?;
-        write.sync_all()?;
-    }
-    write.seek(SeekFrom::Start(valid_len))?;
-    let entries = recs.iter().map(|(hdr, off)| (hdr.id, *off)).collect();
-    Ok(Active {
-        seq: 0,
-        write,
-        read,
-        len: valid_len,
-        entries,
-    })
-}
-
-/// The in-memory pack state a [`ChunkStore`] holds: sealed packs (mmapped),
-/// the active pack (open for append), and the id → location index.
-type PackState = (HashMap<u32, Sealed>, Active, HashMap<ChunkId, Location>);
-
-/// Loads the on-disk pack set into the in-memory state a [`ChunkStore`] needs:
-/// every sealed pack mmapped + indexed, and the active pack opened for append.
-/// Factored out of the constructor so `sync_from_disk` can reload in place
-/// without going through `ChunkStore` (which has a `Drop`, so its fields can't
-/// be moved out).
-fn load(dir: &Path) -> Result<PackState, StoreError> {
-    std::fs::create_dir_all(dir)?;
-    let seqs = list_pack_seqs(dir)?;
-    let mut sealed = HashMap::new();
-    let mut index = HashMap::new();
-
-    let (&active_seq, sealed_seqs) = match seqs.split_last() {
-        Some((last, rest)) => (last, rest),
-        None => {
-            let mut active = open_active(&pack_path(dir, 1), true)?;
-            active.seq = 1;
-            pack::fsync_dir(dir)?;
-            return Ok((sealed, active, index));
-        }
-    };
-
-    for &seq in sealed_seqs {
-        let file = File::open(pack_path(dir, seq))?;
-        let map = unsafe { Mmap::map(&file)? };
-        pack::check_file_header(&map)?;
-        let entries = match idx::read(&idx_path(dir, seq)) {
-            Ok(entries) => entries,
-            Err(_) => {
-                // idx is a cache: rebuild from the pack and repair it
-                let (recs, valid_len) = pack::scan(&map)?;
-                if valid_len != map.len() as u64 {
-                    return Err(StoreError::Format("sealed pack truncated"));
-                }
-                let entries: Vec<_> = recs.iter().map(|(hdr, off)| (hdr.id, *off)).collect();
-                idx::write(&idx_path(dir, seq), &entries)?;
-                pack::fsync_dir(dir)?;
-                entries
-            }
-        };
-        for (id, offset) in entries {
-            index.insert(id, Location { seq, offset });
-        }
-        sealed.insert(seq, Sealed { map });
-    }
-
-    let mut active = open_active(&pack_path(dir, active_seq), false)?;
-    active.seq = active_seq;
-    for (id, offset) in &active.entries {
-        index.insert(
-            *id,
-            Location {
-                seq: active_seq,
-                offset: *offset,
-            },
-        );
-    }
-    Ok((sealed, active, index))
-}
-
 impl ChunkStore {
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
         Self::open_with(dir, Options::default())
     }
 
     pub fn open_with(dir: impl Into<PathBuf>, opts: Options) -> Result<Self, StoreError> {
-        let dir = dir.into();
-        let (sealed, active, index) = load(&dir)?;
-        Ok(Self {
-            dir,
-            opts,
-            sealed,
-            active,
-            index,
-            counters: Counters::default(),
-            cache: Mutex::new(DeltaCache::new()),
-        })
+        Self::open_known(dir.into(), opts, None, Tail::default())
     }
 
     /// Reconciles in-memory state with the packs on disk (another process may
@@ -539,14 +380,29 @@ impl ChunkStore {
     /// write. Counters and the delta cache (keyed by stable ids) survive a
     /// reload.
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        self.newer.take();
+        self.index.remove_stale()?;
         if !self.disk_changed()? {
             return Ok(());
         }
-        let (sealed, active, index) = load(&self.dir)?;
-        self.sealed = sealed;
-        self.active = active;
-        self.index = index;
-        Ok(())
+        self.reload()
+    }
+
+    /// The mapped bytes of sealed pack `seq`.
+    fn sealed_pack(&self, seq: u32) -> Result<&[u8], StoreError> {
+        let cell = self
+            .sealed
+            .get(&seq)
+            .ok_or(StoreError::Format("unknown pack"))?;
+        if let Some(map) = cell.get() {
+            return Ok(map);
+        }
+        let map = packs::map_sealed(&self.dir, seq)?;
+        Ok(cell.get_or_init(|| map))
+    }
+
+    fn locate(&self, id: ChunkId) -> Result<Location, StoreError> {
+        self.index.get(id)?.ok_or(StoreError::NotFound(id))
     }
 
     /// Whether the on-disk pack set or the active pack's length differs from
@@ -569,7 +425,7 @@ impl ChunkStore {
         let id = ChunkId::of(data);
         self.counters.puts += 1;
         self.counters.bytes_in += data.len() as u64;
-        if self.index.contains_key(&id) {
+        if self.stored(id)? {
             self.counters.dedup_hits += 1;
             return Ok(id);
         }
@@ -604,10 +460,8 @@ impl ChunkStore {
         if id == base {
             return Ok(false);
         }
-        let id_loc = *self.index.get(&id).ok_or(StoreError::NotFound(id))?;
-        if !self.index.contains_key(&base) {
-            return Err(StoreError::NotFound(base));
-        }
+        let id_loc = self.locate(id)?;
+        self.locate(base)?;
         let current = self.read_header(id, id_loc)?;
         if current.encoding == ENC_DELTA {
             return Ok(false); // one re-encoding per chunk; also breaks cycles
@@ -620,7 +474,7 @@ impl ChunkStore {
             if node == id {
                 return Ok(false); // would close a loop through id
             }
-            let loc = *self.index.get(&node).ok_or(StoreError::NotFound(node))?;
+            let loc = self.locate(node)?;
             let header = self.read_header(node, loc)?;
             if header.encoding != ENC_DELTA {
                 break;
@@ -658,23 +512,22 @@ impl ChunkStore {
     /// Appends one record and points the index at it (a re-encode
     /// supersedes the previous location).
     fn append_record(&mut self, header: &RecordHeader, payload: &[u8]) -> Result<(), StoreError> {
+        // a run left behind by a pack that was cut back must be gone before
+        // the pack regrows under it
+        self.index.remove_stale()?;
         let offset = self.active.len;
         if let Err(e) = self.append(&header.encode(), payload) {
-            // chop any torn bytes so the next append starts at a clean offset
-            self.active.write.set_len(self.active.len)?;
-            self.active.write.seek(SeekFrom::Start(self.active.len))?;
+            self.cut_torn()?;
             return Err(e.into());
         }
+        self.unsynced = true;
         self.active.len += (REC_HEADER_LEN + payload.len()) as u64;
         self.counters.bytes_written += (REC_HEADER_LEN + payload.len()) as u64;
-        self.active.entries.push((header.id, offset));
-        self.index.insert(
-            header.id,
-            Location {
-                seq: self.active.seq,
-                offset,
-            },
-        );
+        let loc = Location {
+            seq: self.active.seq,
+            offset,
+        };
+        self.index.insert(header.id, loc, self.active.len);
         if self.active.len >= self.opts.seal_threshold {
             self.seal_and_roll()?;
         }
@@ -697,12 +550,9 @@ impl ChunkStore {
             )?;
             return Ok(ChunkId(buf));
         }
-        let sealed = self
-            .sealed
-            .get(&loc.seq)
-            .ok_or(StoreError::Format("unknown pack"))?;
+        let sealed = self.sealed_pack(loc.seq)?;
         let at = loc.offset as usize + REC_HEADER_LEN;
-        let buf = sealed.map.get(at..at + 32).ok_or(StoreError::Corrupt {
+        let buf = sealed.get(at..at + 32).ok_or(StoreError::Corrupt {
             id,
             reason: "record out of bounds",
         })?;
@@ -712,17 +562,14 @@ impl ChunkStore {
     /// Fsyncs the active pack, writes its idx, and starts a fresh pack.
     fn seal_and_roll(&mut self) -> Result<(), StoreError> {
         self.active.write.sync_all()?;
-        idx::write(&idx_path(&self.dir, self.active.seq), &self.active.entries)?;
+        let entries = self.index.pack_entries(self.active.seq);
+        idx::write(&idx_path(&self.dir, self.active.seq), &entries)?;
         pack::fsync_dir(&self.dir)?;
-
-        let map = unsafe { Mmap::map(&self.active.read)? };
-        self.sealed.insert(self.active.seq, Sealed { map });
+        self.sealed.insert(self.active.seq, OnceLock::new());
 
         let seq = self.active.seq + 1;
-        let mut active = open_active(&pack_path(&self.dir, seq), true)?;
-        active.seq = seq;
+        self.active = packs::create_active(&self.dir, seq, &self.tail)?;
         pack::fsync_dir(&self.dir)?;
-        self.active = active;
         Ok(())
     }
 
@@ -747,8 +594,7 @@ impl ChunkStore {
 
         // live records in ascending (seq, offset) — the bases-before-deltas
         // order the writer kept, so the compacted pack reads cache-friendly
-        let mut live: Vec<(ChunkId, Location)> =
-            self.index.iter().map(|(&id, &loc)| (id, loc)).collect();
+        let mut live: Vec<(ChunkId, Location)> = self.index.all().into_iter().collect();
         live.sort_unstable_by_key(|(_, loc)| (loc.seq, loc.offset));
 
         // write the compacted pack to a temp file, then rename it into place
@@ -774,35 +620,24 @@ impl ChunkStore {
 
         // a fresh empty active above the compacted pack
         let active_seq = comp_seq + 1;
-        let mut active = open_active(&pack_path(&self.dir, active_seq), true)?;
-        active.seq = active_seq;
+        let active = packs::create_active(&self.dir, active_seq, &self.tail)?;
         pack::fsync_dir(&self.dir)?;
 
-        // compacted pack + active are durable: now drop the old packs
+        // compacted pack + active are durable: now drop the index runs that
+        // point into the old packs, then the old packs
+        self.index.clear()?;
         for &seq in &old_seqs {
             let _ = std::fs::remove_file(pack_path(&self.dir, seq));
             let _ = std::fs::remove_file(idx_path(&self.dir, seq));
         }
         pack::fsync_dir(&self.dir)?;
 
-        // rebuild in-memory state. Ids are stable, so the delta cache (keyed
-        // by id) stays valid across the relocation.
-        let file = File::open(&final_path)?;
-        let map = unsafe { Mmap::map(&file)? };
-        self.sealed = HashMap::from([(comp_seq, Sealed { map })]);
-        self.index = entries
-            .iter()
-            .map(|(id, off)| {
-                (
-                    *id,
-                    Location {
-                        seq: comp_seq,
-                        offset: *off,
-                    },
-                )
-            })
-            .collect();
-        self.active = active;
+        // reload from disk: the compacted pack is now the first one, so the
+        // index starts over from its records. Ids are stable, so the delta
+        // cache (keyed by id) stays valid across the relocation.
+        drop(active);
+        self.reload()?;
+        self.index_tail()?;
         self.counters.bytes_superseded = 0;
 
         let after_seqs = list_pack_seqs(&self.dir)?;
@@ -826,12 +661,13 @@ impl ChunkStore {
     /// boundary (export → `git fsck` + the round-trip fidelity matrix), a
     /// different trust context than a daily read. Use [`verify_chunk`] /
     /// `alt fsck` to scrub.
-    pub fn for_each_decoded(&self, mut f: impl FnMut(ChunkId, &[u8])) -> Result<(), StoreError> {
+    fn each_decoded_here(&self, mut f: impl FnMut(ChunkId, &[u8])) -> Result<(), StoreError> {
         // chain forest: full records are roots, each delta hangs off the
         // base it names
-        let mut deps: HashMap<ChunkId, Vec<ChunkId>> = HashMap::with_capacity(self.index.len());
+        let index = self.index.all();
+        let mut deps: HashMap<ChunkId, Vec<ChunkId>> = HashMap::with_capacity(index.len());
         let mut roots: Vec<ChunkId> = Vec::new();
-        for (&id, &loc) in &self.index {
+        for (&id, &loc) in &index {
             let header = self.read_header(id, loc)?;
             match header.encoding {
                 ENC_DELTA => deps
@@ -856,7 +692,7 @@ impl ChunkStore {
                 stack.push((child, Some(Rc::clone(&bytes))));
             }
         }
-        if emitted != self.index.len() {
+        if emitted != index.len() {
             // a delta whose base is absent — only on-disk corruption
             return Err(StoreError::Format("bulk materialize missed chunks"));
         }
@@ -867,7 +703,7 @@ impl ChunkStore {
     /// zero-copy from the sealed mmap (the bulk path's hot read). `base` is
     /// `Some` for a delta record, `None` for a full one.
     fn decode_no_verify(&self, id: ChunkId, base: Option<&[u8]>) -> Result<Vec<u8>, StoreError> {
-        let loc = *self.index.get(&id).ok_or(StoreError::NotFound(id))?;
+        let loc = self.locate(id)?;
         let header = self.read_header(id, loc)?;
         // payload: borrowed from the sealed mmap, owned only for the active
         // pack (a handful of records after a compaction)
@@ -882,10 +718,9 @@ impl ChunkStore {
             owned = buf;
             &owned
         } else {
-            let sealed = &self.sealed[&loc.seq];
+            let sealed = self.sealed_pack(loc.seq)?;
             let at = loc.offset as usize + REC_HEADER_LEN;
             sealed
-                .map
                 .get(at..at + header.stored_len as usize)
                 .ok_or(StoreError::Corrupt {
                     id,
@@ -919,8 +754,8 @@ impl ChunkStore {
     /// mmap for the common full-record case (the bulk blob-assembly read).
     /// Multi-chunk blob data and manifest nodes are full records, so they
     /// take the fast path; a delta falls back to the general chain resolve.
-    pub(crate) fn decode_chunk_unverified(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
-        let loc = *self.index.get(&id).ok_or(StoreError::NotFound(id))?;
+    fn decode_unverified_here(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
+        let loc = self.locate(id)?;
         if self.read_header(id, loc)?.encoding == ENC_DELTA {
             self.resolve(id, Verify::None)
         } else {
@@ -939,94 +774,17 @@ impl ChunkStore {
         self.resolve(id, Verify::Boundary)
     }
 
-    /// Deep scrub: resolve `id` re-hashing every layer from disk (bypassing
-    /// the read cache), so corruption is localized to the failing layer
-    /// rather than only detected at the boundary. The fsck path.
-    pub fn verify_chunk(&self, id: ChunkId) -> Result<(), StoreError> {
-        self.resolve(id, Verify::Deep).map(drop)
-    }
-
     /// Resolves a chunk with no hashing (structural checks only). Internal:
     /// the caller must verify at a higher boundary — the blob hash.
     pub(crate) fn read_unverified(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
         self.resolve(id, Verify::None)
     }
 
-    /// Resolves a chunk re-hashing every layer; the bytes are returned so the
-    /// blob deep-verify can reassemble and check the blob boundary too.
-    pub(crate) fn read_deep(&self, id: ChunkId) -> Result<Vec<u8>, StoreError> {
-        self.resolve(id, Verify::Deep)
-    }
-
-    fn resolve(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {
-        // descend: collect delta frames until a full record or a cached
-        // base; iterative so chain length never threatens the stack
-        let mut frames: Vec<(ChunkId, u32, Vec<u8>)> = Vec::new();
-        let mut cur = id;
-        let data: Vec<u8>;
-        loop {
-            // a deep scrub re-reads every layer from disk; the cache may hold
-            // bytes that were only boundary-verified, so deep bypasses it
-            if verify != Verify::Deep
-                && !frames.is_empty()
-                && let Some(hit) = self.cache.lock().unwrap().get(&cur)
-            {
-                data = (*hit).clone();
-                break;
-            }
-            if frames.iter().any(|(fid, ..)| *fid == cur) {
-                // only reachable through on-disk corruption of a base id:
-                // the writer never closes a loop
-                return Err(StoreError::Corrupt {
-                    id: cur,
-                    reason: "delta chain cycle",
-                });
-            }
-            let loc = *self.index.get(&cur).ok_or(StoreError::NotFound(cur))?;
-            let (header, payload) = self.read_record(cur, loc)?;
-            if header.id != cur {
-                return Err(StoreError::Corrupt {
-                    id: cur,
-                    reason: "record id mismatch",
-                });
-            }
-            match header.encoding {
-                ENC_RAW => {
-                    data = Self::sized(cur, payload, header.orig_len)?;
-                    if verify.hash_at(frames.is_empty()) {
-                        Self::check_hash(cur, &data)?;
-                    }
-                    break;
-                }
-                ENC_ZSTD => {
-                    let raw =
-                        alt_zstd::decode_all(&payload[..]).map_err(|_| StoreError::Corrupt {
-                            id: cur,
-                            reason: "zstd decode failed",
-                        })?;
-                    data = Self::sized(cur, raw, header.orig_len)?;
-                    if verify.hash_at(frames.is_empty()) {
-                        Self::check_hash(cur, &data)?;
-                    }
-                    break;
-                }
-                ENC_DELTA => {
-                    let base_bytes = payload.get(..32).ok_or(StoreError::Corrupt {
-                        id: cur,
-                        reason: "delta payload too short",
-                    })?;
-                    let base_id = ChunkId(base_bytes.try_into().unwrap());
-                    frames.push((cur, header.orig_len, payload[32..].to_vec()));
-                    cur = base_id;
-                }
-                _ => return Err(StoreError::Format("reserved record encoding")),
-            }
-        }
-
+    fn resolve_here(&self, id: ChunkId, verify: Verify) -> Result<Vec<u8>, StoreError> {
+        let mut frames = Vec::new();
+        let (mut base_id, mut data) = self.descend(id, verify, &mut frames)?;
         // unwind: apply frames top-down, keeping every base hot. The last
         // frame popped is the requested id — its hash is the boundary.
-        let mut data = data;
-        let mut base_id = cur;
         while let Some((fid, orig_len, z)) = frames.pop() {
             let out = delta::decompress_with_base(&z, &data, orig_len as usize).ok_or(
                 StoreError::Corrupt {
@@ -1043,6 +801,66 @@ impl ChunkStore {
             base_id = fid;
         }
         Ok(data)
+    }
+
+    /// Collects delta frames from `id` down to a full record or a cached
+    /// base, whose id and bytes it returns; iterative so chain length never
+    /// threatens the stack.
+    fn descend(
+        &self,
+        id: ChunkId,
+        verify: Verify,
+        frames: &mut Vec<(ChunkId, u32, Vec<u8>)>,
+    ) -> Result<(ChunkId, Vec<u8>), StoreError> {
+        let mut cur = id;
+        loop {
+            // a deep scrub re-reads every layer from disk; the cache may hold
+            // bytes that were only boundary-verified, so deep bypasses it
+            if verify != Verify::Deep
+                && !frames.is_empty()
+                && let Some(hit) = self.cache.lock().unwrap().get(&cur)
+            {
+                return Ok((cur, (*hit).clone()));
+            }
+            if frames.iter().any(|(fid, ..)| *fid == cur) {
+                // only reachable through on-disk corruption of a base id:
+                // the writer never closes a loop
+                return Err(StoreError::Corrupt {
+                    id: cur,
+                    reason: "delta chain cycle",
+                });
+            }
+            let loc = self.locate(cur)?;
+            let (header, payload) = self.read_record(cur, loc)?;
+            if header.encoding == ENC_DELTA {
+                let base_bytes = payload.get(..32).ok_or(StoreError::Corrupt {
+                    id: cur,
+                    reason: "delta payload too short",
+                })?;
+                let base_id = ChunkId(base_bytes.try_into().unwrap());
+                frames.push((cur, header.orig_len, payload[32..].to_vec()));
+                cur = base_id;
+                continue;
+            }
+            let data = Self::full(cur, &header, payload)?;
+            if verify.hash_at(frames.is_empty()) {
+                Self::check_hash(cur, &data)?;
+            }
+            return Ok((cur, data));
+        }
+    }
+
+    /// The bytes of a record that is not a delta.
+    fn full(id: ChunkId, header: &RecordHeader, payload: Vec<u8>) -> Result<Vec<u8>, StoreError> {
+        let data = match header.encoding {
+            ENC_RAW => payload,
+            ENC_ZSTD => alt_zstd::decode_all(&payload[..]).map_err(|_| StoreError::Corrupt {
+                id,
+                reason: "zstd decode failed",
+            })?,
+            _ => return Err(StoreError::Format("reserved record encoding")),
+        };
+        Self::sized(id, data, header.orig_len)
     }
 
     /// Structural length check (always run — cheap, catches gross corruption).
@@ -1067,13 +885,13 @@ impl ChunkStore {
         Ok(())
     }
 
-    pub fn contains(&self, id: ChunkId) -> bool {
-        self.index.contains_key(&id)
+    pub fn contains(&self, id: ChunkId) -> Result<bool, StoreError> {
+        Ok(self.reading(|store| store.located(id))?.is_some())
     }
 
     /// On-disk accounting for one chunk (encoding and stored size).
-    pub fn stat(&self, id: ChunkId) -> Result<ChunkStat, StoreError> {
-        let loc = *self.index.get(&id).ok_or(StoreError::NotFound(id))?;
+    fn stat_here(&self, id: ChunkId) -> Result<ChunkStat, StoreError> {
+        let loc = self.locate(id)?;
         let header = self.read_header(id, loc)?;
         let encoding = match header.encoding {
             ENC_RAW => Encoding::Raw,
@@ -1090,7 +908,7 @@ impl ChunkStore {
 
     /// Number of distinct chunks stored.
     pub fn len(&self) -> usize {
-        self.index.len()
+        self.index.all().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1099,31 +917,6 @@ impl ChunkStore {
 
     pub fn counters(&self) -> Counters {
         self.counters
-    }
-
-    /// Fsyncs the active pack — the durability point between seals.
-    pub fn flush(&mut self) -> Result<(), StoreError> {
-        if !relaxed_durability() {
-            self.active.write.sync_all()?;
-        }
-        Ok(())
-    }
-
-    /// Raw fsync of the active pack (no relaxed-durability gate) — the group
-    /// commit layer decides whether/when to call it.
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        self.active.write.sync_all()?;
-        Ok(())
-    }
-
-    /// An independent fsync handle (the daemon's group commit fsyncs off the
-    /// write path, without `&mut self`, so appends overlap the fsync). It
-    /// re-finds the active pack on each call because the pack rolls; sealed
-    /// packs are fsynced at seal time, so only the active one needs flushing.
-    pub fn sink(&self) -> ChunkSink {
-        ChunkSink {
-            dir: self.dir.clone(),
-        }
     }
 
     /// Our in-memory write cursor (bytes we have appended to the active pack).
@@ -1156,6 +949,19 @@ impl ChunkStore {
     /// Refuses if the active pack rolled between checkpoint and rewind (sealed
     /// packs are immutable, so a rolled-out region can't be safely undone here).
     pub fn rewind(&mut self, ckpt: ChunkCheckpoint) -> Result<(), StoreError> {
+        self.check_rewind(ckpt)?;
+        self.index.truncate(ckpt.location())?;
+        self.active.write.set_len(ckpt.pack_len)?;
+        self.active.write.sync_all()?;
+        self.reload_whole()?;
+        self.cache.lock().unwrap().clear();
+        Ok(())
+    }
+
+    /// Whether [`Self::rewind`] to `ckpt` can go ahead, changing nothing:
+    /// what stays of the active pack past the index runs that stay must
+    /// read to exactly where the pack is cut.
+    pub fn check_rewind(&self, ckpt: ChunkCheckpoint) -> Result<(), StoreError> {
         if ckpt.pack_seq != self.active.seq {
             return Err(StoreError::Format(
                 "chunk store rolled between checkpoint and rewind",
@@ -1169,35 +975,45 @@ impl ChunkStore {
         if ckpt.pack_len < pack::HEADER_LEN as u64 {
             return Err(StoreError::Format("chunk rewind target below header"));
         }
-        self.active.write.set_len(ckpt.pack_len)?;
-        self.active.write.sync_all()?;
-        let (sealed, active, index) = load(&self.dir)?;
-        self.sealed = sealed;
-        self.active = active;
-        self.index = index;
-        self.cache.lock().unwrap().clear();
+        let from = self
+            .index
+            .covered_up_to(ckpt.location())
+            .offset_in(ckpt.pack_seq);
+        let map = unsafe { Mmap::map(&self.active.read)? };
+        let stays = map.get(..ckpt.pack_len as usize);
+        if stays.is_none_or(|stays| pack::scan_from(stays, from as usize).1 != ckpt.pack_len) {
+            return Err(StoreError::Format("active pack damaged"));
+        }
         Ok(())
+    }
+
+    /// The index is a cache: a record that is not the chunk asked for means
+    /// the index and the pack disagree.
+    fn named(id: ChunkId, header: RecordHeader) -> Result<RecordHeader, StoreError> {
+        if header.id != id {
+            return Err(StoreError::Corrupt {
+                id,
+                reason: "record id mismatch",
+            });
+        }
+        Ok(header)
     }
 
     fn read_header(&self, id: ChunkId, loc: Location) -> Result<RecordHeader, StoreError> {
         if loc.seq == self.active.seq {
             let mut buf = [0u8; REC_HEADER_LEN];
             pack::read_exact_at(&self.active.read, &mut buf, loc.offset)?;
-            return Ok(RecordHeader::parse(&buf));
+            return Self::named(id, RecordHeader::parse(&buf));
         }
-        let sealed = self
-            .sealed
-            .get(&loc.seq)
-            .ok_or(StoreError::Format("unknown pack"))?;
+        let sealed = self.sealed_pack(loc.seq)?;
         let at = loc.offset as usize;
         let buf = sealed
-            .map
             .get(at..at + REC_HEADER_LEN)
             .ok_or(StoreError::Corrupt {
                 id,
                 reason: "record out of bounds",
             })?;
-        Ok(RecordHeader::parse(buf.try_into().unwrap()))
+        Self::named(id, RecordHeader::parse(buf.try_into().unwrap()))
     }
 
     fn read_record(
@@ -1212,24 +1028,16 @@ impl ChunkStore {
             pack::read_exact_at(&self.active.read, &mut payload, at)?;
             return Ok((header, payload));
         }
-        let sealed = &self.sealed[&loc.seq];
+        let sealed = self.sealed_pack(loc.seq)?;
         let at = at as usize;
         let payload =
             sealed
-                .map
                 .get(at..at + header.stored_len as usize)
                 .ok_or(StoreError::Corrupt {
                     id,
                     reason: "record out of bounds",
                 })?;
         Ok((header, payload.to_vec()))
-    }
-}
-
-impl Drop for ChunkStore {
-    fn drop(&mut self) {
-        // best-effort durability; explicit flush() is the checked path
-        let _ = self.active.write.sync_all();
     }
 }
 

@@ -72,17 +72,17 @@ pub(super) fn render_op_log_json(
                 ]),
             ));
         }
-        if matches!(op.payload.first(), Some(0x30..=0x33)) {
+        if matches!(op.payload.first(), Some(0x30..=0x33 | 0x35)) {
             if op.payload.get(1) != Some(&1) {
                 return Err("unsupported recovery record version".into());
             }
             let value: alt_json::Value = alt_json::from_slice(&op.payload[2..])?;
             let mut recovery = vec![(
                 "phase",
-                Json::str(if matches!(op.payload[0], 0x30 | 0x32) {
-                    "prepared"
-                } else {
-                    "completed"
+                Json::str(match op.payload[0] {
+                    0x30 | 0x32 => "prepared",
+                    0x35 => "abandoned",
+                    _ => "completed",
                 }),
             )];
             for key in [

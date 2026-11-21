@@ -12,9 +12,14 @@
 //! Reads re-hash the assembled bytes against the blob id, on top of the
 //! per-chunk re-hash the chunk store already does.
 
+mod open;
+mod settle;
+
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use crate::blobmap::BlobMap;
+use crate::node::{NodeEntry, encode_node, parse_node};
 use crate::{
     BlobId, ChunkCheckpoint, ChunkId, ChunkStore, CompactReport, Counters, Options, StoreError,
 };
@@ -28,61 +33,6 @@ enum ChunkRead {
     Deep,
     /// zero-copy, no hashing — the bulk export / clone-serve read
     Bulk,
-}
-
-const NODE_MAGIC: [u8; 4] = *b"ALTM";
-const NODE_VERSION: u8 = 1;
-/// Node header: magic + version + level u8 + count u32.
-const NODE_HEADER_LEN: usize = 10;
-/// Entry: chunk id 32 + span u64.
-const NODE_ENTRY_LEN: usize = 40;
-
-#[derive(Debug, Clone, Copy)]
-struct NodeEntry {
-    id: ChunkId,
-    /// Bytes covered: chunk length at level 0, subtree total above.
-    span: u64,
-}
-
-fn encode_node(level: u8, entries: &[NodeEntry]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(NODE_HEADER_LEN + NODE_ENTRY_LEN * entries.len());
-    out.extend_from_slice(&NODE_MAGIC);
-    out.push(NODE_VERSION);
-    out.push(level);
-    out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-    for entry in entries {
-        out.extend_from_slice(&entry.id.0);
-        out.extend_from_slice(&entry.span.to_le_bytes());
-    }
-    out
-}
-
-fn parse_node(data: &[u8]) -> Result<(u8, Vec<NodeEntry>), StoreError> {
-    if data.len() < NODE_HEADER_LEN || data[..4] != NODE_MAGIC {
-        return Err(StoreError::Format("bad manifest node header"));
-    }
-    if data[4] != NODE_VERSION {
-        return Err(StoreError::Format("unsupported manifest node version"));
-    }
-    let level = data[5];
-    let count = u32::from_le_bytes(data[6..10].try_into().unwrap()) as usize;
-    if count
-        .checked_mul(NODE_ENTRY_LEN)
-        .and_then(|n| n.checked_add(NODE_HEADER_LEN))
-        != Some(data.len())
-    {
-        return Err(StoreError::Format("manifest node length mismatch"));
-    }
-    let mut entries = Vec::with_capacity(count);
-    for raw in data[NODE_HEADER_LEN..].as_chunks::<NODE_ENTRY_LEN>().0 {
-        let mut id = [0u8; 32];
-        id.copy_from_slice(&raw[..32]);
-        entries.push(NodeEntry {
-            id: ChunkId(id),
-            span: u64::from_le_bytes(raw[32..].try_into().unwrap()),
-        });
-    }
-    Ok((level, entries))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,34 +64,55 @@ pub struct StoreCheckpoint {
     blobmap_len: u64,
 }
 
+impl StoreCheckpoint {
+    /// The active pack's sequence number and length, and the blob map's
+    /// length, at the checkpoint.
+    pub fn lens(&self) -> (u32, u64, u64) {
+        let (seq, pack) = self.chunks.pack();
+        (seq, pack, self.blobmap_len)
+    }
+}
+
+/// Says from which byte on the blob map's records are not known to have
+/// been synced; `None` when nothing tells.
+pub type Unsynced = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
 /// over a [`ChunkStore`].
 pub struct BlobStore {
     // field order is drop order: the pack must sync before the blobmap so a
     // crash never leaves a durable map record pointing at lost chunks
     chunks: ChunkStore,
-    map: BlobMap,
+    /// opened by the first blob that is not a single chunk, or the first
+    /// write: most reads never need it
+    map: OnceLock<BlobMap>,
+    /// the map's index runs, when the opener was told them
+    map_runs: Option<Vec<(u64, u64)>>,
+    /// what a blob map that does not read to its end means
+    map_tail: crate::Tail,
+    /// set for a handle that passes over records that were never synced
+    /// and name a tree which is not stored: how far the map is noted as
+    /// synced, and what says where its synced records end when it is
+    /// longer than that
+    map_synced: Option<(u64, Unsynced)>,
+    dir: PathBuf,
     opts: BlobOptions,
+    /// The lock file of the database this store sits under, if any. Opening
+    /// the map repairs a torn tail, which must not overlap a writer's
+    /// append: a late open takes this lock shared, as the open of the store
+    /// itself ran under it.
+    open_lock: Option<PathBuf>,
+    /// Whether the caller holds that lock exclusively right now (from
+    /// `sync_from_disk` to `end_batch`), so a late open takes nothing.
+    exclusive: bool,
 }
 
 impl BlobStore {
-    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, StoreError> {
-        Self::open_with(dir, BlobOptions::default())
-    }
-
-    pub fn open_with(dir: impl Into<PathBuf>, opts: BlobOptions) -> Result<Self, StoreError> {
-        assert!(opts.fanout >= 2, "manifest fanout must be at least 2");
-        let dir = dir.into();
-        let chunks = ChunkStore::open_with(&dir, opts.chunks)?;
-        let map = BlobMap::open(&dir.join("manifests"))?;
-        Ok(Self { chunks, map, opts })
-    }
-
     /// Stores a byte stream, deduplicating chunk-wise against everything
     /// already in the store.
     pub fn put(&mut self, data: &[u8]) -> Result<BlobId, StoreError> {
         let id = BlobId::of(data);
-        if self.contains(id) {
+        if self.contains(id)? {
             return Ok(id);
         }
 
@@ -178,7 +149,7 @@ impl BlobStore {
             level = next;
         }
 
-        self.map.append(id, level[0].id, data.len() as u64)?;
+        self.map_mut()?.append(id, level[0].id, data.len() as u64)?;
         Ok(id)
     }
 
@@ -210,19 +181,20 @@ impl BlobStore {
         mode: ChunkRead,
         hash_boundary: bool,
     ) -> Result<Vec<u8>, StoreError> {
-        let Some((root, total_len)) = self.map.get(id) else {
-            // no manifest: the blob is a single chunk under the same hash
-            let chunk = ChunkId(id.0);
-            let res = match mode {
-                ChunkRead::Deep => self.chunks.verify_chunk(chunk).map(|()| Vec::new()),
-                ChunkRead::Fast => self.chunks.get(chunk),
-                ChunkRead::Bulk => self.chunks.decode_chunk_unverified(chunk),
-            };
-            return match res {
-                Ok(data) => Ok(data),
-                Err(StoreError::NotFound(_)) => Err(StoreError::BlobNotFound(id)),
-                Err(e) => Err(e),
-            };
+        // a blob of one chunk is that chunk under the same hash, with no
+        // manifest: try it first, so the common read never opens the map
+        let chunk = ChunkId(id.0);
+        let single = match mode {
+            ChunkRead::Deep => self.chunks.verify_chunk(chunk).map(|()| Vec::new()),
+            ChunkRead::Fast => self.chunks.get(chunk),
+            ChunkRead::Bulk => self.chunks.decode_chunk_unverified(chunk),
+        };
+        match single {
+            Err(StoreError::NotFound(_)) => {}
+            other => return other,
+        }
+        let Some((root, total_len)) = self.map()?.get(id)? else {
+            return Err(StoreError::BlobNotFound(id));
         };
         let mut out = Vec::with_capacity(total_len as usize);
         self.walk(root, None, &mut out, mode)?;
@@ -249,8 +221,11 @@ impl BlobStore {
     /// storage-view endpoint needs to surface tier / encoding /
     /// physical bytes per chunk.
     pub fn leaf_chunks(&self, id: BlobId) -> Result<Vec<ChunkId>, StoreError> {
-        let Some((root, _total_len)) = self.map.get(id) else {
-            // single-chunk blob: chunk id coincides with blob id
+        // single-chunk blob: chunk id coincides with blob id
+        if self.chunks.contains(ChunkId(id.0))? {
+            return Ok(vec![ChunkId(id.0)]);
+        }
+        let Some((root, _total_len)) = self.map()?.get(id)? else {
             return Ok(vec![ChunkId(id.0)]);
         };
         let mut out = Vec::new();
@@ -313,8 +288,8 @@ impl BlobStore {
         Ok(())
     }
 
-    pub fn contains(&self, id: BlobId) -> bool {
-        self.map.contains(id) || self.chunks.contains(ChunkId(id.0))
+    pub fn contains(&self, id: BlobId) -> Result<bool, StoreError> {
+        Ok(self.chunks.contains(ChunkId(id.0))? || self.map()?.contains(id)?)
     }
 
     /// Re-encodes `blob` as a lineage delta against `base` when both are
@@ -322,13 +297,17 @@ impl BlobStore {
     /// and lineage wins). Multi-chunk blobs already dedup chunk-wise, so
     /// they are left alone. Returns whether a re-encoding happened.
     pub fn lineage_delta(&mut self, blob: BlobId, base: BlobId) -> Result<bool, StoreError> {
-        if blob == base || self.map.contains(blob) || self.map.contains(base) {
+        if blob == base {
             return Ok(false);
         }
-        let (blob, base) = (ChunkId(blob.0), ChunkId(base.0));
-        if !self.chunks.contains(blob) || !self.chunks.contains(base) {
+        let (blob_chunk, base_chunk) = (ChunkId(blob.0), ChunkId(base.0));
+        if !self.chunks.contains(blob_chunk)? || !self.chunks.contains(base_chunk)? {
             return Ok(false);
         }
+        if self.map()?.contains(blob)? || self.map()?.contains(base)? {
+            return Ok(false);
+        }
+        let (blob, base) = (blob_chunk, base_chunk);
         self.chunks.reencode_as_delta(blob, base)
     }
 
@@ -346,8 +325,8 @@ impl BlobStore {
 
     /// Whether `id` is a multi-chunk blob (has a manifest). Single-chunk
     /// blobs are stored directly as one chunk under the same address.
-    pub fn is_multi_chunk(&self, id: BlobId) -> bool {
-        self.map.contains(id)
+    pub fn is_multi_chunk(&self, id: BlobId) -> Result<bool, StoreError> {
+        self.map()?.contains(id)
     }
 
     pub fn chunk_store(&self) -> &ChunkStore {
@@ -358,52 +337,82 @@ impl BlobStore {
     /// between the two only ever loses map records, never referenced chunks.
     pub fn flush(&mut self) -> Result<(), StoreError> {
         self.chunks.flush()?;
-        self.map.sync()
+        match self.map.get_mut() {
+            Some(map) => map.sync(),
+            None => Ok(()),
+        }
     }
 
     /// Reconciles in-memory state with what other writers appended, before a
     /// write batch. Called by the odb under its write lock.
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
+        self.exclusive = true;
         self.chunks.sync_from_disk()?;
-        self.map.sync_from_disk()
+        match self.map.get_mut() {
+            Some(map) => map.sync_from_disk(),
+            // not opened yet: opening reads the file as it is then
+            None => Ok(()),
+        }
+    }
+
+    /// Whether [`Self::index_tail`] has anything to do. A blob map this
+    /// handle has not opened is not looked at.
+    pub fn index_pending(&self) -> bool {
+        self.chunks.index_pending() || self.map.get().is_some_and(BlobMap::index_pending)
+    }
+
+    /// Folds the records appended since the last index runs into new runs,
+    /// once there are enough of them. Called by the odb under its write lock
+    /// at the end of a batch.
+    pub fn index_tail(&mut self) -> Result<(), StoreError> {
+        self.chunks.index_tail()?;
+        self.map_mut()?.index_tail(u64::MAX)
     }
 
     /// Raw fsync of chunks then the blob map, in that order — so a crash never
     /// leaves a durable map record pointing at lost chunks. Group commit calls
     /// this once for a batch of coalesced commits.
-    pub fn fsync(&self) -> Result<(), StoreError> {
+    pub fn fsync(&mut self) -> Result<(), StoreError> {
         self.chunks.fsync()?;
-        self.map.fsync()
+        match self.map.get_mut() {
+            Some(map) => map.fsync(),
+            None => Ok(()),
+        }
     }
 
     /// Our appended cursors: (chunk pack, blob map) bytes we have written.
-    pub fn appended_lens(&self) -> (u64, u64) {
-        (self.chunks.appended_len(), self.map.appended_len())
+    pub fn appended_lens(&self) -> Result<(u64, u64), StoreError> {
+        Ok((self.chunks.appended_len(), self.map()?.appended_len()))
     }
 
     /// The true on-disk sizes of (chunk pack, blob map).
     pub fn file_lens(&self) -> Result<(u64, u64), StoreError> {
-        Ok((self.chunks.pack_file_len()?, self.map.file_len()?))
+        Ok((self.chunks.pack_file_len()?, self.map()?.file_len()?))
     }
 
     /// Snapshots the write cursor (chunks + blobmap) so [`Self::rewind`] can
     /// later drop everything appended after it. Taken under the odb write lock
     /// at the start of a batch.
-    pub fn checkpoint(&self) -> StoreCheckpoint {
-        StoreCheckpoint {
+    pub fn checkpoint(&self) -> Result<StoreCheckpoint, StoreError> {
+        Ok(StoreCheckpoint {
             chunks: self.chunks.checkpoint(),
-            blobmap_len: self.map.appended_len(),
-        }
+            blobmap_len: self.map()?.appended_len(),
+        })
     }
 
-    /// Drops every chunk + blobmap record appended after `ckpt` was taken.
-    /// Chunks first (they're referenced by the blobmap records) — the inverse
-    /// of the flush order. Each layer truncates + fsyncs internally so the
-    /// rollback is durable; the caller (the odb rewind) is responsible for
-    /// re-writing the odb durable marker afterwards.
+    /// Whether [`Self::rewind`] to `ckpt` can go ahead, changing nothing.
+    pub fn check_rewind(&self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
+        self.chunks.check_rewind(ckpt.chunks)?;
+        self.map()?.check_rewind(ckpt.blobmap_len)
+    }
+
+    /// Drops every chunk + blobmap record appended after `ckpt` was taken,
+    /// each layer truncating + fsyncing internally. The blobmap goes first,
+    /// the inverse of the flush order: a crash between the two leaves chunks
+    /// no record names, never a record naming chunks that are gone.
     pub fn rewind(&mut self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
+        self.map_mut()?.rewind(ckpt.blobmap_len)?;
         self.chunks.rewind(ckpt.chunks)?;
-        self.map.rewind(ckpt.blobmap_len)?;
         Ok(())
     }
 
@@ -412,7 +421,7 @@ impl BlobStore {
     pub fn sink(&self) -> Result<BlobSink, StoreError> {
         Ok(BlobSink {
             chunks: self.chunks.sink(),
-            blobmap: self.map.sync_handle()?,
+            blobmap: self.map()?.sync_handle()?,
         })
     }
 }
@@ -466,7 +475,7 @@ mod tests {
         let ids: Vec<BlobId> = cases.iter().map(|c| store.put(c).unwrap()).collect();
         for (case, id) in cases.iter().zip(&ids) {
             assert_eq!(*id, BlobId::of(case));
-            assert!(store.contains(*id));
+            assert!(store.contains(*id).unwrap());
             assert_eq!(&store.get(*id).unwrap(), case);
         }
     }
@@ -527,45 +536,54 @@ mod tests {
         let multi = random_bytes(2 << 20, 11); // multi-chunk: writes blobmap too
         let id_before = store.put(&before).unwrap();
         let id_multi = store.put(&multi).unwrap();
-        let ckpt = store.checkpoint();
+        let ckpt = store.checkpoint().unwrap();
         let after = b"appended after checkpoint".to_vec();
         let after_multi = random_bytes(2 << 20, 12);
         let id_after = store.put(&after).unwrap();
         let id_after_multi = store.put(&after_multi).unwrap();
-        assert!(store.contains(id_after));
-        assert!(store.contains(id_after_multi));
+        assert!(store.contains(id_after).unwrap());
+        assert!(store.contains(id_after_multi).unwrap());
         store.rewind(ckpt).unwrap();
-        assert!(store.contains(id_before), "pre-checkpoint blob survives");
-        assert!(store.contains(id_multi), "pre-checkpoint multi survives");
+        assert!(
+            store.contains(id_before).unwrap(),
+            "pre-checkpoint blob survives"
+        );
+        assert!(
+            store.contains(id_multi).unwrap(),
+            "pre-checkpoint multi survives"
+        );
         assert_eq!(&store.get(id_before).unwrap(), &before);
         assert_eq!(&store.get(id_multi).unwrap(), &multi);
-        assert!(!store.contains(id_after), "post-checkpoint blob gone");
         assert!(
-            !store.contains(id_after_multi),
+            !store.contains(id_after).unwrap(),
+            "post-checkpoint blob gone"
+        );
+        assert!(
+            !store.contains(id_after_multi).unwrap(),
             "post-checkpoint multi gone"
         );
         // re-open from disk: state matches the rewound view
         drop(store);
         let store = BlobStore::open(dir.path()).unwrap();
-        assert!(store.contains(id_before));
-        assert!(store.contains(id_multi));
-        assert!(!store.contains(id_after));
-        assert!(!store.contains(id_after_multi));
+        assert!(store.contains(id_before).unwrap());
+        assert!(store.contains(id_multi).unwrap());
+        assert!(!store.contains(id_after).unwrap());
+        assert!(!store.contains(id_after_multi).unwrap());
     }
 
     #[test]
     fn rewind_to_empty_checkpoint_yields_empty_store() {
         let dir = alt_os::temp::tempdir().unwrap();
         let mut store = BlobStore::open(dir.path()).unwrap();
-        let ckpt = store.checkpoint();
+        let ckpt = store.checkpoint().unwrap();
         let data = random_bytes(1 << 20, 13);
         let id = store.put(&data).unwrap();
-        assert!(store.contains(id));
+        assert!(store.contains(id).unwrap());
         store.rewind(ckpt).unwrap();
-        assert!(!store.contains(id));
+        assert!(!store.contains(id).unwrap());
         drop(store);
         let store = BlobStore::open(dir.path()).unwrap();
-        assert!(!store.contains(id));
+        assert!(!store.contains(id).unwrap());
     }
 
     #[test]

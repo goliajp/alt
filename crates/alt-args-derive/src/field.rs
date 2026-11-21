@@ -15,9 +15,21 @@ pub(crate) enum Shape {
     Flag,
     /// a flag counted into an integer field
     Count,
+    /// a flag given bare or with a value against its letter, each
+    /// appearance kept as text
+    Attached,
     Required,
     Optional,
     Repeated,
+}
+
+/// What kind of thing a value is, as `#[arg(hint = ...)]` says it.
+pub(crate) enum Hint {
+    Unset,
+    None,
+    Path,
+    Dir,
+    Other(String),
 }
 
 pub(crate) enum Preset {
@@ -48,8 +60,7 @@ pub(crate) struct ArgField {
     pub(crate) group: Option<String>,
     pub(crate) trailing: bool,
     pub(crate) hyphen_values: bool,
-    /// the `Hint` variant
-    pub(crate) hint: String,
+    pub(crate) hint: Hint,
 }
 
 /// `inner` when `ty` is `<wrapper><inner>`.
@@ -90,12 +101,12 @@ fn one_or_list(entry: &attr::Entry) -> Result<Vec<String>, Error> {
 }
 
 /// `none`, `path`, `dir`, or a string naming a kind of the program's own.
-fn hint(entry: &attr::Entry) -> Result<String, Error> {
+fn hint(entry: &attr::Entry) -> Result<Hint, Error> {
     Ok(match entry.text()?.as_str() {
-        "none" => "None".to_owned(),
-        "path" => "Path".to_owned(),
-        "dir" => "Dir".to_owned(),
-        _ => format!("Other({:?})", entry.string()?),
+        "none" => Hint::None,
+        "path" => Hint::Path,
+        "dir" => Hint::Dir,
+        _ => Hint::Other(entry.string()?),
     })
 }
 
@@ -146,7 +157,7 @@ impl ArgField {
             group: None,
             trailing: false,
             hyphen_values: false,
-            hint: "Unset".to_owned(),
+            hint: Hint::Unset,
         };
         for entry in attr::entries(&field.attributes, "arg")? {
             match entry.name.as_str() {
@@ -164,8 +175,10 @@ impl ArgField {
                 "default_missing_value" => arg.missing = Some(entry.string()?),
                 "action" if entry.text()? == "set" => shape = Shape::Required,
                 "action" if entry.text()? == "count" => shape = Shape::Count,
+                "action" if entry.text()? == "attached" => shape = Shape::Attached,
                 "action" => {
-                    return Err(Error::new(entry.span, "the actions are `set` and `count`"));
+                    let known = "the actions are `set`, `count` and `attached`";
+                    return Err(Error::new(entry.span, known));
                 }
                 "value_parser" => match entry.list()? {
                     Some(list) => arg.possible = Some(list),
@@ -191,8 +204,8 @@ impl ArgField {
         if matches!(shape, Shape::Required) && matches!(arg.preset, Preset::None) {
             arg.required = true;
         }
-        if matches!(shape, Shape::Flag | Shape::Count) && arg.long.is_none() && arg.short.is_none()
-        {
+        let flag = matches!(shape, Shape::Flag | Shape::Count | Shape::Attached);
+        if flag && arg.long.is_none() && arg.short.is_none() {
             return Err(Error::new(field.span, "a flag needs `long` or `short`"));
         }
         arg.shape = shape;

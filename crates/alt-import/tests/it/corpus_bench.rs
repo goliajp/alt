@@ -74,7 +74,7 @@ fn corpus_bench_volume_and_throughput() {
 
         // --- full-store read throughput, .alt backend (post-compaction) ---
         let odb = NativeOdb::open(&alt_dir).unwrap();
-        let oids: Vec<_> = odb.entries().map(|e| e.git).collect();
+        let oids: Vec<_> = odb.entries().unwrap().iter().map(|e| e.git).collect();
         let t0 = Instant::now();
         let mut alt_read_bytes = 0u64;
         for oid in &oids {

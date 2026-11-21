@@ -18,7 +18,7 @@ fn reopen_sees_flushed_objects() {
         odb.flush().unwrap();
     }
     let odb = NativeOdb::open(dir.path()).unwrap();
-    assert_eq!(odb.len(), 1);
+    assert_eq!(odb.len().unwrap(), 1);
     assert_eq!(odb.get(&oid).unwrap().unwrap().data, data);
 }
 
@@ -58,11 +58,12 @@ fn corrupt_map_record_mid_file_refuses_to_open() {
             let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data);
             odb.put(oid, ObjectKind::Blob, &data).unwrap();
         }
+        odb.flush().unwrap();
     }
 
     let map_path = dir.path().join("map.alt");
     let mut bytes = fs::read(&map_path).unwrap();
-    bytes[5 + 40] ^= 0xFF; // inside the first record: corruption, not a torn tail
+    bytes[5 + 40] ^= 0xFF; // inside a synced record: corruption, not a torn tail
     fs::write(&map_path, &bytes).unwrap();
 
     let err = match NativeOdb::open(dir.path()) {

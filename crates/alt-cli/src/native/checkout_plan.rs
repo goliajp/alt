@@ -179,7 +179,7 @@ impl NativeRepo<'_> {
             });
         }
         let index_after = target_index(target)?;
-        let index_after = self.snapshot(&canonical_index(index_after, self.store.algo))?;
+        let index_after = self.snapshot(&canonical_index(index_after, self.store.algo()?))?;
         *self.planned.borrow_mut() = Some(super::tree_state::Planned {
             index: index_after.clone(),
             files: planned,
@@ -188,7 +188,7 @@ impl NativeRepo<'_> {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo))?,
+            index_before: self.snapshot(&canonical_index(self.index()?, self.store.algo()?))?,
             index_after,
             files,
         })

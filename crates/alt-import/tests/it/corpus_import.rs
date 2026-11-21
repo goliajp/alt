@@ -26,7 +26,7 @@ fn verify_repo_against_store(repo_dir: &Path, alt_dir: &Path) -> u64 {
         for entry in entries {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "pack") {
-                let indexed = IndexedPack::open(&path, repo.algo()).unwrap();
+                let indexed = IndexedPack::open(&path, repo.algo().unwrap()).unwrap();
                 let idx = indexed.idx();
                 let mut order: Vec<(u64, u32)> = (0..idx.len())
                     .map(|i| (idx.offset_at(i).unwrap(), i))
@@ -167,13 +167,13 @@ fn killed_import_recovers_and_converges() {
         );
         let odb = NativeOdb::open(&alt_dir).unwrap();
         // whatever was mapped must read back (spot-check a sample)
-        let sample: Vec<_> = odb.entries().take(64).cloned().collect();
+        let sample: Vec<_> = odb.entries().unwrap().into_iter().take(64).collect();
         for entry in &sample {
             let raw = odb.get(&entry.git).unwrap().unwrap();
             assert_eq!(raw.kind, entry.kind);
             assert_eq!(raw.data.len() as u64, entry.size);
         }
-        assert!(!sample.is_empty() || odb.is_empty());
+        assert!(!sample.is_empty() || odb.is_empty().unwrap());
     }
 
     // re-run to completion and verify full convergence

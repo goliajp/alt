@@ -197,16 +197,15 @@ fn an_ignore_file_named_by_the_settings_is_found_where_git_finds_it() {
     }
 }
 
-/// `alt` and git both end with status 128 and say `fatal`, git after
-/// whatever else `more` it says about where the setting is.
-fn both_refuse(pair: &mut Pair, at: &str, fatal: &str, more: bool) {
+/// `alt` and git both end with status 128 and say `fatal`.
+fn both_refuse(pair: &mut Pair, at: &str, fatal: &str) {
     let (alt, git) = pair.status(at);
     assert_eq!((alt.code, git.code), (Some(128), Some(128)), "{at}");
-    assert_eq!(alt.said, fatal, "{at}");
-    match more {
-        true => assert!(git.said.starts_with(fatal.trim_end()), "{at}: {git:?}"),
-        false => assert_eq!(git.said, fatal, "{at}"),
-    }
+    assert_eq!(
+        (alt.said.as_str(), git.said.as_str()),
+        (fatal, fatal),
+        "{at}"
+    );
 }
 
 #[test]
@@ -216,19 +215,24 @@ fn a_setting_that_names_no_file_ends_the_command_as_it_ends_git() {
         let low = key.to_lowercase();
         pair.configure(&format!("{key} = ~no-such-user-of-this-system/rules\n"));
         let fatal = "fatal: failed to expand user dir in: '~no-such-user-of-this-system/rules'\n";
-        both_refuse(&mut pair, key, fatal, false);
-        // git goes on to say in which file and at which line
+        both_refuse(&mut pair, key, fatal);
+        // each says in which file of its own and at which line
         pair.configure(&format!("{key}\n"));
-        let fatal = format!(
-            "error: missing value for 'core.{low}'\nfatal: bad config variable 'core.{low}'\n"
-        );
-        both_refuse(&mut pair, key, &fatal, true);
+        let (alt, git) = pair.status(key);
+        let kept = pair.at("a/.alt/git-import/config").canonicalize().unwrap();
+        let theirs = (git, ".git/config", pair.git_config.lines().count() + 2);
+        for (seen, file, line) in [(alt, kept.to_str().unwrap(), 2), theirs] {
+            let error = format!("error: missing value for 'core.{low}'");
+            let fatal = format!("bad config variable 'core.{low}' in file '{file}' at line {line}");
+            let said = format!("{error}\nfatal: {fatal}\n");
+            assert_eq!((seen.code, seen.said), (Some(128), said), "{key}");
+        }
     }
     let mut homeless = Pair::new(false);
     for key in ["excludesFile", "attributesFile"] {
         homeless.configure(&format!("{key} = ~/rules\n"));
         let fatal = "fatal: failed to expand user dir in: '~/rules'\n";
-        both_refuse(&mut homeless, key, fatal, false);
+        both_refuse(&mut homeless, key, fatal);
     }
 }
 

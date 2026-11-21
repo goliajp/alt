@@ -4,10 +4,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -205,4 +205,17 @@ fn show_json_returns_a_single_commit_object() {
     assert!(out.contains("commits"), "got: {out}");
     let opens = out.matches("\"oid\"").count();
     assert_eq!(opens, 1, "expected one commit object, got: {out}");
+}
+
+#[test]
+fn log_takes_a_bare_number_as_the_commit_count() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    setup(tmp.path());
+    let one = ok(alt(tmp.path(), &["log", "-1"]));
+    assert_eq!(one, ok(alt(tmp.path(), &["log", "-n", "1"])));
+    assert_eq!(one.lines().count(), 1, "got: {one}");
+    assert!(one.contains("second commit"), "got: {one}");
+    let both = ok(alt(tmp.path(), &["log", "-2", "HEAD"]));
+    assert_eq!(both.lines().count(), 2, "got: {both}");
+    assert_eq!(ok(alt(tmp.path(), &["log", "-0"])), "");
 }

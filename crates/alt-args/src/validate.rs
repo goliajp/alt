@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::matches::Matched;
 use crate::scope::{Scope, Slot};
-use crate::spec::{Kind, Preset};
+use crate::settings::{Kind, Preset};
 use crate::usage;
 
 /// The ids of the arguments given on the command line, in order of first
@@ -16,10 +16,11 @@ pub(crate) fn given<'a>(scope: &Scope, entries: &'a [Matched]) -> Vec<&'a str> {
 
 /// What `slot` may not appear together with, as it declares it.
 fn excluded(scope: &Scope, slot: &Slot) -> Vec<&'static str> {
-    let mut ids = slot.arg.conflicts.to_vec();
-    if !slot.arg.group.is_empty() {
-        let peers = scope.slots.iter().map(|peer| peer.arg);
-        let peers = peers.filter(|peer| peer.group == slot.arg.group && peer.id != slot.arg.id);
+    let mut ids = slot.arg.conflicts().to_vec();
+    if !slot.arg.group().is_empty() {
+        let group = slot.arg.group();
+        let peers = scope.slots.iter().map(|peer| &peer.arg);
+        let peers = peers.filter(|peer| peer.group() == group && peer.id != slot.arg.id);
         ids.extend(peers.map(|peer| peer.id));
     }
     ids
@@ -56,13 +57,13 @@ fn conflicts(scope: &Scope, given: &[&str]) -> Result<(), Error> {
             .collect();
         let mut used: Vec<&str> = Vec::new();
         for slot in kept.iter().filter_map(|id| scope.find(id)) {
-            let needs = slot.arg.requires.iter();
+            let needs = slot.arg.requires().iter();
             used.extend(needs.filter(|id| !kept.contains(id) && !clashing.contains(id)));
         }
         used.extend(&kept);
         let slot = scope.find(id).expect("given ids are arguments");
         return Err(Error::conflict(
-            slot.arg,
+            &slot.arg,
             &clashing.iter().filter_map(show).collect::<Vec<_>>(),
             usage::narrowed(scope, &usage::required(scope), &used),
         ));
@@ -73,8 +74,8 @@ fn conflicts(scope: &Scope, given: &[&str]) -> Result<(), Error> {
 fn required(scope: &Scope, given: &[&str]) -> Result<(), Error> {
     let mut needed = usage::required(scope);
     for slot in given.iter().filter_map(|id| scope.find(id)) {
-        for id in slot.arg.requires {
-            if !needed.contains(id) {
+        for id in slot.arg.requires() {
+            if !needed.contains(&id) {
                 needed.push(id);
             }
         }
@@ -83,8 +84,8 @@ fn required(scope: &Scope, given: &[&str]) -> Result<(), Error> {
     let mut missing: Vec<&str> = needed.iter().copied().filter(|id| absent(id)).collect();
     missing.retain(|id| clashes(scope, id, given).is_empty());
     for slot in scope.slots.iter().filter(|slot| absent(slot.arg.id)) {
-        let unless = slot.arg.required_unless;
-        if !unless.is_empty() && unless.iter().all(|id| absent(id)) {
+        let unless = slot.arg.required_unless();
+        if !unless.is_empty() && unless.iter().all(&absent) {
             missing.push(slot.arg.id);
         }
     }
@@ -132,11 +133,11 @@ fn defaults(scope: &Scope, entries: &mut Vec<Matched>) {
         if entries.iter().any(|entry| entry.id == slot.arg.id) {
             continue;
         }
-        let value = match (slot.arg.kind, &slot.arg.preset) {
-            (Kind::Help | Kind::Version | Kind::Count, _) => continue,
+        let value = match (slot.arg.kind, slot.arg.preset()) {
+            (Kind::Help | Kind::Version | Kind::Count | Kind::Attached, _) => continue,
             (Kind::Flag, _) => "false".to_owned(),
-            (_, Preset::Text(text)) => (*text).to_owned(),
-            (_, Preset::Computed(compute)) => compute(),
+            (_, Preset::Text(text)) => text.to_owned(),
+            (_, Preset::Computed(computed)) => computed.value(),
             (_, Preset::None) => continue,
         };
         entries.push(Matched {

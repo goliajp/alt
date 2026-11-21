@@ -1,12 +1,12 @@
 //! Machine results and whole-command receipts are identical across transports.
 use alt_json::Value;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
 fn run(root: &Path, args: &[&str], daemon: bool) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut command = crate::alt_command();
     command
         .current_dir(root)
         .args(args)
@@ -193,7 +193,7 @@ fn request_binding_rejects_another_workspace_or_principal() {
     let args = ["--request-id", ID, "add", ".", "--json"];
     assert!(run(root.path(), &args, false).status.success());
     error(&run(workspace.path(), &args, false), 1, "request_mismatch");
-    let output = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let output = crate::alt_command()
         .current_dir(root.path())
         .args(args)
         .env("ALT_NO_DAEMON", "1")
@@ -210,7 +210,7 @@ fn request_binding_rejects_another_workspace_or_principal() {
 fn non_utf8_argument_has_exact_bytes_without_creating_a_request() {
     use std::os::unix::ffi::OsStringExt;
     let root = fixture();
-    let output = Command::new(env!("CARGO_BIN_EXE_alt"))
+    let output = crate::alt_command()
         .current_dir(root.path())
         .arg("add")
         .arg(std::ffi::OsString::from_vec(vec![b'a', 0xff]))
@@ -358,17 +358,9 @@ fn recovering_a_suboperation_does_not_complete_the_interrupted_request() {
         .status
         .success()
     );
-    let log_path = root.path().join(".alt/oplog/log");
-    let bytes = std::fs::read(&log_path).unwrap();
-    let (mut cursor, mut last) = (5, 5);
-    while cursor < bytes.len() {
-        last = cursor;
-        let length = u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
-        cursor += 4 + length + 8;
-    }
     // Crash fixture: index replacement survived, its operation completion and
     // whole-command receipt did not. Keep the request intent intact.
-    std::fs::write(&log_path, &bytes[..last]).unwrap();
+    super::crash_fixture::remove_final_log_frame(root.path());
     let directory = root.path().join(".alt/requests").join(ID);
     std::fs::remove_file(directory.join("completed.json")).unwrap();
     std::fs::remove_file(directory.join("response.bin")).unwrap();
@@ -396,4 +388,55 @@ fn recovering_a_suboperation_does_not_complete_the_interrupted_request() {
         75,
         "result_unknown",
     );
+}
+
+/// Commands that keep a journal of their own work on no repository: each
+/// refuses a workspace and a request id before it does anything.
+#[test]
+fn a_command_with_its_own_journal_refuses_repository_selectors() {
+    let directory = alt_os::temp::tempdir().unwrap();
+    let cases: [(&[&str], &str); 3] = [
+        (
+            &["runner", "probe", "--bindings", "b", "--environment", "e"],
+            "runner uses its snapshot nonce",
+        ),
+        (
+            &[
+                "auth",
+                "delegate",
+                "--credential-file",
+                "c",
+                "--agent-file",
+                "a",
+                "--resume",
+            ],
+            "auth uses a private login journal",
+        ),
+        (
+            &[
+                "portable",
+                "export",
+                "--credential-file",
+                "c",
+                "--journal",
+                "j",
+                "--repository",
+                "r",
+                "--output",
+                "o",
+            ],
+            "portable transfer uses its private journal",
+        ),
+    ];
+    for (args, said) in cases {
+        for selector in [["--workspace", "other"], ["--request-id", ID]] {
+            let refused = run(directory.path(), &[&selector[..], args].concat(), false);
+            let stderr = String::from_utf8_lossy(&refused.stderr);
+            assert!(!refused.status.success(), "{args:?}");
+            assert!(stderr.contains(said), "{args:?} {selector:?}: {stderr}");
+            assert!(refused.stdout.is_empty(), "{args:?}");
+        }
+    }
+    // nothing was created for any of them
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
 }

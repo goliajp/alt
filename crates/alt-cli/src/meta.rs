@@ -16,6 +16,9 @@
 //! decision: chose Result over Option to match the parser
 //! ```
 
+mod lookup;
+pub use lookup::Notes;
+
 use alt_bytes::BString;
 use alt_git_codec::{EntryMode, HashAlgo, ObjectId, ObjectKind, Tree, TreeEntry};
 
@@ -191,27 +194,7 @@ pub type Write<'a> = dyn FnMut(ObjectKind, &[u8]) -> WriteResult + 'a;
 
 /// The note for `target` in the notes commit `notes`, flat or fanned out.
 pub fn find(read: &Read, algo: HashAlgo, notes: ObjectId, target: ObjectId) -> Res<Option<Meta>> {
-    let root = commit_tree(read, notes)?;
-    let hex = target.to_string();
-    let tree = tree_at(read, algo, root)?;
-    let blob = match tree.entries.iter().find(|e| e.name == hex.as_bytes()) {
-        Some(e) => Some(e.oid),
-        None => match tree.entries.iter().find(|e| e.name == hex.as_bytes()[..2]) {
-            Some(dir) => tree_at(read, algo, dir.oid)?
-                .entries
-                .into_iter()
-                .find(|e| e.name == hex.as_bytes()[2..])
-                .map(|e| e.oid),
-            None => None,
-        },
-    };
-    match blob {
-        Some(b) => {
-            let (_, data) = read(b)?.ok_or("note blob missing from store")?;
-            Ok(Some(Meta::parse(&String::from_utf8_lossy(&data))))
-        }
-        None => Ok(None),
-    }
+    Notes::open(read, algo, notes)?.find(read, target)
 }
 
 /// Writes `meta` for `target` on top of the notes commit `parent` (none for

@@ -1,32 +1,85 @@
 //! Direct and daemon commands share parsing, failures, and durable receipts.
+//!
+//! The C runtime calls `main` directly. The standard library's own start-up
+//! finds the main thread's stack guard by reading `/proc/self/maps` and
+//! probes the standard descriptors, about twenty system calls on every
+//! invocation; what a command relies on (a closed pipe as a write error, a
+//! report when the stack overflows, `/dev/null` on a standard descriptor
+//! that was closed) is set up here in five.
+#![cfg_attr(not(test), no_main)]
+
+// the unwinder is linked in rather than loaded: one shared library fewer
+// to map and bind at every start
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[link(name = "gcc_eh", kind = "static")]
+unsafe extern "C" {}
+
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
 use alt_cli::execution::Execution;
 use alt_cli::machine::{self, Failure};
-use alt_cli::native::{self, Identity, Store};
+use alt_cli::native::pathspec::Place;
+use alt_cli::native::{self, Identity};
 use alt_repo::Repository;
 use std::io::Write;
-use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let response = run();
-    let delivered = std::io::stdout()
-        .lock()
-        .write_all(&response.stdout)
-        .and_then(|()| std::io::stderr().lock().write_all(&response.stderr));
-    ExitCode::from(if delivered.is_ok() {
+#[cfg(not(test))]
+#[unsafe(no_mangle)]
+pub extern "C" fn main(
+    _argc: std::ffi::c_int,
+    _argv: *const *const std::ffi::c_char,
+) -> std::ffi::c_int {
+    // before anything is opened: a file must never become standard output
+    alt_os::stdio::fill_closed();
+    alt_os::heap::keep_freed_memory();
+    // a closed output pipe is reported as a failed write, not a signal
+    alt_os::sys::ignore_signal(alt_os::sys::SIGPIPE);
+    alt_os::stack::report_overflow();
+    // a panic leaves with the status the standard runtime gives it, and
+    // with whatever was printed before it
+    let Ok(response) = std::panic::catch_unwind(run) else {
+        let _ = std::io::stdout().flush();
+        return 101;
+    };
+    deliver(&response).into()
+}
+
+/// The test harness brings its own entry point.
+#[cfg(test)]
+fn main() -> std::process::ExitCode {
+    deliver(&run()).into()
+}
+
+/// Writes a command's output and gives its exit status.
+fn deliver(response: &Response) -> u8 {
+    // nothing flushes standard output after the C `main` returns
+    let delivered = (|| {
+        let mut out = std::io::stdout().lock();
+        out.write_all(&response.stdout)?;
+        out.flush()?;
+        std::io::stderr().lock().write_all(&response.stderr)
+    })();
+    if delivered.is_ok() {
         response.exit_code
     } else {
         75
-    })
+    }
 }
 
 fn run() -> Response {
+    let response = native::tell_left_out(attempt());
+    alt_cli::past_damage::report(response)
+}
+
+fn attempt() -> Response {
     let mut args = std::env::args_os().collect::<Vec<_>>();
     let mut parsed = match machine::parse(args.clone()) {
         Ok(parsed) => parsed,
         Err(response) => return response,
     };
+    if let Err(refused) = alt_cli::past_damage::admit(&parsed.cli.command) {
+        return refused.response(parsed.json, None);
+    }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(error) => return machine::from_error(&error, false).response(parsed.json, None),
@@ -37,50 +90,25 @@ fn run() -> Response {
         *error.details = alt_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
         return error.response(parsed.json, parsed.cli.request_id.as_deref());
     }
-    if let Command::Runner { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("runner uses its snapshot nonce; repository request/workspace selectors are not supported")
-                .response(parsed.json, parsed.cli.request_id.as_deref());
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::runner::run(op, &mut stdout) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
+    let own: Option<(&str, OwnRun)> = match &parsed.cli.command {
+        Command::Runner { op, .. } => Some((
+            "runner uses its snapshot nonce; repository request/workspace selectors are not supported",
+            &|out| alt_cli::runner::run(op, out),
+        )),
+        Command::Auth { op, .. } => Some((
+            "auth uses a private login journal; repository request/workspace selectors are not supported",
+            &|out| alt_cli::auth::run(op, out, &mut std::io::stderr().lock()),
+        )),
+        Command::Portable { op, .. } => Some((
+            "portable transfer uses its private journal; repository request/workspace selectors are not supported",
+            &|out| alt_cli::portable::run(op, out),
+        )),
+        _ => None,
+    };
+    if let Some((refused, run)) = own {
+        return outside_repository(&parsed, refused, run);
     }
-    if let Command::Auth { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("auth uses a private login journal; repository request/workspace selectors are not supported").response(parsed.json,None);
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::auth::run(op, &mut stdout, &mut std::io::stderr().lock()) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
-    }
-    if let Command::Portable { op, .. } = &parsed.cli.command {
-        if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-            return Failure::usage("portable transfer uses its private journal; repository request/workspace selectors are not supported").response(parsed.json,None);
-        }
-        let mut stdout = Vec::new();
-        return match alt_cli::portable::run(op, &mut stdout) {
-            Ok(()) => Response {
-                exit_code: 0,
-                stdout,
-                stderr: Vec::new(),
-            },
-            Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-        };
-    }
-    let identity = Identity::from_env();
+    let (forwarded, identity) = Identity::of_process();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
     if native_write {
@@ -113,22 +141,22 @@ fn run() -> Response {
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&parsed.cli.command)
         && !alt_cli::client::disabled()
-        && cwd.to_str().is_some()
         && let Ok((alt_dir, _)) = native::resolve_workspace(&cwd, parsed.cli.workspace.as_deref())
     {
         use alt_cli::client::Outcome;
-        let argv = args
-            .iter()
-            .skip(1)
-            .map(|s| s.to_str().expect("validated arguments").to_owned())
-            .collect::<Vec<_>>();
+        let words = args.iter().skip(1);
+        let mut request = alt_cli::daemon::Request {
+            args: (words.map(|s| s.to_str().expect("validated arguments").to_owned())).collect(),
+            cwd: cwd.clone(),
+            env: forwarded,
+            id: None,
+        };
         let outcome = if native_write {
-            let id =
-                alt_cli::request::parse_id(parsed.cli.request_id.as_deref().expect("write id"))
-                    .expect("validated id");
-            alt_cli::client::serve_write(&alt_dir, &argv, id)
+            let id = parsed.cli.request_id.as_deref().expect("write id");
+            request.id = Some(alt_cli::request::parse_id(id).expect("validated id"));
+            alt_cli::client::serve_write(&alt_dir, &request)
         } else {
-            alt_cli::client::try_serve(&alt_dir, &argv)
+            alt_cli::client::try_serve(&alt_dir, &request)
         };
         match outcome {
             Outcome::Served(response) => {
@@ -160,36 +188,7 @@ fn run() -> Response {
         Err(response) => return response,
     };
     if cli::is_native(&execution.parsed.cli.command) {
-        let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
-            let (dir, coord) =
-                native::resolve_workspace(&cwd, execution.parsed.cli.workspace.as_deref())?;
-            let store = Store::open(dir.clone())?;
-            let repo = Repository::open_alt(dir, Some(coord.root().to_owned()))?;
-            Ok((store, repo))
-        })();
-        let (mut store, repo) = match opened {
-            Ok(pair) => pair,
-            Err(error) => return execution.failure(error.as_ref()),
-        };
-        let (response, operations) = execution.on_store(&mut store, &repo);
-        let barrier = store
-            .odb_mut()
-            .flush_pending()
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-            .and_then(|()| {
-                if execution.writing {
-                    store.sink()?.fsync_all()
-                } else {
-                    Ok(())
-                }
-            });
-        if let Err(error) = barrier {
-            return Failure::unknown(format!("durability: {error}")).response(
-                execution.parsed.json,
-                execution.parsed.cli.request_id.as_deref(),
-            );
-        }
-        return execution.publish(response, operations);
+        return on_native_store(execution, &cwd);
     }
     let capture = alt_cli::diagnostics::Capture::start(execution.parsed.json);
     let mut out = Vec::new();
@@ -220,19 +219,102 @@ fn run() -> Response {
             Command::Ci {
                 op: cli::CiOp::Validate { paths },
                 json,
-            } => return cli::ci_validate(&cwd, paths, *json, &mut out),
+            } => return alt_cli::ci_cmd::ci_validate(&cwd, paths, *json, &mut out),
             command => {
                 let named = execution.parsed.cli.workspace.as_deref();
-                let repo = match native::resolve_workspace(&cwd, named) {
-                    Ok((dir, coord)) => Repository::open_alt(dir, Some(coord.root().to_owned()))?,
+                let (repo, at) = match native::resolve_workspace(&cwd, named) {
+                    Ok((dir, coord)) => (
+                        Repository::open_alt(dir, Some(coord.root().to_owned()))?,
+                        Place::at(coord),
+                    ),
                     Err(error) if named.is_some() => return Err(error),
-                    Err(_) => Repository::discover(&cwd)?,
+                    Err(_) => {
+                        let repo = Repository::discover(&cwd)?;
+                        let at = Place::in_git(&repo, &cwd)?;
+                        (repo, at)
+                    }
                 };
-                let at = native::pathspec::Place::of(&repo, &cwd, named)?;
+                let repo = native::view_for(repo, command);
                 cli::run_git(&repo, command, &at, &mut out)?;
+                if !execution.writing {
+                    leave_to_exit(repo);
+                }
             }
         }
         Ok(0)
     })();
-    execution.finish(result, out, capture.finish(), &[])
+    let response = execution.finish(result, out, capture.finish(), &[]);
+    if !execution.writing && response.exit_code == 0 {
+        leave_to_exit(execution);
+    }
+    response
+}
+
+/// A command that works on no repository: it writes what it prints.
+type OwnRun<'a> = &'a dyn Fn(&mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>>;
+
+/// Runs a command that keeps a journal of its own and works on no
+/// repository: it takes neither a request id nor a workspace.
+fn outside_repository(parsed: &machine::Parsed, refused: &str, run: OwnRun) -> Response {
+    if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
+        // a runner's refusal names the request it was given
+        let id = match &parsed.cli.command {
+            Command::Runner { .. } => parsed.cli.request_id.as_deref(),
+            _ => None,
+        };
+        return Failure::usage(refused).response(parsed.json, id);
+    }
+    let mut stdout = Vec::new();
+    match run(&mut stdout) {
+        Ok(()) => Response {
+            exit_code: 0,
+            stdout,
+            stderr: Vec::new(),
+        },
+        Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
+    }
+}
+
+/// Leaves what a command that only read holds for the exit of the process
+/// to take down, which follows as soon as the answer is written: closing
+/// the files, unmapping and freeing one by one is work the exit does at
+/// once. Not for a handle that may have appended to a log, which syncs it
+/// when dropped: a [`Repository`] has no way to append, and an
+/// [`Execution`] of a command that does not write holds no file.
+fn leave_to_exit<T>(held: T) {
+    std::mem::forget(held);
+}
+
+/// Runs a command of the native store in this process: opens the store,
+/// runs the command, and publishes its result once what it wrote is synced.
+fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
+    let opened = (|| -> Result<_, Box<dyn std::error::Error>> {
+        let (dir, coord) =
+            native::resolve_workspace(cwd, execution.parsed.cli.workspace.as_deref())?;
+        native::open_for_command(&execution.parsed.cli.command, dir, coord.root())
+    })();
+    let (mut store, repo) = match opened {
+        Ok(pair) => pair,
+        Err(error) => return execution.failure(error.as_ref()),
+    };
+    let (response, operations) = execution.on_store(&mut store, &repo);
+    let barrier = store
+        .odb_mut()
+        .flush_pending()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        .and_then(|()| {
+            if execution.writing {
+                store.sink()?.fsync_all()
+            } else {
+                Ok(())
+            }
+        });
+    if let Err(error) = barrier {
+        let causes = machine::causes(error.as_ref());
+        return Failure::unknown(format!("durability: {causes}")).response(
+            execution.parsed.json,
+            execution.parsed.cli.request_id.as_deref(),
+        );
+    }
+    execution.publish(response, operations)
 }

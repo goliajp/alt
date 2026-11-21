@@ -134,7 +134,7 @@ fn corpus_roundtrip_l1_fidelity() {
         }
         repos += 1;
         let repo = Repository::discover(&repo_dir).unwrap();
-        let algo = repo.algo();
+        let algo = repo.algo().unwrap();
 
         let alt_root = alt_os::temp::tempdir().unwrap();
         let alt_dir = alt_root.path().join(".alt");
@@ -150,7 +150,7 @@ fn corpus_roundtrip_l1_fidelity() {
 
         // ① object set: re-hash every exported object and require the
         // exported set to equal the store's set and the source's set
-        let store_len = NativeOdb::open(&alt_dir).unwrap().len();
+        let store_len = NativeOdb::open(&alt_dir).unwrap().len().unwrap();
         let exported = exported_oids(&target, algo);
         assert_eq!(
             exported.len(),

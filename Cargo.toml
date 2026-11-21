@@ -53,6 +53,7 @@ alt-flow = { path = "crates/alt-flow" }
 alt-git-refs = { path = "crates/alt-git-refs" }
 alt-lfs = { path = "crates/alt-lfs" }
 alt-import = { path = "crates/alt-import" }
+alt-marker = { path = "crates/alt-marker" }
 alt-merge = { path = "crates/alt-merge" }
 alt-odb = { path = "crates/alt-odb" }
 alt-oplog = { path = "crates/alt-oplog" }
@@ -65,6 +66,7 @@ alt-prism-png = { path = "crates/alt-prism-png" }
 alt-prism-store = { path = "crates/alt-prism-store" }
 alt-prism-zip = { path = "crates/alt-prism-zip" }
 alt-refs = { path = "crates/alt-refs" }
+alt-regex = { path = "crates/alt-regex" }
 alt-repo = { path = "crates/alt-repo" }
 alt-sign = { path = "crates/alt-sign" }
 alt-treediff = { path = "crates/alt-treediff" }
@@ -91,6 +93,9 @@ serde_json = "1"
 # line tables only: backtraces keep file and line, and full DWARF is most of
 # the size of target/debug
 debug = 1
+
+[profile.dev.package.alt-crypto]
+opt-level = 3
 
 [profile.release]
 # optimized as one unit across crates

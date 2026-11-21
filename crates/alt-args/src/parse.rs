@@ -4,7 +4,7 @@ use crate::error::{Error, ErrorKind};
 use crate::level::{Level, Step};
 use crate::matches::{Matched, Matches};
 use crate::scope::Scope;
-use crate::spec::{Command, Item};
+use crate::spec::Command;
 use crate::{help, validate};
 
 /// `help [COMMAND]...`: the help of the named command.
@@ -12,7 +12,7 @@ fn help_subcommand(scope: &Scope, names: &[String]) -> Error {
     let Some((name, rest)) = names.split_first() else {
         return Error::new(ErrorKind::Help, help::render(scope));
     };
-    match scope.command.subcommands.iter().find(|c| c.name == name) {
+    match scope.command.subcommand(name) {
         Some(command) => help_subcommand(&scope.child(command), rest),
         None if name == "help" && scope.command.help_subcommand => {
             Error::new(ErrorKind::Help, help::of_help(scope))
@@ -37,34 +37,29 @@ fn level(scope: &Scope, words: &[String], at: &mut usize) -> Result<Matches, Err
         }
     }
     level.settle()?;
-    if subcommand.is_none() && !scope.subcommand_names().is_empty() {
+    if subcommand.is_none() && scope.has_subcommands() {
         return Err(match level.given().is_empty() {
             true => Error::new(ErrorKind::Usage, help::render(scope)),
             false => Error::missing_subcommand(scope),
         });
     }
     validate::finish(scope, &mut level.entries)?;
+    let own = scope.slots[..scope.own].iter();
     Ok(Matches {
-        command: scope.command,
+        name: scope.command.name,
+        globals: own
+            .filter(|slot| slot.arg.global)
+            .map(|slot| slot.arg.id)
+            .collect(),
         entries: level.entries,
         subcommand,
     })
 }
 
-fn global_ids(items: &'static [Item], ids: &mut Vec<&'static str>) {
-    for item in items {
-        match item {
-            Item::Arg(arg) if arg.global => ids.push(arg.id),
-            Item::Group(_, items) => global_ids(items, ids),
-            _ => {}
-        }
-    }
-}
-
 /// Gives every level the same value for each global argument: the one
 /// given deepest on the command line, else the default.
 fn spread(matches: &mut Matches, ids: &mut Vec<&'static str>, values: &mut Vec<Matched>) {
-    global_ids(matches.command.items, ids);
+    ids.extend(&matches.globals);
     for id in ids.iter() {
         let Some(own) = matches.entry(id) else {
             continue;
@@ -84,10 +79,7 @@ fn spread(matches: &mut Matches, ids: &mut Vec<&'static str>, values: &mut Vec<M
 }
 
 /// Parses `words`, the first of which is the program path.
-pub fn parse(
-    command: &'static Command,
-    words: impl IntoIterator<Item = String>,
-) -> Result<Matches, Error> {
+pub fn parse(command: Command, words: impl IntoIterator<Item = String>) -> Result<Matches, Error> {
     let words: Vec<String> = words.into_iter().collect();
     let program = words.first().and_then(|path| {
         let name = std::path::Path::new(path).file_name()?.to_str()?;

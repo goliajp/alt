@@ -1,0 +1,170 @@
+//! Reading a stretch of the log as the tail: which bad records are a
+//! crashed writer's unfinished append, and which are corruption.
+
+use super::RecLog;
+use crate::StoreError;
+use crate::pack::read_exact_at;
+
+/// What the end of a stretch of log being read can be.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum End {
+    /// the file's end, where a writer may have died mid-append: such a
+    /// record is passed over, and cut off the file when `cut`
+    MaybeTorn { cut: bool },
+    /// every record was written whole: a bad one anywhere is corruption
+    Whole,
+}
+
+impl RecLog {
+    /// How many leading bytes of `data`, read at `from`, are intact
+    /// records. The first record that does not read ends them when it is an
+    /// unfinished append (see [`crate::Tail`]); otherwise it is corruption.
+    fn intact_prefix(&self, data: &[u8], from: u64, end: End) -> Result<usize, StoreError> {
+        let rec_len = self.layout.rec_len;
+        let mut at = 0usize;
+        while let Some(rec) = data.get(at..at + rec_len) {
+            if !self.layout.intact(rec) {
+                break;
+            }
+            at += rec_len;
+        }
+        if at == data.len() {
+            return Ok(at);
+        }
+        // no whole record fits in what follows the one that does not read
+        let last = data.len() - at <= rec_len;
+        let (len, bad) = (from + data.len() as u64, from + at as u64);
+        if end == End::Whole || !self.policy.unfinished(0, len, bad, last) {
+            return Err(StoreError::Format(self.layout.corrupt));
+        }
+        Ok(at)
+    }
+
+    /// Whether this handle goes on past a damaged record (see
+    /// [`crate::reading_past_damage`]): not one that holds the writers'
+    /// lock.
+    fn reads_past_damage(&self) -> bool {
+        !self.policy.repairs() && crate::reading_past_damage()
+    }
+
+    /// Takes out of `data`, read at `from`, every record that does not
+    /// read, and notes each. What the handle then holds is no stretch of
+    /// the file any more.
+    fn keep_intact(&self, data: &mut Vec<u8>, from: u64) {
+        let rec_len = self.layout.rec_len;
+        let file = self.idx_dir.with_extension("");
+        let mut kept = Vec::with_capacity(data.len());
+        for (n, rec) in data.chunks(rec_len).enumerate() {
+            if rec.len() == rec_len && self.layout.intact(rec) {
+                kept.extend_from_slice(rec);
+            } else {
+                let at = from + (n * rec_len) as u64;
+                crate::past::note(&file, at, at + rec.len() as u64);
+            }
+        }
+        *data = kept;
+    }
+
+    /// Reads and verifies the records in `[from, size)` up to an unfinished
+    /// end, which is cut off the file when `end` says so. Nothing is cut
+    /// when a record is corrupt.
+    pub(super) fn read_records(
+        &self,
+        from: u64,
+        size: u64,
+        end: End,
+    ) -> Result<Vec<u8>, StoreError> {
+        let mut data = vec![0u8; (size - from) as usize];
+        read_exact_at(&self.file, &mut data, from)?;
+        let intact = match self.intact_prefix(&data, from, end) {
+            Err(StoreError::Format(_)) if end != End::Whole && self.reads_past_damage() => {
+                self.keep_intact(&mut data, from);
+                data.len()
+            }
+            intact => intact?,
+        };
+        if intact < data.len() {
+            if end == (End::MaybeTorn { cut: true }) {
+                self.policy.cut(0, from + intact as u64)?;
+                self.file.set_len(from + intact as u64)?;
+                self.file.sync_all()?;
+            }
+            data.truncate(intact);
+        }
+        Ok(data)
+    }
+
+    /// Reads what a [`Self::rewind`] to `target_len` keeps past the runs it
+    /// keeps, changing nothing. These records were all written whole: a
+    /// bad one is corruption and none is cut.
+    pub fn check_rewind(&self, target_len: u64) -> Result<Vec<u8>, StoreError> {
+        let drop = self.len.checked_sub(target_len);
+        if target_len < super::HEADER_LEN as u64
+            || !drop.is_some_and(|n| n.is_multiple_of(self.layout.rec_len as u64))
+        {
+            return Err(StoreError::Format(self.layout.bad_rewind));
+        }
+        self.read_records(self.runs.covered_up_to(target_len), target_len, End::Whole)
+    }
+
+    /// Cuts the log back to `target_len` (an earlier `appended_len`) and
+    /// fsyncs the cut. Index runs reaching past the target go first. A
+    /// damaged record in what stays fails the rewind before anything
+    /// changes: the runs, the file and this handle are as they were.
+    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
+        let kept = self.check_rewind(target_len)?;
+        self.runs.truncate(target_len)?;
+        self.file.set_len(target_len)?;
+        self.file.sync_all()?;
+        self.set_tail(&kept);
+        self.unfinished = false;
+        Ok(())
+    }
+
+    /// Visits the records from `from` (a record boundary) on, each with
+    /// where it begins, in append order, verifying each.
+    pub fn each_from<E: From<StoreError>>(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, &[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let rec_len = self.layout.rec_len;
+        let tail_from = self.len - self.tail.len() as u64;
+        let mut buf = Vec::new();
+        let mut at = from;
+        while at < tail_from {
+            buf.resize(super::SCAN_BYTES / rec_len * rec_len, 0);
+            let take = ((tail_from - at) as usize).min(buf.len());
+            read_exact_at(&self.file, &mut buf[..take], at).map_err(StoreError::from)?;
+            for rec in buf[..take].chunks_exact(rec_len) {
+                if !self.layout.intact(rec) {
+                    return Err(StoreError::Format(self.layout.corrupt).into());
+                }
+                each(at, rec)?;
+                at += rec_len as u64;
+            }
+        }
+        for rec in self.tail[(at - tail_from) as usize..].chunks_exact(rec_len) {
+            each(at, rec)?;
+            at += rec_len as u64;
+        }
+        Ok(())
+    }
+
+    /// Makes `records` — the log from where the runs stop — the tail.
+    pub(super) fn set_tail(&mut self, records: &[u8]) {
+        self.cache.clear();
+        self.tail.clear();
+        self.tail_keys.clear();
+        self.tail_second.clear();
+        self.len = self.runs.covered() + records.len() as u64;
+        self.push_tail(records);
+    }
+
+    /// Reads and verifies `[covered, size)` as the tail.
+    pub(super) fn load_tail(&mut self, size: u64, end: End) -> Result<(), StoreError> {
+        let data = self.read_records(self.runs.covered(), size, end)?;
+        self.set_tail(&data);
+        Ok(())
+    }
+}

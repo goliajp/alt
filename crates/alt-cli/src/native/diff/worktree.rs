@@ -17,7 +17,8 @@ impl NativeRepo<'_> {
     /// are not in `alt diff`'s output, as they are not in git's.
     pub(super) fn worktree_sides(&self) -> Res<(Vec<WorkEntry>, Vec<WorkEntry>, Worktree)> {
         let mut snapshot = self.worktree_snapshot()?;
-        let delta = self.scan_delta(&mut snapshot, alt_worktree::Untracked::No)?;
+        let (delta, _, scanned) =
+            self.scan_delta_within(&mut snapshot, alt_worktree::Untracked::No, &[])?;
         self.keep_snapshot(&snapshot);
         let mut old: Vec<WorkEntry> = delta
             .changed
@@ -32,7 +33,11 @@ impl NativeRepo<'_> {
             })
             .collect();
         old.sort_by(|a, b| a.path.cmp(&b.path));
-        let attrs = self.converter()?;
+        // the converter the scan read with shows the files as well
+        let attrs = match scanned {
+            Some(attrs) => attrs,
+            None => self.converter()?,
+        };
         Ok((old, delta.changed, Worktree { snapshot, attrs }))
     }
 

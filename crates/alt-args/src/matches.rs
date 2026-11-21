@@ -1,7 +1,5 @@
 //! What a command line said, before it is read into typed fields.
 
-use crate::spec::Command;
-
 /// The values of one argument or the members of one group.
 #[derive(Clone)]
 pub struct Matched {
@@ -15,7 +13,9 @@ pub struct Matched {
 
 /// One command level; the chosen subcommand is the next level.
 pub struct Matches {
-    pub(crate) command: &'static Command,
+    pub(crate) name: &'static str,
+    /// the ids of the arguments this level declares for every level below
+    pub(crate) globals: Vec<&'static str>,
     pub(crate) entries: Vec<Matched>,
     pub(crate) subcommand: Option<Box<Matches>>,
 }
@@ -24,7 +24,7 @@ const CHECKED: &str = "values are checked while parsing";
 
 impl Matches {
     pub fn name(&self) -> &'static str {
-        self.command.name
+        self.name
     }
 
     pub fn entries(&self) -> &[Matched] {

@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 /// `alt` and `git` are each run with the same home and the same
 /// configuration directory, both inside `home`.
 fn alt(repo: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")

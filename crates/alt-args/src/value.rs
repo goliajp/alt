@@ -3,16 +3,30 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use crate::settings::Words;
+
 pub type Check = fn(&str) -> Result<(), String>;
 
 fn check<T: Value>(text: &str) -> Result<(), String> {
     T::parse(text).map(drop)
 }
 
+/// Whether `text` is a value of the type, with the reason when the type
+/// has one. The derive macros check the values of an argument by it.
+pub fn check_as<T: Value>(text: &str) -> Result<(), String> {
+    if !T::POSSIBLE.is_empty() && !Words(T::POSSIBLE).contains(text) {
+        return Err(String::new());
+    }
+    match T::CHECK {
+        Some(check) => check(text),
+        None => Ok(()),
+    }
+}
+
 /// A type an argument value can be read as.
 pub trait Value: Sized {
-    /// the only accepted spellings when not empty
-    const POSSIBLE: &'static [&'static str] = &[];
+    /// the only accepted spellings when not empty, a line each
+    const POSSIBLE: &'static str = "";
     /// run on each value while parsing; `None` when `parse` cannot fail
     const CHECK: Option<Check> = Some(check::<Self>);
 
@@ -36,7 +50,7 @@ impl Value for PathBuf {
 }
 
 impl Value for bool {
-    const POSSIBLE: &'static [&'static str] = &["true", "false"];
+    const POSSIBLE: &'static str = "true\nfalse";
     const CHECK: Option<Check> = None;
 
     fn parse(text: &str) -> Result<Self, String> {

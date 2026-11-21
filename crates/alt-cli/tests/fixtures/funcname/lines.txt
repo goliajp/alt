@@ -1,0 +1,140 @@
+static int helper(int a)
+int main(void)
+	return b;
+out:
+public:
+  indented_call(void);
+struct point {
+class Shape : public Base {
+void Shape::draw() const
+template <typename T> T max(T a, T b)
+::global_function(int x)
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+namespace alt {
+    public static void main(String[] args) {
+    private final Map<String, List<Integer>> index = new HashMap<>();
+public class Greeter extends Base implements Runnable {
+    @Override
+    protected int compute(int a, int b) throws IOException {
+        return new Foo();
+    fun greet(name: String): String {
+class Person(val name: String) {
+    internal suspend fun load(): Result<Unit> =
+def run(self):
+    def nested(a, b=2):
+class Thing(Base):
+    async def fetch(url):
+  @decorator
+func (s *Server) Handle(w http.ResponseWriter, r *http.Request) {
+type Config struct {
+func main() {
+	var x int
+pub fn compile(node: &Node) -> Result<Program, Error> {
+    pub(crate) unsafe fn raw(ptr: *const u8) -> usize {
+impl<'a> Parser<'a> {
+struct Compiler {
+    async fn serve(&self) {
+macro_rules! check {
+trait Sections {
+mod tests {
+function greet($name) {
+    public function handle(Request $request): Response
+final class Controller extends Base
+    abstract protected function name();
+sub process {
+package My::Module;
+=head1 NAME
+BEGIN {
+    my ($self, %args) = @_;
+  def initialize(name)
+class Greeter < Base
+module Util
+    describe "something" do
+defmodule MyApp.Worker do
+  def start_link(opts) do
+  defp helper(x), do: x
+  test "works" do
+      SUBROUTINE FOO(X, Y)
+      subroutine bar(a)
+C     a comment line
+      MODULE PROCEDURE baz
+      program main
+      INTEGER FUNCTION ADD(A, B)
+      end subroutine bar
+procedure Main;
+function Add(a, b: Integer): Integer;
+  PROCEDURE Hidden is
+   package body Stack is
+   with Ada.Text_IO;
+   function Top return Integer renames Peek;
+   task type Worker is
+unit Sample;
+type TPoint = record
+implementation
+function result = compute(x, y)
+%% Section title
+classdef Shape < handle
+    methods (Access = public)
+- (void)viewDidLoad
++ (instancetype)sharedInstance;
+@interface AppDelegate : NSObject
+@implementation AppDelegate
+    public async Task<int> RunAsync(string[] args)
+    private static readonly int Max = 10;
+namespace Demo.App
+    internal sealed class Worker : IDisposable
+        get { return value; }
+.header .title {
+body {
+  color: red;
+@media screen and (max-width: 600px) {
+#main > li:first-child {
+<h1>Title</h1>
+<H2 class="x">Section</H2>
+<div>
+# Heading one
+## Heading two
+###### Deep heading
+plain paragraph
+\section{Introduction}
+\subsection*{Details}
+\chapter{One}
+\subsubsection{More}
+@article{key2020,
+@Book{other,
+[section]
+[section "sub"]
+key = value
+	/* comment */
+&node {
+	label: sub@0 {
+/ {
+	compatible = "x";
+(define (square x) (* x x))
+(define-syntax swap!
+  (let loop ((i 0))
+(library (mylib)
+foo() {
+function bar {
+function baz() {
+  local x=1
+my_func ()
+	make_thing <- function(a, b) {
+other = function(x) x + 1
+INT. HOUSE - DAY
+EXT. STREET - NIGHT
+.OPENING TITLES
+int.
+x
+
+	 
+    public void Méthode(int a)
+def café(self):
+func naïve(größe int) {
+class Ünïcode:
+sub größe {
+static int straße(void)
+# Überschrift
+function déjà_vu() {
+fn 関数(x: u32) -> u32 {
+PROCEDURE ÉTÉ;

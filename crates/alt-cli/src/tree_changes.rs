@@ -42,7 +42,7 @@ fn tree_diff(
         if obj.kind != ObjectKind::Tree {
             return Err(format!("{oid} is not a tree").into());
         }
-        Ok(Tree::parse(&obj.data, repo.algo())?.entries)
+        Ok(Tree::parse(&obj.data, repo.algo()?)?.entries)
     };
 
     let old_entries = match old {
@@ -249,7 +249,7 @@ pub(crate) fn file_at(repo: &Repository, tree: ObjectId, path: &[u8]) -> Res<Opt
         let obj = repo
             .read_object(&current)?
             .ok_or_else(|| format!("tree {current} missing"))?;
-        let Some((mode, oid)) = Tree::find(&obj.data, repo.algo(), part)? else {
+        let Some((mode, oid)) = Tree::find(&obj.data, repo.algo()?, part)? else {
             return Ok(None);
         };
         match (parts.peek().is_some(), mode == 0o040000) {
@@ -285,7 +285,7 @@ pub(crate) fn blob_at(
         if obj.kind != ObjectKind::Tree {
             return Err(format!("{current} is not a tree").into());
         }
-        let tree = Tree::parse(&obj.data, repo.algo())?;
+        let tree = Tree::parse(&obj.data, repo.algo()?)?;
         let entry = tree
             .entries
             .iter()

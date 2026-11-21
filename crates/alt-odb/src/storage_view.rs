@@ -3,7 +3,7 @@
 
 use super::*;
 
-impl NativeOdb {
+impl Odb {
     /// Inspect this blob's physical storage layout for a viewer / audit
     /// tool: tier (0 = verbatim CDC, 1 = prism-decomposed), the prism
     /// id and parts blob list when Tier 1, and a per-leaf-chunk
@@ -15,7 +15,7 @@ impl NativeOdb {
     /// to render the visible answer to `git: 'Binary files differ' /
     /// alt: <here's the physical layout>`.
     pub fn storage_view(&self, oid: &ObjectId) -> Result<Option<StorageView>, OdbError> {
-        let Some(entry) = self.map.by_git(oid) else {
+        let Some(entry) = self.map.by_git(oid)? else {
             return Ok(None);
         };
         let blob_id = entry.alt;
@@ -23,7 +23,7 @@ impl NativeOdb {
         let size = entry.size;
 
         // Tier 1: prism record present in tier1 map.
-        let tier1 = if let Some(record_id) = self.tier1.get(blob_id) {
+        let tier1 = if let Some(record_id) = self.tier1()?.get(blob_id)? {
             let record_bytes = self
                 .blobs
                 .get_unverified(record_id)
@@ -103,7 +103,7 @@ impl NativeOdb {
         let mut seen_blobs: std::collections::HashSet<alt_store::BlobId> =
             std::collections::HashSet::new();
 
-        for entry in self.entries() {
+        for entry in self.entries()? {
             stats.object_count += 1;
             stats.logical_total += entry.size;
             match entry.kind {
@@ -118,7 +118,7 @@ impl NativeOdb {
                 continue;
             }
 
-            let tier1_record_id = self.tier1.get(blob_id);
+            let tier1_record_id = self.tier1()?.get(blob_id)?;
             if let Some(record_id) = tier1_record_id {
                 stats.tier1_count += 1;
                 let record_bytes = self

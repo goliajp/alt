@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -69,7 +69,7 @@ fn alt_add_dot_skips_gitignored_paths_at_root() {
 /// exported, `unset` names are removed, so the developer's own excludes
 /// file never leaks in.
 fn alt_env(repo: &Path, args: &[&str], set: &[(&str, &Path)], unset: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_alt"));
+    let mut cmd = crate::alt_command();
     cmd.current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")

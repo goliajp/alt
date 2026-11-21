@@ -29,7 +29,6 @@ fn open_at(directory: &File, name: &str, flags: sys::c_int) -> io::Result<File> 
     Ok(unsafe { File::from_raw_fd(fd) })
 }
 
-#[test]
 fn flock_excludes_a_second_descriptor() {
     let file = temp::NamedTempFile::new().unwrap();
     let first = file.reopen().unwrap();
@@ -50,7 +49,6 @@ fn flock_excludes_a_second_descriptor() {
     sys::flock(&first, sys::LOCK_EX | sys::LOCK_NB).unwrap();
 }
 
-#[test]
 fn kill_signals_a_child_and_reports_a_missing_process() {
     let mut child = Command::new("sleep").arg("60").spawn().unwrap();
     let pid = child.id() as sys::pid_t;
@@ -71,7 +69,6 @@ extern "C" fn on_continue(_signal: sys::c_int) {
     CONTINUED.store(true, Ordering::SeqCst);
 }
 
-#[test]
 fn signal_installs_a_handler() {
     let handler = on_continue as *const () as sys::sighandler_t;
     // SAFETY: the handler only stores to an atomic, which is signal-safe
@@ -84,13 +81,11 @@ fn signal_installs_a_handler() {
     }
 }
 
-#[test]
 fn geteuid_matches_the_owner_of_a_new_file() {
     let file = temp::NamedTempFile::new().unwrap();
     assert_eq!(sys::geteuid(), file.as_file().metadata().unwrap().uid());
 }
 
-#[test]
 fn gethostname_returns_a_name() {
     let mut name = [0u8; 256];
     // SAFETY: the buffer is valid for writes of its length
@@ -102,7 +97,6 @@ fn gethostname_returns_a_name() {
     assert!(!name.to_bytes().is_empty());
 }
 
-#[test]
 fn clear_errno_resets_the_last_error() {
     // SAFETY: closing an invalid descriptor only fails
     assert_eq!(unsafe { sys::close(-1) }, -1);
@@ -111,7 +105,6 @@ fn clear_errno_resets_the_last_error() {
     assert_eq!(io::Error::last_os_error().raw_os_error(), Some(0));
 }
 
-#[test]
 fn directory_relative_calls_see_files_links_and_directories() {
     let directory = temp::tempdir().unwrap();
     std::fs::write(directory.path().join("file"), b"twelve bytes").unwrap();
@@ -196,7 +189,6 @@ fn directory_relative_calls_see_files_links_and_directories() {
     assert_eq!(names, [".", "..", "file", "inner", "link"]);
 }
 
-#[test]
 fn nonblocking_open_of_a_fifo_returns_at_once() {
     let directory = temp::tempdir().unwrap();
     let path = directory.path().join("fifo");
@@ -212,7 +204,6 @@ fn nonblocking_open_of_a_fifo_returns_at_once() {
         .unwrap();
 }
 
-#[test]
 fn close_on_exec_keeps_the_descriptor_out_of_a_child() {
     let directory = temp::tempdir().unwrap();
     std::fs::write(directory.path().join("file"), b"").unwrap();
@@ -237,7 +228,6 @@ fn close_on_exec_keeps_the_descriptor_out_of_a_child() {
     assert!(listing(inherited.as_raw_fd()));
 }
 
-#[test]
 fn filesystem_statistics_are_filled() {
     let directory = temp::tempdir().unwrap();
     let root = File::open(directory.path()).unwrap();
@@ -282,7 +272,6 @@ fn filesystem_statistics_are_filled() {
     }
 }
 
-#[test]
 fn poll_reports_readable_data() {
     let (mut writer, reader) = std::os::unix::net::UnixStream::pair().unwrap();
     let mut fds = [sys::pollfd {
@@ -298,7 +287,6 @@ fn poll_reports_readable_data() {
     assert_eq!(fds[0].revents & sys::POLLIN, sys::POLLIN);
 }
 
-#[test]
 fn setsockopt_accepts_a_receive_buffer_size() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let size: sys::c_int = 4096;
@@ -317,11 +305,7 @@ fn setsockopt_accepts_a_receive_buffer_size() {
 
 /// Runs in a child process started by `setrlimit_caps_open_files`: lowering
 /// the limit in the test process itself would break the other tests.
-#[test]
-fn setrlimit_child() {
-    if std::env::var_os("ALT_OS_SETRLIMIT_CHILD").is_none() {
-        return;
-    }
+pub fn setrlimit_child() {
     let limit = sys::rlimit {
         rlim_cur: 32,
         rlim_max: 32,
@@ -342,11 +326,9 @@ fn setrlimit_child() {
     println!("limit reached");
 }
 
-#[test]
 fn setrlimit_caps_open_files() {
     let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "sys::setrlimit_child", "--nocapture"])
-        .env("ALT_OS_SETRLIMIT_CHILD", "1")
+        .env(crate::CHILD, "setrlimit")
         .stdin(Stdio::null())
         .output()
         .unwrap();
@@ -357,3 +339,19 @@ fn setrlimit_caps_open_files() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+tests![
+    flock_excludes_a_second_descriptor,
+    kill_signals_a_child_and_reports_a_missing_process,
+    signal_installs_a_handler,
+    geteuid_matches_the_owner_of_a_new_file,
+    gethostname_returns_a_name,
+    clear_errno_resets_the_last_error,
+    directory_relative_calls_see_files_links_and_directories,
+    nonblocking_open_of_a_fifo_returns_at_once,
+    close_on_exec_keeps_the_descriptor_out_of_a_child,
+    filesystem_statistics_are_filled,
+    poll_reports_readable_data,
+    setsockopt_accepts_a_receive_buffer_size,
+    setrlimit_caps_open_files,
+];

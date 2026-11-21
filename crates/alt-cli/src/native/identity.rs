@@ -122,12 +122,23 @@ pub struct Identity {
     pub(super) controlling: Option<String>,
     pub(super) protected_override: bool,
     execution_environment: std::collections::BTreeMap<String, String>,
+    /// what the caller has of the variables the configuration outside
+    /// the repository is found by
+    outer_environment: std::sync::Arc<Vec<(String, String)>>,
 }
 
 impl Identity {
     /// From this process's environment (the `alt` CLI path).
     pub fn from_env() -> Self {
         Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// From the variables of this process a command reads, which are
+    /// taken once and given back for a daemon to be sent them.
+    pub fn of_process() -> (Vec<(String, String)>, Self) {
+        let forwarded = crate::daemon::forwarded_env();
+        let identity = Self::from_map(&forwarded);
+        (forwarded, identity)
     }
 
     /// From a request's forwarded env vars (the daemon path).
@@ -169,7 +180,18 @@ impl Identity {
             .into_iter()
             .filter_map(|key| get(key).map(|value| (key.to_owned(), value)))
             .collect(),
+            outer_environment: crate::git_settings::CALLER_ENV
+                .iter()
+                .filter_map(|key| get(key).map(|value| ((*key).to_owned(), value)))
+                .collect::<Vec<_>>()
+                .into(),
         }
+    }
+
+    /// The caller's variables for the configuration outside the
+    /// repository, to read them by while its command runs.
+    pub fn outer_environment(&self) -> crate::git_settings::Caller {
+        crate::git_settings::Caller::new(std::sync::Arc::clone(&self.outer_environment))
     }
 
     pub fn binding(&self) -> alt_json::Value {

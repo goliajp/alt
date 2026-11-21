@@ -50,6 +50,7 @@ alt-merge.workspace = true
 alt-odb.workspace = true
 alt-oplog.workspace = true
 alt-refs.workspace = true
+alt-regex.workspace = true
 alt-repo.workspace = true
 alt-sign.workspace = true
 alt-treediff.workspace = true

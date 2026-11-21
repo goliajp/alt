@@ -299,7 +299,7 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn rev(&self, r: &str) -> Res<ObjectId> {
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         Ok(repo
             .rev_parse(r)?
             .ok_or_else(|| format!("bad revision '{r}'"))?)

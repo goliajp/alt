@@ -25,10 +25,10 @@ pub(crate) fn open_packs(pack_dir: &Path, algo: HashAlgo) -> Result<Vec<IndexedP
 impl Repository {
     /// Abbreviates object ids against the objects of this store; `None`
     /// for git-backed repos.
-    pub fn abbrev(&self) -> Option<alt_odb::Abbrev<'_>> {
-        match &self.backend {
+    pub fn abbrev(&self) -> Result<Option<alt_odb::Abbrev<'_>>, RepoError> {
+        Ok(match &self.backend {
             Backend::Git { .. } => None,
-            Backend::Alt(alt) => Some(alt.odb.abbrev()),
-        }
+            Backend::Alt(alt) => Some(alt.odb()?.abbrev()?),
+        })
     }
 }

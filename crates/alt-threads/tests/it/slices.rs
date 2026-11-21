@@ -4,7 +4,6 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-#[test]
 fn map_keeps_the_order_of_the_elements() {
     let items: Vec<u32> = (0..100_003).collect();
     for grain in [0, 1, 7, 1000, 1 << 20] {
@@ -20,7 +19,6 @@ fn map_keeps_the_order_of_the_elements() {
     assert!(map(&[] as &[u32], 1, |item| *item).is_empty());
 }
 
-#[test]
 fn map_owned_hands_over_every_element_once() {
     let live = Arc::new(());
     let items: Vec<(usize, Arc<()>)> = (0..10_001).map(|at| (at, live.clone())).collect();
@@ -34,7 +32,6 @@ fn map_owned_hands_over_every_element_once() {
     assert!(map_owned(Vec::<String>::new(), 1, |text| text).is_empty());
 }
 
-#[test]
 fn map_results_with_destructors_are_whole() {
     let items: Vec<usize> = (0..5000).collect();
     let texts = map(&items, 3, |item| format!("item {item}"));
@@ -46,7 +43,6 @@ fn map_results_with_destructors_are_whole() {
     );
 }
 
-#[test]
 fn for_each_visits_every_element_once() {
     let items: Vec<usize> = (0..50_000).collect();
     let visits: Vec<AtomicUsize> = items.iter().map(|_| AtomicUsize::new(0)).collect();
@@ -60,7 +56,6 @@ fn for_each_visits_every_element_once() {
     );
 }
 
-#[test]
 fn any_finds_a_single_match_and_reports_none() {
     let items: Vec<u32> = (0..100_000).collect();
     for wanted in [0, 1, 49_999, 99_999] {
@@ -70,7 +65,6 @@ fn any_finds_a_single_match_and_reports_none() {
     assert!(!any(&[] as &[u32], 1, |_| true));
 }
 
-#[test]
 fn a_panic_in_the_work_reaches_the_caller() {
     let items: Vec<u32> = (0..1000).collect();
     let outcome = std::panic::catch_unwind(|| {
@@ -82,7 +76,6 @@ fn a_panic_in_the_work_reaches_the_caller() {
     assert!(outcome.is_err());
 }
 
-#[test]
 fn try_for_each_returns_a_failure_or_visits_everything() {
     let items: Vec<u32> = (0..100_000).collect();
     let visited = AtomicUsize::new(0);
@@ -101,3 +94,13 @@ fn try_for_each_returns_a_failure_or_visits_everything() {
         assert_eq!(outcome, Err(bad));
     }
 }
+
+tests!(
+    map_keeps_the_order_of_the_elements,
+    map_owned_hands_over_every_element_once,
+    map_results_with_destructors_are_whole,
+    for_each_visits_every_element_once,
+    any_finds_a_single_match_and_reports_none,
+    a_panic_in_the_work_reaches_the_caller,
+    try_for_each_returns_a_failure_or_visits_everything,
+);

@@ -3,7 +3,11 @@
 
 use super::*;
 
+mod index;
+mod prepared;
 mod undo;
+pub(super) use index::ABANDON;
+pub use prepared::{export_git, prepared_blobs};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;
@@ -60,6 +64,8 @@ pub(super) struct IndexIntent {
     inverse_of: Option<String>,
 }
 
+/// The record that closes a prepared index change: its completion, or
+/// its abandonment.
 #[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 struct Completion {
@@ -200,14 +206,7 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
-        if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("invalid recovery snapshot identity".into());
-        }
-        let bytes = std::fs::read(self.store.alt_dir.join("recovery/objects").join(id))?;
-        if hash(&bytes) != id {
-            return Err("corrupt recovery snapshot".into());
-        }
-        Ok(bytes)
+        prepared::read_snapshot_at(&self.store.alt_dir, id)
     }
 
     /// The working-tree state at `path`, as an index change records it. A
@@ -264,54 +263,6 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    fn pending_index(&self, identity: &WorkspaceIdentity) -> Res<Option<(OpId, IndexIntent)>> {
-        let mut completed = std::collections::HashSet::new();
-        for op in self.store.refs.oplog().ops().iter().rev() {
-            match op.payload.first() {
-                Some(&COMPLETE) => {
-                    let done: Completion = decode(&op.payload, COMPLETE)?;
-                    if done.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported recovery completion",
-                        )
-                        .into());
-                    }
-                    completed.insert(done.prepared);
-                }
-                Some(&PREPARE) => {
-                    let intent: IndexIntent = decode(&op.payload, PREPARE)?;
-                    if intent.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported index intent",
-                        )
-                        .into());
-                    }
-                    if intent.workspace == *identity && !completed.contains(&op.id.to_string()) {
-                        return Ok(Some((op.id, intent)));
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(None)
-    }
-
-    pub(super) fn ensure_no_pending_recovery(&self) -> Res<()> {
-        self.ensure_no_pending_checkout()?;
-        if let Some((id, _)) = self.pending_index(&self.workspace_identity()?)? {
-            return Err(crate::machine::Failure::pending(
-                id,
-                format!(
-                    "operation {id} has no durable completion; recovery required (outcome unknown)"
-                ),
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     pub(super) fn write_index_transaction(
         &mut self,
         before: Index,
@@ -322,9 +273,9 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         index_file::ensure_sound(&after)?;
-        let before = canonical_index(before, self.store.algo);
-        let after = canonical_index(after, self.store.algo);
-        if canonical_index(self.index()?, self.store.algo) != before {
+        let before = canonical_index(before, self.store.algo()?);
+        let after = canonical_index(after, self.store.algo()?);
+        if canonical_index(self.index()?, self.store.algo()?) != before {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "index changed while preparing operation",
@@ -371,48 +322,6 @@ impl NativeRepo<'_> {
             .refs
             .record_op(&actor, now_ms(), &encode(COMPLETE, &done)?)?;
         Ok(prepared)
-    }
-
-    pub(super) fn recover_index(&mut self, operation: OpId, intent: IndexIntent) -> Res<()> {
-        if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery workspace instance does not match",
-            )
-            .into());
-        }
-        self.check_guards(&intent.worktree)?;
-        for guard in &intent.worktree {
-            self.ensure_path_allowed(&guard.path)?;
-        }
-        let before = self.read_snapshot(&intent.before)?;
-        let after = self.read_snapshot(&intent.after)?;
-        Index::parse(&before, self.store.algo)?;
-        Index::parse(&after, self.store.algo)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo));
-        if current != intent.before && current != intent.after {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: index matches neither recorded state",
-            )
-            .into());
-        }
-        if current != intent.after {
-            durable_write(&self.index_path, &after)?;
-        }
-        self.store.refs.record_op(
-            &self.id.actor("recover"),
-            now_ms(),
-            &encode(
-                COMPLETE,
-                &Completion {
-                    version: 1,
-                    prepared: operation.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
-        Ok(())
     }
 }
 

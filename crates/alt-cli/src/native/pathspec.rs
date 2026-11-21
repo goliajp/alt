@@ -120,19 +120,27 @@ impl Place {
     /// named workspace that does not resolve is an error.
     pub fn of(repo: &Repository, cwd: &Path, workspace: Option<&str>) -> Res<Place> {
         match super::resolve_workspace(cwd, workspace) {
-            Ok((_, coord)) => Ok(Place {
-                head: coord.head_ref,
-                root: coord.root,
-                prefix: coord.prefix,
-            }),
+            Ok((_, coord)) => Ok(Place::at(coord)),
             Err(e) if workspace.is_some() => Err(e),
-            Err(_) => {
-                let root = repo.work_tree().unwrap_or(cwd).to_owned();
-                let prefix = prefix_of(&root, &cwd.canonicalize()?);
-                let head = "HEAD".to_owned();
-                Ok(Place { head, root, prefix })
-            }
+            Err(_) => Place::in_git(repo, cwd),
         }
+    }
+
+    /// The workspace at `coord`.
+    pub fn at(coord: super::Coord) -> Place {
+        Place {
+            head: coord.head_ref,
+            root: coord.root,
+            prefix: coord.prefix,
+        }
+    }
+
+    /// For a command run in `cwd` of the plain git repository `repo`.
+    pub fn in_git(repo: &Repository, cwd: &Path) -> Res<Place> {
+        let root = repo.work_tree().unwrap_or(cwd).to_owned();
+        let prefix = prefix_of(&root, &cwd.canonicalize()?);
+        let head = "HEAD".to_owned();
+        Ok(Place { head, root, prefix })
     }
 
     /// `HEAD` in a revision (also `HEAD~n`, `HEAD^`, `HEAD:path`) means the
@@ -166,7 +174,13 @@ impl Place {
         let rev = rev.unwrap_or("HEAD");
         let path = self.written(given)?;
         let at = self.at_head(rev);
-        let rules = super::settings::ensure_exclude_files(repo.config(), &self.root, &info);
+        let branch = repo.branch_of(&self.head)?;
+        let settings = crate::git_settings::layered(
+            &*crate::git_settings::repository(repo)?,
+            Some(control),
+            branch,
+        )?;
+        let rules = super::settings::ensure_exclude_files(&settings, &self.root, &info);
         if let Err(ended) = rules {
             let known = |start| crate::tree_changes::blob_at(repo, start, &path).is_ok();
             if repo.rev_parse(&at)?.is_some_and(known) {

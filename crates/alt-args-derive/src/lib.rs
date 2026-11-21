@@ -17,7 +17,7 @@
 //!   `id = "..."`, `visible_alias = "..."`, `value_name = "..."`, `global = true`,
 //!   `default_value = "..."`, `default_value_t = expr`,
 //!   `default_missing_value = "..."`, `required = true`,
-//!   `action = set`, `action = count`, `value_parser = path`, `value_parser = ["a", "b"]`,
+//!   `action = set`, `action = count`, `action = attached`, `value_parser = path`, `value_parser = ["a", "b"]`,
 //!   `conflicts_with = "id"`, `conflicts_with_all = ["id", ...]`,
 //!   `requires = "id"`, `required_unless_present = "id"`,
 //!   `required_unless_present_any = ["id", ...]`, `group = "name"`,
@@ -29,6 +29,7 @@
 //! type a single value that is required unless it has a default.
 
 mod attr;
+mod describe;
 mod field;
 mod generate;
 mod parse;

@@ -25,7 +25,7 @@ use alt_odb::NativeOdb;
 use crate::wire_test_server;
 
 fn alt(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(cwd)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -152,7 +152,7 @@ fn alt_fetch_resolves_corpus_packs_byte_exact() {
         let odb = NativeOdb::open(&alt_dir).unwrap();
         let mut missing = 0;
         for oid in &server_oids {
-            if !odb.contains(oid) {
+            if !odb.contains(oid).unwrap() {
                 missing += 1;
             }
         }

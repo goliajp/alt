@@ -73,3 +73,17 @@ fn letters_already_in_a_cluster_have_appeared() {
     assert!(at("tool commit -aZ").is_empty());
     assert!(at("tool commit -Z").is_empty());
 }
+
+#[test]
+fn a_flag_that_takes_attached_text_ends_its_cluster() {
+    assert_eq!(at("tool answer -q"), ["options: -qC -qh"]);
+    // what would follow the letter is its text
+    assert!(at("tool answer -C").is_empty());
+    assert!(at("tool answer -qC3").is_empty());
+    // and it may be given again
+    assert_eq!(at("tool answer -C3 --"), ["options: --workspace --help"]);
+    assert_eq!(
+        at("tool answer -C3 -q -"),
+        ["options: -C --workspace -h --help", "value word [-]"]
+    );
+}

@@ -13,7 +13,7 @@ fn bindings_match_the_recorded_ones() {
         let args = command.split(' ').map(OsString::from).collect();
         let parsed = alt_cli::machine::parse(args)
             .unwrap_or_else(|r| panic!("{command}: {}", String::from_utf8_lossy(&r.stderr)));
-        let actual = alt_json::to_string(&parsed.normalized).unwrap();
+        let actual = alt_json::to_string(&parsed.normalized()).unwrap();
         assert_eq!(actual, expected, "{command}");
         checked += 1;
     }

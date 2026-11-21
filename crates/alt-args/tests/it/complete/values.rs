@@ -113,17 +113,20 @@ fn a_positional_that_takes_hyphen_values_is_offered_behind_a_dash() {
 fn a_value_carries_the_hint_and_the_accepted_spellings() {
     let hint = |line: &str| {
         let words: Vec<String> = line.split(' ').map(String::from).collect();
-        match complete(Tool::COMMAND, &words, words.len() - 1).as_slice() {
-            [Completion::Value { arg, .. }] => (arg.hint, arg.possible),
+        match complete(Tool::command(), &words, words.len() - 1).as_slice() {
+            [Completion::Value { arg, .. }] => (arg.hint(), arg.possible().to_vec()),
             _ => panic!("{line}"),
         }
     };
-    let none: &[&str] = &[];
-    assert_eq!(hint("tool commit "), (Hint::Path, none));
-    assert_eq!(hint("tool switch "), (Hint::Other("branch"), none));
-    assert_eq!(hint("tool switch main "), (Hint::Dir, none));
-    assert_eq!(hint("tool commit -m "), (Hint::None, none));
-    assert_eq!(hint("tool --workspace "), (Hint::Other("workspace"), none));
-    assert_eq!(hint("tool answer "), (Hint::Unset, none));
-    assert_eq!(hint("tool commit -u"), (Hint::Unset, &["no", "all"][..]));
+    let none = Vec::<&str>::new;
+    assert_eq!(hint("tool commit "), (Hint::Path, none()));
+    assert_eq!(hint("tool switch "), (Hint::Other("branch"), none()));
+    assert_eq!(hint("tool switch main "), (Hint::Dir, none()));
+    assert_eq!(hint("tool commit -m "), (Hint::None, none()));
+    assert_eq!(
+        hint("tool --workspace "),
+        (Hint::Other("workspace"), none())
+    );
+    assert_eq!(hint("tool answer "), (Hint::Unset, none()));
+    assert_eq!(hint("tool commit -u"), (Hint::Unset, vec!["no", "all"]));
 }

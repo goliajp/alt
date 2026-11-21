@@ -42,17 +42,24 @@ mod op_log;
 mod operation;
 mod path_gate;
 pub mod pathspec;
+mod push_pack;
 use op_log::render_op_log_json;
 pub mod notes;
+mod object_format;
 use merge::Resolved;
+mod reading;
+pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
+pub use recovery::{export_git, prepared_blobs};
 mod requests;
 mod revert;
 mod sequence_editor;
 mod settings;
 mod status;
 mod task;
+mod unconfirmed;
+pub use unconfirmed::{AfterDiscards, Discards, tell_left_out};
 mod tree_state;
 pub use tree_state::hold_snapshots;
 mod workspace;
@@ -74,7 +81,7 @@ pub struct Store {
     alt_dir: PathBuf,
     odb: NativeOdb,
     refs: RefStore,
-    algo: HashAlgo,
+    algo: std::sync::OnceLock<HashAlgo>,
     /// The repository's capability policy, loaded from `<alt-dir>/policy`. A missing
     /// file → [`Policy::empty`] (every principal gets [`Capabilities::full`]),
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
@@ -86,10 +93,10 @@ impl Store {
     /// Opens (does not create) the store whose control dir is `alt_dir`.
     pub fn open(alt_dir: PathBuf) -> Res<Self> {
         Ok(Self {
-            odb: NativeOdb::open(&alt_dir)?,
-            refs: RefStore::open(&alt_dir)?,
+            odb: NativeOdb::deferred(&alt_dir),
+            refs: unconfirmed::open_refs(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
-            algo: alt_repo::native_object_format(&alt_dir)?,
+            algo: std::sync::OnceLock::new(),
             alt_dir,
         })
     }
@@ -137,8 +144,11 @@ impl Store {
     /// Also re-loads the capability policy so a `.alt/policy` edit takes effect on
     /// the next request without restarting the daemon.
     pub fn refresh(&mut self) -> Res<()> {
-        self.odb.refresh()?;
+        // refs before objects: a writer stores its objects before the ref
+        // that names them, so refs read first never name an object the
+        // refreshed store lacks
         self.refs.refresh()?;
+        self.odb.refresh()?;
         self.policy = Policy::load(&self.alt_dir)?;
         Ok(())
     }
@@ -202,7 +212,7 @@ impl Store {
 /// Store`. New object appends wait until both data and log are synchronized.
 pub struct StoreSink {
     odb: alt_odb::OdbSink,
-    oplog: std::fs::File,
+    oplog: alt_oplog::OpLogSink,
     odb_lock: PathBuf,
 }
 
@@ -216,18 +226,9 @@ impl StoreSink {
         // cloned fd would let one concurrent barrier unlock another's lock.
         // Closing the fd releases it on both success and error.
         let _barrier = std::fs::File::open(&self.odb_lock)?;
-        #[cfg(unix)]
-        {
-            loop {
-                match alt_os::sys::flock(&_barrier, alt_os::sys::LOCK_SH) {
-                    Ok(()) => break,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-        }
+        alt_odb::held::lock_shared(&_barrier)?;
         self.odb.fsync()?;
-        self.oplog.sync_all()?;
+        self.oplog.fsync()?;
         Ok(())
     }
 }
@@ -730,7 +731,7 @@ impl<'a> NativeRepo<'a> {
         if old == new {
             return Ok(Some(true));
         }
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         if repo.read_object(&old)?.is_none() || repo.read_object(&new)?.is_none() {
             return Ok(None);
         }
@@ -1049,7 +1050,7 @@ impl<'a> NativeRepo<'a> {
         // Servers that didn't advertise a nonce (older ones) get the
         // legacy payload — backward-compat.
         let payload =
-            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo);
+            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo()?);
         let sig = sec.sign(&payload);
         // .to_text() includes a trailing newline; the wire cap list can
         // not carry one, so strip it before declaring the cap
@@ -1096,7 +1097,7 @@ impl<'a> NativeRepo<'a> {
         if old == new {
             return Ok(true);
         }
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let mut seen = std::collections::HashSet::new();
         let mut stack = vec![new];
         while let Some(c) = stack.pop() {
@@ -1118,7 +1119,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     fn index(&self) -> Res<Index> {
-        match Index::open(&self.index_path, self.store.algo) {
+        match Index::open(&self.index_path, self.store.algo()?) {
             Ok(i) => Ok(i),
             Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 Ok(empty_index())
@@ -1174,7 +1175,7 @@ impl<'a> NativeRepo<'a> {
         let tree = alt_git_codec::Commit::parse(&obj.data)?
             .tree()
             .ok_or("commit has no tree")?;
-        Ok(flatten_tree(&self.store.odb, tree, self.store.algo)?)
+        Ok(flatten_tree(&self.store.odb, tree, self.store.algo()?)?)
     }
 
     fn blob_bytes(&self, oid: ObjectId) -> Res<Vec<u8>> {
@@ -1417,7 +1418,11 @@ impl<'a> NativeRepo<'a> {
         let mut tags: Vec<(String, Option<String>)> = Vec::new();
         for (name, _) in self.store.refs.iter() {
             if let Some(short) = name.strip_prefix("refs/tags/") {
-                let oid = self.store.refs.resolve(name)?.map(|o| o.to_string());
+                // only the JSON listing shows what a tag points at
+                let oid = match json {
+                    true => self.store.refs.resolve(name)?.map(|o| o.to_string()),
+                    false => None,
+                };
                 tags.push((short.to_string(), oid));
             }
         }
@@ -1461,7 +1466,7 @@ impl<'a> NativeRepo<'a> {
         }
         let target = match rev {
             Some(spec) => {
-                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                let repo = self.store.git_view()?;
                 repo.rev_parse(spec)?
                     .ok_or_else(|| format!("bad revision '{spec}'"))?
             }
@@ -1523,7 +1528,7 @@ impl<'a> NativeRepo<'a> {
         }
         let target = match rev {
             Some(spec) => {
-                let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+                let repo = self.store.git_view()?;
                 repo.rev_parse(spec)?
                     .ok_or_else(|| format!("bad revision '{spec}'"))?
             }
@@ -1539,7 +1544,7 @@ impl<'a> NativeRepo<'a> {
         let target_kind = self
             .store
             .odb
-            .lookup(&target)
+            .lookup(&target)?
             .map(|e| e.kind)
             .ok_or_else(|| format!("target {target} not in the object store"))?;
         let type_str = match target_kind {
@@ -1566,7 +1571,7 @@ impl<'a> NativeRepo<'a> {
             "+0000",
             &msg,
         );
-        let tag_oid = ObjectId::hash_object(self.store.algo, ObjectKind::Tag, &bytes);
+        let tag_oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Tag, &bytes);
         self.store.odb.put(tag_oid, ObjectKind::Tag, &bytes)?;
         self.store.odb.flush()?;
 
@@ -1883,7 +1888,8 @@ impl<'a> NativeRepo<'a> {
         }
 
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let tree = write_tree(&mut self.store.odb, &entries, self.store.algo)?;
+        let algo = self.store.algo()?;
+        let tree = write_tree(&mut self.store.odb, &entries, algo)?;
         let when = (now_ms() / 1000) as i64;
         let (name, email) = self.id.sig();
         let sig = Sig {
@@ -1900,7 +1906,7 @@ impl<'a> NativeRepo<'a> {
             &sig,
             &sig,
             &msg,
-            self.store.algo,
+            algo,
         )?;
         self.store.odb.flush()?;
         Ok(MergeOutcome::Merged { commit, entries })
@@ -2626,8 +2632,8 @@ impl<'a> NativeRepo<'a> {
         // common payoff is rewriting SSH-style URLs to HTTPS so alt's
         // git-smart-http transport can take them.
         let rewritten_url = {
-            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
-            repo.rewrite_url(&remote.url)
+            let repo = self.store.git_view()?;
+            repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
 
@@ -2889,15 +2895,16 @@ impl<'a> NativeRepo<'a> {
         // common payoff is rewriting SSH-style URLs to HTTPS so alt's
         // git-smart-http transport can take them.
         let rewritten_url = {
-            let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
-            repo.rewrite_url(&remote.url)
+            let repo = self.store.git_view()?;
+            repo.rewrite_url(&remote.url)?
         };
         let transport = build_transport(&remote.name, &rewritten_url);
 
         // v1 ref advertisement: the receive-pack endpoint speaks v1 even
         // when we ask for v2 (push isn't in protocol v2 in upstream git)
         let ad_bytes = transport.info_refs(alt_wire_http::Service::ReceivePack)?;
-        let ad = alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo)?;
+        let ad =
+            alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo()?)?;
         if !ad.supports("report-status") {
             return Err("remote does not support report-status".into());
         }
@@ -2985,40 +2992,11 @@ impl<'a> NativeRepo<'a> {
         }
 
         // compute outgoing object set: reachable(local tips) \ reachable(server tips)
-        let repo = alt_repo::Repository::discover(&self.store.alt_dir)?;
+        let repo = self.store.git_view()?;
         let excludes: Vec<ObjectId> = ad.refs.values().copied().collect();
         let outgoing = repo.reachable_objects(&local_tips, &excludes)?;
 
-        // write a plain pack (no deltas) of the outgoing set into a
-        // scratch dir under `<alt-dir>/tmp_push/`; we don't need it as a
-        // stored pack, just as the wire body, so it's removed after the
-        // request completes
-        let pack_dir = self
-            .store
-            .alt_dir
-            .join("tmp_push")
-            .join(format!("push-{remote_name}"));
-        std::fs::create_dir_all(&pack_dir)?;
-        let pack_bytes = if outgoing.is_empty() {
-            // a delete-only push or no-op push still needs to send
-            // *something* per the v1 protocol — but in practice servers
-            // accept an empty body when no commands ship a pack
-            Vec::new()
-        } else {
-            let count =
-                u32::try_from(outgoing.len()).map_err(|_| "outgoing object set exceeds u32")?;
-            let mut writer = alt_git_pack::PackWriter::create(&pack_dir, self.store.algo, count)?;
-            for (oid, kind) in &outgoing {
-                let obj = repo
-                    .read_object(oid)?
-                    .ok_or_else(|| format!("outgoing object {oid} not in odb"))?;
-                writer.add(*oid, *kind, &obj.data)?;
-            }
-            let written = writer.finish()?;
-            std::fs::read(&written.pack_path)?
-        };
-        // best-effort cleanup; not fatal if the dir is busy
-        let _ = crate::durable::remove_dir_all(&pack_dir);
+        let pack_bytes = self.push_pack(&repo, remote_name, &outgoing)?;
 
         // capabilities to declare on the push request
         let agent = format!("agent=alt/{}", env!("CARGO_PKG_VERSION"));
@@ -3050,7 +3028,7 @@ impl<'a> NativeRepo<'a> {
             &mut body,
             &updates,
             &caps_refs,
-            self.store.algo,
+            self.store.algo()?,
             &pack_bytes,
         )?;
         let resp = transport.command(alt_wire_http::Service::ReceivePack, &body)?;
@@ -3156,10 +3134,10 @@ impl<'a> NativeRepo<'a> {
         verify: bool,
         out: &mut impl Write,
     ) -> Res<()> {
-        let oplog = alt_oplog::OpLog::open(&self.store.alt_dir.join("oplog"))?;
+        let oplog = alt_oplog::OpLog::open_read_only(&self.store.alt_dir.join("oplog"), None)?;
         let limit = max_count.unwrap_or(usize::MAX);
         // newest first matches `alt log` and what an auditor naturally wants
-        let entries: Vec<&alt_oplog::Op> = oplog.ops().iter().rev().take(limit).collect();
+        let entries: Vec<&alt_oplog::Op> = oplog.ops()?.iter().rev().take(limit).collect();
 
         // when --verify is asked, pre-compute the verdict for each op id
         // up front so the per-op rendering doesn't pay an N×M cost

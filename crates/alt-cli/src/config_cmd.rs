@@ -31,7 +31,7 @@ pub fn run(
         return unset_one(repo, unset_key, out);
     }
     if list {
-        return list_all(repo.config(), out);
+        return list_all(&*crate::git_settings::repository(repo)?, out);
     }
     let Some(key) = key else {
         return Err("usage: alt config <key> [<value>] | --list | --unset <key>".into());
@@ -39,7 +39,7 @@ pub fn run(
     if let Some(new_value) = value {
         return set_one(repo, key, new_value, out);
     }
-    let cfg = repo.config();
+    let cfg = crate::git_settings::repository(repo)?;
     let (section, subsection, name) = split_key(key)?;
     let value = cfg
         .get_str(&section, subsection.as_deref(), &name)
@@ -70,6 +70,7 @@ fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> R
             subsection: subsection.as_ref().map(|s| BString::from(s.clone())),
             key: name.clone(),
             value: Some(BString::from(value.as_bytes())),
+            origin: None,
         });
     }
     write_entries(&path, &entries)?;

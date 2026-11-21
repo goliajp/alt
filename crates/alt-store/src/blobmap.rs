@@ -1,119 +1,49 @@
 //! Blob map: append-only record of blob id → manifest root. Unlike the
 //! altidx this is truth, not cache — a blob's manifest root is not derivable
 //! from the packs without materializing every manifest — so each record
-//! carries its own checksum. A torn tail (crash mid-append) is truncated on
-//! open; a bad record anywhere else is corruption and reported as such.
+//! carries its own checksum (see [`crate::reclog`] for how the log is opened
+//! and indexed).
 
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::path::Path;
 
 use crate::pack::fsync_dir;
-use crate::{BlobId, ChunkId, StoreError};
+use crate::reclog::{self, Layout, RecLog};
+use crate::{BlobId, ChunkId, StoreError, Tail};
 
-const MAGIC: [u8; 4] = *b"ALTB";
-const VERSION: u8 = 1;
-const HEADER_LEN: usize = 5;
 /// Record: blob id 32 + manifest root 32 + total_len u64 + checksum 8.
 const REC_LEN: usize = 80;
 const CHECKED_LEN: usize = REC_LEN - 8;
 
-fn file_header() -> [u8; HEADER_LEN] {
-    [MAGIC[0], MAGIC[1], MAGIC[2], MAGIC[3], VERSION]
-}
-
-fn checksum(checked: &[u8]) -> [u8; 8] {
-    alt_hash::blake3::hash(checked).as_bytes()[..8]
-        .try_into()
-        .unwrap()
-}
+const LAYOUT: Layout = Layout {
+    magic: *b"ALTB",
+    version: 1,
+    rec_len: REC_LEN,
+    bad_header: "bad blobmap header",
+    bad_version: "unsupported blobmap version",
+    corrupt: "blobmap record corrupt",
+    bad_rewind: "blobmap rewind target off a record boundary",
+    keys: |rec| (rec[..32].try_into().unwrap(), None),
+};
 
 pub struct BlobMap {
-    file: File,
-    map: HashMap<BlobId, (ChunkId, u64)>,
-    /// Byte offset past the last record we have read — lets `sync_from_disk`
-    /// fold in only the records another writer appended since.
-    len: u64,
+    log: RecLog,
 }
 
 impl BlobMap {
-    /// Opens `<dir>/blobmap`, creating it (and the directory) if missing.
-    pub fn open(dir: &Path) -> Result<Self, StoreError> {
-        std::fs::create_dir_all(dir)?;
-        let path: PathBuf = dir.join("blobmap");
-
-        let existing = match std::fs::read(&path) {
-            Ok(data) => Some(data),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
-
-        let Some(data) = existing else {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .read(true)
-                .write(true)
-                .open(&path)?;
-            file.write_all(&file_header())?;
-            file.sync_all()?;
+    /// Opens `<dir>/blobmap`, creating it (and the directory) if missing;
+    /// `named` are its index runs when the caller has them on record, and
+    /// `tail` what a log that does not read to its end means.
+    pub fn open_with_runs(
+        dir: &Path,
+        named: Option<&[(u64, u64)]>,
+        tail: Tail,
+    ) -> Result<Self, StoreError> {
+        let (log, created) = RecLog::open_with_runs(&dir.join("blobmap"), LAYOUT, named, tail)?;
+        if created {
             fsync_dir(dir)?;
-            return Ok(Self {
-                file,
-                map: HashMap::new(),
-                len: HEADER_LEN as u64,
-            });
-        };
-
-        // a crash between create and the header fsync can leave a short
-        // file; anything that is not a header prefix is foreign
-        if data.len() < HEADER_LEN {
-            if !file_header().starts_with(&data) {
-                return Err(StoreError::Format("bad blobmap header"));
-            }
-        } else {
-            if data[..4] != MAGIC {
-                return Err(StoreError::Format("bad blobmap header"));
-            }
-            if data[4] != VERSION {
-                return Err(StoreError::Format("unsupported blobmap version"));
-            }
         }
-
-        let mut map = HashMap::new();
-        let mut at = HEADER_LEN.min(data.len());
-        let mut valid_len = at as u64;
-        while let Some(rec) = data.get(at..at + REC_LEN) {
-            if checksum(&rec[..CHECKED_LEN]) != rec[CHECKED_LEN..] {
-                if at + REC_LEN == data.len() {
-                    break; // torn final record: truncate below
-                }
-                return Err(StoreError::Format("blobmap record corrupt"));
-            }
-            let mut blob = [0u8; 32];
-            blob.copy_from_slice(&rec[..32]);
-            let mut root = [0u8; 32];
-            root.copy_from_slice(&rec[32..64]);
-            let total_len = u64::from_le_bytes(rec[64..72].try_into().unwrap());
-            map.insert(BlobId(blob), (ChunkId(root), total_len));
-            at += REC_LEN;
-            valid_len = at as u64;
-        }
-
-        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
-        if valid_len < HEADER_LEN as u64 {
-            file.set_len(0)?;
-            file.write_all(&file_header())?;
-            file.sync_all()?;
-        } else {
-            if valid_len < data.len() as u64 {
-                file.set_len(valid_len)?;
-                file.sync_all()?;
-            }
-            file.seek(SeekFrom::Start(valid_len))?;
-        }
-        let len = valid_len.max(HEADER_LEN as u64);
-        Ok(Self { file, map, len })
+        Ok(Self { log })
     }
 
     pub fn append(
@@ -126,124 +56,127 @@ impl BlobMap {
         rec[..32].copy_from_slice(&blob.0);
         rec[32..64].copy_from_slice(&root.0);
         rec[64..72].copy_from_slice(&total_len.to_le_bytes());
-        let check = checksum(&rec[..CHECKED_LEN]);
+        let check = reclog::checksum(&rec[..CHECKED_LEN]);
         rec[CHECKED_LEN..].copy_from_slice(&check);
-        self.file.write_all(&rec)?;
-        self.map.insert(blob, (root, total_len));
-        self.len += REC_LEN as u64;
-        Ok(())
+        self.log.append(&rec)
     }
 
-    /// Folds in records another writer appended since our last read, extending
-    /// the in-memory map. Run under the odb write lock. A torn tail left by a
-    /// crashed writer is truncated (we hold the lock, so none is mid-append).
+    /// Folds in records another writer appended since our last read. Run
+    /// under the odb write lock. A torn tail left by a crashed writer is
+    /// truncated (we hold the lock, so none is mid-append).
     pub fn sync_from_disk(&mut self) -> Result<(), StoreError> {
-        let size = self.file.metadata()?.len();
-        if size <= self.len {
-            return Ok(());
-        }
-        let mut tail = vec![0u8; (size - self.len) as usize];
-        self.file.seek(SeekFrom::Start(self.len))?;
-        self.file.read_exact(&mut tail)?;
-
-        let mut at = 0usize;
-        while let Some(rec) = tail.get(at..at + REC_LEN) {
-            if checksum(&rec[..CHECKED_LEN]) != rec[CHECKED_LEN..] {
-                break; // torn final record (we hold the lock): truncate below
-            }
-            let mut blob = [0u8; 32];
-            blob.copy_from_slice(&rec[..32]);
-            let mut root = [0u8; 32];
-            root.copy_from_slice(&rec[32..64]);
-            let total_len = u64::from_le_bytes(rec[64..72].try_into().unwrap());
-            self.map.insert(BlobId(blob), (ChunkId(root), total_len));
-            at += REC_LEN;
-        }
-        let new_len = self.len + at as u64;
-        if (at as u64) < tail.len() as u64 {
-            self.file.set_len(new_len)?; // drop a crashed writer's torn record
-            self.file.sync_all()?;
-            self.file.seek(SeekFrom::Start(new_len))?;
-        }
-        self.len = new_len;
-        Ok(())
+        self.log.sync_from_disk()
     }
 
-    pub fn get(&self, blob: BlobId) -> Option<(ChunkId, u64)> {
-        self.map.get(&blob).copied()
+    /// Indexes the records before byte `upto` that have no index run yet,
+    /// once there are enough of them. Run under the odb write lock.
+    pub fn index_tail(&mut self, upto: u64) -> Result<(), StoreError> {
+        self.log.index_tail(upto, !crate::relaxed_durability())
     }
 
-    pub fn contains(&self, blob: BlobId) -> bool {
-        self.map.contains_key(&blob)
+    pub fn index_pending(&self) -> bool {
+        self.log.index_pending()
+    }
+
+    pub fn run_chain(&self) -> Vec<(u64, u64)> {
+        self.log.run_chain()
+    }
+
+    pub fn get(&self, blob: BlobId) -> Result<Option<(ChunkId, u64)>, StoreError> {
+        Ok(self.log.get(&blob.0)?.map(|rec| {
+            let root = ChunkId(rec[32..64].try_into().unwrap());
+            (root, u64::from_le_bytes(rec[64..72].try_into().unwrap()))
+        }))
+    }
+
+    /// Full check of the log (see [`RecLog::check`]); `each` sees every
+    /// blob recorded before byte `upto` and its total length.
+    pub fn check(
+        &self,
+        upto: u64,
+        mut each: impl FnMut(BlobId, u64) -> Result<(), StoreError>,
+    ) -> Result<u64, StoreError> {
+        self.log.check_upto(upto, |rec| {
+            let blob = BlobId(rec[..32].try_into().unwrap());
+            each(blob, u64::from_le_bytes(rec[64..72].try_into().unwrap()))
+        })
+    }
+
+    /// Visits the records from byte `from` of the log on: where each
+    /// begins, the blob and its manifest root.
+    pub fn each_from(
+        &self,
+        from: u64,
+        mut each: impl FnMut(u64, BlobId, ChunkId) -> Result<(), StoreError>,
+    ) -> Result<(), StoreError> {
+        self.log.each_from(from, |at, rec| {
+            let blob = BlobId(rec[..32].try_into().unwrap());
+            each(at, blob, ChunkId(rec[32..64].try_into().unwrap()))
+        })
+    }
+
+    /// See [`RecLog::pass_over_from`].
+    pub fn pass_over_from(&mut self, at: u64) -> Result<(), StoreError> {
+        self.log.pass_over_from(at)
+    }
+
+    /// See [`RecLog::unfinished`].
+    pub fn unfinished(&self) -> bool {
+        self.log.unfinished()
+    }
+
+    /// See [`RecLog::passed`].
+    pub fn passed(&self) -> Result<crate::Passed, StoreError> {
+        self.log.passed()
+    }
+
+    pub fn contains(&self, blob: BlobId) -> Result<bool, StoreError> {
+        self.log.contains(&blob.0)
     }
 
     pub fn sync(&mut self) -> Result<(), StoreError> {
-        if !crate::relaxed_durability() {
-            self.file.sync_all()?;
-        }
-        Ok(())
+        self.log.sync()
     }
 
     /// Raw fsync (no relaxed gate) — called by the group commit layer.
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        self.file.sync_all()?;
-        Ok(())
+    pub fn fsync(&mut self) -> Result<(), StoreError> {
+        self.log.fsync()
     }
 
     /// Bytes we have appended (our write cursor).
     pub fn appended_len(&self) -> u64 {
-        self.len
+        self.log.appended_len()
     }
 
     /// The blobmap's true on-disk size.
     pub fn file_len(&self) -> Result<u64, StoreError> {
-        Ok(self.file.metadata()?.len())
+        self.log.file_len()
     }
 
     /// Truncates the blobmap back to `target_len` (a previous `appended_len`),
-    /// removing every record appended past that point from the in-memory map.
-    /// The target must lie at a record boundary and not below the file header.
-    /// Followed by an fsync so the truncation is durable: callers (the odb
-    /// rewind path) rely on this to be torn-tail-free on recovery.
-    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
-        if target_len > self.len {
+    /// dropping every record appended past that point. Followed by an fsync
+    /// so the truncation is durable: callers (the odb rewind path) rely on
+    /// this to be torn-tail-free on recovery.
+    /// Whether [`Self::rewind`] to `target_len` can go ahead (see
+    /// [`RecLog::check_rewind`]).
+    pub fn check_rewind(&self, target_len: u64) -> Result<(), StoreError> {
+        if target_len > self.log.appended_len() {
             return Err(StoreError::Format("blobmap rewind target above cursor"));
         }
-        if target_len < HEADER_LEN as u64 {
-            return Err(StoreError::Format("blobmap rewind target below header"));
+        self.log.check_rewind(target_len).map(drop)
+    }
+
+    pub fn rewind(&mut self, target_len: u64) -> Result<(), StoreError> {
+        if target_len > self.log.appended_len() {
+            return Err(StoreError::Format("blobmap rewind target above cursor"));
         }
-        let drop_bytes = self.len - target_len;
-        if !drop_bytes.is_multiple_of(REC_LEN as u64) {
-            return Err(StoreError::Format("blobmap rewind target mid-record"));
-        }
-        if drop_bytes > 0 {
-            let mut tail = vec![0u8; drop_bytes as usize];
-            self.file.seek(SeekFrom::Start(target_len))?;
-            self.file.read_exact(&mut tail)?;
-            for rec in tail.as_chunks::<REC_LEN>().0 {
-                let mut blob = [0u8; 32];
-                blob.copy_from_slice(&rec[..32]);
-                self.map.remove(&BlobId(blob));
-            }
-        }
-        self.file.set_len(target_len)?;
-        self.file.sync_all()?;
-        self.file.seek(SeekFrom::Start(target_len))?;
-        self.len = target_len;
-        Ok(())
+        self.log.rewind(target_len)
     }
 
     /// An independent fd to the (stable, never-rolled) blobmap file, for the
     /// daemon's off-write-path fsync. `fsync` flushes the inode regardless of
     /// which fd it is called on, so this dup is enough.
     pub fn sync_handle(&self) -> Result<File, StoreError> {
-        Ok(self.file.try_clone()?)
-    }
-}
-
-impl Drop for BlobMap {
-    fn drop(&mut self) {
-        // best-effort durability; explicit sync() is the checked path
-        let _ = self.file.sync_all();
+        self.log.sync_handle()
     }
 }

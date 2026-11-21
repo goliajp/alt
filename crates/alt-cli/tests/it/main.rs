@@ -1,4 +1,5 @@
 //! Single integration-test binary for alt-cli.
+mod abandoned_add;
 mod add_clash;
 mod add_conflict;
 mod add_hidden;
@@ -20,16 +21,22 @@ mod charset;
 mod cherry_pick;
 mod ci_validate;
 mod clone;
+mod closed_fds;
 mod commit_loop;
 mod commit_meta;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
+mod crash_fixture;
 mod credential_helper;
 mod cwd_paths;
 mod daemon_client;
+mod daemon_home;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod daemon_locale;
 mod daemon_server;
 mod daemon_stop;
+mod damage_messages;
 mod diff;
 mod diff_git;
 mod eol;
@@ -40,20 +47,29 @@ mod flow;
 mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
+mod fsck;
+mod fsck_tails;
 mod gitlink;
 mod gitlink_said;
 mod identity;
 mod ignore_sources;
 mod import_materialize;
+mod index_blobs;
 mod json_outputs;
 mod lfs;
+mod lock_order;
 mod log_patch;
+mod log_tails;
 mod machine_results;
 mod merge;
 mod merge_criss_cross;
+mod merge_modes;
+mod mixed_versions;
 mod monorepo_bench;
 mod nested_repo;
+mod old_daemon;
 mod op_log;
+mod past_damage;
 mod path_gate;
 mod pathspec_git;
 mod patterns;
@@ -62,6 +78,7 @@ mod push;
 mod push_policy;
 mod push_wire_ext;
 mod read_json;
+mod readers;
 mod rebase;
 mod remote;
 mod replay_refused;
@@ -80,12 +97,17 @@ mod status_json;
 mod status_labels;
 mod status_replaced;
 mod status_untracked;
+mod store_refresh;
 mod switch_kinds;
+mod sync_order;
 mod tag;
 mod task_delivery;
 mod task_evidence;
 mod task_remote;
 mod task_runner;
+mod torn_pack;
+mod unconfirmed;
+mod unconfirmed_tails;
 mod undo_add;
 mod url_rewrite;
 mod verify_commit;
@@ -99,4 +121,21 @@ mod auth;
 mod cli_matrix;
 mod corpus_cli;
 mod corpus_history;
+mod filter_process;
+mod funcname;
+mod funcname_drivers;
+mod funcname_git;
+mod funcname_long;
+mod git_settings;
 mod recovery_kinds;
+mod stack_overflow;
+
+/// The `alt` binary under test, kept from the git configuration of the
+/// machine the tests run on, as the git they compare it with is. A test
+/// of that configuration gives the command a home of its own.
+pub fn alt_command() -> std::process::Command {
+    let mut alt = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
+    alt.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+    alt
+}

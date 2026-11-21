@@ -5,10 +5,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
@@ -145,4 +145,96 @@ fn cherry_pick_root_commit_fails() {
     assert!(!out.status.success(), "root cherry-pick should fail");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("root commit"), "got: {err}");
+}
+
+/// A message long enough that its commit object is stored as several
+/// chunks, so reading it opens the blob map.
+fn long_message() -> String {
+    let mut message = String::from("a commit with a very long message\n\n");
+    let mut word = 0x9e37_79b9_7f4a_7c15u64;
+    while message.len() < 600_000 {
+        word ^= word << 13;
+        word ^= word >> 7;
+        word ^= word << 17;
+        message.push_str(&format!("{word:016x}\n"));
+    }
+    message
+}
+
+/// Puts a commit with that message on top of `main`, same tree. No
+/// command line carries a message this long, so it is written through the
+/// stores.
+fn long_commit_on_main(repo: &Path) {
+    use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+    use alt_refs::{RefChange, RefStore, RefTarget};
+
+    let head = ok(alt(repo, &["rev-parse", "HEAD"]));
+    let shown = ok(alt(repo, &["cat-file", "-p", "HEAD"]));
+    let tree = shown.lines().next().unwrap().strip_prefix("tree ").unwrap();
+    let data = format!(
+        "tree {tree}\nparent {}\nauthor tester <t@e> 1700000000 +0000\n\
+         committer tester <t@e> 1700000000 +0000\n\n{}",
+        head.trim(),
+        long_message()
+    )
+    .into_bytes();
+    let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Commit, &data);
+    let alt_dir = repo.join(".alt");
+    let mut odb = alt_odb::NativeOdb::open(&alt_dir).unwrap();
+    odb.put(oid, ObjectKind::Commit, &data).unwrap();
+    odb.flush().unwrap();
+    drop(odb);
+    let old = ObjectId::from_hex(head.trim().as_bytes()).unwrap();
+    RefStore::open(&alt_dir)
+        .unwrap()
+        .commit(
+            "test",
+            1_700_000_000_000,
+            &[RefChange {
+                name: "refs/heads/main".to_owned(),
+                old: Some(RefTarget::Oid(old)),
+                new: Some(RefTarget::Oid(oid)),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        ok(alt(repo, &["rev-parse", "HEAD"])).trim(),
+        oid.to_string()
+    );
+}
+
+/// Runs `alt` and gives up (failing) when it has not finished in a minute.
+fn finishes(repo: &Path, args: &[&str]) -> Output {
+    let mut child = crate::alt_command()
+        .current_dir(repo)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(60) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("alt {args:?} did not finish: it waits on a lock it holds itself");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn cherry_pick_onto_a_commit_stored_as_several_chunks_finishes() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (feature_oid, _) = diverged(tmp.path());
+    long_commit_on_main(tmp.path());
+
+    let out = ok(finishes(tmp.path(), &["cherry-pick", &feature_oid]));
+    assert!(out.contains("feature adds b"), "got: {out}");
+    assert_eq!(fs::read_to_string(tmp.path().join("b")).unwrap(), "b\n");
+    ok(alt(tmp.path(), &["fsck"]));
 }

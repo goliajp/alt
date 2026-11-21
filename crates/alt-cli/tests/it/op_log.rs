@@ -2,10 +2,10 @@
 //! the op log; this reads them back out.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 fn alt(repo: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "alice")
@@ -16,8 +16,14 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// How many operations the log of the repository at `root` holds.
+pub(crate) fn op_count(root: &Path) -> usize {
+    let log = alt_oplog::OpLog::open(&root.join(".alt/oplog")).unwrap();
+    log.ops().unwrap().len()
+}
+
 fn alt_as_agent(repo: &Path, args: &[&str], agent_id: &str, session: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_alt"))
+    crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", agent_id)

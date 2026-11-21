@@ -19,16 +19,18 @@ pub(crate) struct Style<'a> {
     pub(crate) quotepath: bool,
     /// absent for a store that cannot say which ids share a prefix
     pub(crate) abbrev: Option<alt_odb::Abbrev<'a>>,
+    /// what the hunk headers name
+    pub(crate) sections: crate::funcname::Sections,
 }
 
 impl Style<'_> {
-    pub(crate) fn short(&self, oid: Option<ObjectId>) -> String {
-        match (oid, &self.abbrev) {
-            (Some(oid), Some(abbrev)) => abbrev.of(&oid),
+    pub(crate) fn short(&self, oid: Option<ObjectId>) -> std::io::Result<String> {
+        Ok(match (oid, &self.abbrev) {
+            (Some(oid), Some(abbrev)) => abbrev.of(&oid).map_err(std::io::Error::other)?,
             (Some(oid), None) => oid.to_string()[..7].to_owned(),
             (None, Some(abbrev)) => "0".repeat(abbrev.min_len()),
             (None, None) => "0".repeat(7),
-        }
+        })
     }
 
     /// `prefix` and `path` as one name, in double quotes with C escapes
@@ -85,8 +87,8 @@ impl FileHeader<'_> {
         write!(
             out,
             "index {}..{}",
-            style.short(old_oid),
-            style.short(new_oid)
+            style.short(old_oid)?,
+            style.short(new_oid)?
         )?;
         match (&self.old, &self.new) {
             (Some(o), Some(n)) if o.mode == n.mode => writeln!(out, " {:06o}", o.mode)?,
