@@ -301,34 +301,4 @@ impl Arg {
     pub(crate) fn is_builtin(&self) -> bool {
         matches!(self.kind, Kind::Help | Kind::Version)
     }
-
-    /// `--long <NAME>`, `-s`, `<NAME>` or `[NAME]...`; `required` picks the
-    /// brackets of a positional and defaults to the argument's own setting.
-    pub(crate) fn display(&self, required: Option<bool>) -> String {
-        let mut text = if !self.long.is_empty() {
-            format!("--{}", self.long)
-        } else if let Some(short) = self.short {
-            format!("-{short}")
-        } else {
-            String::new()
-        };
-        if !self.takes_value() {
-            return text;
-        }
-        if !self.missing().is_empty() {
-            return text + &format!("[=<{}>]", self.value_name());
-        }
-        if !self.is_positional() {
-            text.push(' ');
-        }
-        if self.is_positional() && !required.unwrap_or(self.required) {
-            text += &format!("[{}]", self.value_name());
-        } else {
-            text += &format!("<{}>", self.value_name());
-        }
-        if self.is_positional() && self.kind == Kind::Multiple {
-            text += "...";
-        }
-        text
-    }
 }

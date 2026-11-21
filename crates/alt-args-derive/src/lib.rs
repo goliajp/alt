@@ -33,6 +33,7 @@ mod describe;
 mod field;
 mod generate;
 mod parse;
+mod value_enum;
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 
@@ -97,5 +98,5 @@ pub fn derive_subcommand(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(ValueEnum)]
 pub fn derive_value_enum(input: TokenStream) -> TokenStream {
-    expand(input, generate::value_enum)
+    expand(input, value_enum::value_enum)
 }
