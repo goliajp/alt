@@ -7,6 +7,9 @@
 //! checksum: the whole part its own, a record the one that chains it to
 //! everything before it. The records up to the first that fails are what
 //! the file says.
+//!
+//! The whole part of a file is never written again: records come after
+//! it, and a snapshot written whole is another file under the same name.
 
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::Path;
@@ -16,7 +19,7 @@ use alt_git_codec::{HashAlgo, ObjectId};
 use super::{Dir, Entry, FileStat, Snapshot};
 
 const MAGIC: &[u8; 8] = b"ALTWTC01";
-const HEADER: usize = 80;
+pub(super) const HEADER: usize = 80;
 const ENTRY: usize = 104;
 const DIR: usize = 56;
 pub(super) const CHECKSUM: usize = 32;
@@ -31,14 +34,66 @@ const RECORDS_AT_LEAST: u64 = 16 << 10;
 /// The file a snapshot was read from or written to, as far as that went.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Origin {
-    dev: u64,
-    ino: u64,
+    pub(super) dev: u64,
+    pub(super) ino: u64,
     /// the length of the whole part
-    whole: u64,
+    pub(super) whole: u64,
     /// the length up to the end of the last record read or written
-    len: u64,
+    pub(super) len: u64,
     /// the checksum the next record is chained to
-    chain: [u8; CHECKSUM],
+    pub(super) chain: [u8; CHECKSUM],
+}
+
+/// Where the parts of a whole part lie, as its header says.
+pub(super) struct Laid {
+    id_len: usize,
+    entries: usize,
+    paths_at: usize,
+    dirs_at: usize,
+    dirs: usize,
+    /// where its checksum stands
+    body: usize,
+}
+
+impl Laid {
+    /// What the header at the start of `bytes` says, where it is one of a
+    /// snapshot of this version; the header is the first [`HEADER`] bytes.
+    pub(super) fn of(bytes: &[u8], algo: HashAlgo) -> Option<Laid> {
+        if bytes.len() < HEADER || &bytes[..8] != MAGIC || u32le(bytes, 8) != 1 {
+            return None;
+        }
+        if u32le(bytes, 12) as usize != algo.raw_len() {
+            return None;
+        }
+        let id_len = u64le(bytes, 48) as usize;
+        let (entries, paths_len, dirs) = (
+            u64le(bytes, 56) as usize,
+            u64le(bytes, 64) as usize,
+            u64le(bytes, 72) as usize,
+        );
+        let paths_at = HEADER.checked_add(entries.checked_mul(ENTRY)?)?;
+        let dirs_at = paths_at.checked_add(paths_len)?;
+        let body = dirs_at.checked_add(dirs.checked_mul(DIR)?)?;
+        body.checked_add(CHECKSUM)?;
+        (id_len <= 32).then_some(Laid {
+            id_len,
+            entries,
+            paths_at,
+            dirs_at,
+            dirs,
+            body,
+        })
+    }
+
+    /// The length of the whole part.
+    pub(super) fn whole(&self) -> usize {
+        self.body + CHECKSUM
+    }
+
+    /// Whether the whole part at the start of `bytes` is as it was written.
+    pub(super) fn holds(&self, bytes: &[u8]) -> bool {
+        alt_hash::blake3::hash(&bytes[..self.body]).as_bytes()[..] == bytes[self.body..self.whole()]
+    }
 }
 
 impl Origin {
@@ -50,7 +105,7 @@ impl Origin {
 }
 
 impl Snapshot {
-    /// The snapshot as a file that has no records yet.
+    /// The whole part of the snapshot's file: a file that has no records yet.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(
             HEADER
@@ -93,53 +148,12 @@ impl Snapshot {
         out
     }
 
-    /// The snapshot `bytes` say; `None` when they do not begin with one
-    /// this version wrote whole.
-    pub fn decode(bytes: &[u8], algo: HashAlgo) -> Option<Snapshot> {
-        Some(Snapshot::read(bytes, algo)?.0)
-    }
-
-    /// [`decode`](Self::decode), with the length of the whole part, the
-    /// length up to the end of the last record that holds, and the
-    /// checksum a record after it is chained to.
-    fn read(bytes: &[u8], algo: HashAlgo) -> Option<(Snapshot, usize, usize, [u8; CHECKSUM])> {
-        let (mut snapshot, whole) = Snapshot::decode_whole(bytes, algo)?;
-        let mut chain: [u8; CHECKSUM] = bytes[whole - CHECKSUM..whole].try_into().unwrap();
-        let mut len = whole;
-        while let Some((noted, sum)) = super::journal::record(&bytes[len..], &chain) {
-            // a record that holds and names what is not there is no
-            // record of this snapshot: nothing of the file is believed
-            snapshot.replay(noted)?;
-            len += super::journal::framed(noted.len());
-            chain = sum;
-        }
-        snapshot.changed = false;
-        Some((snapshot, whole, len, chain))
-    }
-
-    fn decode_whole(bytes: &[u8], algo: HashAlgo) -> Option<(Snapshot, usize)> {
-        if bytes.len() < HEADER || &bytes[..8] != MAGIC || u32le(bytes, 8) != 1 {
-            return None;
-        }
-        if u32le(bytes, 12) as usize != algo.raw_len() {
-            return None;
-        }
-        let id_len = u64le(bytes, 48) as usize;
-        let (n, paths_len, n_dirs) = (
-            u64le(bytes, 56) as usize,
-            u64le(bytes, 64) as usize,
-            u64le(bytes, 72) as usize,
-        );
-        let paths_at = HEADER.checked_add(n.checked_mul(ENTRY)?)?;
-        let dirs_at = paths_at.checked_add(paths_len)?;
-        let body = dirs_at.checked_add(n_dirs.checked_mul(DIR)?)?;
-        let whole = body.checked_add(CHECKSUM)?;
-        if id_len > 32 || bytes.len() < whole {
-            return None;
-        }
-        if alt_hash::blake3::hash(&bytes[..body]).as_bytes()[..] != bytes[body..whole] {
-            return None;
-        }
+    /// The snapshot the whole part at the start of `bytes` says, laid
+    /// out as `laid` has it.
+    pub(super) fn decode_whole(bytes: &[u8], algo: HashAlgo, laid: &Laid) -> Option<Snapshot> {
+        let (n, n_dirs, id_len) = (laid.entries, laid.dirs, laid.id_len);
+        let (paths_at, dirs_at) = (laid.paths_at, laid.dirs_at);
+        let paths_len = dirs_at - paths_at;
         let raw = algo.raw_len();
         let mut entries = Vec::with_capacity(n);
         for i in 0..n {
@@ -177,7 +191,7 @@ impl Snapshot {
         if dirs.is_empty() {
             return None;
         }
-        let snapshot = Snapshot {
+        Some(Snapshot {
             index_id: bytes[16..16 + id_len].to_vec(),
             algo,
             paths: bytes[paths_at..dirs_at].to_vec(),
@@ -186,27 +200,7 @@ impl Snapshot {
             changed: false,
             origin: None,
             noted: Vec::new(),
-        };
-        Some((snapshot, whole))
-    }
-
-    /// Reads the snapshot at `path`; `None` when there is none to use.
-    pub fn load(path: &Path, algo: HashAlgo) -> Option<Snapshot> {
-        let file = std::fs::File::open(path).ok()?;
-        let meta = file.metadata().ok()?;
-        let mut bytes = vec![0; usize::try_from(meta.len()).ok()?];
-        file.read_exact_at(&mut bytes, 0).ok()?;
-        let (mut snapshot, whole, len, chain) = Snapshot::read(&bytes, algo)?;
-        // what follows the last record that holds stays in the way of
-        // another: such a file is written whole the next time
-        snapshot.origin = (len == bytes.len()).then_some(Origin {
-            dev: meta.dev(),
-            ino: meta.ino(),
-            whole: whole as u64,
-            len: len as u64,
-            chain,
-        });
-        Some(snapshot)
+        })
     }
 
     /// Has the file at `path` say what this says: with one more record

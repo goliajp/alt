@@ -13,6 +13,7 @@ use alt_git_index::Index;
 
 mod file;
 mod journal;
+mod load;
 mod replace;
 
 pub use replace::Replaced;
