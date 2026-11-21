@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: end the daemon when a request panics with the store in hand
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/held.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/workers.rs
