@@ -80,6 +80,7 @@ mod push_wire_ext;
 mod read_json;
 mod readers;
 mod rebase;
+mod recovery_checked;
 mod remote;
 mod replay_refused;
 mod revert;

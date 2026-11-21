@@ -13,6 +13,8 @@
 
 use super::*;
 
+mod checked;
+
 /// The payload of the record that abandons a prepared index change: a
 /// [`Completion`] naming it.
 pub(in crate::native) const ABANDON: u8 = 0x35;
@@ -66,46 +68,46 @@ impl NativeRepo<'_> {
         Ok(crate::diagnostics::emit(said.as_bytes()).map(|()| true)?)
     }
 
-    fn pending_index(&self, identity: &WorkspaceIdentity) -> Res<Option<(OpId, IndexIntent)>> {
-        let mut completed = std::collections::HashSet::new();
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
-            match op.payload.first() {
-                Some(&kind @ (COMPLETE | ABANDON)) => {
-                    let done: Completion = decode(&op.payload, kind)?;
-                    if done.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported recovery completion",
-                        )
-                        .into());
-                    }
-                    completed.insert(done.prepared);
-                }
-                Some(&PREPARE) => {
-                    let intent: IndexIntent = decode(&op.payload, PREPARE)?;
-                    if intent.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported index intent",
-                        )
-                        .into());
-                    }
-                    if intent.workspace == *identity && !completed.contains(&op.id.to_string()) {
-                        return Ok(Some((op.id, intent)));
-                    }
-                }
-                _ => {}
-            }
+    pub(in crate::native) fn ensure_writable(&mut self, verb: &str) -> Res<()> {
+        if self.caps.read_only {
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                format!("capability denied: principal cannot {verb} (read-only)"),
+            )
+            .into());
         }
-        Ok(None)
+        self.lock_workspace()?;
+        if self.caps.read_only {
+            return Err(crate::machine::Failure::refusal(
+                "capability_denied",
+                format!("capability denied: principal cannot {verb} (read-only)"),
+            )
+            .into());
+        }
+        self.ensure_no_pending_recovery()
     }
 
     /// Fails where an operation of this workspace was interrupted and is
     /// to be recovered first. An index change that cannot be completed is
     /// abandoned here and is in no command's way.
+    ///
+    /// Only the ops the workspace has not been checked against are read:
+    /// where none of them is left open, how far the log reaches is kept
+    /// beside the index once the command has succeeded
+    /// ([`Store::keep_checked`]), and the next check starts there.
     pub(in crate::native) fn ensure_no_pending_recovery(&mut self) -> Res<()> {
-        self.ensure_no_pending_checkout()?;
-        if let Some((id, intent)) = self.pending_index(&self.workspace_identity()?)?
+        let head = self.store.refs.head_op();
+        if head.is_none() || self.recovery_checked == head {
+            return Ok(());
+        }
+        let identity = self.workspace_identity()?;
+        let place = self.index_path.with_file_name(checked::NAME);
+        let (read, pending) = {
+            let ops = checked::unread(self.store.refs.oplog(), &place, &identity)?;
+            checkout_recovery::ensure_none_pending(&ops, &identity)?;
+            (!ops.is_empty(), pending_index(&ops, &identity)?)
+        };
+        if let Some((id, intent)) = pending
             && !self.abandon_unstorable(id, &intent)?
         {
             return Err(crate::machine::Failure::pending(
@@ -116,6 +118,10 @@ impl NativeRepo<'_> {
             )
             .into());
         }
+        if read && let Some(anchor) = self.store.refs.oplog().anchor() {
+            self.store.checked = Some((place, checked::encode(&identity, &anchor)));
+        }
+        self.recovery_checked = self.store.refs.head_op();
         Ok(())
     }
 
@@ -182,4 +188,57 @@ impl NativeRepo<'_> {
         )?;
         Ok(())
     }
+}
+
+impl Store {
+    /// Writes down how far the command that just ran found the log to hold
+    /// nothing its workspace left open, for the next command, when the
+    /// command `succeeded`: one that fails or is refused changes no file.
+    pub fn keep_checked(&mut self, succeeded: bool) {
+        if let Some((place, record)) = self.checked.take()
+            && succeeded
+        {
+            // a cache: where it cannot be written, the next check reads more
+            let _ = checked::keep(&place, &record);
+        }
+    }
+}
+
+/// The latest index change among `ops` that the workspace `identity`
+/// prepared and nothing among them closed.
+fn pending_index(
+    ops: &[alt_oplog::Op],
+    identity: &WorkspaceIdentity,
+) -> Res<Option<(OpId, IndexIntent)>> {
+    let mut completed = std::collections::HashSet::new();
+    for op in ops.iter().rev() {
+        match op.payload.first() {
+            Some(&kind @ (COMPLETE | ABANDON)) => {
+                let done: Completion = decode(&op.payload, kind)?;
+                if done.version != 1 {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported recovery completion",
+                    )
+                    .into());
+                }
+                completed.insert(done.prepared);
+            }
+            Some(&PREPARE) => {
+                let intent: IndexIntent = decode(&op.payload, PREPARE)?;
+                if intent.version != 1 {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported index intent",
+                    )
+                    .into());
+                }
+                if intent.workspace == *identity && !completed.contains(&op.id.to_string()) {
+                    return Ok(Some((op.id, intent)));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
 }

@@ -87,6 +87,8 @@ pub struct Store {
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
     /// so an operator edit is picked up on the next request.
     policy: Policy,
+    /// where and what [`Self::keep_checked`] writes
+    checked: Option<(PathBuf, Vec<u8>)>,
 }
 
 impl Store {
@@ -97,6 +99,7 @@ impl Store {
             refs: unconfirmed::open_refs(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
+            checked: None,
             alt_dir,
         })
     }
@@ -609,6 +612,9 @@ pub struct NativeRepo<'a> {
     /// the checkout this command worked out from the entries of a tree:
     /// the index it ends with, and what it writes at each path
     planned: std::cell::RefCell<Option<tree_state::Planned>>,
+    /// the head of the log when this workspace was last found to have
+    /// nothing left open
+    recovery_checked: Option<OpId>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -636,6 +642,7 @@ impl<'a> NativeRepo<'a> {
             checkout_intent: None,
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
+            recovery_checked: None,
         }
     }
 
@@ -736,25 +743,6 @@ impl<'a> NativeRepo<'a> {
             return Ok(None);
         }
         Ok(Some(self.is_ancestor(old, new)?))
-    }
-
-    fn ensure_writable(&mut self, verb: &str) -> Res<()> {
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                format!("capability denied: principal cannot {verb} (read-only)"),
-            )
-            .into());
-        }
-        self.lock_workspace()?;
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                format!("capability denied: principal cannot {verb} (read-only)"),
-            )
-            .into());
-        }
-        self.ensure_no_pending_recovery()
     }
 
     /// Refuse `verb` on a protected branch (`main` / `develop` from the

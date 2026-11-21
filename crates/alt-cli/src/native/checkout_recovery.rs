@@ -61,55 +61,6 @@ impl NativeRepo<'_> {
         self.ensure_no_pending_recovery()
     }
 
-    pub(super) fn ensure_no_pending_checkout(&self) -> Res<()> {
-        let mut completed = std::collections::HashSet::new();
-        // Identity is only allocated on writes, after the capability gate.
-        let identity = self.workspace_identity()?;
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
-            match op.payload.first() {
-                Some(&COMPLETE_CHECKOUT) => {
-                    let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
-                    if done.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported checkout completion",
-                        )
-                        .into());
-                    }
-                    completed.insert(done.prepared);
-                }
-                Some(&PREPARE_CHECKOUT) => {
-                    let pending: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
-                    if pending.version != 1 {
-                        return Err(crate::machine::Failure::refusal(
-                            "unsupported_record",
-                            "unsupported checkout intent",
-                        )
-                        .into());
-                    }
-                    if pending.workspace == identity && !completed.contains(&op.id.to_string()) {
-                        return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
-                    }
-                }
-                Some(&alt_refs::PAYLOAD_REF_TX) => {
-                    if let Some(tx) = alt_refs::parse_tx(&op.payload)?
-                        && let Some(context) = tx.context
-                    {
-                        let context: recovery::RefContext = alt_json::from_slice(&context)?;
-                        if context.workspace == identity
-                            && context.checkout.is_some()
-                            && !completed.contains(&op.id.to_string())
-                        {
-                            return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete ref recovery; recovery required (outcome unknown)", op.id)).into());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn snapshot_workspace(&self) -> Res<String> {
         let index = self.index()?;
         let mut files = Vec::new();
@@ -386,6 +337,55 @@ impl NativeRepo<'_> {
         )?;
         Ok(())
     }
+}
+
+/// Fails where `ops` hold a checkout of the workspace `identity` that
+/// nothing among them completed.
+pub(super) fn ensure_none_pending(ops: &[alt_oplog::Op], identity: &WorkspaceIdentity) -> Res<()> {
+    let mut completed = std::collections::HashSet::new();
+    for op in ops.iter().rev() {
+        match op.payload.first() {
+            Some(&COMPLETE_CHECKOUT) => {
+                let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
+                if done.version != 1 {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported checkout completion",
+                    )
+                    .into());
+                }
+                completed.insert(done.prepared);
+            }
+            Some(&PREPARE_CHECKOUT) => {
+                let pending: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
+                if pending.version != 1 {
+                    return Err(crate::machine::Failure::refusal(
+                        "unsupported_record",
+                        "unsupported checkout intent",
+                    )
+                    .into());
+                }
+                if pending.workspace == *identity && !completed.contains(&op.id.to_string()) {
+                    return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
+                }
+            }
+            Some(&alt_refs::PAYLOAD_REF_TX) => {
+                if let Some(tx) = alt_refs::parse_tx(&op.payload)?
+                    && let Some(context) = tx.context
+                {
+                    let context: recovery::RefContext = alt_json::from_slice(&context)?;
+                    if context.workspace == *identity
+                        && context.checkout.is_some()
+                        && !completed.contains(&op.id.to_string())
+                    {
+                        return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete ref recovery; recovery required (outcome unknown)", op.id)).into());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

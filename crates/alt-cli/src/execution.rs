@@ -156,6 +156,7 @@ impl Execution {
                 self.id,
                 &mut stdout,
             );
+            store.keep_checked(ran.is_ok());
             // what the store cut off its files for this command, or before it
             store.warn_discarded()?;
             ran

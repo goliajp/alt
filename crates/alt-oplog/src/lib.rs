@@ -30,6 +30,7 @@ mod op;
 mod read;
 mod scan;
 mod settle;
+mod since;
 mod sync;
 mod synced;
 mod tail;
@@ -46,8 +47,8 @@ pub use synced::{OpLogSink, SyncNamed};
 pub use tail::Discarded;
 
 use lock::{lock_exclusive, lock_shared, unlock};
-use read::{read_at, read_log, scan, scan_and_create};
-use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
+use read::{read_log, scan, scan_and_create};
+use scan::{CHECKSUM_LEN, HEADER_LEN, encode_body};
 
 /// A place in the log to start reading from instead of its first record:
 /// the op whose record occupies bytes `start..end`, being op number `count`
@@ -361,30 +362,6 @@ impl OpLog {
     /// anchor it was opened at, or all of them without one.
     pub fn recent(&self) -> &[Op] {
         &self.ops
-    }
-
-    /// All ops in chain order — the replay basis. On a log opened at an
-    /// anchor the first call reads and verifies the part before it.
-    pub fn ops(&self) -> Result<&[Op], OpLogError> {
-        let Some(base) = self.base else {
-            return Ok(&self.ops);
-        };
-        if let Some(full) = self.full.get() {
-            return Ok(full);
-        }
-        // the records before the anchor never change; no lock needed
-        let data = read_at(&self.file, 0, base.end as usize)?;
-        check_header(&data)?;
-        let mut all = Vec::new();
-        let replayed = replay_records(&data, HEADER_LEN.min(data.len()), ROOT, &mut all)?;
-        if replayed.valid as u64 != base.end
-            || all.len() as u64 != base.count
-            || all.last().map(|op| op.id) != Some(base.op)
-        {
-            return Err(OpLogError::Format("oplog does not lead to its anchor"));
-        }
-        all.extend_from_slice(&self.ops);
-        Ok(self.full.get_or_init(|| all))
     }
 
     pub fn get(&self, id: &OpId) -> Result<Option<&Op>, OpLogError> {
