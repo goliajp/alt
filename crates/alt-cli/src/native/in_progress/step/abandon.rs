@@ -119,8 +119,7 @@ impl NativeRepo<'_> {
         let index = canonical_index(self.index()?, self.store.algo()?);
         let now = hash(&index);
         let recorded = |c: &CheckoutIntent| c.index_before == now || c.index_after == now;
-        // a checkout that gave the step up before and was cut short is
-        // from the index it found, which the step need not have recorded
+        // a giving up cut short before is from an index of any kind
         let own = &told.checkouts[..told.own.unwrap_or(told.checkouts.len())];
         let index_after = match own.iter().any(recorded) {
             true => first.index_before.clone(),
@@ -203,8 +202,7 @@ impl NativeRepo<'_> {
         }
         self.checkout_intent = checkout;
         let effects = recovery::RefEffects::RefsOnly;
-        // another workspace that moved the notes ref meanwhile has its note
-        // on the tip: what the step wrote is taken out on top of that
+        // on top of the note another workspace put on the tip meanwhile
         let moved = loop {
             match self.commit_refs_gated("recover", &refs, None, effects) {
                 Err(e) if notes_moved(&*e) => refs = self.refs_back(told)?,
