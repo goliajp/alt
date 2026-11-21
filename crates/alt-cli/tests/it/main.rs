@@ -104,6 +104,7 @@ mod status_labels;
 mod status_replaced;
 mod status_untracked;
 mod store_refresh;
+mod submission_records;
 mod switch_kinds;
 mod sync_order;
 #[cfg(target_os = "linux")]

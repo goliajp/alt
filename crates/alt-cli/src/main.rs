@@ -16,7 +16,7 @@ unsafe extern "C" {}
 
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
-use alt_cli::execution::Execution;
+use alt_cli::execution::{Execution, submit};
 use alt_cli::machine::{self, Failure};
 use alt_cli::native::pathspec::Place;
 use alt_cli::native::{self, Identity};
@@ -111,10 +111,10 @@ fn attempt() -> Response {
     let (forwarded, identity) = Identity::of_process();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
-    let mut drawn = false;
+    let (mut drawn, mut bound) = (false, None);
     if native_write {
-        (parsed, drawn) = match alt_cli::execution::submit(&mut args, parsed, &cwd, &identity) {
-            Ok(submitted) => submitted,
+        (parsed, bound, drawn) = match submit(&mut args, parsed, &cwd, &identity) {
+            Ok((parsed, bound, drawn)) => (parsed, Some(bound), drawn),
             Err(response) => return response,
         };
     }
@@ -163,7 +163,7 @@ fn attempt() -> Response {
             Outcome::NotSent | Outcome::LostAfterSend => {}
         }
     }
-    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None, drawn) {
+    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None, drawn, bound) {
         Ok(execution) => execution,
         Err(response) => return response,
     };

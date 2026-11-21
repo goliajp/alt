@@ -28,11 +28,11 @@ pub struct Execution {
     outcome: std::cell::Cell<&'static str>,
 }
 
-pub fn binding(
-    parsed: &Parsed,
-    cwd: &Path,
-    identity: &Identity,
-) -> Res<(PathBuf, String, String, alt_json::Value)> {
+/// The control directory a command runs in, the repository and the
+/// workspace by their ids, and what the command is bound to.
+pub type Bound = (PathBuf, String, String, alt_json::Value);
+
+pub fn binding(parsed: &Parsed, cwd: &Path, identity: &Identity) -> Res<Bound> {
     let (alt_dir, coord) = native::resolve_workspace(cwd, parsed.cli.workspace.as_deref())?;
     let repository = request::repository_identity(&alt_dir)?;
     let workspace = coord.request_workspace()?;
@@ -46,14 +46,14 @@ pub fn binding(
 
 /// Gives a native write the request id it runs under and records that it
 /// was submitted. Where the caller named none, one is drawn and put among
-/// `args`. Returns the command as it parses then, and whether the id was
-/// drawn here.
+/// `args`. Returns the command as it parses then, what it is bound to,
+/// and whether the id was drawn here.
 pub fn submit(
     args: &mut Vec<std::ffi::OsString>,
     mut parsed: Parsed,
     cwd: &Path,
     identity: &Identity,
-) -> Result<(Parsed, bool), Response> {
+) -> Result<(Parsed, Bound, bool), Response> {
     let drawn = parsed.cli.request_id.is_none();
     let id = match parsed.cli.request_id.as_deref() {
         Some(id) => request::parse_id(id).map_err(|e| e.response(parsed.json, Some(id)))?,
@@ -64,22 +64,23 @@ pub fn submit(
         args.splice(1..1, ["--request-id".into(), machine::hex(&id).into()]);
         parsed = machine::parse(args.clone())?;
     }
-    binding(&parsed, cwd, identity)
-        .and_then(|(dir, _, _, value)| {
+    let bound = binding(&parsed, cwd, identity)
+        .and_then(|bound| {
             // this process runs the one command: what it says here stands
-            std::mem::forget(hardening::enter(
-                &parsed.cli.command,
-                drawn,
-                &dir,
-                identity,
-            )?);
-            request::record_submission(&dir, id, &value)
+            let left = hardening::enter(&parsed.cli.command, drawn, &bound.0, identity)?;
+            std::mem::forget(left);
+            // an id drawn here for a command this process runs itself is
+            // known to nobody until the request is claimed under it
+            if !(drawn && crate::client::runs_here(&parsed.cli.command)) {
+                request::record_submission(&bound.0, id, &bound.3)?;
+            }
+            Ok(bound)
         })
         .map_err(|error| {
             machine::from_error(error.as_ref(), false)
                 .response(parsed.json, Some(&machine::hex(&id)))
         })?;
-    Ok((parsed, drawn))
+    Ok((parsed, bound, drawn))
 }
 
 impl Execution {
@@ -95,12 +96,15 @@ impl Execution {
     /// Claim before acquiring any daemon store mutex. A retry can block here
     /// while the original publishes its result, without holding up durability.
     /// `drawn`: the request id was drawn for this run ([`submit`]).
+    /// `bound`: what the command is bound to, where this process worked
+    /// it out when it submitted the command.
     pub fn prepare(
         parsed: Parsed,
         cwd: PathBuf,
         identity: Identity,
         wire_id: Option<RequestId>,
         drawn: bool,
+        bound: Option<Bound>,
     ) -> Result<Self, Response> {
         let writing = cli::mutates_command(&parsed.cli.command);
         let reported_id = parsed
@@ -132,7 +136,10 @@ impl Execution {
                     Some(id) => id,
                     None => request::new_id()?,
                 };
-                let (alt_dir, repository, workspace, value) = binding(&parsed, &cwd, &identity)?;
+                let (alt_dir, repository, workspace, value) = match bound {
+                    Some(bound) => bound,
+                    None => binding(&parsed, &cwd, &identity)?,
+                };
                 let left = hardening::enter(&parsed.cli.command, drawn, &alt_dir, &identity)?;
                 // what was found to say of `core.fsync`, here or in `submit`
                 let left = (left, hardening::take_warnings());

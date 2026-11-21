@@ -118,26 +118,13 @@ impl NativeRepo<'_> {
     /// would be once those exist.
     fn settings_listed(&self) -> Res<(alt_git_config::Config, Vec<PathBuf>)> {
         let dir = self.store.alt_dir.join("git-import");
-        let file = dir.join("config");
-        let branch = self.head_branch().ok().and_then(|full| {
+        let branch = || {
+            let full = self.head_branch().ok()?;
             let short = full.strip_prefix("refs/heads/")?;
             Some(BString::from(short.as_bytes().to_vec()))
-        });
-        let (mut entries, mut files) =
-            crate::git_settings::outer_listed(Some(dir.clone()), branch.clone())?;
-        if !file.is_file() {
-            files.push(file);
-            return Ok((alt_git_config::Config { entries }, files));
-        }
-        let ctx = alt_git_config::IncludeContext {
-            git_dir: Some(dir),
-            branch,
-            home: crate::git_settings::home(),
         };
-        let (own, read) = alt_git_config::Config::load_listing(&file, &ctx)?;
-        entries.extend(own.entries);
-        files.extend(read);
-        Ok((alt_git_config::Config { entries }, files))
+        let read = crate::git_settings::applying(&dir, branch)?;
+        Ok((read.config.clone(), read.files.clone()))
     }
 }
 

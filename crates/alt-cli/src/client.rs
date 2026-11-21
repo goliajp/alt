@@ -28,6 +28,14 @@ pub use imp::{
     Outcome, disabled, is_idempotent, routes_through_daemon, serve_write, stay_direct, try_serve,
 };
 
+/// Whether this process runs `command` itself and asks no daemon to.
+pub fn runs_here(command: &crate::cli::Command) -> bool {
+    #[cfg(unix)]
+    return disabled() || !routes_through_daemon(command);
+    #[cfg(not(unix))]
+    true
+}
+
 #[cfg(unix)]
 mod imp {
     use std::os::unix::net::UnixStream;

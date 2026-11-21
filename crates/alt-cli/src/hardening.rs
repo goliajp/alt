@@ -14,7 +14,6 @@
 
 use std::path::Path;
 
-use alt_git_config::{Config, IncludeContext};
 use alt_os::durability::Unsynced;
 
 use crate::cli::Command;
@@ -66,18 +65,8 @@ pub fn hardens_index(value: &[u8]) -> (bool, Vec<&[u8]>) {
 /// `alt_dir`, as the caller `identity` reads it, has `alt add` sync.
 fn index_hardened(alt_dir: &Path, identity: &Identity) -> Res<bool> {
     let _caller = identity.outer_environment();
-    let dir = alt_dir.join("git-import");
-    let mut entries = crate::git_settings::outer(Some(dir.clone()), None)?;
-    let file = dir.join("config");
-    if file.is_file() {
-        let ctx = IncludeContext {
-            git_dir: Some(dir),
-            branch: None,
-            home: crate::git_settings::home(),
-        };
-        entries.extend(Config::load(&file, &ctx)?.entries);
-    }
-    let settings = Config { entries };
+    let read = crate::git_settings::applying(&alt_dir.join("git-import"), || None)?;
+    let settings = &read.config;
     let Some(value) = settings.get_str("core", None, "fsync") else {
         return Ok(false);
     };

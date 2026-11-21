@@ -237,12 +237,14 @@ mod unix {
                 return Ok(());
             }
         };
+        alt_cli::begin_command();
         let execution = match Execution::prepare(
             parsed,
             req.cwd.clone(),
             Identity::from_map(&req.env),
             req.id,
             req.drawn,
+            None,
         ) {
             Ok(execution) => execution,
             Err(response) => {

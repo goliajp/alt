@@ -122,6 +122,7 @@ fn write_entries(path: &PathBuf, entries: &[Entry]) -> Res<()> {
     let tmp = path.with_extension("config.tmp");
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
+    crate::git_settings::forget();
     Ok(())
 }
 

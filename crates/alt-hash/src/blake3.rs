@@ -300,6 +300,10 @@ pub fn hash(input: &[u8]) -> Hash {
 /// BLAKE3 of one buffer, computed on several threads when the buffer is large enough
 /// for that to pay: the same value as [`hash`].
 pub fn hash_threads(input: &[u8]) -> Hash {
+    // too short to be split: how many processors there are is not asked
+    if input.len() < tree::THREAD_LEN {
+        return hash(input);
+    }
     static DEPTH: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     // two leaves of the split per processor, so that an uneven one does not idle the rest
     let depth = *DEPTH
