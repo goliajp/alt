@@ -14,7 +14,7 @@ use super::dangling::{
     CASES, Fault, UNSYNCED_APPENDS, damage, reader_is_sound, recovered, snapshot, store, synced_to,
     try_put,
 };
-use super::rewind_interrupted::{FILES, lens};
+use super::rewind_interrupted::{FILES, KEPT, lens, object, open, put, reads};
 
 /// Notes in the lock file that the appends past `whole` were left
 /// unsynced in the running boot, or in another one.
@@ -100,6 +100,41 @@ fn a_writer_that_syncs_cuts_what_the_running_boot_left_unsynced_and_names_conten
             recovered(tmp.path(), victim, &case);
         }
     }
+}
+
+/// A record of the pack that is not its last and does not read, past
+/// the boundary: to a writer that syncs, what the running boot left
+/// unsynced ends there, as what another boot left does.
+#[test]
+fn a_writer_that_syncs_cuts_the_pack_the_running_boot_left_unsynced_at_a_record_within_it() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let mut odb = open(dir);
+    put(&mut odb, 0..KEPT);
+    let kept = lens(dir);
+    // two objects of one chunk each, left unsynced
+    put(&mut odb, 60..61);
+    let first = lens(dir);
+    put(&mut odb, 63..64);
+    drop(odb);
+    synced_to(dir, kept, UNSYNCED_APPENDS);
+    left_unsynced(dir, kept, true);
+    // the first of the two records is whole in length, and holds zeros
+    // where the end of its content was
+    let pack = fs::OpenOptions::new().write(true).open(dir.join(FILES[0]));
+    pack.unwrap().write_all_at(&[0; 20], first[0] - 20).unwrap();
+    let mut odb = try_put(dir, 66).unwrap();
+    for n in [60, 63] {
+        assert!(!odb.contains(&object(n).0).unwrap(), "object {n}");
+    }
+    put(&mut odb, 60..61);
+    put(&mut odb, 63..64);
+    drop(odb);
+    let odb = open(dir);
+    for n in (0..KEPT).chain([60, 63, 66]) {
+        reads(&odb, n);
+    }
+    odb.check().unwrap();
 }
 
 fn note(dir: &Path) -> [u8; 64] {

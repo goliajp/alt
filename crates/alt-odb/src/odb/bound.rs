@@ -72,8 +72,13 @@ impl Odb {
         let cached = relaxed && unsynced::cached(&marker, note);
         // a pack noted as synced is not, once the marker stops saying so
         let unseen = unsynced::unseen(&marker, note);
-        if (!marker.trusted() || unseen.is_some()) && self.blobs.distrust_synced()? {
-            head::forget_synced(&self.lock)?;
+        if !marker.trusted() || unseen.is_some() {
+            if self.blobs.distrust_synced()? {
+                head::forget_synced(&self.lock)?;
+            } else if !relaxed && unsynced::cached(&marker, note) {
+                // this handle read the pack as the running boot wrote it
+                self.blobs.look_again()?;
+            }
         }
         let looked_by = (!cached).then(|| unseen.as_ref().unwrap_or(&marker));
         self.settle(&marker, looked_by)?;

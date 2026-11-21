@@ -64,6 +64,11 @@ impl BlobStore {
         self.chunks.distrust_synced()
     }
 
+    /// See [`crate::ChunkStore::look_again`].
+    pub fn look_again(&mut self) -> Result<(), StoreError> {
+        self.chunks.look_again()
+    }
+
     /// Visits the blob map's records from byte `from` on: where each
     /// begins, the blob and its manifest root.
     pub fn map_records_from(

@@ -51,6 +51,14 @@ impl ChunkStore {
         Ok(true)
     }
 
+    /// Reads the end of the active pack again, by what is known of it
+    /// now: for the holder of the write lock that no longer takes the
+    /// records there for what was written.
+    pub fn look_again(&mut self) -> Result<(), StoreError> {
+        self.tail.forget_synced();
+        self.reload()
+    }
+
     /// Checks the records a load just walked in the active pack and loads
     /// the pack again up to the first that never finished.
     pub(crate) fn settle(&mut self, fresh: Fresh, tail: &Tail) -> Result<(), StoreError> {
