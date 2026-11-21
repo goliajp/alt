@@ -7,12 +7,12 @@ use alt_args::Subcommand;
 pub enum AuthOp {
     /// Give an agent a short credential with explicit repository and write bounds
     Delegate {
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
-        #[arg(long)]
+        #[arg(long, hint = path)]
         agent_file: std::path::PathBuf,
         /// JSON purpose, agent_session, lifetime_seconds and scope
-        #[arg(long, required_unless_present = "resume", conflicts_with = "resume")]
+        #[arg(long, required_unless_present = "resume", conflicts_with = "resume", hint = path)]
         plan: Option<std::path::PathBuf>,
         /// Retry the same privately saved delegation after interruption
         #[arg(long)]
@@ -20,23 +20,23 @@ pub enum AuthOp {
     },
     /// List agent credentials belonging to the current human account
     Delegations {
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         after: Option<String>,
     },
     /// Revoke one agent credential owned by the current human account
     RevokeAgent {
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         credential_id: String,
     },
     /// Save a private, origin-bound credential after explicit browser consent
     Login {
-        #[arg(long)]
+        #[arg(long, hint = none)]
         server: String,
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
         /// Continue the same saved request after interruption
         #[arg(long)]
@@ -49,12 +49,12 @@ pub enum AuthOp {
     },
     /// Check the current principal and installation without printing secrets
     Status {
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
     },
     /// Revoke the saved credential before removing its private file
     Logout {
-        #[arg(long)]
+        #[arg(long, hint = path)]
         credential_file: std::path::PathBuf,
     },
 }
@@ -62,12 +62,13 @@ pub enum AuthOp {
 #[derive(Subcommand, Debug)]
 pub enum RunnerOp {
     Probe {
-        #[arg(long)]
+        #[arg(long, hint = none)]
         bindings: String,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         environment: String,
     },
     Execute {
+        #[arg(hint = path)]
         spec: std::path::PathBuf,
     },
 }
@@ -77,9 +78,15 @@ pub enum RequestOp {
     /// List requests without a durable completion
     Pending,
     /// Inspect request scope, completion, and attributed operations
-    Status { id: String },
+    Status {
+        #[arg(hint = none)]
+        id: String,
+    },
     /// Read the entire recorded stdout, stderr, and exit code
-    Result { id: String },
+    Result {
+        #[arg(hint = none)]
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -87,30 +94,36 @@ pub enum OperationOp {
     /// List incomplete operations belonging to this workspace instance
     Pending,
     /// Show the durable state of one operation
-    Status { id: String },
+    Status {
+        #[arg(hint = none)]
+        id: String,
+    },
     /// Finish a prepared operation after checking every affected prestate
-    Recover { id: String },
+    Recover {
+        #[arg(hint = none)]
+        id: String,
+    },
 }
 
 #[derive(alt_args::Args, Debug)]
 pub struct PortableOptions {
     /// Private credential created by alt auth login
-    #[arg(long)]
+    #[arg(long, hint = path)]
     pub credential_file: std::path::PathBuf,
     /// Private durable journal; reuse this directory after an interrupted attempt
-    #[arg(long)]
+    #[arg(long, hint = path)]
     pub journal: std::path::PathBuf,
-    #[arg(long, default_value_t = 16_777_216)]
+    #[arg(long, default_value_t = 16_777_216, hint = none)]
     pub max_metadata_bytes: usize,
-    #[arg(long, default_value_t = 1_000_000)]
+    #[arg(long, default_value_t = 1_000_000, hint = none)]
     pub max_entries: usize,
-    #[arg(long, default_value_t = 100_000)]
+    #[arg(long, default_value_t = 100_000, hint = none)]
     pub max_publications: usize,
-    #[arg(long, default_value_t = 8_589_934_592)]
+    #[arg(long, default_value_t = 8_589_934_592, hint = none)]
     pub max_blob_bytes: u64,
-    #[arg(long, default_value_t = 68_719_476_736)]
+    #[arg(long, default_value_t = 68_719_476_736, hint = none)]
     pub max_total_bytes: u64,
-    #[arg(long, default_value_t = 120)]
+    #[arg(long, default_value_t = 120, hint = none)]
     pub timeout_seconds: u64,
 }
 
@@ -120,9 +133,9 @@ pub enum PortableOp {
     Export {
         #[command(flatten)]
         options: PortableOptions,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         repository: String,
-        #[arg(long)]
+        #[arg(long, hint = path)]
         output: std::path::PathBuf,
     },
     /// Inspect the same immutable source export
@@ -149,21 +162,21 @@ pub enum PortableOp {
     Import {
         #[command(flatten)]
         options: PortableOptions,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         repository: String,
-        #[arg(long)]
+        #[arg(long, hint = path)]
         archive: std::path::PathBuf,
         /// JSON list of explicit source identity dispositions; null links preserve history only
-        #[arg(long)]
+        #[arg(long, hint = path)]
         mappings: std::path::PathBuf,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         source_installation: String,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         source_repository: String,
-        #[arg(long)]
+        #[arg(long, hint = none)]
         source_epoch: u64,
         /// Source receipt public key obtained independently of the archive
-        #[arg(long)]
+        #[arg(long, hint = none)]
         source_key: String,
     },
     /// Query the original target intent, including a lost activation response

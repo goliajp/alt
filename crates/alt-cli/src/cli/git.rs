@@ -22,6 +22,7 @@ pub struct CatFileArgs {
     /// pretty-print object's content
     #[arg(short = 'p', group = "op")]
     pretty: bool,
+    #[arg(hint = "rev")]
     object: String,
 }
 

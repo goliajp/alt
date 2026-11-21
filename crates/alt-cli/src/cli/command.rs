@@ -60,16 +60,21 @@ pub enum Command {
     /// Provide contents or details of repository objects
     CatFile(CatFileArgs),
     /// Pick out and massage parameters
-    RevParse { rev: String },
+    RevParse {
+        #[arg(hint = "rev")]
+        rev: String,
+    },
     /// Show commit logs
     Log(log_cmd::LogArgs),
     /// Verify and independently import a supported Git source for tasks
     Intake {
+        #[arg(hint = dir)]
         source: std::path::PathBuf,
         /// New directory outside every repository (must not already exist)
+        #[arg(hint = dir)]
         target: std::path::PathBuf,
         /// Absolute Git executable used for independent verification
-        #[arg(long, default_value = "/usr/bin/git")]
+        #[arg(long, default_value = "/usr/bin/git", hint = path)]
         git: std::path::PathBuf,
         #[arg(long, global = true)]
         json: bool,
@@ -79,17 +84,20 @@ pub enum Command {
         /// Destination directory: the store is created at <DIR>/.alt
         /// (keep it outside any git work tree — .alt does not coexist
         /// with .git)
+        #[arg(hint = dir)]
         target: std::path::PathBuf,
     },
     /// Export this .alt store back to a git repository
     Export {
         /// Destination directory (must not exist or be empty): a .git is
         /// rebuilt at <DIR>/.git with L1 semantic fidelity
+        #[arg(hint = dir)]
         target: std::path::PathBuf,
     },
     /// Create an empty native .alt repository
     Init {
         /// Directory to create the repo in (default: current directory)
+        #[arg(hint = dir)]
         dir: Option<std::path::PathBuf>,
     },
     /// Stage file contents into the index
@@ -100,7 +108,7 @@ pub enum Command {
     /// Record staged changes as a new commit
     Commit {
         /// Commit message (with --amend, defaults to the amended commit's)
-        #[arg(short = 'm', required_unless_present_any = ["amend", "validate"])]
+        #[arg(short = 'm', required_unless_present_any = ["amend", "validate"], hint = none)]
         message: Option<String>,
         /// Replace the current branch tip with a new commit made from the
         /// index, keeping its parents and author
@@ -120,10 +128,10 @@ pub enum Command {
         #[arg(long, conflicts_with_all = ["amend", "message", "no_verify"])]
         validate: bool,
         /// Record a one-line decision in the commit's metadata (up to 3)
-        #[arg(long = "decision", value_name = "TEXT")]
+        #[arg(long = "decision", value_name = "TEXT", hint = none)]
         decisions: Vec<String>,
         /// Record an extra metadata field (`key=value`, e.g. `model=…`)
-        #[arg(long = "meta", value_name = "KEY=VALUE", value_parser = parse_key_value)]
+        #[arg(long = "meta", value_name = "KEY=VALUE", value_parser = parse_key_value, hint = none)]
         extra: Vec<(String, String)>,
         /// Emit the new commit/tree oids (or, with --validate, the findings)
         /// as a JSON object
@@ -138,9 +146,10 @@ pub enum Command {
     /// List, create, or delete branches
     Branch {
         /// Branch name to create (omit to list branches)
+        #[arg(hint = none)]
         name: Option<String>,
         /// Delete the named branch
-        #[arg(short = 'd')]
+        #[arg(short = 'd', hint = "branch-delete")]
         delete: Option<String>,
         /// With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
         #[arg(short = 'r', long = "remotes", requires = "delete")]
@@ -152,6 +161,7 @@ pub enum Command {
     /// Switch branches, materializing the target tree into the work tree
     Switch {
         /// Branch to switch to
+        #[arg(hint = "branch")]
         name: String,
         /// Create the branch before switching
         #[arg(short = 'c')]
@@ -163,6 +173,7 @@ pub enum Command {
     /// Show a commit: header + per-file unified diff against its first parent
     Show {
         /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.
+        #[arg(hint = "rev")]
         rev: Option<String>,
         /// Emit a structured JSON diff instead of unified text
         #[arg(long)]
@@ -171,8 +182,10 @@ pub enum Command {
     /// Line-by-line origin attribution for one file (`git blame`-style)
     Blame {
         /// Path to the file to blame (relative to the current directory).
+        #[arg(hint = "path-tracked")]
         path: String,
         /// Revision to start the walk from (default `HEAD`).
+        #[arg(hint = "rev")]
         rev: Option<String>,
         /// Trace lines moved within the file. A number against the letter
         /// is how many letters and digits they must carry (20 if absent).
@@ -208,7 +221,7 @@ pub enum Command {
     /// Replay the current branch's own commits onto another base
     Rebase {
         /// The base to replay onto
-        #[arg(required_unless_present_any = ["cont", "skip", "abort"])]
+        #[arg(required_unless_present_any = ["cont", "skip", "abort"], hint = "rev")]
         upstream: Option<String>,
         /// Edit the list of commits first (pick, reword, squash, fixup,
         /// drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
@@ -230,10 +243,10 @@ pub enum Command {
     /// Record new commits that undo earlier ones
     Revert {
         /// Commits to revert, in order
-        #[arg(required_unless_present_any = ["cont", "abort"])]
+        #[arg(required_unless_present_any = ["cont", "abort"], hint = "rev")]
         revs: Vec<String>,
         /// For a merge commit, the parent (1-based) whose side is kept
-        #[arg(short = 'm', long = "mainline")]
+        #[arg(short = 'm', long = "mainline", hint = none)]
         mainline: Option<usize>,
         /// Commit the resolved revert and go on with the rest
         #[arg(long = "continue", id = "cont", conflicts_with_all = ["revs", "abort", "mainline"])]
@@ -251,6 +264,7 @@ pub enum Command {
     /// Apply the changes from a commit on top of the current branch
     CherryPick {
         /// Revision of the commit to apply
+        #[arg(hint = "rev")]
         rev: String,
         /// Emit a structured JSON result instead of human lines.
         #[arg(long)]
@@ -260,34 +274,38 @@ pub enum Command {
     Config {
         /// Dotted key (e.g. `user.name`). Omit when `--list` or
         /// `--unset` is set.
+        #[arg(hint = "config-key")]
         key: Option<String>,
         /// New value. When supplied, the key is set (overwriting any
         /// existing value); when omitted, the key is read.
+        #[arg(hint = none)]
         value: Option<String>,
         /// List every entry as `section.key=value` (git's default
         /// `--list` shape).
         #[arg(long)]
         list: bool,
         /// Remove a key from the config file.
-        #[arg(long)]
+        #[arg(long, hint = "config-key")]
         unset: Option<String>,
     },
     /// List, create (lightweight or annotated), or delete tags
     Tag {
         /// Tag name to create. Omit (and omit `-d`) to list all tags.
+        #[arg(hint = none)]
         name: Option<String>,
         /// Revision the new tag should point to (default HEAD). Only
         /// honoured when creating a tag.
+        #[arg(hint = "rev")]
         rev: Option<String>,
         /// Delete a tag by name. Mutually exclusive with `name`.
-        #[arg(short = 'd', long)]
+        #[arg(short = 'd', long, hint = "tag")]
         delete: Option<String>,
         /// Create an *annotated* tag (writes a tag object carrying the
         /// message + tagger ident, instead of a bare ref).
         #[arg(short = 'a', long)]
         annotate: bool,
         /// Annotated-tag message. Required when `-a` is set.
-        #[arg(short = 'm', long)]
+        #[arg(short = 'm', long, hint = none)]
         message: Option<String>,
         /// JSON output for list mode (ignored otherwise).
         #[arg(long)]
@@ -310,6 +328,7 @@ pub enum Command {
     /// Join another branch into the current one
     Merge {
         /// Branch to merge into the current branch
+        #[arg(hint = "branch")]
         branch: String,
         /// Emit a structured JSON result instead of the human lines
         #[arg(long)]
@@ -355,9 +374,11 @@ pub enum Command {
     /// Clone a remote repository: init + remote add origin + fetch + checkout
     Clone {
         /// Remote URL (e.g. `https://github.com/user/repo.git`)
+        #[arg(hint = none)]
         url: String,
         /// Destination directory (defaults to the URL's last path
         /// segment with any `.git` suffix stripped)
+        #[arg(hint = dir)]
         dir: Option<std::path::PathBuf>,
         /// Emit a structured JSON result instead of the human view
         #[arg(long)]
@@ -366,9 +387,10 @@ pub enum Command {
     /// Fetch refs + objects from a configured remote (git smart-http v2)
     Fetch {
         /// Remote name (defaults to `origin`)
-        #[arg(default_value = "origin")]
+        #[arg(default_value = "origin", hint = "remote")]
         remote: String,
         /// Refspecs to fetch (defaults to the remote's configured refspec)
+        #[arg(hint = none)]
         refspecs: Vec<String>,
         /// Emit a structured JSON result instead of the human view
         #[arg(long)]
@@ -377,10 +399,11 @@ pub enum Command {
     /// Push refs + objects to a configured remote (git smart-http v1)
     Push {
         /// Remote name (defaults to `origin`)
-        #[arg(default_value = "origin")]
+        #[arg(default_value = "origin", hint = "remote")]
         remote: String,
         /// Refspecs to push (`<src>:<dst>` or just `<src>` — defaults to
         /// the current branch onto its same-named remote branch)
+        #[arg(hint = "refspec")]
         refspecs: Vec<String>,
         /// Force the update (allow non-fast-forward); the server still
         /// enforces its own policy
@@ -403,7 +426,7 @@ pub enum Command {
     #[command(name = "op-log")]
     OpLog {
         /// Limit the number of entries shown (newest first; default = all)
-        #[arg(short = 'n')]
+        #[arg(short = 'n', hint = none)]
         max_count: Option<usize>,
         /// Emit a structured JSON list instead of the human view
         #[arg(long)]
@@ -440,9 +463,10 @@ pub enum Command {
     /// `untrusted:<principal>`.
     Verify {
         /// Commit oids to check (hex). Empty = walk HEAD.
+        #[arg(hint = "rev")]
         commits: Vec<String>,
         /// Limit when walking HEAD (default 50; ignored when oids given)
-        #[arg(short = 'n', long = "max-count")]
+        #[arg(short = 'n', long = "max-count", hint = none)]
         max_count: Option<usize>,
         /// Emit a structured JSON list instead of the human view
         #[arg(long)]

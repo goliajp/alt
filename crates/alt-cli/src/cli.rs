@@ -14,6 +14,7 @@ mod native;
 mod platform;
 mod prepare;
 mod task;
+mod task_remote;
 mod vcs;
 
 pub use classify::{is_native, mutates_command};
@@ -21,7 +22,8 @@ pub use command::Command;
 pub use git::{CatFileArgs, run_git, run_on_store};
 pub use native::run_native;
 pub use platform::{AuthOp, OperationOp, PortableOp, PortableOptions, RequestOp, RunnerOp};
-pub use task::{CandidateOp, ChangeOp, EvidenceOp, TaskOp, TaskRemoteOp};
+pub use task::{CandidateOp, EvidenceOp, TaskOp};
+pub use task_remote::{ChangeOp, TaskRemoteOp};
 pub use vcs::{
     BisectOp, CiOp, FlowOp, FlowTopicOp, IdentityOp, LfsOp, MetaOp, RemoteOp, WorkspaceOp,
 };
@@ -34,9 +36,9 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
     /// Operate in the named parallel workspace instead of the default one
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hint = "workspace")]
     pub workspace: Option<String>,
     /// Stable request identity for a write in an existing native repository
-    #[arg(long, global = true, value_name = "HEX")]
+    #[arg(long, global = true, value_name = "HEX", hint = none)]
     pub request_id: Option<String>,
 }

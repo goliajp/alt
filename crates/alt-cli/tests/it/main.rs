@@ -129,6 +129,7 @@ mod funcname_long;
 mod git_settings;
 mod recovery_kinds;
 mod stack_overflow;
+mod value_hints;
 
 /// The `alt` binary under test, kept from the git configuration of the
 /// machine the tests run on, as the git they compare it with is. A test
