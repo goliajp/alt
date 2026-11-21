@@ -68,6 +68,35 @@ pub fn submit(
 }
 
 impl Execution {
+    fn of(
+        parsed: Parsed,
+        identity: Identity,
+        id: Option<RequestId>,
+        cwd: PathBuf,
+        writing: bool,
+        claim: Option<Claim>,
+    ) -> Self {
+        Self {
+            parsed,
+            identity,
+            id,
+            cwd,
+            writing,
+            drawn: false,
+            claim,
+            outcome: std::cell::Cell::new("unknown"),
+        }
+    }
+
+    /// Refuses a request id an older alt recorded effects under without a
+    /// receipt. An id drawn for this run is on no operation older than it.
+    fn ensure_not_legacy(&self, store: &Store) -> Res<()> {
+        match self.id {
+            Some(id) if !self.drawn && store.legacy_request(&id)? => Err(Failure::unknown("legacy request has recorded effects but no complete response; inspect operations before recovery").into()),
+            _ => Ok(()),
+        }
+    }
+
     /// Says whether the request id was drawn for this run ([`submit`]).
     pub fn with_its_id_drawn(mut self, drawn: bool) -> Self {
         self.drawn = drawn;
@@ -123,16 +152,7 @@ impl Execution {
         })();
         match result {
             Ok((_, _, Some(response))) => Err(response),
-            Ok((id, claim, None)) => Ok(Self {
-                parsed,
-                identity,
-                id,
-                cwd,
-                writing,
-                drawn: false,
-                claim,
-                outcome: std::cell::Cell::new("unknown"),
-            }),
+            Ok((id, claim, None)) => Ok(Self::of(parsed, identity, id, cwd, writing, claim)),
             Err(error) => Err(machine::from_error(error.as_ref(), writing)
                 .response(parsed.json, reported_id.as_deref())),
         }
@@ -183,12 +203,7 @@ impl Execution {
                 )
                 .into());
             }
-            if let Some(id) = self.id
-                && !self.drawn
-                && store.legacy_request(&id)?
-            {
-                return Err(Failure::unknown("legacy request has recorded effects but no complete response; inspect operations before recovery").into());
-            }
+            self.ensure_not_legacy(store)?;
             let ran = cli::run_on_store(
                 &self.parsed.cli,
                 store,

@@ -122,15 +122,7 @@ pub fn claim(
                 started_ms: now_ms(),
             };
             crate::durable::write_entry(&intent_path, &alt_json::to_vec(&intent)?)?;
-            // the directory was made for this request: its entry is synced
-            // here, once, and so is the entry of the directory above it
-            for above in std::fs::canonicalize(&directory)?
-                .ancestors()
-                .skip(1)
-                .take(2)
-            {
-                File::open(above)?.sync_all()?;
-            }
+            crate::durable::sync_above(&directory, 2)?;
             Ok(Claimed::Execute(Claim {
                 _lock: lock,
                 directory,

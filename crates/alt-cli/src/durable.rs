@@ -49,6 +49,20 @@ pub fn write_entry(path: &Path, bytes: &[u8]) -> io::Result<()> {
     File::open(parent)?.sync_all()
 }
 
+/// Syncs the `levels` directories above `directory`: the entry of a
+/// directory that was just made, and the entries of those it lies in. Once
+/// that is done, what is put into the directory needs [`write_entry`] only.
+pub fn sync_above(directory: &Path, levels: usize) -> io::Result<()> {
+    for above in fs::canonicalize(directory)?
+        .ancestors()
+        .skip(1)
+        .take(levels)
+    {
+        File::open(above)?.sync_all()?;
+    }
+    Ok(())
+}
+
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
     fs::remove_file(path)?;
