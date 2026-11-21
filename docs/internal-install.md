@@ -75,6 +75,10 @@ the selected binary directly. Existing daemons are not stopped by installation.
 The normal client can refresh a daemon when its executable changes; the
 installer itself does not make repository requests.
 
+The package carries the zsh plugin under `share/alt/zsh/`. The result of
+`install` has a `zsh` member with the line that loads it, to add to
+`~/.zshrc` by hand; [alt in zsh](shell.md) describes what it does.
+
 Files are copied and verified before activation. `current` is switched as one
 symlink operation; `bin` resolves through it. The retained release directory is
 named by the SHA-256 of its manifest. `status` verifies all retained releases,

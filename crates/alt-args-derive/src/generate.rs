@@ -1,10 +1,13 @@
 //! Generated trait implementations.
 
-use crate::field::{ArgField, Member, Preset, Shape, kebab};
+use crate::field::{ArgField, Hint, Member, Preset, Shape, kebab};
 use crate::parse::{Data, Field, Input, Shape as VariantShape, text};
 use proc_macro::Span;
 
-use crate::describe::{Named, command, items, lines, long, one, quote, short, table, three, two};
+use crate::describe::{
+    HELP_SUBCOMMAND, HIDDEN, Named, command, items, lines, long, one, quote, short, table, three,
+    two,
+};
 use crate::{Error, attr};
 
 /// One argument as the description has it.
@@ -71,8 +74,15 @@ fn arg_item(arg: &ArgField, named: &mut Named) -> Result<String, Error> {
                 + &short(arg.group.as_deref().unwrap_or_default(), span)?
         }
     };
+    let hint = match &arg.hint {
+        Hint::Unset => one(0),
+        Hint::None => one(1),
+        Hint::Path => one(2),
+        Hint::Dir => one(3),
+        Hint::Other(kind) => one(4) + &short(kind, span)?,
+    };
     let rest =
-        short(&arg.value_name, span)? + &long(&arg.help, span)? + &lines(&listed, span)? + &rare;
+        short(&arg.value_name, span)? + &long(&arg.help, span)? + &lines(&listed, span)? + &hint;
     let letter = arg.short.map(String::from).unwrap_or_default();
     Ok(one(0)
         + &one(kind)
@@ -185,7 +195,7 @@ pub(crate) fn parser(input: &Input) -> Result<String, Error> {
     }
     let group = group(&input.name, &members, input.span)?;
     let command = command(
-        help_subcommand,
+        HELP_SUBCOMMAND * usize::from(help_subcommand),
         members.subcommand,
         &about,
         &group,
@@ -208,7 +218,7 @@ pub(crate) fn args(input: &Input) -> Result<String, Error> {
     let mut named = Named::new(input.span);
     let members = members(fields(input)?, &mut named)?;
     let group = group(&input.name, &members, input.span)?;
-    let command = command(false, None, "", &group, input.span)?;
+    let command = command(0, None, "", &group, input.span)?;
     Ok(format!(
         "{spec} impl ::alt_args::Args for {ty} {{ \
            fn from_matches(m: &::alt_args::Matches) -> Self {{ Self {{ {values} }} }} }}",
@@ -231,9 +241,11 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
     let mut arms = String::new();
     for variant in variants {
         let mut name = kebab(&variant.name);
+        let mut hidden = false;
         for entry in attr::entries(&variant.attributes, "command")? {
             match entry.name.as_str() {
                 "name" => name = entry.string()?,
+                "hide" => hidden = entry.enabled()?,
                 other => {
                     return Err(Error::new(
                         entry.span,
@@ -259,7 +271,8 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
             ),
         };
         let about = attr::doc(&variant.attributes)?;
-        let command = command(false, subcommand, &about, &items, variant.span)?;
+        let flags = HIDDEN * usize::from(hidden);
+        let command = command(flags, subcommand, &about, &items, variant.span)?;
         arms += &format!("{} => Self::{}{value}, ", quote(&name), variant.name);
         commands.push((name, command));
     }
@@ -269,34 +282,5 @@ pub(crate) fn subcommand(input: &Input) -> Result<String, Error> {
              match m.name() {{ {arms} _ => ::core::unreachable!() }} }} }}",
         spec = named.spec(&input.name, &table(&commands, input.span)?, "\"\""),
         ty = input.name,
-    ))
-}
-
-pub(crate) fn value_enum(input: &Input) -> Result<String, Error> {
-    let Data::Enum(variants) = &input.data else {
-        return Err(Error::new(input.span, "expected an enum"));
-    };
-    let mut names = Vec::new();
-    let mut arms = String::new();
-    for variant in variants {
-        if !matches!(variant.shape, VariantShape::Unit) {
-            return Err(Error::new(variant.span, "expected a unit variant"));
-        }
-        let name = kebab(&variant.name);
-        arms += &format!(
-            "{} => ::core::result::Result::Ok(Self::{}), ",
-            quote(&name),
-            variant.name
-        );
-        names.push(name);
-    }
-    Ok(format!(
-        "impl ::alt_args::Value for {ty} {{ \
-           const POSSIBLE: &'static str = {names}; \
-           const CHECK: ::core::option::Option<::alt_args::Check> = ::core::option::Option::None; \
-           fn parse(text: &str) -> ::core::result::Result<Self, ::std::string::String> {{ \
-             match text {{ {arms} _ => ::core::result::Result::Err(::std::string::String::new()) }} }} }}",
-        ty = input.name,
-        names = quote(&names.join("\n")),
     ))
 }

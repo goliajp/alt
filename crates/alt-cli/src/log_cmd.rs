@@ -56,10 +56,10 @@ fn strip_encoding_header(data: &[u8]) -> Vec<u8> {
 #[derive(alt_args::Args, Clone)]
 pub struct LogArgs {
     /// pretty-print commits: raw | oneline (ignored with --json)
-    #[arg(long, default_value = "oneline")]
+    #[arg(long, default_value = "oneline", hint = none)]
     pretty: String,
     /// limit the number of commits
-    #[arg(short = 'n')]
+    #[arg(short = 'n', hint = none)]
     max_count: Option<usize>,
     /// emit the commit list as a stable JSON object
     #[arg(long)]
@@ -74,7 +74,7 @@ pub struct LogArgs {
     #[arg(long = "cc")]
     combined: bool,
     /// start revision
-    #[arg(default_value = "HEAD")]
+    #[arg(default_value = "HEAD", hint = "rev")]
     rev: String,
 }
 

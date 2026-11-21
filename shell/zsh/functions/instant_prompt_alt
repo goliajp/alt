@@ -1,0 +1,4 @@
+# The powerlevel10k segment as it is shown before the shell is ready: from
+# the state of the last prompt.
+
+prompt_alt

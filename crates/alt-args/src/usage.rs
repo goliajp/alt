@@ -1,6 +1,8 @@
 //! The `Usage:` line.
 
+use crate::arg::Arg;
 use crate::scope::Scope;
+use crate::settings::Kind;
 
 fn finish(scope: &Scope, mut line: String) -> String {
     if scope.has_subcommands() {
@@ -59,4 +61,36 @@ pub(crate) fn narrowed(scope: &Scope, needed: &[&str], used: &[&str]) -> String 
         line += &format!(" {}", slot.arg.display(Some(named(slot.arg.id))));
     }
     finish(scope, line)
+}
+
+impl Arg {
+    /// `--long <NAME>`, `-s`, `<NAME>` or `[NAME]...`; `required` picks the
+    /// brackets of a positional and defaults to the argument's own setting.
+    pub(crate) fn display(&self, required: Option<bool>) -> String {
+        let mut text = if !self.long.is_empty() {
+            format!("--{}", self.long)
+        } else if let Some(short) = self.short {
+            format!("-{short}")
+        } else {
+            String::new()
+        };
+        if !self.takes_value() {
+            return text;
+        }
+        if !self.missing().is_empty() {
+            return text + &format!("[=<{}>]", self.value_name());
+        }
+        if !self.is_positional() {
+            text.push(' ');
+        }
+        if self.is_positional() && !required.unwrap_or(self.required) {
+            text += &format!("[{}]", self.value_name());
+        } else {
+            text += &format!("<{}>", self.value_name());
+        }
+        if self.is_positional() && self.kind == Kind::Multiple {
+            text += "...";
+        }
+        text
+    }
 }

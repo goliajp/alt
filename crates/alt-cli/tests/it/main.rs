@@ -25,6 +25,7 @@ mod closed_fds;
 mod commit_batch;
 mod commit_loop;
 mod commit_meta;
+mod complete;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
@@ -55,6 +56,7 @@ mod fsck_tails;
 mod fsync_by_branch;
 mod gitlink;
 mod gitlink_said;
+mod help_texts;
 mod identity;
 mod ignore_sources;
 #[cfg(target_os = "linux")]
@@ -78,12 +80,14 @@ mod monorepo_bench;
 mod nested_repo;
 mod old_daemon;
 mod op_log;
+mod operation_state;
 mod past_damage;
 mod path_gate;
 mod pathspec_git;
 mod patterns;
 mod power_cut;
 mod precommit;
+mod prompt;
 mod push;
 mod push_policy;
 mod push_wire_ext;
@@ -105,6 +109,7 @@ mod scan_daemon_switch;
 #[cfg(target_os = "linux")]
 mod scan_daemon_watches;
 mod scan_records;
+mod shell;
 mod show;
 mod staged_durability;
 mod staged_stored;
@@ -149,6 +154,7 @@ mod funcname_long;
 mod git_settings;
 mod recovery_kinds;
 mod stack_overflow;
+mod value_hints;
 
 /// Puts `bytes` at `path` as a writer of state does: in a new file, renamed
 /// into place. The file that was there may be kept under another name, as

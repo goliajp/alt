@@ -7,7 +7,7 @@ use super::*;
 impl NativeRepo<'_> {
     /// The mode named `given`, or without one what `status.showUntrackedFiles`
     /// sets, which may be a boolean as for git; `normal` when nothing does.
-    fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
+    pub(super) fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
         let invalid = |mode: &[u8]| {
             let mode = String::from_utf8_lossy(mode);
             format!("invalid untracked files mode '{mode}'")
@@ -46,7 +46,9 @@ impl NativeRepo<'_> {
 
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
-            return render_status_json(out, short, &self.id.principal, &st, &unmerged);
+            let operation = self.operation()?;
+            let who = &self.id.principal;
+            return render_status_json(out, short, who, &st, &unmerged, operation.as_ref());
         }
         // as git shows them: from where the command was run, unless
         // `status.relativePaths` is off
@@ -147,6 +149,7 @@ fn render_status_json(
     principal: &Principal,
     st: &alt_worktree::Status,
     unmerged: &std::collections::BTreeSet<BString>,
+    operation: Option<&in_progress::Operation>,
 ) -> Res<()> {
     use crate::json::Json;
     let change = |k: ChangeKind| match k {
@@ -185,6 +188,10 @@ fn render_status_json(
     ));
     let unmerged = unmerged.iter().map(|path| path.as_slice());
     doc.extend(crate::json::paths("unmerged", "unmerged_bytes", unmerged));
+    doc.push((
+        "operation",
+        operation.map_or(Json::Null, in_progress::Operation::json),
+    ));
     doc.push(("clean", Json::Bool(clean)));
     Json::Object(doc).write(out)?;
     out.write_all(b"\n")?;

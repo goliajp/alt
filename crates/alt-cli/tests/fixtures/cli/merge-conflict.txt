@@ -27,7 +27,7 @@ exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":[]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"partial","request_id":"<id32:0>","retryable":false},"schema_version":1}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"later.txt","change":"added"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"clean":false}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"later.txt","change":"added"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"operation":{"kind":"merge"},"clean":false}
 $ [repo] alt diff --json
 exit 0
 out| {"schema_version":1,"files":[]}
@@ -48,7 +48,7 @@ exit 0
 out| {"operation_ids":["<id64:6>","<id64:7>"],"request_id":"<id32:8>","schema_version":1,"staged":1}
 $ [repo] alt status --json
 exit 0
-out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"f.txt","change":"modified"},{"path":"later.txt","change":"added"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"clean":false}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"f.txt","change":"modified"},{"path":"later.txt","change":"added"},{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":[],"operation":{"kind":"merge"},"clean":false}
 $ [repo] alt commit -m merge feat --json
 exit 0
 out| {"branch":"main","commit":"<id40:9>","operation_ids":["<id64:10>"],"request_id":"<id32:11>","schema_version":1,"tree":"<id40:12>"}

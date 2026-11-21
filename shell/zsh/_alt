@@ -1,0 +1,83 @@
+#compdef alt
+
+# Completion for alt. The command line is handed to `alt complete`, which
+# reads it by the rules alt itself parses with and answers with lines of
+# tab-separated fields; nothing about alt's commands is known here.
+
+local out line tag title ret=1 nospace=
+local -a fields items
+
+out=$(command alt complete --shell zsh --current $(( CURRENT - 1 )) -- "${words[@]}" 2>/dev/null) || {
+  # no alt on the path, or one from before `alt complete`
+  _files
+  return
+}
+
+# a field as it was before `alt complete` escaped it
+_alt_field() {
+  local rest=$1 char
+  REPLY=
+  while [[ $rest == *\\* ]]; do
+    REPLY+=${rest%%\\*}
+    rest=${rest#*\\}
+    char=$rest[1]
+    rest=$rest[2,-1]
+    case $char in
+      (t) REPLY+=$'\t' ;;
+      (n) REPLY+=$'\n' ;;
+      (*) REPLY+=$char ;;
+    esac
+  done
+  REPLY+=$rest
+}
+
+# hands the candidates gathered for the current group to the completion system
+_alt_group() {
+  (( $#items )) || return
+  if [[ -n $nospace ]]; then
+    _describe -t "$tag" "$title" items -S '' && ret=0
+  else
+    _describe -t "$tag" "$title" items && ret=0
+  fi
+  items=()
+  nospace=
+}
+
+for line in "${(@f)out}"; do
+  fields=("${(@ps:\t:)line}")
+  case $line in
+    (group$'\t'*)
+      _alt_group
+      tag=$fields[2] title=$fields[3]
+      ;;
+    (files$'\t'*)
+      _alt_group
+      if [[ $fields[2] == dir ]]; then
+        _files -/ && ret=0
+      else
+        _files && ret=0
+      fi
+      ;;
+    (nospace)
+      nospace=1
+      _alt_group
+      ;;
+    (prefix$'\t'*)
+      _alt_group
+      _alt_field "$fields[2]"
+      compset -P "${(b)REPLY}"
+      ;;
+    (*)
+      _alt_field "$fields[1]"
+      line=${REPLY//:/\\:}
+      if [[ -n $fields[2] ]]; then
+        _alt_field "$fields[2]"
+        line+=":$REPLY"
+      fi
+      items+=("$line")
+      ;;
+  esac
+done
+_alt_group
+
+return ret

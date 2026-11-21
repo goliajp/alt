@@ -13,18 +13,18 @@ use super::sequence_editor::{self as ed, Action};
 use super::*;
 
 /// What a stopped or running rebase remembers.
-struct RebaseState {
+pub(super) struct RebaseState {
     recovery: Option<String>,
     /// The branch being rebased (`refs/heads/…`).
-    branch: String,
+    pub(super) branch: String,
     /// Where the branch pointed before the rebase.
     orig: ObjectId,
     /// The base the commits go onto.
-    onto: ObjectId,
+    pub(super) onto: ObjectId,
     /// The step that stopped on a conflict, not yet committed.
-    current: Option<(Action, ObjectId)>,
+    pub(super) current: Option<(Action, ObjectId)>,
     /// Steps still to run, in order.
-    todo: Vec<(Action, ObjectId)>,
+    pub(super) todo: Vec<(Action, ObjectId)>,
 }
 
 enum Picked {
@@ -426,7 +426,7 @@ impl NativeRepo<'_> {
         format!("rebase/{}", self.workspace)
     }
 
-    fn rebase_head(&self) -> Res<ObjectId> {
+    pub(super) fn rebase_head(&self) -> Res<ObjectId> {
         Ok(self
             .store
             .refs
@@ -499,7 +499,7 @@ impl NativeRepo<'_> {
         self.rebase_state_path().exists()
     }
 
-    fn rebase_state(&self) -> Res<Option<RebaseState>> {
+    pub(super) fn rebase_state(&self) -> Res<Option<RebaseState>> {
         let text = match std::fs::read_to_string(self.rebase_state_path()) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),

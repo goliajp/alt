@@ -51,7 +51,7 @@ exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"copy/.alt already exists","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":null,"retryable":false},"schema_version":1}
 $ [copy] alt status --json
 exit 0
-out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"clean":true}
+out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"operation":null,"clean":true}
 $ [copy] alt remote list --json
 exit 0
 out| {"schema_version":1,"remotes":[{"name":"origin","url":"<server>","fetch":"+refs/heads/*:refs/remotes/origin/*"}]}

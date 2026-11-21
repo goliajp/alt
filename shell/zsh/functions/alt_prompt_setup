@@ -1,0 +1,21 @@
+# Sets the plugin up: completion, the hooks that keep `alt_prompt` current,
+# and alt as a backend of vcs_info. Called once by whatever loads the plugin.
+
+typeset -gA alt_prompt
+typeset -g _alt_prompt_pwd= _alt_prompt_root= _alt_prompt_shown=
+typeset -gi _alt_prompt_fd=0
+
+(( $+functions[compdef] )) && compdef _alt alt
+
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd alt_prompt_update
+
+# alt as a backend of vcs_info: named by a hook that runs as vcs_info starts
+local -a hooks
+zstyle -a ':vcs_info-static_hooks:start-up' hooks hooks
+(( ${hooks[(I)alt-backend]} )) || zstyle ':vcs_info-static_hooks:start-up' hooks $hooks alt-backend
+
+if zstyle -t ':alt:prompt' auto; then
+  setopt prompt_subst
+  RPROMPT='$(alt_prompt_info)'
+fi

@@ -90,7 +90,7 @@ impl Error {
             format!(
                 "'{}' requires a subcommand but one was not provided\n  [subcommands: {}]",
                 scope.path,
-                scope.subcommand_names().join(", ")
+                scope.listed_subcommand_names().join(", ")
             ),
             &[],
             Some(usage::full(scope)),

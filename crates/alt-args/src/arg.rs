@@ -1,6 +1,6 @@
 //! One argument of a command.
 
-use crate::settings::{Computed, Kind, Preset, Rare, Words};
+use crate::settings::{Computed, Hint, Kind, Preset, Rare, Words};
 use crate::spec::Node;
 use crate::text::Reader;
 
@@ -26,8 +26,12 @@ const GROUP: usize = 64;
 /// argument = kind:1 flags:1 rare:1 number:2 short:short id:short long:short rest:long
 /// rest     = [ alias:short preset:1 [ text:long ] missing:long conflicts:long
 ///              requires:long required_unless:long group:short ]
-///            value_name:short help:long listed:long
+///            value_name:short help:long listed:long hint:1 [ kind:short ]
 /// ```
+///
+/// `hint` is 0 for none declared, 1 for no candidates, 2 for a path, 3
+/// for a directory and 4 for a kind of the program's own, whose name
+/// follows.
 ///
 /// `rare` has a bit for each of the settings in brackets that is set, and
 /// the brackets are there when it is not 0. What every command line is
@@ -66,8 +70,8 @@ pub(crate) const HELP: Arg = Arg {
     id: "help",
     long: "help",
     short: Some('h'),
-    // value name, help, listed values
-    rest: "\0\0\u{a}Print help\0\0",
+    // value name, help, listed values, hint
+    rest: "\0\0\u{a}Print help\0\0\0",
     kind: Kind::Help,
     ..Arg::NEW
 };
@@ -76,7 +80,7 @@ pub(crate) const VERSION: Arg = Arg {
     id: "version",
     long: "version",
     short: Some('V'),
-    rest: "\0\0\u{d}Print version\0\0",
+    rest: "\0\0\u{d}Print version\0\0\0",
     kind: Kind::Version,
     ..Arg::NEW
 };
@@ -212,6 +216,21 @@ impl Arg {
         Words(reader.long())
     }
 
+    /// What kind of thing a value of this argument is.
+    pub fn hint(&self) -> Hint {
+        let mut reader = self.common();
+        reader.short();
+        reader.long();
+        reader.long();
+        match reader.one() {
+            0 => Hint::Unset,
+            1 => Hint::None,
+            2 => Hint::Path,
+            3 => Hint::Dir,
+            _ => Hint::Other(reader.short()),
+        }
+    }
+
     fn has(&self, setting: usize) -> bool {
         usize::from(self.rare) & setting != 0
     }
@@ -281,35 +300,5 @@ impl Arg {
     /// Whether this is the built-in `--help` or `--version`.
     pub(crate) fn is_builtin(&self) -> bool {
         matches!(self.kind, Kind::Help | Kind::Version)
-    }
-
-    /// `--long <NAME>`, `-s`, `<NAME>` or `[NAME]...`; `required` picks the
-    /// brackets of a positional and defaults to the argument's own setting.
-    pub(crate) fn display(&self, required: Option<bool>) -> String {
-        let mut text = if !self.long.is_empty() {
-            format!("--{}", self.long)
-        } else if let Some(short) = self.short {
-            format!("-{short}")
-        } else {
-            String::new()
-        };
-        if !self.takes_value() {
-            return text;
-        }
-        if !self.missing().is_empty() {
-            return text + &format!("[=<{}>]", self.value_name());
-        }
-        if !self.is_positional() {
-            text.push(' ');
-        }
-        if self.is_positional() && !required.unwrap_or(self.required) {
-            text += &format!("[{}]", self.value_name());
-        } else {
-            text += &format!("<{}>", self.value_name());
-        }
-        if self.is_positional() && self.kind == Kind::Multiple {
-            text += "...";
-        }
-        text
     }
 }

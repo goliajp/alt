@@ -11,12 +11,13 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import shlex
 import stat
 import sys
 import tempfile
 
 
-FORMAT = "alt-internal-package-v2"
+FORMAT = "alt-internal-package-v3"
 OWNER = {"format": "alt-internal-install-v1"}
 LEGACY_FILES = {
     "bin/alt", "bin/altd", "bin/altd-server", "install.py", "README.md",
@@ -24,9 +25,17 @@ LEGACY_FILES = {
     "docs/recovery.md", "docs/task-walkthrough.md",
     "examples/task-workflow.py",
 }
-FILES = LEGACY_FILES | {"docs/task-remote.md", "docs/change-links.md",
-                        "server-operator.md", "example-config.json"}
-PAYLOAD_FORMATS = {"alt-internal-package-v1": LEGACY_FILES, FORMAT: FILES}
+V2_FILES = LEGACY_FILES | {"docs/task-remote.md", "docs/change-links.md",
+                           "server-operator.md", "example-config.json"}
+ZSH = "share/alt/zsh"
+ZSH_FUNCTIONS = ["+vi-alt-backend", "VCS_INFO_detect_alt", "VCS_INFO_get_data_alt",
+                 "alt_prompt_arrived", "alt_prompt_info", "alt_prompt_root",
+                 "alt_prompt_setup", "alt_prompt_update", "instant_prompt_alt", "prompt_alt"]
+FILES = (V2_FILES | {"docs/shell.md", f"{ZSH}/alt.plugin.zsh", f"{ZSH}/_alt"}
+         | {f"{ZSH}/functions/{name}" for name in ZSH_FUNCTIONS})
+PAYLOAD_FORMATS = {"alt-internal-package-v1": LEGACY_FILES,
+                   "alt-internal-package-v2": V2_FILES, FORMAT: FILES}
+DIRECTORIES = ["bin", "docs", "examples", "share", "share/alt", ZSH, f"{ZSH}/functions"]
 TARGETS = {("Darwin", "arm64"): "aarch64-apple-darwin",
            ("Linux", "x86_64"): "x86_64-unknown-linux-gnu"}
 
@@ -74,11 +83,10 @@ def verify_package(root, check_platform=True):
     if check_platform and (target is None or manifest.get("target") != target):
         fail("package target does not match this operating system and architecture")
     expected = files | {"manifest.json"}
-    directories = {"bin", "docs", "examples"}
     for path in root.rglob("*"):
         name = path.relative_to(root).as_posix()
         mode = path.lstat().st_mode
-        if stat.S_ISDIR(mode) and name in directories:
+        if stat.S_ISDIR(mode) and name in DIRECTORIES:
             continue
         if name not in expected or not stat.S_ISREG(mode):
             fail(f"unexpected package entry: {name}")
@@ -198,8 +206,9 @@ def install(package, prefix):
                 os.fsync(src.fileno())
         if verify_package(stage)[1] != identity:
             fail("package changed while it was copied")
-        for directory in [stage / "bin", stage / "docs", stage / "examples", stage]:
-            sync_dir(directory)
+        for directory in [stage / name for name in reversed(DIRECTORIES)] + [stage]:
+            if directory.is_dir():
+                sync_dir(directory)
         with lock_prefix(prefix, create=True):
             installed(prefix)
             destination = prefix / "releases" / identity
@@ -207,7 +216,12 @@ def install(package, prefix):
                 os.rename(stage, destination)
                 sync_dir(prefix / "releases")
             state = activate(prefix, identity)
-    return {"prefix": str(prefix), "version": manifest["version"], **state}
+    result = {"prefix": str(prefix), "version": manifest["version"], **state}
+    plugin = prefix / "current" / ZSH / "alt.plugin.zsh"
+    if plugin.is_file():
+        # the line for ~/.zshrc; the installer changes no file of the user
+        result["zsh"] = f"source {shlex.quote(str(plugin))}"
+    return result
 
 
 def manage(prefix, action, identity=None):

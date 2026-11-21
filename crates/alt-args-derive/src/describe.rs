@@ -130,18 +130,20 @@ pub(crate) fn items(items: &[String]) -> String {
     two(items.len()) + &items.concat()
 }
 
+/// set in the flags of a command where `help` is a subcommand
+pub(crate) const HELP_SUBCOMMAND: usize = 1;
+/// set in the flags of a command that is not shown
+pub(crate) const HIDDEN: usize = 2;
+
 /// One command of a description whose arguments are `items`.
 pub(crate) fn command(
-    help_subcommand: bool,
+    flags: usize,
     subcommand: Option<usize>,
     about: &str,
     items: &str,
     span: Span,
 ) -> Result<String, Error> {
-    Ok(one(usize::from(help_subcommand))
-        + &two(subcommand.map_or(0, |part| part + 1))
-        + &long(about, span)?
-        + items)
+    Ok(one(flags) + &two(subcommand.map_or(0, |part| part + 1)) + &long(about, span)? + items)
 }
 
 /// The text of a description: where each command begins, then the

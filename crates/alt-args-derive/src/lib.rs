@@ -12,7 +12,7 @@
 //!
 //! - `#[command(...)]` on a `Parser` struct: `name = "..."`, `version`,
 //!   `about = "..."`, `disable_help_subcommand = true`; on a variant:
-//!   `name = "..."`; on a field: `subcommand`, `flatten`
+//!   `name = "..."`, `hide`; on a field: `subcommand`, `flatten`
 //! - `#[arg(...)]` on a field: `long`, `long = "..."`, `short`, `short = 'c'`,
 //!   `id = "..."`, `visible_alias = "..."`, `value_name = "..."`, `global = true`,
 //!   `default_value = "..."`, `default_value_t = expr`,
@@ -21,7 +21,8 @@
 //!   `conflicts_with = "id"`, `conflicts_with_all = ["id", ...]`,
 //!   `requires = "id"`, `required_unless_present = "id"`,
 //!   `required_unless_present_any = ["id", ...]`, `group = "name"`,
-//!   `trailing_var_arg = true`, `allow_hyphen_values = true`
+//!   `trailing_var_arg = true`, `allow_hyphen_values = true`,
+//!   `hint = path`, `hint = dir`, `hint = none`, `hint = "name"`
 //!
 //! A field without `long` and `short` is positional. `bool` is a flag,
 //! `Option<T>` an optional value, `Vec<T>` a repeatable one, and any other
@@ -32,6 +33,7 @@ mod describe;
 mod field;
 mod generate;
 mod parse;
+mod value_enum;
 
 use proc_macro::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 
@@ -96,5 +98,5 @@ pub fn derive_subcommand(input: TokenStream) -> TokenStream {
 
 #[proc_macro_derive(ValueEnum)]
 pub fn derive_value_enum(input: TokenStream) -> TokenStream {
-    expand(input, generate::value_enum)
+    expand(input, value_enum::value_enum)
 }

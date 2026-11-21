@@ -1,6 +1,7 @@
 //! One command level with the arguments it accepts.
 
 use crate::arg::{Arg, HELP, VERSION};
+use crate::settings::Kind;
 use crate::spec::{Command, Item, Items};
 
 pub(crate) struct Slot {
@@ -20,6 +21,26 @@ pub(crate) struct Scope {
     pub(crate) slots: Vec<Slot>,
     /// how many of the slots are the command's own
     pub(crate) own: usize,
+}
+
+/// One letter of a `-abc` word.
+pub(crate) enum Letter<'a> {
+    Unknown(char),
+    /// a flag, by slot
+    Flag(usize),
+    /// a flag that takes what is written against its letter, by slot, and
+    /// the rest of the word
+    Attached(usize, &'a str),
+    /// an option that takes a value, by slot, and the value attached to it
+    Valued(usize, Option<&'a str>),
+}
+
+/// The name and the attached value of `--name` or `--name=value`.
+pub(crate) fn split_long(word: &str) -> (&str, Option<&str>) {
+    match word[2..].split_once('=') {
+        Some((name, value)) => (name, Some(value)),
+        None => (&word[2..], None),
+    }
 }
 
 fn collect(
@@ -109,6 +130,35 @@ impl Scope {
             .position(|slot| slot.arg.short == Some(name))
     }
 
+    /// The letters of `-abc`, each with its offset behind the `-`, up to
+    /// the first that is unknown or takes a value.
+    pub(crate) fn cluster<'a>(&self, word: &'a str) -> Vec<(usize, Letter<'a>)> {
+        let cluster = &word[1..];
+        let mut letters = Vec::new();
+        for (offset, letter) in cluster.char_indices() {
+            let Some(at) = self.short(letter) else {
+                letters.push((offset, Letter::Unknown(letter)));
+                break;
+            };
+            let attached = &cluster[offset + letter.len_utf8()..];
+            if self.slots[at].arg.kind == Kind::Attached {
+                letters.push((offset, Letter::Attached(at, attached)));
+                break;
+            }
+            if !self.slots[at].arg.takes_value() {
+                letters.push((offset, Letter::Flag(at)));
+                continue;
+            }
+            let value = attached.strip_prefix('=').unwrap_or(attached);
+            letters.push((
+                offset,
+                Letter::Valued(at, (!attached.is_empty()).then_some(value)),
+            ));
+            break;
+        }
+        letters
+    }
+
     pub(crate) fn positionals(&self) -> impl Iterator<Item = (usize, &Slot)> {
         self.slots
             .iter()
@@ -138,8 +188,13 @@ impl Scope {
         self.command.help_subcommand || !self.command.subcommands().is_empty()
     }
 
-    pub(crate) fn subcommand_names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.command.subcommands().map(|c| c.name).collect();
+    /// The subcommands that are shown to the user.
+    pub(crate) fn listed_subcommands(&self) -> impl Iterator<Item = Command> {
+        self.command.subcommands().filter(|c| !c.hidden)
+    }
+
+    pub(crate) fn listed_subcommand_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<_> = self.listed_subcommands().map(|c| c.name).collect();
         if self.command.help_subcommand {
             names.push("help");
         }

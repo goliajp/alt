@@ -6,9 +6,9 @@ use super::*;
 
 /// What a bisect session knows so far.
 #[derive(Default)]
-struct BisectState {
+pub(super) struct BisectState {
     /// The branch HEAD was on when the session started.
-    branch: String,
+    pub(super) branch: String,
     bad: Option<ObjectId>,
     good: Vec<ObjectId>,
     skip: Vec<ObjectId>,
@@ -342,7 +342,7 @@ impl NativeRepo<'_> {
         self.bisect_state_path().exists()
     }
 
-    fn bisect_state(&self) -> Res<Option<BisectState>> {
+    pub(super) fn bisect_state(&self) -> Res<Option<BisectState>> {
         let text = match std::fs::read_to_string(self.bisect_state_path()) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),

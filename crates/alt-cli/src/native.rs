@@ -21,18 +21,21 @@ use alt_worktree::{
 use http_auth::{build_transport, http_auth};
 
 mod add;
+mod ahead_behind;
 mod bisect;
 mod checkout_files;
 mod checkout_plan;
 mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
+mod complete;
 mod convert;
 mod coord;
 pub use coord::{Coord, branch_at, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
+mod in_progress;
 mod index_file;
 use index_file::{empty_index, save_index};
 mod lfs;
@@ -42,6 +45,7 @@ mod op_log;
 mod operation;
 mod path_gate;
 pub mod pathspec;
+mod prompt;
 mod push_pack;
 use op_log::render_op_log_json;
 pub mod notes;
@@ -51,6 +55,7 @@ mod reading;
 pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
+mod remotes;
 pub use recovery::{export_git, prepared_blobs};
 mod requests;
 mod revert;
@@ -2369,31 +2374,6 @@ impl<'a> NativeRepo<'a> {
             )?;
         } else {
             writeln!(out, "added remote '{name}' → {url}")?;
-        }
-        Ok(())
-    }
-
-    /// `alt remote list`: emit configured remotes (alphabetical). Empty
-    /// when no `remotes/` dir exists — a fresh repo has no remotes.
-    pub fn remote_list(&self, json: bool, out: &mut impl Write) -> Res<()> {
-        let remotes = self.read_remotes()?;
-        if json {
-            use crate::json::Json;
-            let arr = remotes
-                .iter()
-                .map(|r| {
-                    Json::Object(vec![
-                        ("name", Json::str(&r.name)),
-                        ("url", Json::str(&r.url)),
-                        ("fetch", Json::str(&r.fetch)),
-                    ])
-                })
-                .collect();
-            crate::json::emit(out, vec![("remotes", Json::Array(arr))])?;
-        } else {
-            for r in &remotes {
-                writeln!(out, "{}\t{}", r.name, r.url)?;
-            }
         }
         Ok(())
     }

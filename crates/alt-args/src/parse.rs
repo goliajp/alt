@@ -1,7 +1,7 @@
 //! Reading a command line against a command and its subcommands.
 
 use crate::error::{Error, ErrorKind};
-use crate::level::{Level, State};
+use crate::level::{Level, Step};
 use crate::matches::{Matched, Matches};
 use crate::scope::Scope;
 use crate::spec::Command;
@@ -22,51 +22,19 @@ fn help_subcommand(scope: &Scope, names: &[String]) -> Error {
 }
 
 fn level(scope: &Scope, words: &[String], at: &mut usize) -> Result<Matches, Error> {
-    let mut level = Level {
-        scope,
-        entries: Vec::new(),
-        pending: None,
-        state: State::Idle,
-        filled: 0,
-        trailing: false,
-    };
+    let mut level = Level::new(scope);
     let mut subcommand = None;
     while let Some(word) = words.get(*at) {
         *at += 1;
-        if !level.trailing {
-            if level.state == State::Idle {
-                if word == "help" && scope.command.help_subcommand {
-                    return Err(help_subcommand(scope, &words[*at..]));
-                }
-                if let Some(command) = scope.command.subcommand(word) {
-                    level.settle()?;
-                    subcommand = Some(Box::new(self::level(&scope.child(command), words, at)?));
-                    break;
-                }
-            }
-            if word == "--" {
-                level.trailing = true;
-                continue;
-            }
-            let is_option = if word.starts_with("--") {
-                level.long(word, &words[*at..])?
-            } else if word.starts_with('-') && word.len() > 1 {
-                level.short(word)?
-            } else {
-                false
-            };
-            if is_option {
-                continue;
-            }
-            if level.state == State::Value {
-                if let Some((_, values)) = &mut level.pending {
-                    values.push(word.clone());
-                }
-                level.state = State::Idle;
-                continue;
+        match level.word(word, &words[*at..])? {
+            Step::Taken => {}
+            Step::Help => return Err(help_subcommand(scope, &words[*at..])),
+            Step::Subcommand(command) => {
+                level.settle()?;
+                subcommand = Some(Box::new(self::level(&scope.child(command), words, at)?));
+                break;
             }
         }
-        level.positional(word.clone())?;
     }
     level.settle()?;
     if subcommand.is_none() && scope.has_subcommands() {

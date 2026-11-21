@@ -5,6 +5,7 @@
 #[derive(alt_args::Args)]
 pub struct Add {
     /// Paths to stage; `.` stages the directory the command runs in
+    #[arg(hint = "path-add")]
     pub paths: Vec<String>,
     /// Store every tracked file among the paths again, as the
     /// attributes and line-ending settings now in force clean it
@@ -36,7 +37,8 @@ pub struct Status {
         short = 'u',
         long = "untracked-files",
         value_name = "MODE",
-        default_missing_value = "all"
+        default_missing_value = "all",
+        hint = none,
     )]
     pub untracked_files: Option<String>,
     /// Emit a stable JSON object instead of the human-readable view

@@ -27,7 +27,7 @@ fn excluded(scope: &Scope, slot: &Slot) -> Vec<&'static str> {
 }
 
 /// The given arguments `id` conflicts with, by either side's declaration.
-fn clashes<'a>(scope: &Scope, id: &str, given: &[&'a str]) -> Vec<&'a str> {
+pub(crate) fn clashes<'a>(scope: &Scope, id: &str, given: &[&'a str]) -> Vec<&'a str> {
     let own = scope
         .find(id)
         .map_or(Vec::new(), |slot| excluded(scope, slot));

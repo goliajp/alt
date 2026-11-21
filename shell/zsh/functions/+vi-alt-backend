@@ -1,0 +1,5 @@
+# A vcs_info hook, run as vcs_info starts: vcs_info finds its backends as
+# files on fpath, and a plugin that was not loaded from files names itself.
+
+(( ${VCS_INFO_backends[(I)alt]} )) || VCS_INFO_backends+=(alt)
+return 0

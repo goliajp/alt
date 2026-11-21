@@ -45,6 +45,7 @@ class GateTests(unittest.TestCase):
             "Path('package-called').write_text('yes')\n"
             "sys.exit(int(os.environ.get('GATE_PACKAGE_EXIT', '0')))\n"
         )
+        (self.root / "scripts/test-package-shell.py").write_text("")
         for name in ("crates", "vendor", "fuzz", ".dev/corpus", "bin"):
             (self.root / name).mkdir(parents=True)
         cargo = self.root / "bin/cargo"

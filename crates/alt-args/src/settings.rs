@@ -33,6 +33,21 @@ impl Kind {
     }
 }
 
+/// What kind of thing a value is, for whoever offers candidates for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Hint {
+    /// nothing was declared
+    Unset,
+    /// declared to have no candidates
+    None,
+    /// a file or directory
+    Path,
+    /// a directory
+    Dir,
+    /// a kind only the program knows, by name
+    Other(&'static str),
+}
+
 /// Words kept as one text, a line each.
 #[derive(Clone, Copy)]
 pub struct Words(pub &'static str);

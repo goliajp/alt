@@ -297,3 +297,56 @@ impl Execution {
         response
     }
 }
+
+/// A command that works on no repository: it writes what it prints.
+pub type OwnRun<'a> = &'a dyn Fn(&mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>>;
+
+/// Runs a command that keeps a journal of its own and works on no
+/// repository: it takes neither a request id nor a workspace.
+pub fn outside_repository(parsed: &Parsed, refused: &str, run: OwnRun) -> Response {
+    if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
+        // a runner's refusal names the request it was given
+        let id = match &parsed.cli.command {
+            Command::Runner { .. } => parsed.cli.request_id.as_deref(),
+            _ => None,
+        };
+        return Failure::usage(refused).response(parsed.json, id);
+    }
+    let mut stdout = Vec::new();
+    match run(&mut stdout) {
+        Ok(()) => Response {
+            exit_code: 0,
+            stdout,
+            stderr: Vec::new(),
+        },
+        Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
+    }
+}
+
+/// Runs a command as any other is run.
+pub type Attempt<'a> = Box<dyn FnOnce() -> Response + 'a>;
+
+/// How a command a shell runs on its own is answered: it gets no error
+/// and nothing on stderr, whatever state the repository is in. `None`
+/// for every other command.
+pub fn for_shell<'a>(command: &Command) -> Option<Box<dyn FnOnce(Attempt<'a>) -> Response>> {
+    match command {
+        Command::Complete(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |attempt| {
+                crate::complete::respond(&asked, attempt)
+            }))
+        }
+        Command::Prompt(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |attempt| {
+                crate::prompt::respond(&asked, attempt)
+            }))
+        }
+        Command::Shell(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |_| crate::shell::respond(&asked)))
+        }
+        _ => None,
+    }
+}

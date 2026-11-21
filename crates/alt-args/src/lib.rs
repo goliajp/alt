@@ -44,12 +44,17 @@
 //! `-nvalue`, `-n=value`, clustered short flags (`-abc`), and `--` to end
 //! option parsing. A single-value option may appear once; an option whose
 //! field is a `Vec` may repeat.
+//!
+//! [`complete::complete`] reads an unfinished command line by the same
+//! rules and says what may stand at the cursor, for shell completion.
 
 mod arg;
+pub mod complete;
 mod error;
 mod help;
 mod level;
 mod matches;
+mod option;
 mod parse;
 mod scope;
 mod settings;
@@ -65,7 +70,7 @@ pub use arg::Arg;
 pub use error::{Error, ErrorKind};
 pub use matches::{Matched, Matches};
 pub use parse::parse;
-pub use settings::{Computed, Kind, Preset, Rare, Words};
+pub use settings::{Computed, Hint, Kind, Preset, Rare, Words};
 pub use spec::{Command, Commands, Item, Items, Node, Spec};
 pub use text::{joined, joined_len};
 pub use value::{Check, Value, check_as};

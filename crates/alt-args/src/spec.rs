@@ -17,8 +17,8 @@
 //! item    = 0 argument | 1 name:short size:3 items | 2 part:2 | 3
 //! ```
 //!
-//! `offset` is where a command begins in the text. `flags` is 1 where
-//! `help` is a subcommand. `subcommands` is one more than the part
+//! `offset` is where a command begins in the text. `flags` has 1 where
+//! `help` is a subcommand and 2 where the command is hidden. `subcommands` is one more than the part
 //! ([`Spec::part`]) that describes the subcommands, 0 for none. Item 1 is
 //! a group of arguments recorded under a name, `size` the bytes its items
 //! take, item 2 the group of
@@ -141,6 +141,9 @@ impl Node {
     }
 }
 
+const HELP_SUBCOMMAND: usize = 1;
+const HIDDEN: usize = 2;
+
 /// One command: the program itself or a subcommand.
 #[derive(Clone, Copy)]
 pub struct Command {
@@ -151,6 +154,8 @@ pub struct Command {
     pub version: &'static str,
     /// whether `help [COMMAND]...` is a subcommand
     pub help_subcommand: bool,
+    /// left out of help, suggestions and completion; parsed like any other
+    pub hidden: bool,
     node: Node,
     /// one more than the part that describes the subcommands
     subcommands: usize,
@@ -168,9 +173,11 @@ impl Command {
 
     fn read(node: Node, name: &'static str, offset: usize) -> Command {
         let mut reader = Reader::new(node.text(Ask::Text), offset);
+        let flags = reader.one();
         Command {
             name,
-            help_subcommand: reader.one() != 0,
+            help_subcommand: flags & HELP_SUBCOMMAND != 0,
+            hidden: flags & HIDDEN != 0,
             subcommands: reader.two(),
             about: reader.long(),
             version: "",

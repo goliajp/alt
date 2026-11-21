@@ -21,6 +21,7 @@ use alt_cli::machine::{self, Failure};
 use alt_cli::native::pathspec::Place;
 use alt_cli::native::{self, Identity};
 use alt_repo::Repository;
+use std::ffi::OsString;
 use std::io::Write;
 
 #[cfg(not(test))]
@@ -67,16 +68,18 @@ fn deliver(response: &Response) -> u8 {
 }
 
 fn run() -> Response {
-    let response = native::tell_left_out(attempt());
-    alt_cli::past_damage::report(response)
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let response = match machine::parse(args.clone()) {
+        Ok(parsed) => match alt_cli::execution::for_shell(&parsed.cli.command) {
+            Some(respond) => return respond(Box::new(|| attempt(args, parsed))),
+            None => attempt(args, parsed),
+        },
+        Err(response) => response,
+    };
+    alt_cli::past_damage::report(native::tell_left_out(response))
 }
 
-fn attempt() -> Response {
-    let mut args = std::env::args_os().collect::<Vec<_>>();
-    let mut parsed = match machine::parse(args.clone()) {
-        Ok(parsed) => parsed,
-        Err(response) => return response,
-    };
+fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
     if let Err(refused) = alt_cli::past_damage::admit(&parsed.cli.command) {
         return refused.response(parsed.json, None);
     }
@@ -90,7 +93,7 @@ fn attempt() -> Response {
         *error.details = alt_json::json!({"path_bytes_hex": machine::hex(cwd.as_os_str().as_encoded_bytes()), "encoding":"os_bytes"});
         return error.response(parsed.json, parsed.cli.request_id.as_deref());
     }
-    let own: Option<(&str, OwnRun)> = match &parsed.cli.command {
+    let own: Option<(&str, alt_cli::execution::OwnRun)> = match &parsed.cli.command {
         Command::Runner { op, .. } => Some((
             "runner uses its snapshot nonce; repository request/workspace selectors are not supported",
             &|out| alt_cli::runner::run(op, out),
@@ -106,7 +109,7 @@ fn attempt() -> Response {
         _ => None,
     };
     if let Some((refused, run)) = own {
-        return outside_repository(&parsed, refused, run);
+        return alt_cli::execution::outside_repository(&parsed, refused, run);
     }
     let (forwarded, identity) = Identity::of_process();
     let native_write =
@@ -228,31 +231,6 @@ fn attempt() -> Response {
         leave_to_exit(execution);
     }
     response
-}
-
-/// A command that works on no repository: it writes what it prints.
-type OwnRun<'a> = &'a dyn Fn(&mut Vec<u8>) -> Result<(), Box<dyn std::error::Error>>;
-
-/// Runs a command that keeps a journal of its own and works on no
-/// repository: it takes neither a request id nor a workspace.
-fn outside_repository(parsed: &machine::Parsed, refused: &str, run: OwnRun) -> Response {
-    if parsed.cli.request_id.is_some() || parsed.cli.workspace.is_some() {
-        // a runner's refusal names the request it was given
-        let id = match &parsed.cli.command {
-            Command::Runner { .. } => parsed.cli.request_id.as_deref(),
-            _ => None,
-        };
-        return Failure::usage(refused).response(parsed.json, id);
-    }
-    let mut stdout = Vec::new();
-    match run(&mut stdout) {
-        Ok(()) => Response {
-            exit_code: 0,
-            stdout,
-            stderr: Vec::new(),
-        },
-        Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
-    }
 }
 
 /// Leaves what a command that only read holds for the exit of the process
