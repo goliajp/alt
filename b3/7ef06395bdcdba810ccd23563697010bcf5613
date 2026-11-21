@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: record the help of the completion, prompt and shell commands
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/help_texts.rs
