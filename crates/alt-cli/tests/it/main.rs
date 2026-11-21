@@ -24,6 +24,7 @@ mod clone;
 mod closed_fds;
 mod commit_loop;
 mod commit_meta;
+mod complete;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;

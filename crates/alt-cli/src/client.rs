@@ -75,6 +75,7 @@ mod imp {
                 | Cmd::Undo { .. }
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
+                | Cmd::Complete(_)
         )
     }
 
@@ -92,6 +93,7 @@ mod imp {
                 | Cmd::OpLog { .. }
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
+                | Cmd::Complete(_)
                 | Cmd::Branch {
                     name: None,
                     delete: None,

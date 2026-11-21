@@ -27,6 +27,7 @@ mod checkout_plan;
 mod checkout_recovery;
 mod cherry_pick;
 pub mod commit;
+mod complete;
 mod convert;
 mod coord;
 pub use coord::{Coord, resolve_workspace};

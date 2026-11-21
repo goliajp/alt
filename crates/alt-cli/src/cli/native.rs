@@ -60,6 +60,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
             }
         }
+        Command::Complete(args) => repo.complete(args, out)?,
         Command::Status { args } => repo.status(args.untracked(), args.json, out)?,
         Command::Branch {
             name,
