@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: record an op without its sync
+author-type: human
+author: doracawl
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/record.rs
