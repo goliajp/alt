@@ -23,9 +23,10 @@ fn a_tree_with_a_gitlink_is_whole_without_the_commit_it_names() {
 }
 
 /// The reads of a push that adds a merge of `parents` served commits
-/// with `dirs` directories, each of them new. The parents differ in a
-/// file and have the directories alike.
-fn reads_of_a_merge(parents: usize, dirs: usize) -> usize {
+/// with `dirs` directories, each of them new, and `chain` commits on top
+/// of it that each change a file. The parents differ in a file and have
+/// the directories alike.
+fn reads_of_a_merge(parents: usize, dirs: usize, chain: usize) -> usize {
     let mut held = Held::default();
     let names: Vec<String> = (0..dirs).map(|n| format!("d{n:04}")).collect();
     let level = |held: &mut Held, what: &str| -> Vec<ObjectId> {
@@ -52,22 +53,28 @@ fn reads_of_a_merge(parents: usize, dirs: usize) -> usize {
         })
         .collect();
     let merged = root(&mut held, &new, "merge");
-    let merge = held.commit_of(merged, &served, 1_000_000);
+    let mut pushed = vec![held.commit_of(merged, &served, 1_000_000)];
+    for n in 0..chain {
+        let root = root(&mut held, &new, &format!("chain {n}"));
+        pushed.push(held.commit_of(root, &pushed[n..], 1_000_001 + n as u64));
+    }
     held.reads.set(0);
-    let added = held.added(&[merge], &served, &[merge]).unwrap();
-    // the merge, its root and file, and each directory with its file
-    assert_eq!(added.len(), 3 + 2 * dirs);
+    let added = held.added(&pushed, &served, &pushed[chain..]).unwrap();
+    // each commit with its root and file, and each directory with its file
+    assert_eq!(added.len(), 3 * (1 + chain) + 2 * dirs);
     held.reads.get()
 }
 
 /// Each tree is read once, those of the push and those the refs reach
-/// in their place, and each commit twice at most.
+/// in their place, and each commit twice at most: whatever the number
+/// of parents a tree of the push is held against, and of commits of the
+/// push that are held against the same parents.
 #[test]
 fn the_trees_of_a_merge_of_many_parents_are_each_read_once() {
-    for (parents, dirs) in [(200, 200), (400, 400)] {
-        let reads = reads_of_a_merge(parents, dirs);
-        let trees = (1 + dirs) + (parents + dirs);
-        let most = trees + 2 * (parents + 1);
+    for (parents, dirs, chain) in [(200, 200, 0), (200, 0, 200), (400, 400, 400)] {
+        let reads = reads_of_a_merge(parents, dirs, chain);
+        let trees = (1 + chain + dirs) + (parents + dirs);
+        let most = trees + 2 * (parents + 1 + chain);
         assert!(
             reads <= most,
             "{reads} reads for {trees} trees of {parents} parents"
