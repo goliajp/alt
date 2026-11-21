@@ -66,6 +66,16 @@ impl NativeOdb {
         }
     }
 
+    /// [`Self::refresh`] unless a batch is open: the handle then holds
+    /// the write lock, read what every other writer had appended when it
+    /// took it, and nothing was appended by another since.
+    pub fn refresh_unless_writing(&mut self) -> Result<(), OdbError> {
+        match self.odb.get_mut() {
+            Some(odb) if !odb.held => odb.refresh(),
+            _ => Ok(()),
+        }
+    }
+
     /// Whether this handle was named to be read ([`Self::reading`],
     /// [`Self::read_only`]).
     pub fn is_read_only(&self) -> bool {

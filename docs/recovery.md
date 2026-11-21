@@ -620,8 +620,15 @@ operation log and the index it was made from are on disk.
 `alt add` only stages, and by default it does not sync: it answers once the
 kernel has what it wrote, as `git add` does under git's default `core.fsync`.
 The next command that syncs makes the staged content durable together with
-its own writes: the objects, the operation log, the recovery snapshots of the
-adds and the index of every workspace. A power cut before that can lose the
+its own writes: the objects, the operation log, the index of every workspace
+and, for each workspace, the two recovery snapshots of its last add: the index
+that add began from and the one it left. Those are what `alt undo` of that add
+and the recovery of an add that was cut short read. The snapshots between
+earlier adds are not synced, however many adds there were: `alt undo` takes
+back the last operation only, and once a later index is on disk nothing puts
+an earlier one back. A power cut can leave such a snapshot as a file that does
+not read; the add that makes the same index again writes it anew. A power cut
+before the command that syncs can lose the
 adds made since the last command that synced, whole or in part, and nothing
 else. What is left of them is dealt with as the sections above and below
 describe: records that did not arrive whole are cut by the next command that

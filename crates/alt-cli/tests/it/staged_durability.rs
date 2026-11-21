@@ -105,9 +105,10 @@ mod files {
     const INDEX: &str = ".alt/index";
     const LOG: &str = ".alt/oplog/log";
     const PACK: &str = ".alt/store/pack-00000001.altpack";
+    const SNAPSHOTS: &str = ".alt/recovery/objects";
 
     fn snapshots(dir: &Path) -> Vec<String> {
-        let mut names: Vec<_> = fs::read_dir(dir.join(".alt/recovery/objects"))
+        let mut names: Vec<_> = fs::read_dir(dir.join(SNAPSHOTS))
             .unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
@@ -148,7 +149,7 @@ mod files {
 
         let (out, synced) = synced(dir, &library, alt_command(dir, &["commit", "-m", "second"]));
         ok(out);
-        for path in [INDEX, LOG, PACK, ".alt/map.alt", ".alt/recovery/objects"] {
+        for path in [INDEX, LOG, PACK, ".alt/map.alt", SNAPSHOTS] {
             assert!(count(&synced, path) > 0, "{path} of {synced:?}");
         }
         let written = snapshots(dir);
@@ -157,10 +158,10 @@ mod files {
             .filter(|name| !before.contains(name))
             .collect();
         assert_eq!(written.len(), 3, "the index after each add");
-        for name in written {
-            let path = format!(".alt/recovery/objects/{name}");
-            assert!(count(&synced, &path) > 0, "{path} of {synced:?}");
-        }
+        // the last is one file with the index; of the others, the one the
+        // last add began from is synced (`left_snapshots`)
+        let by_name = |name: &&&String| count(&synced, &format!("{SNAPSHOTS}/{name}")) > 0;
+        assert_eq!(written.iter().filter(by_name).count(), 1, "{synced:?}");
         assert!(synced_to_the_ends(dir));
     }
 

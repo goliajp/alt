@@ -28,9 +28,11 @@ impl NativeRepo<'_> {
     pub(in crate::native) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
         let id = hash(bytes);
         let path = self.store.alt_dir.join("recovery/objects").join(&id);
-        // byte for byte: what was there before, or what is written now
+        // byte for byte: what was there before, or what is written now.
+        // A file of that name with other bytes is one a power cut left of
+        // a snapshot that was not synced: it is written anew
         let mut held = crate::durable::holds(&path, bytes)?;
-        if held.is_none() {
+        if held != Some(true) {
             durable_write(&path, bytes)?;
             held = crate::durable::holds(&path, bytes)?;
         }
@@ -74,17 +76,16 @@ impl NativeRepo<'_> {
 
     /// Keeps `bytes` as the snapshot `id`, their hash; whether this wrote
     /// the file, which is then as synced as what the thread writes is. A
-    /// file that was there is compared byte for byte.
+    /// file that was there is compared byte for byte, and one with other
+    /// bytes, which a power cut leaves of a snapshot that was not synced,
+    /// is written anew.
     pub(in crate::native) fn keep_snapshot_as(&self, id: &str, bytes: &[u8]) -> Res<bool> {
         let path = self.recovery_object(id);
-        match crate::durable::holds(&path, bytes)? {
-            Some(true) => Ok(false),
-            Some(false) => Err("corrupt recovery snapshot".into()),
-            None => {
-                durable_write(&path, bytes)?;
-                Ok(true)
-            }
+        if crate::durable::holds(&path, bytes)? == Some(true) {
+            return Ok(false);
         }
+        durable_write(&path, bytes)?;
+        Ok(true)
     }
 
     /// Puts the snapshot `id`, which holds `bytes`, in place as the index

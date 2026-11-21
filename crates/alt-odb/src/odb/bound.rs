@@ -143,10 +143,12 @@ impl Odb {
         self.settle(&marker, looked_by)?;
         let behind = !marker.trusted() && !(relaxed && cached);
         if behind {
-            self.blobs.fsync()?;
-            self.tier1_mut()?.sync()?;
-            self.map.fsync()?;
+            // what a cut made here took away the marker no longer counts
+            let now = Marker::read(&self.durable_path);
+            let synced = now.recorded().map(|state| state.eof);
+            self.tier1_mut()?;
             let whole = self.appended_whole()?;
+            self.sync_grown(synced, whole.seq)?;
             synced::establish(&self.durable_path, whole)?;
             if !relaxed {
                 head::note_synced(&self.lock, whole);

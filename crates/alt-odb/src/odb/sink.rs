@@ -136,12 +136,24 @@ impl NativeOdb {
             return Ok(());
         }
         let holds = odb.holds()?;
-        odb.blobs.fsync()?;
-        odb.tier1_mut()?.sync()?;
-        odb.map.fsync()?;
+        // a file an fsync at this generation found as long as it is read
+        // here holds nothing unsynced
+        let synced = marker.recorded().map(|state| (state.generation, state.eof));
+        let synced = synced.filter(|(at, _)| Some(*at) == generation);
+        let synced = synced.map(|(_, eof)| eof);
+        let [pack, blobmap, tier1, map] = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map]
+            .map(|log| grown(synced.as_ref(), &holds, log));
+        odb.blobs.fsync_of(pack, blobmap)?;
+        if tier1 {
+            odb.tier1_mut()?.sync()?;
+        }
+        if map {
+            odb.map.fsync()?;
+        }
         // a marker without boundaries gets them from a writer
         if let Some(generation) = generation {
-            synced::record(&durable_path, generation, holds, Some(holds))?;
+            let eof = (pack || blobmap || tier1 || map).then_some(holds);
+            synced::record(&durable_path, generation, holds, eof)?;
         }
         Ok(())
     }
@@ -159,37 +171,44 @@ impl Odb {
             .recorded()
             .filter(|state| state.generation == generation);
         let synced = synced.map(|state| state.eof);
-        let eof = if synced.is_some_and(|eof| eof.reaches(&target)) {
-            None
-        } else {
-            let (pack, blobmap) = self.blobs.file_lens()?;
-            let eof = Lens {
-                seq: target.seq,
-                pack,
-                blobmap,
-                // not opened, not fsynced
-                tier1: self.tier1.get().map_or(Ok(0), Tier1Map::file_len)?,
-                map: self.map.file_len()?,
-            };
-            let grown = |log| grown(synced.as_ref(), &eof, log);
-            // chunks then blobmap, in order
-            self.blobs.fsync_of(grown(Log::Pack), grown(Log::Blobmap))?;
-            // then tier1 (references blob ids above)
-            if let Some(tier1) = self.tier1.get_mut()
-                && grown(Log::Tier1)
-            {
-                tier1.sync()?;
-            }
-            // then map.alt (may reference tier1 ids)
-            if grown(Log::Map) {
-                self.map.fsync()?;
-            }
-            Some(eof)
+        let eof = match synced.is_some_and(|eof| eof.reaches(&target)) {
+            true => None,
+            false => Some(self.sync_grown(synced, target.seq)?),
         };
         if let Some(whole) = synced::record(&self.durable_path, generation, target, eof)? {
             head::note_synced(&self.lock, whole);
         }
         Ok(())
+    }
+
+    /// Fsyncs the files that are longer than `synced` has them, the
+    /// lengths an fsync found that holds for the store as it is, and
+    /// all of them where there is none. The lengths the files have, the
+    /// pack being `seq`: what the fsyncs made here covered.
+    pub(super) fn sync_grown(&mut self, synced: Option<Lens>, seq: u32) -> Result<Lens, OdbError> {
+        let (pack, blobmap) = self.blobs.file_lens()?;
+        let eof = Lens {
+            seq,
+            pack,
+            blobmap,
+            // not opened, not fsynced
+            tier1: self.tier1.get().map_or(Ok(0), Tier1Map::file_len)?,
+            map: self.map.file_len()?,
+        };
+        let grown = |log| grown(synced.as_ref(), &eof, log);
+        // chunks then blobmap, in order
+        self.blobs.fsync_of(grown(Log::Pack), grown(Log::Blobmap))?;
+        // then tier1 (references blob ids above)
+        if let Some(tier1) = self.tier1.get_mut()
+            && grown(Log::Tier1)
+        {
+            tier1.sync()?;
+        }
+        // then map.alt (may reference tier1 ids)
+        if grown(Log::Map) {
+            self.map.fsync()?;
+        }
+        Ok(eof)
     }
 }
 

@@ -63,6 +63,7 @@ mod index_blobs;
 mod index_link;
 mod index_seen;
 mod json_outputs;
+mod left_snapshots;
 mod lfs;
 mod lock_order;
 mod log_patch;

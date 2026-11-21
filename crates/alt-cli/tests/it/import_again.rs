@@ -63,14 +63,13 @@ fn an_import_that_moves_a_ref_syncs_what_adds_left_unsynced_before_it_records_th
     let (out, synced) = synced(dst, &library, again);
     ok(out);
     assert!(synced_to_the_ends(dst));
-    let mut wanted = vec![".alt/index".to_owned()];
-    wanted.extend(
-        written
-            .iter()
-            .map(|name| format!(".alt/recovery/objects/{name}")),
-    );
-    for path in wanted {
-        assert!(synced.contains(&path), "{path} of {synced:?}");
+    // the index, which is one file with the snapshot the add left
+    use std::os::unix::fs::MetadataExt;
+    assert!(synced.contains(&".alt/index".to_owned()), "{synced:?}");
+    let index = fs::metadata(dst.join(".alt/index")).unwrap().ino();
+    for name in written {
+        let snapshot = dst.join(".alt/recovery/objects").join(name);
+        assert_eq!(fs::metadata(snapshot).unwrap().ino(), index, "{synced:?}");
     }
     // the add is as it was
     assert!(ok(alt(dst, &["status"])).contains("new file:   n.txt"));

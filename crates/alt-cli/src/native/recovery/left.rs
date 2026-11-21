@@ -7,19 +7,67 @@
 //! synced here. A commit therefore answers with the index it was made
 //! from on disk, and with the snapshots that an undo or a recovery of the
 //! adds before it reads.
+//!
+//! Those are the two snapshots of the last change of each workspace and
+//! of every change that nothing closed. An undo takes back the last
+//! operation of the log and no earlier one; a recovery completes or
+//! abandons a change that is open; and an index file that is not whole is
+//! put back to what the latest change left, which is synced here. The
+//! index between two earlier changes is read by none of them once a later
+//! one is on disk, so however many adds were left unsynced, the snapshots
+//! synced for a workspace are two.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 
 use super::*;
 
-fn sync_if_there(path: &Path) -> io::Result<()> {
-    match File::open(path) {
-        Ok(file) => file.sync_all(),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+/// Syncs the file or directory at `path` where there is one and no other
+/// name of the same file was synced before: `synced` holds those. An
+/// index is one file with the snapshot of it.
+fn sync_if_there(path: &Path, synced: &mut HashSet<(u64, u64)>) -> io::Result<()> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let meta = file.metadata()?;
+    match synced.insert((meta.dev(), meta.ino())) {
+        true => file.sync_all(),
+        false => Ok(()),
     }
+}
+
+/// The snapshots that something still reads of those the index changes
+/// among `left` name: of the last change of each workspace, and of each
+/// change that no op among `left` closes.
+fn read_later(left: &[alt_oplog::Op]) -> BTreeSet<String> {
+    let (mut last, mut open) = (HashMap::new(), HashMap::new());
+    for op in left {
+        // an intent that does not read names nothing here: the recovery
+        // of that operation reports it
+        match op.payload.first() {
+            Some(&PREPARE) => {
+                if let Ok(intent) = decode::<IndexIntent>(&op.payload, PREPARE) {
+                    let named = [intent.before, intent.after];
+                    last.insert(intent.workspace.instance, named.clone());
+                    open.insert(op.id.to_string(), named);
+                }
+            }
+            Some(&kind @ (COMPLETE | ABANDON)) => {
+                if let Ok(done) = decode::<Completion>(&op.payload, kind) {
+                    open.remove(&done.prepared);
+                }
+            }
+            _ => {}
+        }
+    }
+    last.into_values()
+        .chain(open.into_values())
+        .flatten()
+        .collect()
 }
 
 /// Syncs what the index changes among `left`, ops of the store under
@@ -32,19 +80,10 @@ pub(in crate::native) fn sync_left(alt_dir: &Path, left: &[alt_oplog::Op]) -> io
     if !left.iter().any(changed) {
         return Ok(());
     }
-    let mut snapshots = BTreeSet::new();
-    for op in left {
-        // an intent that does not read names nothing here: the recovery
-        // of that operation reports it
-        if let Ok(intent) = decode::<IndexIntent>(&op.payload, PREPARE) {
-            snapshots.extend([intent.before, intent.after]);
-        }
-    }
     let objects = alt_dir.join("recovery/objects");
     let named = |id: &String| id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit());
-    for id in snapshots.iter().filter(|id| named(id)) {
-        sync_if_there(&objects.join(id))?;
-    }
+    let snapshots = read_later(left).into_iter().filter(named);
+    let snapshots: Vec<_> = snapshots.map(|id| objects.join(id)).collect();
     let mut directories = vec![objects, alt_dir.join("recovery")];
     let mut indexes = vec![alt_dir.join("index")];
     let workspaces = alt_dir.join("workspaces");
@@ -61,8 +100,9 @@ pub(in crate::native) fn sync_left(alt_dir: &Path, left: &[alt_oplog::Op]) -> io
         Err(e) => return Err(e),
     }
     directories.push(alt_dir.to_owned());
-    for path in indexes.iter().chain(&directories) {
-        sync_if_there(path)?;
+    let mut synced = HashSet::new();
+    for path in indexes.iter().chain(&snapshots).chain(&directories) {
+        sync_if_there(path, &mut synced)?;
     }
     Ok(())
 }
