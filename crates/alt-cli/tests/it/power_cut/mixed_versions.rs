@@ -10,6 +10,8 @@ use super::super::staged_durability::{add, repo};
 use super::super::sync_order::{FILES, lens, objects_synced};
 use super::another_boot;
 
+#[cfg(target_os = "linux")]
+mod cut_short;
 mod head_lost;
 #[cfg(target_os = "linux")]
 mod held;
