@@ -96,6 +96,11 @@ develop [side]          in the parallel workspace `side`
 develop ⚠               the repository needs attention (see `alt prompt` below)
 ```
 
+An operation under way ends with the commit that concludes it or with the
+command's `--continue`, and is given up with its `--abort`: `alt merge
+--abort`, `alt rebase --abort`, `alt cherry-pick --abort`, `alt revert
+--abort`. A bisect ends with `alt bisect reset`.
+
 | style | under | meaning | default |
 |---|---|---|---|
 | `async` | `:alt:prompt` | ask in the background | yes |
