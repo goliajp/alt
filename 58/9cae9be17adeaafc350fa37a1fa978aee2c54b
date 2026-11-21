@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: read the clock once when building a cloud lease
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/cloud.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
+touched: crates/alt-server/tests/it/database/portable/cloud.rs
