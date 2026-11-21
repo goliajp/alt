@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what is done about unsynced adds after a power cut and about a stop whose index is lost
+author-type: human
+author: doracawl
+touched: docs/recovery.md
