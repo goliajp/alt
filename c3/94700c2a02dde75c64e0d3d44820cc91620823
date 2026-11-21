@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a rebase the policy forbids before it begins, and let one that began be given up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/rebase/state.rs
+touched: crates/alt-cli/tests/it/step_refused.rs
