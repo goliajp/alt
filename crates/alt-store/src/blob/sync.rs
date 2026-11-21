@@ -43,8 +43,17 @@ pub struct BlobSink {
 
 impl BlobSink {
     pub fn fsync(&self) -> Result<(), StoreError> {
-        self.chunks.fsync()?;
-        self.blobmap.sync_all()?;
+        self.fsync_of(true, true)
+    }
+
+    /// [`Self::fsync`] of the files named ([`BlobStore::fsync_of`]).
+    pub fn fsync_of(&self, pack: bool, map: bool) -> Result<(), StoreError> {
+        if pack {
+            self.chunks.fsync()?;
+        }
+        if map {
+            self.blobmap.sync_all()?;
+        }
         Ok(())
     }
 }

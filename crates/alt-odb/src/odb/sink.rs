@@ -43,32 +43,34 @@ impl OdbSink {
     /// Fsyncs the files, then records in the marker how far the handle
     /// this sink was made from had written whole batches before the fsync.
     ///
-    /// Where an fsync since the last rewind already reached as far as that
-    /// handle wrote, the files hold nothing of it that is not synced, and
-    /// none is made.
+    /// A file that an fsync since the last rewind already found as long as
+    /// that handle wrote it holds nothing of the handle's that is not
+    /// synced, and is left alone.
     pub fn fsync(&self) -> Result<(), OdbError> {
-        let pending = *self.deferred.lock().unwrap();
-        let marker = Marker::read(&self.durable_path);
-        let reached = |(lens, generation): (Lens, u64)| {
-            let synced = marker
-                .recorded()
-                .filter(|state| state.generation == generation);
-            synced.is_some_and(|state| state.eof.reaches(&lens))
-        };
-        let covered = pending.is_some_and(reached);
-        if !covered {
+        let Some((lens, generation)) = *self.deferred.lock().unwrap() else {
             self.blobs.fsync()?;
             self.tier1.sync_all()?;
+            return Ok(self.map.sync_all()?);
+        };
+        let marker = Marker::read(&self.durable_path);
+        let synced = marker
+            .recorded()
+            .filter(|state| state.generation == generation);
+        let synced = synced.map(|state| state.eof);
+        let [pack, blobmap, tier1, map] = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map]
+            .map(|log| grown(synced.as_ref(), &lens, log));
+        self.blobs.fsync_of(pack, blobmap)?;
+        if tier1 {
+            self.tier1.sync_all()?;
+        }
+        if map {
             self.map.sync_all()?;
         }
-        let Some((lens, generation)) = pending else {
-            return Ok(());
-        };
         // a rewind holds the append lock exclusively: it is over or has not
         // begun, and the marker's generation tells which
         let lock = OpenOptions::new().write(true).open(&self.lock_path)?;
         lock_shared(&lock)?;
-        let eof = (!covered).then_some(lens);
+        let eof = (pack || blobmap || tier1 || map).then_some(lens);
         if let Some(whole) = synced::record(&self.durable_path, generation, lens, eof)? {
             head::note_synced(&lock, whole);
         }
@@ -183,9 +185,9 @@ impl Odb {
     }
 }
 
-/// Whether `log`, now as long as `eof` has it, holds bytes past what the
-/// last fsync recorded covered: `synced` has the lengths that fsync found,
-/// and is `None` where no fsync since the last rewind recorded any.
+/// Whether `log`, as long as `eof` has it, reaches past what the last
+/// fsync recorded covered: `synced` has the lengths that fsync found, and
+/// is `None` where no fsync since the last rewind recorded any.
 fn grown(synced: Option<&Lens>, eof: &Lens, log: Log) -> bool {
     synced.and_then(|was| was.of(log, eof.seq)) < eof.of(log, eof.seq)
 }
