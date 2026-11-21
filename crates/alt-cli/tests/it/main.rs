@@ -28,6 +28,7 @@ mod complete;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
+mod conflict_reset;
 mod crash_fixture;
 mod credential_helper;
 mod cwd_paths;
@@ -101,6 +102,7 @@ mod status_json;
 mod status_labels;
 mod status_replaced;
 mod status_untracked;
+mod stopped_trees;
 mod store_refresh;
 mod switch_kinds;
 mod sync_order;
