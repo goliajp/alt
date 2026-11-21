@@ -26,6 +26,7 @@ use super::super::*;
 mod abandon;
 mod guard;
 mod mark;
+mod notes;
 mod recover;
 mod undo;
 
@@ -143,10 +144,11 @@ fn read(target: &Option<String>) -> Res<Option<RefTarget>> {
     }))
 }
 
-/// Each ref from what it was before the first change to what the last left.
+/// Each ref from what it was before the first change to what the last
+/// left; not the notes ref, which other workspaces move too: see `notes`.
 fn net_refs(changes: &[RefChange]) -> Vec<RefMove> {
     let mut net: Vec<RefChange> = Vec::new();
-    for change in changes {
+    for change in changes.iter().filter(|c| c.name != crate::meta::NOTES_REF) {
         match net.iter_mut().find(|known| known.name == change.name) {
             Some(known) => known.new = change.new.clone(),
             None => net.push(change.clone()),

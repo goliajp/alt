@@ -9,23 +9,38 @@ static PASSED: AtomicUsize = AtomicUsize::new(0);
 
 /// Passes the point `name`. With `ALT_CRASH_POINT=<n>` the process dies at
 /// the n-th point it passes; with `ALT_CRASH_POINT=list:<file>` it writes
-/// the name of each to the file and goes on.
+/// the name of each to the file and goes on; with
+/// `ALT_CRASH_POINT=wait:<n>:<m>:<file>` it makes the file at the n-th,
+/// goes on once the file is removed, and dies at the m-th, at none for 0.
 pub(crate) fn point(name: &str) {
     let Some(asked) = std::env::var_os("ALT_CRASH_POINT") else {
         return;
     };
     let asked = asked.to_string_lossy();
     let passed = PASSED.fetch_add(1, Ordering::Relaxed) + 1;
-    match asked.strip_prefix("list:") {
-        Some(file) => {
-            let mut list = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(file);
-            let listed = list.as_mut().map(|list| writeln!(list, "{name}"));
-            assert!(matches!(listed, Ok(Ok(()))), "cannot list crash points");
+    if let Some(file) = asked.strip_prefix("list:") {
+        let mut list = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file);
+        let listed = list.as_mut().map(|list| writeln!(list, "{name}"));
+        assert!(matches!(listed, Ok(Ok(()))), "cannot list crash points");
+        return;
+    }
+    let mut dies_at = asked.parse();
+    if let Some(waits) = asked.strip_prefix("wait:") {
+        let mut asked = waits.splitn(3, ':');
+        let (at, then, file) = (asked.next(), asked.next(), asked.next());
+        let file = std::path::Path::new(file.expect("a file to wait for"));
+        if at.map(str::parse) == Some(Ok(passed)) {
+            std::fs::write(file, name).expect("cannot tell of the point waited at");
+            while file.exists() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
         }
-        None if asked.parse() == Ok(passed) => std::process::abort(),
-        None => {}
+        dies_at = then.expect("a point to die at").parse();
+    }
+    if dies_at == Ok(passed) {
+        std::process::abort()
     }
 }

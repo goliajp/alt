@@ -59,11 +59,49 @@ impl NativeRepo<'_> {
         Err(refusal(why))
     }
 
+    /// The ref changes that take back what the step `op` is the record of
+    /// did to every ref but the notes ref, refused where one is no longer
+    /// as the step left it; and what the step did to the notes ref, change
+    /// by change. A record from before the transactions told that tells of
+    /// the notes ref as of any other.
+    fn refs_to_undo(
+        &self,
+        op: &alt_oplog::Op,
+        step: &StepRecord,
+    ) -> Res<(Vec<RefChange>, Vec<RefChange>)> {
+        let mut notes = match step.begin {
+            Some(_) => self.step_notes(op, step)?,
+            None => Vec::new(),
+        };
+        let mut back = Vec::new();
+        for moved in &step.refs {
+            let (name, old, new) = (moved.name.clone(), read(&moved.old)?, read(&moved.new)?);
+            if name == crate::meta::NOTES_REF {
+                if step.begin.is_none() {
+                    notes.push(RefChange { name, old, new });
+                }
+                continue;
+            }
+            let head = name == "HEAD" || name.starts_with("workspaces/");
+            if head && name != self.head_ref {
+                let why = "operation changes another workspace; automatic undo refused";
+                return Err(refusal(why));
+            }
+            if self.store.refs.get(&name) != new.as_ref() {
+                return Err(refusal("recovery precondition failed: refs changed"));
+            }
+            let (old, new) = (new, old);
+            back.push(RefChange { name, old, new });
+        }
+        Ok((back, notes))
+    }
+
     /// The step a record tells of, the ref changes that take it back and the
     /// checkout that does: refused where the workspace is no longer as the
     /// step left it.
     fn step_to_undo(
-        &self,
+        &mut self,
+        op: &alt_oplog::Op,
         step: StepRecord,
     ) -> Res<(StepRecord, Vec<RefChange>, Option<CheckoutIntent>)> {
         if step.version != 1 {
@@ -96,23 +134,7 @@ impl NativeRepo<'_> {
         {
             return Err("corrupt step record".into());
         }
-        let mut back = Vec::new();
-        for moved in &step.refs {
-            let change = RefChange {
-                name: moved.name.clone(),
-                old: read(&moved.new)?,
-                new: read(&moved.old)?,
-            };
-            let head = change.name == "HEAD" || change.name.starts_with("workspaces/");
-            if head && change.name != self.head_ref {
-                let why = "operation changes another workspace; automatic undo refused";
-                return Err(refusal(why));
-            }
-            if self.store.refs.get(&change.name) != change.old.as_ref() {
-                return Err(refusal("recovery precondition failed: refs changed"));
-            }
-            back.push(change);
-        }
+        let (mut back, notes) = self.refs_to_undo(op, &step)?;
         // refused here, before anything is put back, where the ref store
         // would refuse the changes
         self.ensure_no_force(&back)?;
@@ -123,6 +145,10 @@ impl NativeRepo<'_> {
         if checkout.is_none() && self.index()?.entries.iter().any(|e| e.stage() > 0) {
             return Err(refusal("recovery precondition failed: index changed"));
         }
+        // the notes of the commits the step made are taken out last: where
+        // another workspace wrote notes since, that stores a notes commit
+        back.extend(self.notes_back(&notes)?);
+        self.ensure_no_force(&back)?;
         Ok((step, back, checkout))
     }
 
@@ -161,7 +187,7 @@ impl NativeRepo<'_> {
             let why = "nothing to undo: the last operation was interrupted and left as it was";
             return Err(refusal(why));
         }
-        let (step, back, checkout) = self.step_to_undo(step)?;
+        let (step, back, checkout) = self.step_to_undo(op, step)?;
         let tracked = Tracked::undoing(self.state_files()?, op.id.to_string());
         *self.step.borrow_mut() = Some(tracked);
         let undone = self.put_back(op, &step, &back, checkout.as_ref());

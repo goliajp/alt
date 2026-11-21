@@ -1,0 +1,143 @@
+//! A revert of two commits in one workspace, and a commit of another
+//! workspace between the two it makes: the notes ref the workspaces share
+//! holds a note of the other between the two of the revert. Taking the
+//! revert back, by an undo or by giving it up, takes its two notes out
+//! and leaves the note of the other workspace.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+
+fn command(at: &Path, args: &[&str], crash: Option<&str>) -> Command {
+    let mut command = crate::alt_command();
+    command
+        .current_dir(at)
+        .env("ALT_NO_DAEMON", "1")
+        .env("GIT_AUTHOR_NAME", "tester")
+        .env("GIT_AUTHOR_EMAIL", "t@e")
+        .args(args);
+    if let Some(crash) = crash {
+        command.env("ALT_CRASH_POINT", crash);
+    }
+    command
+}
+
+fn alt(at: &Path, args: &[&str], crash: Option<&str>) -> Output {
+    command(at, args, crash).output().unwrap()
+}
+
+fn ok(at: &Path, args: &[&str]) -> String {
+    let done = alt(at, args, None);
+    let said = String::from_utf8_lossy(&done.stderr);
+    assert!(done.status.success(), "{args:?}: {said}");
+    String::from_utf8(done.stdout).unwrap()
+}
+
+fn commit(at: &Path, file: &str) {
+    std::fs::write(at.join(file), format!("{file}\n")).unwrap();
+    ok(at, &["add", file]);
+    ok(at, &["commit", "-m", file]);
+}
+
+const REVERT: &[&str] = &["revert", "HEAD", "HEAD~1"];
+
+/// Two workspaces, and in `main` the revert of its last two commits with
+/// a commit of `other` between the two commits the revert makes. The
+/// revert dies at the first point named `dies_at` after the second of its
+/// ref transactions, where one is named. The workspaces, and the commits
+/// the revert made.
+fn reverted_around_a_commit(dir: &Path, dies_at: Option<&str>) -> (PathBuf, PathBuf, [String; 2]) {
+    let (main, other) = (dir.join("main"), dir.join("other"));
+    std::fs::create_dir(&main).unwrap();
+    ok(&main, &["init", "."]);
+    for file in ["f.txt", "g.txt", "h.txt"] {
+        commit(&main, file);
+    }
+    ok(&main, &["branch", "feat"]);
+    let at = other.to_str().unwrap();
+    ok(&main, &["workspace", "add", "other", at, "feat"]);
+
+    let list = dir.join("points");
+    let listing = format!("list:{}", list.display());
+    assert!(alt(&main, REVERT, Some(&listing)).status.success());
+    ok(&main, &["undo"]);
+    let points = std::fs::read_to_string(&list).unwrap();
+    let points: Vec<&str> = points.lines().collect();
+    let named = |name: &'static str| move |(_, point): &(usize, &&str)| **point == name;
+    let mut transactions = points
+        .iter()
+        .enumerate()
+        .filter(named("ref-transaction:before"));
+    let second = transactions.nth(1).expect("two commits").0;
+    let dies = dies_at.map_or(0, |name| {
+        let later = points.iter().enumerate().skip(second + 1);
+        later
+            .filter(|(_, point)| **point == name)
+            .map(|(at, _)| at + 1)
+            .next()
+            .unwrap()
+    });
+
+    let waits = dir.join("waits");
+    let asked = format!("wait:{}:{dies}:{}", second + 1, waits.display());
+    let mut revert = command(&main, REVERT, Some(&asked));
+    let mut revert = revert
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    while !waits.exists() {
+        assert_eq!(revert.try_wait().unwrap(), None, "the revert did not wait");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    commit(&other, "o.txt");
+    std::fs::remove_file(&waits).unwrap();
+    let ended = revert.wait().unwrap();
+    assert_eq!(ended.success(), dies_at.is_none(), "{ended}");
+    let made = ["HEAD~1", "HEAD"].map(|rev| ok(&main, &["rev-parse", rev]).trim().to_owned());
+    (main, other, made)
+}
+
+/// The note of the other workspace is there, with those of the commits
+/// from before the revert, and the two of the revert are not.
+fn only_the_notes_of_the_revert_are_gone(main: &Path, other: &Path, made: &[String; 2]) {
+    let theirs = ok(other, &["log", "-n", "1"]);
+    let theirs = theirs.split(' ').next().unwrap();
+    assert!(ok(main, &["meta", "show", theirs]).contains("o.txt"));
+    assert!(ok(main, &["meta", "show"]).contains("h.txt"));
+    assert!(ok(main, &["meta", "show", "HEAD~1"]).contains("g.txt"));
+    for commit in made {
+        let shown = alt(main, &["meta", "show", commit], None);
+        let said = String::from_utf8_lossy(&shown.stderr);
+        assert!(said.contains("no metadata recorded"), "{commit}: {said}");
+    }
+    assert!(main.join("g.txt").exists() && main.join("h.txt").exists());
+    assert!(ok(main, &["status", "--json"]).contains(r#""clean":true"#));
+    ok(main, &["fsck"]);
+    commit(main, "i.txt");
+    assert!(ok(main, &["meta", "show"]).contains("i.txt"));
+    assert!(ok(main, &["meta", "show", theirs]).contains("o.txt"));
+}
+
+#[test]
+fn an_undo_leaves_the_note_another_workspace_wrote_between_the_commits_of_a_revert() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (main, other, made) = reverted_around_a_commit(dir.path(), None);
+    for commit in &made {
+        assert!(ok(&main, &["meta", "show", commit]).contains("Revert"));
+    }
+    ok(&main, &["undo"]);
+    only_the_notes_of_the_revert_are_gone(&main, &other, &made);
+}
+
+#[test]
+fn giving_a_revert_up_leaves_the_note_another_workspace_wrote_between_its_commits() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let dies_at = Some("checkout-file:before");
+    let (main, other, made) = reverted_around_a_commit(dir.path(), dies_at);
+    assert!(main.join("g.txt").exists());
+    let pending = ok(&main, &["operation", "pending"]);
+    let id = pending.split(' ').next().unwrap();
+    ok(&main, &["operation", "abandon", id]);
+    assert_eq!(ok(&main, &["operation", "pending"]), "");
+    only_the_notes_of_the_revert_are_gone(&main, &other, &made);
+}

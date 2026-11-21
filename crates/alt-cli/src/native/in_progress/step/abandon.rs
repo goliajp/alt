@@ -113,9 +113,9 @@ impl NativeRepo<'_> {
         Ok((Some(back), kept))
     }
 
-    /// The ref changes that take back what the step moved. The note of a
-    /// commit it made stays where another workspace wrote one on top.
-    fn refs_back(&self, told: &Told) -> Res<Vec<RefChange>> {
+    /// The ref changes that take back what the step moved; of the notes
+    /// ref, only the notes of the commits it made.
+    fn refs_back(&mut self, told: &Told) -> Res<Vec<RefChange>> {
         let mut back = Vec::new();
         for moved in net_refs(&told.refs) {
             let change = RefChange {
@@ -123,13 +123,14 @@ impl NativeRepo<'_> {
                 new: read(&moved.old)?,
                 name: moved.name,
             };
-            if self.store.refs.get(&change.name) == change.old.as_ref() {
-                back.push(change);
-            } else if change.name != crate::meta::NOTES_REF {
+            if self.store.refs.get(&change.name) != change.old.as_ref() {
                 let why = format!("{} was moved since the operation moved it", change.name);
                 return Err(refusal(why));
             }
+            back.push(change);
         }
+        self.ensure_no_force(&back)?;
+        back.extend(self.notes_back(&told.refs)?);
         self.ensure_no_force(&back)?;
         Ok(back)
     }
