@@ -115,6 +115,111 @@ fn one_ref_with_new_objects_and_one_without_go_in_the_same_push() {
     git(p.server.path(), &["fsck", "--strict", "--no-dangling"]);
 }
 
+/// Has the server append the commands of every push it is sent to a file:
+/// one `<old> <new> <ref>` line each. Returns the file.
+fn record_commands(server: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let received = server.join("received");
+    let hook = server.join("hooks/pre-receive");
+    std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\ncat >>'{}'\n", received.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    received
+}
+
+fn commands(received: &Path) -> Vec<String> {
+    std::fs::read_to_string(received)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+const ABSENT: &str = "0000000000000000000000000000000000000000";
+
+#[test]
+#[ignore = "requires system git; run with --include-ignored locally"]
+fn a_ref_the_server_has_is_left_out_of_a_push_that_creates_another() {
+    let p = pushed_main();
+    let received = record_commands(p.server.path());
+    let stdout = ok(
+        "alt push main older",
+        alt(
+            p.local.path(),
+            &["push", "origin", "main", "older", "--json"],
+        ),
+    );
+    assert!(stdout.contains("\"objects\":0"), "{stdout}");
+    assert!(
+        stdout.contains(concat!(
+            r#""refs":[{"name":"refs/heads/older","status":"ok"},"#,
+            r#"{"name":"refs/heads/main","status":"up-to-date"}]"#
+        )),
+        "{stdout}"
+    );
+    assert_eq!(
+        commands(&received),
+        [format!("{ABSENT} {} refs/heads/older", p.first)]
+    );
+    assert_eq!(server_ref(p.server.path(), "refs/heads/older"), p.first);
+    git(p.server.path(), &["fsck", "--strict", "--no-dangling"]);
+}
+
+#[test]
+#[ignore = "requires system git; run with --include-ignored locally"]
+fn a_ref_the_server_has_is_left_out_of_a_push_that_brings_objects() {
+    let p = pushed_main();
+    let root = p.local.path();
+    ok("alt push older", alt(root, &["push", "origin", "older"]));
+    let before = tip(root, "refs/heads/main");
+    std::fs::write(root.join("c.txt"), "new\n").unwrap();
+    ok("alt add", alt(root, &["add", "c.txt"]));
+    ok("alt commit", alt(root, &["commit", "-m", "third"]));
+    let after = tip(root, "refs/heads/main");
+    let received = record_commands(p.server.path());
+    let stdout = ok(
+        "alt push main older",
+        alt(root, &["push", "origin", "older", "main"]),
+    );
+    assert!(stdout.contains(": 3 object(s), "), "{stdout}");
+    assert!(
+        stdout.ends_with("  ok       refs/heads/main\n  up-to-date refs/heads/older\n"),
+        "{stdout}"
+    );
+    assert_eq!(
+        commands(&received),
+        [format!("{before} {after} refs/heads/main")]
+    );
+    assert_eq!(server_ref(p.server.path(), "refs/heads/main"), after);
+    assert_eq!(server_ref(p.server.path(), "refs/heads/older"), p.first);
+    git(p.server.path(), &["fsck", "--strict", "--no-dangling"]);
+}
+
+#[test]
+#[ignore = "requires system git; run with --include-ignored locally"]
+fn a_push_of_refs_the_server_all_has_sends_no_request() {
+    let p = pushed_main();
+    let root = p.local.path();
+    ok("alt push older", alt(root, &["push", "origin", "older"]));
+    let received = record_commands(p.server.path());
+    let stdout = ok(
+        "alt push main older",
+        alt(root, &["push", "origin", "main", "older", "--json"]),
+    );
+    assert!(stdout.contains(r#""refs":[]"#), "{stdout}");
+    assert!(stdout.contains(r#""updated":false"#), "{stdout}");
+    let stdout = ok(
+        "alt push main older",
+        alt(root, &["push", "origin", "main", "older"]),
+    );
+    assert_eq!(stdout, "push 'origin': everything up to date\n");
+    assert_eq!(commands(&received), Vec::<String>::new());
+}
+
 /// The request a push that only deletes sends: its command and nothing
 /// after the flush.
 #[test]

@@ -47,6 +47,7 @@ mod path_gate;
 pub mod pathspec;
 mod prompt;
 mod push_pack;
+mod push_report;
 use op_log::render_op_log_json;
 pub mod notes;
 mod object_format;
@@ -2911,7 +2912,6 @@ impl<'a> NativeRepo<'a> {
         };
 
         let mut updates: Vec<alt_wire::RefUpdate> = Vec::new();
-        let mut local_tips: Vec<ObjectId> = Vec::new();
         for spec in &parsed {
             let src_full = canonicalise_local_ref(&spec.src);
             let dst_full = canonicalise_remote_ref(&spec.dst);
@@ -2930,7 +2930,6 @@ impl<'a> NativeRepo<'a> {
                 new: Some(new),
                 name: dst_full,
             });
-            local_tips.push(new);
         }
 
         if updates.iter().all(|u| u.old == u.new) {
@@ -2949,6 +2948,11 @@ impl<'a> NativeRepo<'a> {
             }
             return Ok(());
         }
+        // a ref the server already has at the pushed value is left out of
+        // the request, as git leaves it out, and reported with the rest
+        let (current, updates): (Vec<_>, Vec<_>) =
+            updates.into_iter().partition(|u| u.old == u.new);
+        let local_tips: Vec<ObjectId> = updates.iter().filter_map(|u| u.new).collect();
 
         // cross-party pre-check: run the local capability
         // policy against the would-be ref changes BEFORE going to the
@@ -2957,7 +2961,6 @@ impl<'a> NativeRepo<'a> {
         // leaking the pack body onto the network at all.
         let pseudo_changes: Vec<RefChange> = updates
             .iter()
-            .filter(|u| u.old != u.new)
             .map(|u| RefChange {
                 name: u.name.clone(),
                 old: u.old.map(RefTarget::Oid),
@@ -3022,60 +3025,16 @@ impl<'a> NativeRepo<'a> {
         if let Err(reason) = &report.unpack {
             return Err(format!("server rejected push: unpack {reason}").into());
         }
-        let mut any_ng = false;
-        for s in &report.commands {
-            if let alt_wire::CommandStatus::Ng { .. } = s {
-                any_ng = true;
-            }
-        }
-
-        // render and (locally) record the push as an op so it shows up in
-        // op-log; the local ref state didn't change, so we don't commit a
-        // ref tx — this is purely an audit marker, omitted here to keep
-        // scope tight
-        if json {
-            use crate::json::Json;
-            let refs_json: Vec<Json> = report
-                .commands
-                .iter()
-                .map(|s| match s {
-                    alt_wire::CommandStatus::Ok(name) => {
-                        Json::Object(vec![("name", Json::str(name)), ("status", Json::str("ok"))])
-                    }
-                    alt_wire::CommandStatus::Ng { name, reason } => Json::Object(vec![
-                        ("name", Json::str(name)),
-                        ("status", Json::str("ng")),
-                        ("reason", Json::str(reason)),
-                    ]),
-                })
-                .collect();
-            crate::json::emit(
-                out,
-                vec![
-                    ("remote", Json::str(remote_name)),
-                    ("objects", Json::Num(outgoing.len() as i64)),
-                    ("pack_bytes", Json::Num(pack_bytes.len() as i64)),
-                    ("refs", Json::Array(refs_json)),
-                ],
-            )?;
-        } else {
-            writeln!(
-                out,
-                "push '{}': {} object(s), {} byte(s)",
-                remote_name,
-                outgoing.len(),
-                pack_bytes.len()
-            )?;
-            for s in &report.commands {
-                match s {
-                    alt_wire::CommandStatus::Ok(name) => writeln!(out, "  ok       {name}")?,
-                    alt_wire::CommandStatus::Ng { name, reason } => {
-                        writeln!(out, "  rejected {name}: {reason}")?
-                    }
-                }
-            }
-        }
-        if any_ng {
+        push_report::render(
+            out,
+            json,
+            remote_name,
+            (outgoing.len(), pack_bytes.len()),
+            &report.commands,
+            &current,
+        )?;
+        let ng = |s: &alt_wire::CommandStatus| matches!(s, alt_wire::CommandStatus::Ng { .. });
+        if report.commands.iter().any(ng) {
             return Err("server rejected one or more refs".into());
         }
         Ok(())
