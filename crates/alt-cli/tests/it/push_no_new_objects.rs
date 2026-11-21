@@ -157,7 +157,7 @@ fn a_ref_the_server_has_is_left_out_of_a_push_that_creates_another() {
     assert!(
         stdout.contains(concat!(
             r#""refs":[{"name":"refs/heads/older","status":"ok"},"#,
-            r#"{"name":"refs/heads/main","status":"up-to-date"}]"#
+            r#"{"name":"refs/heads/main","status":"up-to-date"}],"#
         )),
         "{stdout}"
     );
@@ -210,7 +210,14 @@ fn a_push_of_refs_the_server_all_has_sends_no_request() {
         "alt push main older",
         alt(root, &["push", "origin", "main", "older", "--json"]),
     );
-    assert!(stdout.contains(r#""refs":[]"#), "{stdout}");
+    assert!(
+        stdout.contains(concat!(
+            r#"{"objects":0,"operation_ids":[],"pack_bytes":0,"#,
+            r#""refs":[{"name":"refs/heads/main","status":"up-to-date"},"#,
+            r#"{"name":"refs/heads/older","status":"up-to-date"}],"#
+        )),
+        "{stdout}"
+    );
     assert!(stdout.contains(r#""updated":false"#), "{stdout}");
     let stdout = ok(
         "alt push main older",

@@ -205,3 +205,35 @@ fn an_absent_object_refuses_the_creations_and_deletions_sent_with_it() {
     assert!(!branches.contains("present"), "{branches}");
     assert!(!branches.contains("absent"), "{branches}");
 }
+
+/// The signature a push carries is over the commands it sends: with a ref
+/// left out because the server has it, the server still verifies it.
+#[test]
+fn a_signed_push_with_a_ref_the_server_has_is_verified() {
+    let (origin, seed) = seeded();
+    std::fs::write(
+        origin.path().join(".alt").join("policy"),
+        "human:anonymous -> require-signed\n",
+    )
+    .unwrap();
+    let server = spawn_server(origin.path());
+    let url = format!("http://{}/", server.addr);
+    let work = alt_os::temp::tempdir().unwrap();
+    let clone = work.path().join("clone");
+    ok(alt(
+        work.path(),
+        &["clone", url.as_str(), clone.to_str().unwrap()],
+    ));
+    crate::altd_server::enable_signed_push(&clone, origin.path(), "alice");
+    ok(alt(&clone, &["branch", "again"]));
+    let stdout = ok(alt(&clone, &["push", "origin", "main", "again", "--json"]));
+    assert!(
+        stdout.contains(concat!(
+            r#""refs":[{"name":"refs/heads/again","status":"ok"},"#,
+            r#"{"name":"refs/heads/main","status":"up-to-date"}],"#
+        )),
+        "{stdout}"
+    );
+    drop(server);
+    assert_eq!(tip(origin.path(), "refs/heads/again"), seed);
+}

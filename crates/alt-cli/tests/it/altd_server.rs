@@ -924,7 +924,7 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
 /// `<client>/.alt/sign-policy`. After this returns, an `alt push` from
 /// `client` carries `alt-principal=<principal>` + `alt-sig=<ed25519>`
 /// caps the server can verify against `<principal>.pub`.
-fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
+pub(crate) fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
     use alt_sign::SecretKey;
     let (sec, pubkey) = SecretKey::generate();
 

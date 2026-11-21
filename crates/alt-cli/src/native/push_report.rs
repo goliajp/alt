@@ -2,10 +2,11 @@
 
 use super::*;
 
-/// Writes the outcome of a push that sent commands: what the server
-/// answered to each, then the refs in `current`, which it already had at
-/// the pushed value and so were not sent. `sent` is the number of objects
-/// and of pack bytes.
+/// Writes the outcome of a push: what the server answered to each command
+/// it was sent, then the refs in `current`, which it already had at the
+/// pushed value and so were not sent. `sent` is the number of objects and
+/// of pack bytes. A push that sent nothing, every ref being in `current`,
+/// has the same fields in JSON.
 pub(super) fn render(
     out: &mut impl Write,
     json: bool,
@@ -15,6 +16,7 @@ pub(super) fn render(
     current: &[alt_wire::RefUpdate],
 ) -> Res<()> {
     let (objects, pack_bytes) = sent;
+    let accepted = |s: &alt_wire::CommandStatus| matches!(s, alt_wire::CommandStatus::Ok(_));
     if json {
         use crate::json::Json;
         let answered = commands.iter().map(|s| match s {
@@ -40,8 +42,13 @@ pub(super) fn render(
                 ("objects", Json::Num(objects as i64)),
                 ("pack_bytes", Json::Num(pack_bytes as i64)),
                 ("refs", Json::Array(answered.chain(unsent).collect())),
+                ("updated", Json::Bool(commands.iter().any(accepted))),
             ],
         )?;
+        return Ok(());
+    }
+    if commands.is_empty() {
+        writeln!(out, "push '{remote_name}': everything up to date")?;
         return Ok(());
     }
     writeln!(

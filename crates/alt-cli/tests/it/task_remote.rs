@@ -54,9 +54,9 @@ fn future() -> u64 {
         .as_millis() as u64
         + 3_600_000
 }
-struct Server {
-    url: String,
-    token: String,
+pub(crate) struct Server {
+    pub(crate) url: String,
+    pub(crate) token: String,
     bob: String,
     reviewer: String,
     store: Store,
@@ -71,7 +71,7 @@ struct Server {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Server {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         assert_eq!(
             std::env::var("ALT_SERVER_TEST_ISOLATED").as_deref(),
             Ok("1"),

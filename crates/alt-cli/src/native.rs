@@ -2932,26 +2932,13 @@ impl<'a> NativeRepo<'a> {
             });
         }
 
-        if updates.iter().all(|u| u.old == u.new) {
-            if json {
-                use crate::json::Json;
-                crate::json::emit(
-                    out,
-                    vec![
-                        ("remote", Json::str(remote_name)),
-                        ("updated", Json::Bool(false)),
-                        ("refs", Json::Array(Vec::new())),
-                    ],
-                )?;
-            } else {
-                writeln!(out, "push '{remote_name}': everything up to date")?;
-            }
-            return Ok(());
-        }
         // a ref the server already has at the pushed value is left out of
         // the request, as git leaves it out, and reported with the rest
         let (current, updates): (Vec<_>, Vec<_>) =
             updates.into_iter().partition(|u| u.old == u.new);
+        if updates.is_empty() {
+            return push_report::render(out, json, remote_name, (0, 0), &[], &current);
+        }
         let local_tips: Vec<ObjectId> = updates.iter().filter_map(|u| u.new).collect();
 
         // cross-party pre-check: run the local capability
