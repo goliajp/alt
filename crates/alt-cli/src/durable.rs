@@ -49,6 +49,31 @@ pub fn write_entry(path: &Path, bytes: &[u8]) -> io::Result<()> {
     File::open(parent)?.sync_all()
 }
 
+/// Whether the file at `path` holds `bytes` and nothing else; `None` where
+/// there is no such file. The file is read a piece at a time: a large one
+/// is not held a second time to be compared.
+pub fn holds(path: &Path, mut bytes: &[u8]) -> io::Result<Option<bool>> {
+    use std::io::Read;
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut piece = [0u8; 1 << 16];
+    loop {
+        let read = match file.read(&mut piece) {
+            Ok(0) => return Ok(Some(bytes.is_empty())),
+            Ok(read) => read,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        match bytes.split_at_checked(read) {
+            Some((same, rest)) if same == &piece[..read] => bytes = rest,
+            _ => return Ok(Some(false)),
+        }
+    }
+}
+
 /// Syncs the `levels` directories above `directory`: the entry of a
 /// directory that was just made, and the entries of those it lies in. Once
 /// that is done, what is put into the directory needs [`write_entry`] only.
@@ -91,4 +116,35 @@ pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
     fs::remove_dir_all(path)?;
     sync_parents(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_holds_bytes_only_when_it_is_exactly_them() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("file");
+        // longer than a piece, and not a whole number of them
+        let bytes: Vec<u8> = (0..200_003u32).map(|n| (n % 251) as u8).collect();
+        assert_eq!(holds(&path, &bytes).unwrap(), None);
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(holds(&path, &bytes).unwrap(), Some(true));
+        // shorter, longer, and one byte apart in the last piece
+        assert_eq!(
+            holds(&path, &bytes[..bytes.len() - 1]).unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            holds(&path, &[&bytes[..], &[0]].concat()).unwrap(),
+            Some(false)
+        );
+        let mut other = bytes.clone();
+        *other.last_mut().unwrap() ^= 1;
+        assert_eq!(holds(&path, &other).unwrap(), Some(false));
+        fs::write(&path, b"").unwrap();
+        assert_eq!(holds(&path, b"").unwrap(), Some(true));
+        assert_eq!(holds(&path, &bytes).unwrap(), Some(false));
+    }
 }

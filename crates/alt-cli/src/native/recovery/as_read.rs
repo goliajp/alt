@@ -60,7 +60,11 @@ impl NativeRepo<'_> {
     /// Whether the index file holds the index `read` was read as: the
     /// same bytes, or failing that the same index in another form.
     pub(super) fn unchanged_since(&self, read: &AsRead) -> Res<bool> {
-        if self::read(&self.index_path)? == read.bytes {
+        let same = match &read.bytes {
+            Some(bytes) => crate::durable::holds(&self.index_path, bytes)? == Some(true),
+            None => crate::durable::holds(&self.index_path, &[])?.is_none(),
+        };
+        if same {
             return Ok(true);
         }
         let algo = self.store.algo()?;

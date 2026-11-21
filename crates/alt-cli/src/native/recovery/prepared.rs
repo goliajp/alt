@@ -27,14 +27,16 @@ impl NativeRepo<'_> {
     pub(in crate::native) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
         let id = hash(bytes);
         let path = self.store.alt_dir.join("recovery/objects").join(&id);
-        if !path.exists() {
+        // byte for byte: what was there before, or what is written now
+        let mut held = crate::durable::holds(&path, bytes)?;
+        if held.is_none() {
             durable_write(&path, bytes)?;
+            held = crate::durable::holds(&path, bytes)?;
         }
-        // byte for byte: what was there before, or what was just written
-        if std::fs::read(path)? != bytes {
-            return Err("corrupt recovery snapshot".into());
+        match held {
+            Some(true) => Ok(id),
+            _ => Err("corrupt recovery snapshot".into()),
         }
-        Ok(id)
     }
 
     pub(in crate::native) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
