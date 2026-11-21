@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: look up only the directories above a file that are as long as a path the add is given
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/pathspec/set.rs
