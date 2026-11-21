@@ -68,6 +68,16 @@ impl Index {
     }
 
     pub fn parse(data: &[u8], algo: HashAlgo) -> Result<Self, IndexError> {
+        Self::parse_as(data, algo, false)
+    }
+
+    /// [`Self::parse`] of bytes known to end in the checksum of what
+    /// comes before: the checksum is not computed again.
+    pub fn parse_checked(data: &[u8], algo: HashAlgo) -> Result<Self, IndexError> {
+        Self::parse_as(data, algo, true)
+    }
+
+    fn parse_as(data: &[u8], algo: HashAlgo, checked: bool) -> Result<Self, IndexError> {
         const ERR: fn(&'static str) -> IndexError = IndexError::Format;
         let raw = algo.raw_len();
         if data.len() < 12 + raw || &data[..4] != b"DIRC" {
@@ -77,11 +87,11 @@ impl Index {
         // trailer: hash of everything before it
         let content_end = data.len() - raw;
         let checksum = &data[content_end..];
-        let computed: Vec<u8> = match algo {
-            HashAlgo::Sha1 => alt_hash::sha1(&data[..content_end]).to_vec(),
-            HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end]).to_vec(),
+        let holds = || match algo {
+            HashAlgo::Sha1 => alt_hash::sha1(&data[..content_end])[..] == *checksum,
+            HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end])[..] == *checksum,
         };
-        if checksum != computed {
+        if !checked && !holds() {
             return Err(IndexError::Torn("index checksum mismatch"));
         }
         let version = u32::from_be_bytes(data[4..8].try_into().unwrap());

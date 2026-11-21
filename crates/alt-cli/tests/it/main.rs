@@ -56,6 +56,7 @@ mod ignore_sources;
 mod import_materialize;
 mod index_blobs;
 mod index_link;
+mod index_seen;
 mod json_outputs;
 mod lfs;
 mod lock_order;

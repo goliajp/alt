@@ -55,6 +55,7 @@ impl Store {
             algo: std::sync::OnceLock::new(),
             attributed: Default::default(),
             checked: None,
+            seen: Default::default(),
             alt_dir,
         })
     }

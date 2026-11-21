@@ -90,6 +90,8 @@ pub struct Store {
     attributed: std::sync::Mutex<requests::Attributed>,
     /// where and what [`Self::keep_checked`] writes
     checked: Option<(PathBuf, Vec<u8>)>,
+    /// the note that an index file is whole, which it writes as well
+    seen: std::sync::Mutex<Option<(PathBuf, Vec<u8>)>>,
 }
 
 impl Store {
@@ -102,6 +104,7 @@ impl Store {
             algo: std::sync::OnceLock::new(),
             attributed: Default::default(),
             checked: None,
+            seen: Default::default(),
             alt_dir,
         })
     }

@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use super::whole::FromFile;
 use super::*;
 
 /// The recovery snapshot `id` of the store under `alt_dir`.
@@ -43,22 +44,31 @@ impl NativeRepo<'_> {
         self.store.alt_dir.join("recovery/objects").join(id)
     }
 
-    /// [`Self::snapshot`] of bytes that were read from the file `read`
-    /// (its device and inode), where they were read from one: a snapshot
-    /// that is that very file holds them and is not read to be compared.
-    /// An index change leaves the index and its snapshot as one file.
+    /// [`Self::snapshot`] of bytes that were read from the file `read`,
+    /// where they were read from one: a snapshot that is that very file
+    /// holds them and is not read to be compared, and where the file is
+    /// noted as that snapshot the bytes are not hashed either. An index
+    /// change leaves the index and its snapshot as one file.
     pub(in crate::native) fn snapshot_as(
         &self,
         bytes: &[u8],
-        read: Option<(u64, u64)>,
+        read: Option<FromFile>,
     ) -> Res<String> {
         use std::os::unix::fs::MetadataExt;
-        let id = hash(bytes);
-        let same = |meta: std::fs::Metadata| Some((meta.dev(), meta.ino())) == read;
-        if read.is_some() && std::fs::metadata(self.recovery_object(&id)).is_ok_and(same) {
+        let Some(read) = read else {
+            return self.snapshot(bytes);
+        };
+        let same = |meta: std::fs::Metadata| (meta.dev(), meta.ino()) == read.file;
+        let is_the_file = |id: &str| std::fs::metadata(self.recovery_object(id)).is_ok_and(same);
+        if let Some(id) = read.snapshot
+            && is_the_file(&id)
+        {
             return Ok(id);
         }
-        self.keep_snapshot_as(&id, bytes)?;
+        let id = hash(bytes);
+        if !is_the_file(&id) {
+            self.keep_snapshot_as(&id, bytes)?;
+        }
         Ok(id)
     }
 
@@ -86,6 +96,7 @@ impl NativeRepo<'_> {
         if !crate::durable::link_state(&snapshot, &self.index_path, fresh)? {
             durable_write(&self.index_path, bytes)?;
         }
+        self.note_whole(&std::fs::metadata(&self.index_path)?, Some(id));
         Ok(())
     }
 

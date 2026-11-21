@@ -6,6 +6,7 @@
 //! the file is still what it was and was written in that form, which is
 //! how every index change leaves it.
 
+use super::whole::FromFile;
 use super::*;
 
 /// The index of a workspace as it was read; `None` for the bytes where
@@ -13,8 +14,8 @@ use super::*;
 pub(in crate::native) struct AsRead {
     index: Index,
     bytes: Option<Vec<u8>>,
-    /// the device and inode of the file the bytes were read from
-    file: Option<(u64, u64)>,
+    /// the file the bytes were read from
+    file: Option<FromFile>,
 }
 
 impl std::ops::Deref for AsRead {
@@ -29,7 +30,7 @@ impl AsRead {
     /// [`canonical_index`] of the index: the bytes it was read from where
     /// they are that form already, whose trailer was checked when they
     /// were parsed, and then the file they were read from.
-    pub(super) fn canonical(self, algo: HashAlgo) -> (Vec<u8>, Option<(u64, u64)>) {
+    pub(super) fn canonical(self, algo: HashAlgo) -> (Vec<u8>, Option<FromFile>) {
         let content = canonical(self.index).content(algo);
         let whole = content.len() + algo.raw_len();
         match self.bytes {
@@ -50,8 +51,14 @@ impl NativeRepo<'_> {
     }
 
     /// Whether the index file holds the index `read` was read as: the
-    /// same bytes, or failing that the same index in another form.
+    /// file it was read from as it was then, else the same bytes, or
+    /// failing that the same index in another form.
     pub(super) fn unchanged_since(&self, read: &AsRead) -> Res<bool> {
+        if let Some(file) = &read.file
+            && std::fs::metadata(&self.index_path).is_ok_and(|meta| file.is(&meta))
+        {
+            return Ok(true);
+        }
         let same = match &read.bytes {
             Some(bytes) => crate::durable::holds(&self.index_path, bytes)? == Some(true),
             None => crate::durable::holds(&self.index_path, &[])?.is_none(),

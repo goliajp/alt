@@ -19,7 +19,13 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-use checkout_recovery::{COMPLETE_CHECKOUT, CheckoutDone, CheckoutIntent, PREPARE_CHECKOUT};
+
+mod left_by;
+mod seen;
+mod stopped;
+use left_by::{Left, left_by};
+pub(in crate::native) use seen::FromFile;
+use stopped::stopped_at;
 
 /// Where the index that stands in for a torn file comes from.
 #[derive(Clone)]
@@ -35,41 +41,6 @@ pub(in crate::native) struct Restored {
     bytes: Vec<u8>,
     from: Source,
 }
-
-/// What an operation says of the index of a workspace.
-enum Left {
-    /// nothing: another workspace's, or of no workspace
-    Nothing,
-    /// it moved a ref of the workspace and left the index as it was
-    Refs,
-    /// it left the index in this snapshot, where that is recorded; and
-    /// whether it moved a ref of the workspace
-    Index(Option<String>, bool),
-}
-
-/// The index a merge that stopped left, kept beside the index: no
-/// operation records it.
-#[derive(alt_json::ToJson, alt_json::FromJson)]
-struct Stopped {
-    version: u32,
-    /// the snapshot of the index
-    index: String,
-    /// the last operation of the log when it was written
-    after: String,
-}
-
-fn stopped_path(index_path: &Path) -> PathBuf {
-    index_path.with_file_name("index.stopped")
-}
-
-fn stopped_at(index_path: &Path) -> Option<Stopped> {
-    let bytes = std::fs::read(stopped_path(index_path)).ok()?;
-    let stopped: Stopped = alt_json::from_slice(&bytes).ok()?;
-    (stopped.version == 1).then_some(stopped)
-}
-
-/// An index, the bytes of its file, and the device and inode of that file.
-pub(super) type FileRead = (Index, Option<Vec<u8>>, Option<(u64, u64)>);
 
 fn said(restored: &Restored, written: bool) -> String {
     let state = match &restored.from {
@@ -102,11 +73,11 @@ impl NativeRepo<'_> {
         Ok((index, bytes))
     }
 
-    /// [`Self::read_index`], and the device and inode of the file the
-    /// bytes are those of: none for an index that stands in for the file.
-    pub(super) fn read_index_file(&self) -> Res<FileRead> {
+    /// [`Self::read_index`], and which file the bytes are those of: none
+    /// for an index that stands in for the file. The checksum of a file
+    /// noted as seen whole is not computed again ([`seen`]).
+    pub(super) fn read_index_file(&self) -> Res<(Index, Option<Vec<u8>>, Option<FromFile>)> {
         use std::io::Read;
-        use std::os::unix::fs::MetadataExt;
         let mut file = match std::fs::File::open(&self.index_path) {
             Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -118,13 +89,36 @@ impl NativeRepo<'_> {
         let mut bytes = Vec::with_capacity(meta.len() as usize + 1);
         file.read_to_end(&mut bytes)?;
         let algo = self.store.algo()?;
-        match Index::parse(&bytes, algo) {
-            Ok(index) => Ok((index, Some(bytes), Some((meta.dev(), meta.ino())))),
+        let noted = seen::seen(&self.index_path, &meta);
+        let parsed = match noted {
+            Some(_) => Index::parse_checked(&bytes, algo),
+            None => Index::parse(&bytes, algo),
+        };
+        match parsed {
+            Ok(index) => {
+                // by a command that writes: one that only reads changes no file
+                if noted.is_none() && self.write_lock.is_some() {
+                    self.note_whole(&meta, None);
+                }
+                let from = FromFile::of(&meta, noted.flatten());
+                Ok((index, Some(bytes), Some(from)))
+            }
             Err(alt_git_index::IndexError::Torn(_)) => {
                 let bytes = self.in_place_of_torn()?;
                 Ok((Index::parse(&bytes, algo)?, Some(bytes), None))
             }
             Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Has the command, once it has succeeded, note that the index file
+    /// `meta` describes is whole and that the snapshot `id` holds its
+    /// bytes, where one is given.
+    pub(super) fn note_whole(&self, meta: &std::fs::Metadata, id: Option<&str>) {
+        let snapshot = id.and_then(seen::unhex);
+        if let Some(note) = seen::note(meta, snapshot) {
+            let place = seen::place(&self.index_path);
+            *self.store.seen.lock().unwrap() = Some((place, note));
         }
     }
 
@@ -249,88 +243,5 @@ impl NativeRepo<'_> {
             }
         }
         Ok(None)
-    }
-
-    /// Keeps `index`, which a merge that stopped has just put in place,
-    /// where it is found again should the index file be torn later: no
-    /// operation records this index.
-    pub(in crate::native) fn keep_stopped(&self, index: Index) -> Res<()> {
-        let Some(after) = self.store.refs.head_op() else {
-            return Ok(());
-        };
-        let stopped = Stopped {
-            version: 1,
-            index: self.snapshot(&canonical_index(index, self.store.algo()?))?,
-            after: after.to_string(),
-        };
-        let bytes = alt_json::to_vec(&stopped)?;
-        Ok(durable_write(&stopped_path(&self.index_path), &bytes)?)
-    }
-}
-
-/// What `op` says of the index of the workspace `identity`. Walked from
-/// the end of the log: `closed` gathers the records that close a prepared
-/// change, which come after it.
-fn left_by(
-    op: &alt_oplog::Op,
-    identity: &WorkspaceIdentity,
-    closed: &mut HashMap<String, u8>,
-) -> Res<Left> {
-    let id = op.id.to_string();
-    Ok(match op.payload.first() {
-        Some(&kind @ (COMPLETE | ABANDON)) => {
-            let done: Completion = decode(&op.payload, kind)?;
-            closed.insert(done.prepared, kind);
-            Left::Nothing
-        }
-        Some(&COMPLETE_CHECKOUT) => {
-            let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
-            closed.insert(done.prepared, COMPLETE_CHECKOUT);
-            Left::Nothing
-        }
-        Some(&PREPARE) => {
-            let intent: IndexIntent = decode(&op.payload, PREPARE)?;
-            if intent.workspace != *identity {
-                return Ok(Left::Nothing);
-            }
-            // one that was abandoned or never closed left what was there
-            let left = match closed.get(&id) {
-                Some(&COMPLETE) => intent.after,
-                _ => intent.before,
-            };
-            Left::Index(Some(left), false)
-        }
-        Some(&PREPARE_CHECKOUT) => {
-            let intent: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
-            if intent.workspace != *identity {
-                return Ok(Left::Nothing);
-            }
-            Left::Index(Some(checked_out(intent, closed.contains_key(&id))), false)
-        }
-        Some(&alt_refs::PAYLOAD_REF_TX) => {
-            let Some(context) = alt_refs::parse_tx(&op.payload)?.and_then(|tx| tx.context) else {
-                return Ok(Left::Nothing);
-            };
-            let context: RefContext = alt_json::from_slice(&context)?;
-            if context.workspace != *identity {
-                return Ok(Left::Nothing);
-            }
-            match (context.checkout, context.effects) {
-                (Some(intent), _) => {
-                    Left::Index(Some(checked_out(intent, closed.contains_key(&id))), true)
-                }
-                (None, RefEffects::RefsOnly) => Left::Refs,
-                // nothing says what this one did to the index
-                (None, _) => Left::Index(None, true),
-            }
-        }
-        _ => Left::Nothing,
-    })
-}
-
-fn checked_out(intent: CheckoutIntent, completed: bool) -> String {
-    match completed {
-        true => intent.index_after,
-        false => intent.index_before,
     }
 }

@@ -1,6 +1,7 @@
 //! The operating system interface alt uses, written against the kernel and
 //! the system C library directly.
 //!
+//! - [`boot`]: which boot of the machine the process runs in
 //! - [`durability`]: whether a thread's writes are fsynced
 //! - [`env`]: the variables of the process in one pass
 //! - [`locale`]: the locales the C library has installed
@@ -24,6 +25,7 @@
 )))]
 compile_error!("alt-os supports Linux (glibc) and macOS on x86_64 and aarch64 only");
 
+pub mod boot;
 pub mod durability;
 pub mod env;
 pub mod heap;

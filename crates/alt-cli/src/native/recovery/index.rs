@@ -195,11 +195,16 @@ impl Store {
     /// nothing its workspace left open, for the next command, when the
     /// command `succeeded`: one that fails or is refused changes no file.
     pub fn keep_checked(&mut self, succeeded: bool) {
+        // caches: where one cannot be written, the next command reads more
         if let Some((place, record)) = self.checked.take()
             && succeeded
         {
-            // a cache: where it cannot be written, the next check reads more
             let _ = checked::keep(&place, &record);
+        }
+        if let Some((place, note)) = self.seen.get_mut().unwrap().take()
+            && succeeded
+        {
+            let _ = checked::keep(&place, &note);
         }
     }
 }

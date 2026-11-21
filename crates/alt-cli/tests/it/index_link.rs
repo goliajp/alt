@@ -120,3 +120,44 @@ mod synced {
         assert_eq!(snapshots_of_the_index(dir), [name]);
     }
 }
+
+mod mixed_versions {
+    use super::super::mixed_versions::{new_bin, old_bin, run, same_reads};
+    use super::*;
+
+    #[test]
+    #[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+    fn an_older_build_and_this_one_change_and_undo_each_others_index_changes() {
+        let (old, new) = (old_bin(), new_bin());
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        repo(dir);
+        let add = |bin: &Path, name: &str| {
+            fs::write(dir.join(name), name).unwrap();
+            ok(run(bin, dir, &["add", name]));
+            same_reads(&old, dir);
+        };
+        // this build's index is its snapshot's file and is noted as seen
+        // whole; the older build puts a file of its own in place of it
+        add(&new, "b.txt");
+        assert_eq!(snapshots_of_the_index(dir).len(), 1);
+        add(&old, "c.txt");
+        assert_eq!(snapshots_of_the_index(dir).len(), 0);
+        add(&new, "d.txt");
+        assert_eq!(snapshots_of_the_index(dir).len(), 1);
+        // each undoes what the other added last
+        ok(run(&old, dir, &["undo"]));
+        same_reads(&old, dir);
+        add(&old, "e.txt");
+        ok(run(&new, dir, &["undo"]));
+        same_reads(&old, dir);
+        let status = ok(run(&new, dir, &["status"]));
+        for (name, staged) in [("b", true), ("c", true), ("d", false), ("e", false)] {
+            let line = format!("new file:   {name}.txt");
+            assert_eq!(status.contains(&line), staged, "{name}: {status}");
+        }
+        ok(run(&old, dir, &["commit", "-m", "second"]));
+        same_reads(&old, dir);
+        assert!(ok(run(&new, dir, &["fsck"])).ends_with("every record verified\n"));
+    }
+}
