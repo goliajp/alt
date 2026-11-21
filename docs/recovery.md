@@ -392,6 +392,60 @@ synced before the commit that was discarded still has its blob: neither the
 command that cuts nor `alt fsck` says anything of its entry, and the commit
 is made again without another `alt add`.
 
+### Records of lost content among synced ones
+
+The rule above cuts a record whose content never arrived only where the
+record lies past the synced point. One case puts such a record before it.
+`alt add` does not sync what it writes. After a power cut, this alt looks at
+those unsynced records before it records anything as synced. An older alt
+does not know of them: when it is the first to write after the power cut, it
+records the files as synced the way it finds them and appends its own records
+behind. From then on every command of this alt that writes fails with
+
+```
+fatal: the record at byte 2547 of map.alt names content the store does not hold: `alt fsck --drop-lost` lists such records and takes them out
+```
+
+and changes nothing: cutting the file at that record would take the synced
+records behind it as well. Commands that only read go on working. The older
+alt does not notice; it takes the record at its word, and reading that object
+fails.
+
+`alt fsck --drop-lost` reads the blob map, `tier1` and `map.alt` whole and
+lists every record that names content which is not stored, the objects that
+go with those records, the index entries that stage one of them, and the
+commits, reached from a ref, that name one. It changes nothing and exits 1:
+
+```
+the record at byte 2547 of map.alt names content that is not stored
+blob 39b06ed55e6f8670685412ead3dd38b50b038047 goes with them: no other record names it
+index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b038047, which is not stored: add the file again
+nothing was changed: `alt fsck --drop-lost --yes` takes these 1 record(s) out
+```
+
+`alt fsck --drop-lost --yes` takes the listed records out and keeps every
+other record: the last records of the file are written over the ones that
+go, and the file ends that many records earlier. A daemon that serves the
+repository is stopped first. Afterwards commands that write work again, an
+older alt reads the repository as before, and the files whose blobs went are
+added again with `alt add`; `alt commit` refuses a tree that names a blob
+which is not stored until they are.
+
+An object that a commit names is another matter: it is part of history, and
+taking its record out does not bring it back. With such an object in the
+list, `--yes` changes nothing and says so. Fetch the object from another copy
+of the repository if there is one. `alt fsck --drop-lost --yes --committed`
+takes the records out all the same; the commits stay as they are and name
+objects that are not stored, which `alt fsck` reports until the objects are
+stored again. A lost blob whose file is still in the working tree comes back
+with `alt add` of that file.
+
+The records that are moved are first kept in `.alt/odb.repair` and synced. A
+run that is interrupted leaves that file; commands that write then fail with
+`taking lost records out of the object store was interrupted`, and the next
+`alt fsck --drop-lost`, with or without `--yes`, finishes the removal before
+it lists anything.
+
 ### An unconfirmed tail
 
 Nothing past the synced point of a file was ever confirmed to the command
@@ -504,7 +558,7 @@ the tables above and on these. None of them changes a file.
 | `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
 | `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
 | `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
-| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content |
+| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content, or take the record out (Records of lost content among synced ones, below) |
 | `pack holds bytes that are not records` | a pack does not read as records to its end | restore the pack |
 | `refs disagree with the operation log`, `ref state diverged during replay` | replaying the log does not give the refs the repository shows | move `.alt/refs/snapshot`, a cache, aside and check again; when it still fails, restore `.alt/oplog/log` |
 | `index run corrupt`, `chunk index misses a record`, `chunk index names a superseded record`, `chunk index names a record no pack holds`, `pack shorter than its index` | an index does not match the file it indexes | see Indexes below |

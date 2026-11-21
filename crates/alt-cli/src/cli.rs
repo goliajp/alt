@@ -456,11 +456,7 @@ pub enum Command {
     /// blob and object against its hash, each index against the file it
     /// indexes, the whole operation log, and the refs against a replay of
     /// that log. Exits non-zero at the first record that fails.
-    Fsck {
-        /// Emit the record counts as a JSON object
-        #[arg(long)]
-        json: bool,
-    },
+    Fsck(crate::fsck::FsckArgs),
     /// Verify the `alt-sig` header on one or more commit objects.
     /// With no args, walks the current branch's commit chain back to root
     /// (newest first). Each row is one of:
@@ -1059,7 +1055,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Identity { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
-            | Command::Fsck { .. }
+            | Command::Fsck(_)
     )
 }
 
@@ -1140,7 +1136,7 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Diff { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
-            | Command::Fsck { .. }
+            | Command::Fsck(_)
             | Command::Commit { validate: true, .. }
             | Command::Branch {
                 name: None,
@@ -1513,7 +1509,7 @@ pub fn run_on_store<W: Write>(
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
-        Command::Fsck { json } => crate::fsck::run(store, *json, out),
+        Command::Fsck(args) => crate::fsck::run(store, args, out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here

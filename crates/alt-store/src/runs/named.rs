@@ -133,3 +133,31 @@ pub fn unusable(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
     out.sort();
     Ok(out)
 }
+
+/// Removes every run file in `dir` that reaches past byte `target` of its
+/// log, and fsyncs the removal: a run that is gone cannot come back under
+/// records that were since written there.
+pub fn remove_past(dir: &Path, target: u64) -> Result<(), StoreError> {
+    let listing = match fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut removed = false;
+    for entry in listing {
+        let entry = entry?;
+        let past = entry
+            .file_name()
+            .to_str()
+            .and_then(parse_name)
+            .is_some_and(|(_, end)| end > target);
+        if past {
+            remove_if_present(&entry.path())?;
+            removed = true;
+        }
+    }
+    if removed {
+        crate::pack::fsync_dir(dir)?;
+    }
+    Ok(())
+}

@@ -79,6 +79,11 @@ impl BlobStore {
         self.map()?.each_from(from, each)
     }
 
+    /// See [`crate::reclog::RecLog::removal`], for the blob map.
+    pub fn map_removal(&self, gone: &[u64]) -> Result<crate::reclog::Removal, StoreError> {
+        self.map()?.removal(gone)
+    }
+
     /// Whether the chunk a blob of one chunk is stored as is there.
     pub fn chunk_stored(&self, id: BlobId) -> Result<bool, StoreError> {
         self.chunks.contains(ChunkId(id.0))

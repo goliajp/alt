@@ -92,3 +92,35 @@ pub fn read(alt_dir: &Path) -> Daemon {
         (false, _) => Daemon::Other(pid),
     }
 }
+
+/// Stops the daemon that answers for `alt_dir`, of whichever build:
+/// what it holds of the store in memory is about to be out of date in a
+/// way it does not look for. `false` when one goes on answering, or
+/// answers and left no meta to tell which process it is.
+#[cfg(unix)]
+pub fn stop(alt_dir: &Path) -> bool {
+    use std::os::unix::net::UnixStream;
+    use std::time::{Duration, Instant};
+
+    let sock = alt_dir.join("daemon.sock");
+    if UnixStream::connect(&sock).is_err() {
+        return true;
+    }
+    let meta = std::fs::read_to_string(alt_dir.join("daemon.meta")).unwrap_or_default();
+    let Some(pid) = meta
+        .lines()
+        .next()
+        .and_then(|line| line.parse::<i32>().ok())
+    else {
+        return false;
+    };
+    let _ = alt_os::sys::kill(pid, alt_os::sys::SIGTERM);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while UnixStream::connect(&sock).is_ok() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    true
+}

@@ -12,6 +12,7 @@ mod duplicate_records;
 mod full_check;
 mod head_record;
 mod left_unsynced;
+mod lost_dropped;
 mod marker;
 mod marker_states;
 mod marker_unreadable;

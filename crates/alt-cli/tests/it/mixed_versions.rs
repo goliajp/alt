@@ -74,7 +74,7 @@ pub(super) fn same_reads(old: &Path, repo: &Path) {
 }
 
 /// The entries of the tree of `HEAD`, as `bin` prints them.
-fn head_tree(bin: &Path, repo: &Path) -> String {
+pub(super) fn head_tree(bin: &Path, repo: &Path) -> String {
     let commit = ok(run(bin, repo, &["cat-file", "-p", "HEAD"]));
     let tree = commit
         .lines()

@@ -24,6 +24,7 @@ mod lock;
 mod map;
 mod odb;
 mod registry;
+mod repair;
 mod storage_view;
 mod synced;
 mod tier1;
@@ -41,7 +42,7 @@ pub use check::OdbChecked;
 pub use error::OdbError;
 pub use map::{MapEntry, ObjectMap};
 use odb::Odb;
-pub use odb::{Discarded, OdbSink};
+pub use odb::{Discarded, Lost, OdbSink};
 pub use registry::default_registry;
 pub use storage_view::{
     ChunkInfo, ChunkLayout, PrismStats, StorageStats, StorageView, Tier1Layout,
@@ -118,7 +119,8 @@ impl NativeOdb {
 
     fn start(&self) -> Result<Odb, OdbError> {
         let mode = self.access.mode(self.late, self.deferred.clone());
-        let mut odb = Odb::open_with(&self.alt_dir, self.opts, mode)?;
+        let opened = Odb::open_with(&self.alt_dir, self.opts, mode);
+        let mut odb = opened.map_err(|error| repair::told(&self.alt_dir, error))?;
         odb.set_defer_durability(self.defer);
         Ok(odb)
     }
@@ -209,14 +211,6 @@ impl NativeOdb {
     /// several across kinds or hash algorithms).
     pub fn lookup_by_alt(&self, id: BlobId) -> Result<Vec<MapEntry>, OdbError> {
         self.odb()?.lookup_by_alt(id)
-    }
-
-    /// Resolve a short hex prefix (≥ 4 hex chars) to the git oids it
-    /// matches, at most `cap` of them so callers can detect ambiguity
-    /// without paying for every match. Too-short or non-hex prefixes match
-    /// nothing.
-    pub fn lookup_by_prefix(&self, prefix: &str, cap: usize) -> Result<Vec<MapEntry>, OdbError> {
-        self.odb()?.lookup_by_prefix(prefix, cap)
     }
 
     pub fn contains(&self, oid: &ObjectId) -> Result<bool, OdbError> {

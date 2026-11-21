@@ -7,11 +7,13 @@ mod confirmed;
 mod cut;
 mod durable;
 mod follow;
+mod lost;
 mod open;
 mod settle;
 mod sink;
 
 pub use cut::Discarded;
+pub use lost::Lost;
 pub(crate) use open::Access;
 pub(crate) use settle::lost;
 pub use sink::OdbSink;

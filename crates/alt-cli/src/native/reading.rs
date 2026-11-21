@@ -40,7 +40,7 @@ pub fn open_for_command(
 ) -> Res<(Store, Repository)> {
     let repo = Repository::open_alt(alt_dir.clone(), Some(root.to_owned()))?;
     let store = match command {
-        Command::Fsck { .. } => Store::open_read_only(alt_dir)?,
+        Command::Fsck(_) => Store::open_read_only(alt_dir)?,
         _ => Store::open_for(alt_dir, cli::mutates_command(command))?,
     };
     Ok((store, view_for(repo, command)))

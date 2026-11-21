@@ -39,6 +39,7 @@ use super::*;
 use crate::daemon::Response;
 
 mod discarded;
+mod lost;
 mod staged;
 pub use discarded::{AfterDiscards, Discards};
 

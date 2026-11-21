@@ -9,6 +9,7 @@
 
 mod cache;
 mod check;
+mod removal;
 mod sync;
 mod tail;
 #[cfg(test)]
@@ -23,6 +24,7 @@ use crate::pack::read_exact_at;
 use crate::runs::{GUARD_SPAN, Guard, Key, Runs};
 use crate::{StoreError, Tail};
 use alt_hash::IdMap;
+pub use removal::Removal;
 use tail::End;
 
 const HEADER_LEN: usize = 5;
@@ -410,11 +412,6 @@ impl RecLog {
     /// The log's true on-disk size.
     pub fn file_len(&self) -> Result<u64, StoreError> {
         Ok(self.file.metadata()?.len())
-    }
-
-    /// An independent fd to the log file, for an off-write-path fsync.
-    pub fn sync_handle(&self) -> Result<File, StoreError> {
-        Ok(self.file.try_clone()?)
     }
 }
 

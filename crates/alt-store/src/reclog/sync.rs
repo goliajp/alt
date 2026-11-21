@@ -55,6 +55,11 @@ impl RecLog {
         Ok(())
     }
 
+    /// An independent fd to the log file, for an off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<std::fs::File, StoreError> {
+        Ok(self.file.try_clone()?)
+    }
+
     /// For a handle that lives long and looks the same records up again
     /// and again: records read from behind the runs are kept in memory
     /// from now on.

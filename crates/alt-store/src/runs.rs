@@ -35,7 +35,7 @@ use crate::StoreError;
 use crate::run_write::write_run;
 
 mod named;
-pub use named::unusable;
+pub use named::{remove_past, unusable};
 
 pub const KEY_LEN: usize = 32;
 /// How many log bytes before a run's end its guard holds, at most.
@@ -413,28 +413,7 @@ impl Runs {
     pub fn truncate(&mut self, target: u64) -> Result<(), StoreError> {
         self.remove_stale()?;
         self.runs.retain(|run| run.end <= target);
-        let listing = match fs::read_dir(&self.dir) {
-            Ok(listing) => listing,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut removed = false;
-        for entry in listing {
-            let entry = entry?;
-            let past = entry
-                .file_name()
-                .to_str()
-                .and_then(parse_name)
-                .is_some_and(|(_, end)| end > target);
-            if past {
-                remove_if_present(&entry.path())?;
-                removed = true;
-            }
-        }
-        if removed {
-            crate::pack::fsync_dir(&self.dir)?;
-        }
-        Ok(())
+        remove_past(&self.dir, target)
     }
 
     /// Removes run files left outside the chain (a crash mid-merge, or a log

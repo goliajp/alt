@@ -28,6 +28,9 @@ pub enum OdbError {
         file: &'static str,
         at: u64,
     },
+    /// the error of a store on which a removal of lost records was
+    /// interrupted
+    Interrupted(Box<OdbError>),
 }
 
 impl std::fmt::Display for OdbError {
@@ -59,7 +62,12 @@ impl std::fmt::Display for OdbError {
             ),
             Self::Dangling { file, at } => write!(
                 f,
-                "the record at byte {at} of {file} names content the store does not hold"
+                "the record at byte {at} of {file} names content the store does not hold: \
+                 `alt fsck --drop-lost` lists such records and takes them out"
+            ),
+            Self::Interrupted(_) => f.write_str(
+                "taking lost records out of the object store was interrupted: \
+                 `alt fsck --drop-lost` finishes it",
             ),
         }
     }
@@ -70,6 +78,7 @@ impl std::error::Error for OdbError {
         match self {
             Self::Io(e) => Some(e),
             Self::Store(e) => Some(e),
+            Self::Interrupted(e) => Some(e),
             Self::Format(_)
             | Self::HashMismatch { .. }
             | Self::SizeMismatch(..)

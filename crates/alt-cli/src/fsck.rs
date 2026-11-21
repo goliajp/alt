@@ -10,8 +10,11 @@
 //! records that were never synced and name what is not stored. Those a
 //! command that writes cuts off; they are not damage. Where what is cut
 //! holds whole records, the check says how much goes, which command takes
-//! it, and does not pass ([`tails`]). It changes no file.
+//! it, and does not pass ([`tails`]). It changes no file,
+//! unless it is asked to take out records that name content which is not
+//! stored ([`lost`]).
 
+mod lost;
 mod tails;
 
 use std::io::Write;
@@ -79,7 +82,30 @@ fn counts(
     ]
 }
 
-pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
+#[derive(alt_args::Args, Clone)]
+pub struct FsckArgs {
+    /// Emit the record counts as a JSON object
+    #[arg(long, conflicts_with_all = ["drop_lost"])]
+    json: bool,
+    /// List the records of the object store that name content which is
+    /// not stored, wherever they lie, and what names the objects that go
+    /// with them; with --yes, take those records out
+    #[arg(long)]
+    drop_lost: bool,
+    /// With --drop-lost: take the records out
+    #[arg(long, requires = "drop_lost")]
+    yes: bool,
+    /// With --drop-lost --yes: take the records out also where a commit
+    /// that a ref reaches names an object that goes with them
+    #[arg(long, requires = "yes")]
+    committed: bool,
+}
+
+pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> Res<u8> {
+    if args.drop_lost {
+        return lost::run(store, args, out);
+    }
+    let json = args.json;
     // looked for before the store is opened, which may replace them
     let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
     // a file that ends short of the records its marker says were synced

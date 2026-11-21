@@ -22,6 +22,7 @@ impl Odb {
             *self.left.lock().unwrap() = None;
         }
         let ready = self.catch_up().and_then(|()| self.bound());
+        let ready = ready.map_err(|error| crate::repair::told(&self.alt_dir, error));
         if ready.is_err() {
             // nothing was appended; the next call looks at the store again
             release_exclusive(&self.lock);

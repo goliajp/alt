@@ -48,6 +48,7 @@ mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
 mod fsck;
+mod fsck_lost;
 mod fsck_tails;
 mod fsync_by_branch;
 mod gitlink;
