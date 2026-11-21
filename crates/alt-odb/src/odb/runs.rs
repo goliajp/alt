@@ -9,6 +9,8 @@
 //! appended stays in the tail every opener reads, where a record a power
 //! cut left without its content is found.
 
+mod boot;
+
 use std::fs::File;
 use std::path::Path;
 
@@ -89,12 +91,13 @@ pub(super) fn index_synced(
 
 impl Odb {
     /// Folds long enough log tails into the index runs, for a writer
-    /// that syncs: the records are fsynced first. The runs are a cache:
-    /// failing to write one is not an error, anything else is.
+    /// that syncs: the records are fsynced first. One that leaves its
+    /// appends unsynced folds them into the boot runs. The runs are a
+    /// cache: failing to write one is not an error, anything else is.
     pub(super) fn index_tails(&mut self) -> Result<(), OdbError> {
         let relaxed = alt_store::relaxed_durability();
         if relaxed && !alt_os::durability::never_synced() {
-            return Ok(());
+            return self.index_boot_runs();
         }
         let pending = self.blobs.index_pending()
             || (self.tier1.get()).is_some_and(|tier1| tier1.index_pending(u64::MAX))

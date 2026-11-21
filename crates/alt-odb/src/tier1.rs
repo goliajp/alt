@@ -124,6 +124,11 @@ impl Tier1Map {
         self.log.pass_over_from(at)
     }
 
+    /// The log itself, for what is done to every record log alike.
+    pub fn log_mut(&mut self) -> &mut RecLog {
+        &mut self.log
+    }
+
     /// See [`RecLog::unfinished`].
     pub fn unfinished(&self) -> bool {
         self.log.unfinished()

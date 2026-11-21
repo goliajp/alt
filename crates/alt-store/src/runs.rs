@@ -34,7 +34,9 @@ use alt_os::map::Mmap;
 use crate::StoreError;
 use crate::run_write::write_run;
 
+mod boot;
 mod named;
+pub use boot::{BootRun, remove_boot_runs};
 pub use named::{remove_past, unusable, written_synced};
 
 pub const KEY_LEN: usize = 32;
@@ -356,16 +358,7 @@ impl Runs {
         durable: bool,
     ) -> Result<(), StoreError> {
         self.remove_stale()?;
-        let mut fresh: Vec<[u8; ENTRY_LEN]> = entries
-            .iter()
-            .map(|(key, position)| {
-                let mut entry = [0u8; ENTRY_LEN];
-                entry[..KEY_LEN].copy_from_slice(key);
-                entry[KEY_LEN..].copy_from_slice(&position.to_be_bytes());
-                entry
-            })
-            .collect();
-        fresh.sort_unstable();
+        let fresh = boot::sorted(entries);
         let fresh = fresh.as_flattened();
 
         let mut keep = self.runs.len();

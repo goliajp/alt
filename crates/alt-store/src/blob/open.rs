@@ -133,6 +133,11 @@ impl BlobStore {
             .expect("the blob map was opened just above"))
     }
 
+    /// The record log of the blob map, opened now where it was not.
+    pub fn map_log(&mut self) -> Result<&mut crate::reclog::RecLog, StoreError> {
+        Ok(self.map_mut()?.log_mut())
+    }
+
     /// What the next opener can be told about this store's files (see
     /// [`Known`]). The blob map's runs are reported only once the map has
     /// been opened: until then they are whatever they were.

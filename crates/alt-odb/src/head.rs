@@ -88,7 +88,7 @@ impl Head {
     /// the file says, its note of unsynced appends, and what it notes of
     /// removals of lost records ([`crate::repair`]).
     pub fn read_with_synced(lock: &File) -> (Self, Option<Lens>, Option<Left>, Notes) {
-        let mut buf = [0u8; NOTED_AT + NOTES];
+        let mut buf = [0u8; NOTED_AT + NOTES + crate::unsynced::boot_runs::LEN];
         let have = lock.read_at(&mut buf, 0).unwrap_or(0);
         let head = Self::parse(&buf[..have.min(MAX_LEN)]).unwrap_or_default();
         let synced = buf[..have].get(SYNCED_AT..).and_then(parse_synced);

@@ -758,6 +758,20 @@ record. A staged file whose blob went this way is named by `alt status` and
 `alt fsck` (`index entry … names blob …, which is not stored: add the file
 again`) and stored again by the next `alt add` of it.
 
+An add that leaves 256 records or more of a file unsynced indexes them, so
+that the commands after it look a record up instead of reading every one of
+them each time they open the store. These indexes lie in a directory of their
+own under the file's index directory, `map.alt.idx/<boot>-<generation>/` for
+`map.alt`, are noted in `odb.lock`, and are never synced. A command looks in
+them only in the boot they were written in, and only while the generation the
+synced marker records is the one they were written under: every cut of
+records moves it. After another boot, or once records were taken out of the
+store, no command opens them, and the first one that writes removes them. A
+command that syncs reads the records they cover before it records them as
+synced, removes these indexes, and indexes the records with all the others.
+An older alt does not look in these directories and leaves them where they
+are.
+
 An older alt keeps no such note. Where one is the first to write after the
 power cut, it records the files as synced as it finds them. A current alt
 that runs later still reads the records the note tells of, whatever the

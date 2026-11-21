@@ -1,6 +1,6 @@
 //! Keeping a held log handle and the index runs in step with the file.
 
-use super::{End, HEADER_LEN, INDEX_AT, RecLog, SECONDARY, guard_at};
+use super::{End, HEADER_LEN, INDEX_AT, RecLog, guard_at};
 use crate::StoreError;
 use crate::runs::Runs;
 
@@ -105,16 +105,7 @@ impl RecLog {
             return Ok(());
         }
         let end = from + (take * rec_len) as u64;
-        let mut entries = Vec::with_capacity(take);
-        let mut position = from;
-        for rec in self.tail[..take * rec_len].chunks_exact(rec_len) {
-            let (key, second) = (self.layout.keys)(rec);
-            entries.push((key, position));
-            if let Some(second) = second {
-                entries.push((second, position | SECONDARY));
-            }
-            position += rec_len as u64;
-        }
+        let entries = self.entries(&self.tail[..take * rec_len], from);
         let guard = guard_at(&self.file, &self.layout, self.len, end)
             .ok_or(StoreError::Format(self.layout.corrupt))?;
         self.runs.extend(&entries, from, end, guard, durable)?;

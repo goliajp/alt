@@ -1,6 +1,7 @@
 //! Single integration-test binary for alt-odb.
 
 mod abbrev;
+mod boot_runs;
 mod cache_failure;
 mod compact_readers;
 mod confirmed;

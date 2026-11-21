@@ -7,6 +7,7 @@
 //! runs is verified on open, where a record that does not read is an
 //! unfinished append or is reported as corruption (see [`Tail`]).
 
+mod boot;
 mod cache;
 mod check;
 mod removal;
@@ -21,9 +22,10 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use crate::pack::read_exact_at;
-use crate::runs::{GUARD_SPAN, Guard, Key, Runs};
+use crate::runs::{Key, Runs};
 use crate::{StoreError, Tail};
 use alt_hash::IdMap;
+use boot::guard_at;
 pub use removal::Removal;
 use tail::End;
 
@@ -154,18 +156,6 @@ fn open_for_append(path: &Path, header: &[u8]) -> Result<(File, bool), StoreErro
     }
 }
 
-fn guard_at(file: &File, layout: &Layout, size: u64, end: u64) -> Option<Guard> {
-    let first = HEADER_LEN as u64 + layout.rec_len as u64;
-    if end < first || end > size || !(end - HEADER_LEN as u64).is_multiple_of(layout.rec_len as u64)
-    {
-        return None;
-    }
-    let span = end.min(GUARD_SPAN as u64);
-    let mut guard = vec![0u8; span as usize];
-    read_exact_at(file, &mut guard, end - span).ok()?;
-    Some(guard)
-}
-
 impl RecLog {
     /// Opens the log at `path`, creating it when missing; the second value
     /// says whether it was created. Index runs live in `<path>.idx/`.
@@ -201,6 +191,7 @@ impl RecLog {
             Some(named) => Runs::open_named(&idx_dir, HEADER_LEN as u64, named, guard)?,
             None => Runs::open(&idx_dir, HEADER_LEN as u64, guard)?,
         };
+        let runs = runs.with_boot_run(policy.boot_run(), guard)?;
         let mut this = Self {
             layout,
             file,

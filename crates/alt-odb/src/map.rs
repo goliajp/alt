@@ -14,6 +14,7 @@ use alt_store::{BlobId, StoreError};
 
 use crate::OdbError;
 
+mod log;
 mod prefix;
 
 /// Record: algo u8 + git oid 32 (sha1 zero-padded) + blake3 32 + kind u8 +
@@ -230,25 +231,6 @@ impl ObjectMap {
     /// See [`RecLog::passed`].
     pub fn passed(&self) -> Result<alt_store::Passed, StoreError> {
         self.log.passed()
-    }
-
-    /// All entries in append order.
-    pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
-        let mut out = Vec::with_capacity(self.log.count());
-        let mut bad = None;
-        self.log
-            .for_each(|rec| -> Result<(), StoreError> {
-                match MapEntry::parse(rec) {
-                    Ok(entry) => out.push(entry),
-                    Err(e) => bad = bad.take().or(Some(e)),
-                }
-                Ok(())
-            })
-            .map_err(lift)?;
-        match bad {
-            Some(e) => Err(e),
-            None => Ok(out),
-        }
     }
 
     pub fn len(&self) -> usize {

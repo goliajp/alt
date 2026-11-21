@@ -12,8 +12,9 @@ use crate::lock::{lock_shared, unlock};
 use crate::map::ObjectMap;
 use crate::synced::{self, Deferred, Lens, Log, Marker, State};
 use crate::tier1::Tier1Map;
-use crate::unsynced::{self, Left, Noted};
+use crate::unsynced::{self, Left, Noted, boot_runs};
 use crate::{OdbError, default_registry};
+use alt_store::runs::BootRun;
 
 /// How an [`Odb`] is opened.
 pub(crate) struct Mode {
@@ -80,7 +81,14 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
 /// What `log` not reading to its end means, from what the marker says of
 /// how far it was synced; a cut of it brings the marker down first. A pack
 /// no longer than `synced` says is not looked up in the marker.
-fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<Lens>, left: &Noted) -> Tail {
+fn tail(
+    durable: &Path,
+    read_only: bool,
+    log: Log,
+    synced: Option<Lens>,
+    left: &Noted,
+    boot_run: Option<BootRun>,
+) -> Tail {
     let (read, lowered, left) = (durable.to_owned(), durable.to_owned(), left.clone());
     let tail = Tail::judged_by(move |seq, len| {
         let bounded = || {
@@ -92,7 +100,8 @@ fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<Lens>, left: &
     })
     .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at))
     // what a dead writer left unfinished is cut by `Odb::settle`
-    .deferring();
+    .deferring()
+    .with_boot_run(boot_run);
     let tail = match (log, synced) {
         (Log::Pack, Some(synced)) => tail.synced_to(synced.seq, synced.pack),
         _ => tail,
@@ -165,7 +174,13 @@ impl Odb {
         // back since, and does not take the note back
         let synced = synced.filter(|_| head.bounded);
         let noted: Noted = Arc::new(left.into());
-        let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced, &noted);
+        let held = || boot_runs::held_at_open(&durable_path, left, notes.boot_runs);
+        // a check reads every record itself
+        let boot_runs = mode.index.then(held).flatten();
+        let tail = |log: Log| {
+            let boot_run = boot_runs.and_then(|(runs, boot)| runs.of(log, boot));
+            tail(&durable_path, mode.read_only, log, synced, &noted, boot_run)
+        };
         // without a note every file is longer than what is known synced
         let confirmed = mode.index.then(|| synced.unwrap_or(Lens::NONE));
         let passing = confirmed.map(|noted| (noted, left));

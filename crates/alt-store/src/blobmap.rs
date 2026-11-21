@@ -74,6 +74,11 @@ impl BlobMap {
         self.log.index_tail(upto, crate::runs::written_synced())
     }
 
+    /// The log itself, for what is done to every record log alike.
+    pub(crate) fn log_mut(&mut self) -> &mut RecLog {
+        &mut self.log
+    }
+
     /// Whether [`Self::index_tail`] has enough records before byte `upto`.
     pub fn index_pending(&self, upto: u64) -> bool {
         self.log.index_pending(upto)

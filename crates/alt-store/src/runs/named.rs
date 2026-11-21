@@ -62,7 +62,8 @@ impl Runs {
     /// The log range of each run, oldest first: what [`Runs::open_named`]
     /// takes.
     pub fn chain(&self) -> Vec<(u64, u64)> {
-        self.runs.iter().map(|run| (run.start, run.end)).collect()
+        let chain = &self.runs[..self.chained()];
+        chain.iter().map(|run| (run.start, run.end)).collect()
     }
 
     /// Removes every run file, finished or not, that is not part of the
@@ -80,6 +81,10 @@ impl Runs {
             if ours && !self.runs.iter().any(|run| run.path == path) {
                 remove_if_present(&path)?;
                 removed = true;
+            } else if entry.file_type()?.is_dir() {
+                // a boot run begins where the chain ended before this
+                // run was written
+                super::boot::remove_dir(&path)?;
             }
         }
         if removed {

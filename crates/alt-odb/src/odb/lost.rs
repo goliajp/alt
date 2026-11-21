@@ -159,8 +159,10 @@ impl Odb {
         repair::carry_out(&self.alt_dir, &self.lock, &lost.removals)?;
         repair::forget(&self.alt_dir, &self.lock)?;
         self.catch_up()?;
-        let (note, _) = crate::unsynced::read(&self.lock);
-        self.bound(Marker::read(&self.durable_path), note)?;
+        let (note, notes) = crate::unsynced::read(&self.lock);
+        let marker = Marker::read(&self.durable_path);
+        self.settle_boot_runs(&marker, note, notes.boot_runs)?;
+        self.bound(marker, note)?;
         repair::note_generation(&self.lock, self.generation.unwrap_or_default());
         self.note_checked();
         self.save_head();

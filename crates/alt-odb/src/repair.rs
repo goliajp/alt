@@ -60,6 +60,7 @@ pub(crate) struct Notes {
     pub removal: bool,
     /// the marker's generation as the last writer left it
     pub generation: Option<u64>,
+    pub boot_runs: Option<unsynced::boot_runs::BootRuns>,
 }
 const MAGIC: [u8; 8] = *b"ALTV\x01\0\0\0";
 /// The logs records are removed from, in the order they are written.
@@ -126,6 +127,9 @@ pub(crate) fn notes(noted: Option<&[u8]>) -> Notes {
     Notes {
         removal: noted.starts_with(&NOTED),
         generation,
+        boot_runs: noted
+            .get(NOTES..)
+            .and_then(unsynced::boot_runs::BootRuns::parse),
     }
 }
 

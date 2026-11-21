@@ -19,6 +19,8 @@ use super::super::unconfirmed_tails::{archive, noise};
 use super::base::copy_tree;
 use super::{VERIFIED, another_boot, checked, sound, writes};
 
+mod boot_runs;
+
 /// Records from which a writer that syncs folds a tail into a run.
 const RUN_FROM: usize = 256;
 const PAGE: u64 = 4096;

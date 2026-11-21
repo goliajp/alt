@@ -35,6 +35,8 @@ use alt_store::Basis;
 
 use crate::synced::{Lens, Log, Marker, State};
 
+pub(crate) mod boot_runs;
+
 const BODY: usize = 56;
 pub(crate) const LEN: usize = BODY + 8;
 
@@ -79,7 +81,7 @@ impl Left {
 /// removals of lost records ([`crate::repair`]), which follows in the
 /// file: one read.
 pub(crate) fn read(lock: &File) -> (Option<Left>, crate::repair::Notes) {
-    let mut bytes = [0u8; LEN + crate::repair::NOTES];
+    let mut bytes = [0u8; LEN + crate::repair::NOTES + boot_runs::LEN];
     let have = lock.read_at(&mut bytes, UNSYNCED_AT as u64).unwrap_or(0);
     let left = bytes[..have].get(..LEN).and_then(Left::parse);
     (left, crate::repair::notes(bytes[..have].get(LEN..)))

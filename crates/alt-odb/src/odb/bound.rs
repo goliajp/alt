@@ -27,7 +27,7 @@ impl Odb {
             }
             let (note, notes) = unsynced::read(&self.lock);
             self.noted = notes.generation;
-            let ready = self.caught_up(note, notes.removal);
+            let ready = self.caught_up(note, notes);
             let ready = ready.map_err(|error| repair::told(&self.alt_dir, error));
             if !matches!(ready, Ok(true)) {
                 // nothing was appended; the next call looks at the store again
@@ -51,11 +51,11 @@ impl Odb {
     /// With the write lock just taken: reads what other writers appended
     /// and bounds the store ([`Self::bound`]). `false`, with nothing read,
     /// where this handle has to read the store anew first: a removal of
-    /// lost records was interrupted (`removal`) and is finished here, or
+    /// lost records was interrupted (`notes`) and is finished here, or
     /// the marker's generation is not the one this handle read the store
     /// at.
-    fn caught_up(&mut self, note: Option<Left>, removal: bool) -> Result<bool, OdbError> {
-        if removal {
+    fn caught_up(&mut self, note: Option<Left>, notes: repair::Notes) -> Result<bool, OdbError> {
+        if notes.removal {
             repair::finish_held(&self.alt_dir, &self.lock)?;
             return Ok(false);
         }
@@ -66,6 +66,7 @@ impl Odb {
             return Ok(false);
         }
         self.catch_up()?;
+        self.settle_boot_runs(&marker, note, notes.boot_runs)?;
         self.bound(marker, note)?;
         Ok(true)
     }

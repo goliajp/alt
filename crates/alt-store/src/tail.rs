@@ -41,6 +41,8 @@ pub struct Tail {
     read_only: bool,
     locked: bool,
     deferred: bool,
+    /// the run over records left unsynced that the opener may look in
+    boot_run: Option<crate::runs::BootRun>,
 }
 
 /// A store nothing is known about and that no one else writes: its opener
@@ -54,6 +56,7 @@ impl Default for Tail {
             read_only: false,
             locked: true,
             deferred: false,
+            boot_run: None,
         }
     }
 }
@@ -71,6 +74,7 @@ impl Tail {
             read_only: false,
             locked: false,
             deferred: false,
+            boot_run: None,
         }
     }
 
@@ -115,6 +119,17 @@ impl Tail {
     pub fn deferring(mut self) -> Self {
         self.deferred = true;
         self
+    }
+
+    /// The same policy for an opener of a record log that may look
+    /// records up in the boot run `named` instead of reading them.
+    pub fn with_boot_run(mut self, named: Option<crate::runs::BootRun>) -> Self {
+        self.boot_run = named;
+        self
+    }
+
+    pub(crate) fn boot_run(&self) -> Option<&crate::runs::BootRun> {
+        self.boot_run.as_ref()
     }
 
     /// No longer takes the pack [`Self::synced_to`] named for synced; says
