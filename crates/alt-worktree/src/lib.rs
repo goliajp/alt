@@ -43,7 +43,7 @@ pub use error::WorktreeError;
 pub use kind::ChangeKind;
 pub use snapshot::{Dir, Entry, FileStat, Replaced, Snapshot};
 #[cfg(unix)]
-pub use untracked::{Untracked, hidden_by};
+pub use untracked::{Hidden, Untracked};
 #[cfg(target_os = "linux")]
 pub use watch::{Unanswered, Watched, watch_allowance};
 

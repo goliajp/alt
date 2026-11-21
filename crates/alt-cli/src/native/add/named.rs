@@ -125,10 +125,11 @@ impl NativeRepo<'_> {
         let walked = walked(specs, &self.prefix).as_bytes();
         let inputs = self.scan_inputs()?;
         let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
+        let mut rules = alt_worktree::Hidden::new(&self.root, &excludes)?;
         let mut hidden = Vec::new();
         for spec in specs.iter().filter(|spec| !spec.literal().is_empty()) {
             let literal = spec.literal().as_bytes();
-            let Some(by) = alt_worktree::hidden_by(&self.root, literal, &excludes)? else {
+            let Some(by) = rules.by(literal)? else {
                 continue;
             };
             let met = within(&by, walked) || within(walked, &by);
