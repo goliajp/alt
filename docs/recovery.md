@@ -570,6 +570,32 @@ state before the merge. An older alt ignores that file; it cannot restore a
 torn index and fails with `index format: ...` until a current alt has run a
 command that writes.
 
+A merge that an older alt stopped has no such note. The first `alt add` of a
+current alt in that workspace keeps the index as the older alt left it, and
+syncs that, before it changes it. The same holds for a revert and a rebase
+that stopped on conflicts.
+
+Where a merge, a revert or a rebase is stopped on conflicts, the index file
+is not whole, and the index the stop left cannot be put back (its note or its
+snapshot is gone as well), what can be put back is from before the stop and
+holds nothing of what the stop staged. A commit made from it would leave the
+other side's changes out without a word, so alt does not put it in place for
+such a command. A command that only reads shows it and says that the index
+the stop left is lost. A command that writes is refused:
+
+```
+fatal: the index file of this workspace is not a whole index (a power cut leaves it so when the last `alt add` was not synced), and the index the merge that stopped on conflicts left is lost with it. What can be put back is from before the merge stopped and holds nothing of what it staged: a commit made from it would leave that out. Stage the working tree as a whole again with `alt add -A` and look at `alt status` before going on
+```
+
+The working tree still holds the outcome of the stop: the files that merged,
+and the conflicted ones as far as they were resolved. `alt add -A` (or
+`alt add .` at the top of the workspace) stages it again as a whole and is not
+refused; check `alt status` and the conflicted files before committing. Once
+that is done a revert or a rebase can also be given up, with
+`alt revert --abort` and `alt rebase --abort`: before it, they are refused
+like any other command that writes, since by an index from before the stop
+they would leave the files the stop wrote as they are.
+
 To have `alt add` sync before it answers:
 
 ```
@@ -613,6 +639,27 @@ as no longer holding until a command that syncs writes: in between, too, only
 the last record of a file can be an unfinished one, and a power cut can lose
 such adds and commits whole or in part.
 
+Until the machine goes down, what was left unsynced is in the kernel's cache
+as it was written, and no command looks at it again. alt notes in `odb.lock`
+which boot the unsynced records were written in. After another boot each of
+the store's files may end anywhere past the point it was synced to, each on
+its own, so a record that names an object can be there without the object's
+content. The first command that writes then reads the records past the synced
+boundaries, cuts off those that name content which is not stored, syncs what
+is left and records it as synced; a command that only reads passes over the
+same records. An object is never taken for stored on the word of such a
+record. A staged file whose blob went this way is named by `alt status` and
+`alt fsck` (`index entry … names blob …, which is not stored: add the file
+again`) and stored again by the next `alt add` of it.
+
+An older alt keeps no such note. Where one is the first to write after the
+power cut, it records the files as synced as it finds them. A current alt
+that runs later still reads the records the note tells of, whatever the
+older alt recorded; one of them that
+names content which is not stored is then reported as damage
+(`the record at byte … of map.alt names content the store does not hold`), and nothing is cut, because records
+the older alt synced may follow it.
+
 An `alt add` that was not synced and that a power cut interrupts can leave its
 intent in the log and its blobs nowhere, like the one described under Records
 whose content never arrived. Here nothing says the intent was never synced, so
@@ -630,8 +677,10 @@ is run for such an operation abandons it the same way. Afterwards
 `alt operation status` shows the operation as `abandoned`, with the outcome
 `not_applied`, and the file is added again. The same is done for an add whose
 intent was synced and whose blob the store has lost since. An index that is
-neither the one from before the add nor the one it prepared is left alone,
-and the operation stays pending.
+neither the one from before the add nor the one it prepared was put in place
+by a later add whose records the power cut took. It is kept as it is, the
+operation is abandoned, and the command says so; a file the index stages
+whose blob is lost is named the same way and is added again.
 
 ### A `durable` file that is gone or does not read
 
