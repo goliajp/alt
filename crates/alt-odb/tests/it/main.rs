@@ -27,3 +27,4 @@ mod synced_marker;
 mod synced_note;
 mod synced_writers;
 mod taken_over;
+mod unverified;

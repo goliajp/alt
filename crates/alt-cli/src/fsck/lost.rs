@@ -73,7 +73,7 @@ pub(super) fn run<W: Write>(
     for line in &staged {
         writeln!(out, "{line}")?;
     }
-    let committed = store.reaching(0, &|oid| Ok(gone.contains(oid)))?;
+    let committed = store.reaching(0, false, &|oid, _| Ok(gone.contains(oid)))?;
     for named in &committed {
         writeln!(out, "{} {}: {}", named.kind, named.oid, named.by)?;
     }

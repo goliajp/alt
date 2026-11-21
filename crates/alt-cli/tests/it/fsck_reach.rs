@@ -162,3 +162,118 @@ fn a_commit_that_is_not_stored_is_named_with_the_commit_it_is_a_parent_of() {
     assert!(said.contains(", has it as a parent\n"), "{said}");
     assert_eq!(said.matches("missing ").count(), 1, "{said}");
 }
+
+#[test]
+fn what_a_tree_below_other_trees_names_is_told_with_the_whole_path() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    repo(dir);
+    let blob = oid_of(ObjectKind::Blob, b"x\n");
+    let gone = oid_of(ObjectKind::Tree, b"never stored");
+    let deep = [
+        &b"100644 x.txt\0"[..],
+        blob.as_bytes(),
+        b"40000 gone\0",
+        gone.as_bytes(),
+    ]
+    .concat();
+    let deep_oid = oid_of(ObjectKind::Tree, &deep);
+    let sub = [&b"40000 deep\0"[..], deep_oid.as_bytes()].concat();
+    let sub_oid = oid_of(ObjectKind::Tree, &sub);
+    let mut odb = alt_odb::NativeOdb::open(dir.join(".alt")).unwrap();
+    odb.put(deep_oid, ObjectKind::Tree, &deep).unwrap();
+    odb.put(sub_oid, ObjectKind::Tree, &sub).unwrap();
+    odb.flush().unwrap();
+    drop(odb);
+    let entry = [&b"40000 sub\0"[..], sub_oid.as_bytes()].concat();
+    let older = an_older_commit_names(dir, &entry, &[]);
+    let said = missing(dir);
+    let by = format!(": commit {older}, reached from refs/heads/");
+    assert!(said.contains(&format!("missing blob {blob}{by}")), "{said}");
+    assert!(said.contains(", names it at sub/deep/x.txt\n"), "{said}");
+    assert!(said.contains(&format!("missing tree {gone}{by}")), "{said}");
+    assert!(said.contains(", names it at sub/deep/gone/\n"), "{said}");
+    assert_eq!(said.matches("missing ").count(), 2, "{said}");
+}
+
+#[test]
+fn what_a_tag_names_and_the_tree_of_a_commit_are_told_when_they_are_not_stored() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    repo(dir);
+    let who = "t <t@e> 0 +0000";
+    let tree = oid_of(ObjectKind::Tree, b"never stored");
+    let commit = format!("tree {tree}\nauthor {who}\ncommitter {who}\n\nno tree\n");
+    let commit_oid = oid_of(ObjectKind::Commit, commit.as_bytes());
+    let target = oid_of(ObjectKind::Commit, b"never stored\n");
+    let tag = |object: ObjectId, name: &str| {
+        let tag = format!("object {object}\ntype commit\ntag {name}\ntagger {who}\n\n{name}\n");
+        (oid_of(ObjectKind::Tag, tag.as_bytes()), tag)
+    };
+    let (kept, kept_tag) = tag(commit_oid, "kept");
+    let (lost, lost_tag) = tag(target, "lost");
+    let mut odb = alt_odb::NativeOdb::open(dir.join(".alt")).unwrap();
+    odb.put(commit_oid, ObjectKind::Commit, commit.as_bytes())
+        .unwrap();
+    odb.put(kept, ObjectKind::Tag, kept_tag.as_bytes()).unwrap();
+    odb.put(lost, ObjectKind::Tag, lost_tag.as_bytes()).unwrap();
+    odb.flush().unwrap();
+    drop(odb);
+    let named = |name: &str, oid| RefChange {
+        name: format!("refs/tags/{name}"),
+        old: None,
+        new: Some(RefTarget::Oid(oid)),
+    };
+    let mut refs = RefStore::open(dir.join(".alt")).unwrap();
+    refs.commit("test", 0, &[named("kept", kept), named("lost", lost)])
+        .unwrap();
+    drop(refs);
+    let said = missing(dir);
+    let line = format!(
+        "missing tree {tree}: commit {commit_oid}, reached from refs/tags/kept, names it at /\n"
+    );
+    assert!(said.contains(&line), "{said}");
+    let line =
+        format!("missing object {target}: tag {lost}, reached from refs/tags/lost, names it\n");
+    assert!(said.contains(&line), "{said}");
+    assert_eq!(said.matches("missing ").count(), 2, "{said}");
+}
+
+/// Where each chunk record of a pack starts.
+fn pack_records(pack: &[u8]) -> Vec<usize> {
+    let (mut at, mut found) = (5usize, Vec::new());
+    while at < pack.len() {
+        found.push(at);
+        let stored = u32::from_le_bytes(pack[at + 37..at + 41].try_into().unwrap());
+        at += 41 + stored as usize;
+    }
+    found
+}
+
+#[test]
+fn a_tree_that_does_not_hold_what_it_names_is_told_before_anything_is_walked() {
+    use std::os::unix::fs::FileExt;
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    repo(dir);
+    let blob = oid_of(ObjectKind::Blob, b"b.txt\n");
+    let entry = [&b"100644 b.txt\0"[..], blob.as_bytes()].concat();
+    an_older_commit_names(dir, &entry, &[]);
+    assert!(missing(dir).contains(&format!("missing blob {blob}")));
+    // the tree that names the blob is the third record from the end: the
+    // last byte of what it holds is changed
+    let pack = dir.join(".alt/store/pack-00000001.altpack");
+    let bytes = fs::read(&pack).unwrap();
+    let records = pack_records(&bytes);
+    let end = records[records.len() - 2] - 1;
+    let file = fs::OpenOptions::new().write(true).open(&pack).unwrap();
+    file.write_all_at(&[!bytes[end]], end as u64).unwrap();
+    for command in [&["fsck"][..], &["fsck", "--no-connectivity"]] {
+        let checked = alt(dir, command);
+        assert!(!checked.status.success());
+        let said = stderr(&checked);
+        // the walk reads a tree without hashing it: it is not come to
+        assert!(!said.contains("missing "), "{said}");
+        assert!(said.contains("corrupt: hash mismatch"), "{said}");
+    }
+}

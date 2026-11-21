@@ -83,6 +83,15 @@ impl NativeOdb {
     pub fn check(&self) -> Result<OdbChecked, OdbError> {
         self.odb()?.check()
     }
+
+    /// [`Self::get`] with no hashing of what is read: for a caller that
+    /// had [`Self::check`] verify every record before.
+    pub fn get_unverified(
+        &self,
+        oid: &alt_git_codec::ObjectId,
+    ) -> Result<Option<alt_git_codec::RawObject>, OdbError> {
+        self.odb()?.get_unverified(oid)
+    }
 }
 
 impl NativeOdb {

@@ -22,14 +22,43 @@ pub(crate) struct Reached {
     pub(crate) tip: bool,
 }
 
+/// How a walk came to a tag or a commit: put in words for one it finds.
+#[derive(Clone, Copy)]
+enum Link {
+    /// the ref points at it
+    Tip,
+    /// the tag names it
+    Tag(ObjectId),
+    /// the commit has it as a parent
+    Parent(ObjectId),
+}
+
+impl Link {
+    fn told(self, from: &str) -> String {
+        match self {
+            Link::Tip => format!("ref {from} points at it"),
+            Link::Tag(tag) => format!("tag {tag}, reached from {from}, names it"),
+            Link::Parent(of) => format!("commit {of}, reached from {from}, has it as a parent"),
+        }
+    }
+}
+
 /// A walk from refs through tags, commits and trees that stops at every
 /// object `wanted` picks. An object is looked at once, however many
 /// commits and trees name it.
 struct Walk<'a> {
     store: &'a Store,
-    wanted: &'a dyn Fn(&ObjectId) -> Res<bool>,
+    /// asked of an object met for the first time, with whether the walk
+    /// goes on to read it, and of one it read that the store has not
+    wanted: &'a dyn Fn(&ObjectId, bool) -> Res<bool>,
+    /// whether every record of the store was verified before the walk
+    verified: bool,
     seen: alt_hash::IdSet<ObjectId>,
     found: Vec<Reached>,
+    /// the directories entered of the tree being walked, the root first:
+    /// the one each is in and where `names` has its name
+    dirs: Vec<(u32, std::ops::Range<usize>)>,
+    names: Vec<u8>,
 }
 
 impl Walk<'_> {
@@ -39,24 +68,45 @@ impl Walk<'_> {
         &mut self,
         oid: ObjectId,
         kind: &'static str,
-        by: impl FnOnce() -> String,
+        read: bool,
+        by: impl FnOnce(&Self) -> String,
     ) -> Res<bool> {
         if !self.seen.insert(oid) {
             return Ok(false);
         }
-        if !(self.wanted)(&oid)? {
+        if !(self.wanted)(&oid, read)? {
             return Ok(true);
         }
-        let (by, tip) = (by(), false);
+        let (by, tip) = (by(self), false);
         self.found.push(Reached { oid, kind, by, tip });
         Ok(false)
     }
 
+    /// The object `oid`, entered to be read. One the store does not hold
+    /// is asked for as an object that is not read, and kept with `by`
+    /// where it is wanted.
+    fn read(
+        &mut self,
+        oid: ObjectId,
+        kind: &'static str,
+        by: impl FnOnce(&Self) -> String,
+    ) -> Res<Option<alt_git_codec::RawObject>> {
+        let object = match self.verified {
+            true => self.store.odb.get_unverified(&oid)?,
+            false => self.store.odb.get(&oid)?,
+        };
+        if object.is_none() && (self.wanted)(&oid, false)? {
+            let (by, tip) = (by(self), false);
+            self.found.push(Reached { oid, kind, by, tip });
+        }
+        Ok(object)
+    }
+
     /// Walks what `tip`, entered already, leads to; `from` is the ref.
     fn below(&mut self, tip: ObjectId, from: &str) -> Res<()> {
-        let mut commits = vec![tip];
-        while let Some(oid) = commits.pop() {
-            let Some(object) = self.store.odb.get(&oid)? else {
+        let mut commits = vec![(tip, "object", Link::Tip)];
+        while let Some((oid, kind, link)) = commits.pop() {
+            let Some(object) = self.read(oid, kind, |_| link.told(from))? else {
                 continue;
             };
             match object.kind {
@@ -64,23 +114,21 @@ impl Walk<'_> {
                     let Some(target) = Tag::parse(&object.data)?.object() else {
                         continue;
                     };
-                    let by = || format!("tag {oid}, reached from {from}, names it");
-                    if self.enter(target, "object", by)? {
-                        commits.push(target);
+                    let link = Link::Tag(oid);
+                    if self.enter(target, "object", true, |_| link.told(from))? {
+                        commits.push((target, "object", link));
                     }
                 }
                 ObjectKind::Commit => {
                     let commit = Commit::parse(&object.data)?;
-                    let by = format!("commit {oid}, reached from {from},");
+                    let link = Link::Parent(oid);
                     for parent in commit.parents() {
-                        if self.enter(parent, "commit", || format!("{by} has it as a parent"))? {
-                            commits.push(parent);
+                        if self.enter(parent, "commit", true, |_| link.told(from))? {
+                            commits.push((parent, "commit", link));
                         }
                     }
-                    if let Some(tree) = commit.tree()
-                        && self.enter(tree, "tree", || format!("{by} names it at /"))?
-                    {
-                        self.tree(tree, &by)?;
+                    if let Some(tree) = commit.tree() {
+                        self.tree(tree, oid, from)?;
                     }
                 }
                 ObjectKind::Tree | ObjectKind::Blob => {}
@@ -89,22 +137,53 @@ impl Walk<'_> {
         Ok(())
     }
 
-    /// Walks the tree `root`, entered already, of the commit `by` tells.
-    fn tree(&mut self, root: ObjectId, by: &str) -> Res<()> {
+    /// Where the tree of `commit` has the entry `name` of the directory
+    /// `dir`, or with no name that directory itself.
+    fn at(&self, commit: ObjectId, from: &str, mut dir: usize, name: &[u8]) -> String {
+        let mut path = vec![name];
+        while dir != 0 {
+            let (parent, within) = &self.dirs[dir];
+            path.extend([&b"/"[..], &self.names[within.clone()]]);
+            dir = *parent as usize;
+        }
+        if path == [b""] {
+            path.push(b"/");
+        }
+        path.reverse();
+        let path = alt_bytes::BString::from(path.concat());
+        format!("commit {commit}, reached from {from}, names it at {path}")
+    }
+
+    /// Walks the tree `root` of `commit`, which the ref `from` leads to.
+    fn tree(&mut self, root: ObjectId, commit: ObjectId, from: &str) -> Res<()> {
         let algo = self.store.algo()?;
-        let mut trees = vec![(root, String::new())];
-        while let Some((tree, at)) = trees.pop() {
-            let Some(object) = self.store.odb.get(&tree)? else {
+        self.dirs.clear();
+        self.names.clear();
+        self.dirs.push((0, 0..0));
+        if !self.enter(root, "tree", true, |walk| walk.at(commit, from, 0, b""))? {
+            return Ok(());
+        }
+        let mut trees = vec![(root, 0)];
+        while let Some((tree, dir)) = trees.pop() {
+            let by = |walk: &Self| walk.at(commit, from, dir, b"");
+            let Some(object) = self.read(tree, "tree", by)? else {
                 continue;
             };
-            for entry in Tree::parse(&object.data, algo)?.entries {
-                let path = || format!("{by} names it at {at}{}", entry.name);
-                if entry.mode.is_tree() {
-                    if self.enter(entry.oid, "tree", || path() + "/")? {
-                        trees.push((entry.oid, format!("{at}{}/", entry.name)));
-                    }
-                } else if !entry.mode.is_gitlink() {
-                    self.enter(entry.oid, "blob", path)?;
+            for entry in Tree::raw_entries(&object.data, algo) {
+                let (mode, name, oid) = entry?;
+                if mode.is_gitlink() {
+                    continue;
+                }
+                let oid = ObjectId::from_bytes(algo, oid).map_err(|e| e.to_string())?;
+                if !mode.is_tree() {
+                    self.enter(oid, "blob", false, |walk| walk.at(commit, from, dir, name))?;
+                } else if self.enter(oid, "tree", true, |walk| {
+                    walk.at(commit, from, dir, name) + "/"
+                })? {
+                    let start = self.names.len();
+                    self.names.extend_from_slice(name);
+                    self.dirs.push((dir as u32, start..self.names.len()));
+                    trees.push((oid, self.dirs.len() - 1));
                 }
             }
         }
@@ -117,27 +196,37 @@ impl Store {
     /// refs were before the last `dropped` operations of the log: what a
     /// ref points at, what a tag names, the parents and the tree of a
     /// commit, the entries of its trees. Nothing below a picked object
-    /// is looked at.
+    /// is looked at. `wanted` is asked of each object once, and told
+    /// whether the walk reads the object next; of an object it reads
+    /// and the store does not hold it is asked again, told that it does
+    /// not. With `verified` the walk hashes nothing it reads: every
+    /// record of the store was verified before.
     pub(crate) fn reaching(
         &self,
         dropped: usize,
-        wanted: &dyn Fn(&ObjectId) -> Res<bool>,
+        verified: bool,
+        wanted: &dyn Fn(&ObjectId, bool) -> Res<bool>,
     ) -> Res<Vec<Reached>> {
-        let (seen, found) = (alt_hash::IdSet::default(), Vec::new());
         let mut walk = Walk {
             store: self,
             wanted,
-            seen,
-            found,
+            verified,
+            seen: alt_hash::IdSet::default(),
+            found: Vec::new(),
+            dirs: Vec::new(),
+            names: Vec::new(),
         };
         for (name, target) in self.refs.refs_before(dropped)? {
             let RefTarget::Oid(tip) = target else {
                 continue;
             };
             let found = walk.found.len();
-            if walk.enter(tip, "object", || format!("ref {name} points at it"))? {
+            if walk.enter(tip, "object", true, |_| Link::Tip.told(&name))? {
                 walk.below(tip, &name)?;
-            } else if let Some(reached) = walk.found.get_mut(found) {
+            }
+            if let Some(reached) = walk.found.get_mut(found)
+                && reached.oid == tip
+            {
                 reached.tip = true;
             }
         }

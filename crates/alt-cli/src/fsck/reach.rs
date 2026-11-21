@@ -26,10 +26,11 @@ pub(super) fn missing(store: &Store, dropped: usize, refs_only: bool) -> Res<Vec
     // a record a writer is about to cut off holds nothing for good
     let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
     let odb = store.odb();
-    let absent = |oid: &_| Ok(gone.contains(oid) || !odb.contains(oid)?);
+    // an object the walk reads tells by itself whether it is stored
+    let absent = |oid: &_, read: bool| Ok(gone.contains(oid) || !read && !odb.contains(oid)?);
     let taken = store.kept_lost()?.unwrap_or_default();
     let told: HashSet<_> = dangling.iter().map(|(_, oid)| *oid).collect();
-    for named in store.reaching(dropped, &absent)? {
+    for named in store.reaching(dropped, true, &absent)? {
         if named.tip && told.contains(&named.oid) {
             continue;
         }
