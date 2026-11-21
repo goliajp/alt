@@ -29,6 +29,9 @@ mod complete;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod conflict_killed;
 mod conflict_reset;
 mod conflict_untracked;
 mod crash_fixture;

@@ -27,16 +27,16 @@ exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"merge --abort: no merge in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:0>","retryable":false},"schema_version":1}
 $ [repo] alt merge feat --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:1>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:1>","outcome":"partial","request_id":"<id32:2>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:1>","<id64:2>","<id64:3>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:3>","outcome":"partial","request_id":"<id32:4>","retryable":false},"schema_version":1}
 $ [repo] alt merge --abort --json
 exit 1
-err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"merge --abort: 'only-feat.txt' has changes that are not staged and would be overwritten; stage them or take them back first","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:3>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"merge --abort: 'only-feat.txt' has changes that are not staged and would be overwritten; stage them or take them back first","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:5>","retryable":false},"schema_version":1}
 $ [repo] alt merge --abort --json
 exit 0
-out| {"command_output":{"encoding":"utf-8","text":"Merge aborted.\n","truncated":false},"operation_ids":["<id64:4>","<id64:5>","<id64:6>"],"request_id":"<id32:7>","schema_version":1}
+out| {"command_output":{"encoding":"utf-8","text":"Merge aborted.\n","truncated":false},"operation_ids":["<id64:6>","<id64:7>","<id64:8>"],"request_id":"<id32:9>","schema_version":1}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"operation":null,"clean":true}
 $ [repo] alt op-log -n 2 --json
 exit 0
-out| {"schema_version":1,"ops":[{"id":"<id64:6>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:5>","request_id":"<id32:7>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"checkout","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:4>"}}]}
+out| {"schema_version":1,"ops":[{"id":"<id64:8>","request_id":"<id32:9>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:7>","request_id":"<id32:9>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"checkout","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:6>"}}]}

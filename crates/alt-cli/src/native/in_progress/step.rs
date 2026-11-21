@@ -2,8 +2,8 @@
 //! back as a whole.
 //!
 //! Such a command changes more than one record tells: several ref
-//! transactions and checkouts, a conflict written without a record, and
-//! the file that says the operation is under way. Where that file changed,
+//! transactions and checkouts, and the file that says the operation is
+//! under way. Where that file changed,
 //! the command ends with one more record of what it did in all: the refs,
 //! the index and the files from before its first change to after its
 //! last, and the state files as they were and as they are. `alt undo`
@@ -13,10 +13,10 @@
 //! The record is written before a state file is removed. An older alt
 //! passes it over, and refuses to undo it.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
 use super::super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
-use super::super::recovery::{WorkspaceIdentity, canonical_index, decode, encode};
+use super::super::recovery::{WorkspaceIdentity, decode, encode};
 use super::super::*;
 
 mod undo;
@@ -72,9 +72,6 @@ pub(in crate::native) struct Tracked {
     /// state files to remove once the record is written
     removed: Vec<&'static str>,
 }
-
-/// The index and the files at some paths before a write no checkout records.
-pub(in crate::native) type Unrecorded = (String, Vec<(BString, Option<FileState>)>);
 
 fn written(target: &Option<RefTarget>) -> Option<String> {
     target.as_ref().map(|target| match target {
@@ -189,55 +186,6 @@ impl NativeRepo<'_> {
         if let Some(tracked) = self.step.borrow_mut().as_mut() {
             tracked.checkouts.push(checkout.clone());
         }
-    }
-
-    fn index_snapshot(&self) -> Res<String> {
-        self.snapshot(&canonical_index(self.index()?, self.store.algo()?))
-    }
-
-    fn found_at(&self, path: &BString, among: &HashSet<&[u8]>) -> Res<Option<FileState>> {
-        self.observed(path, true, false, &|p| among.contains(p))
-    }
-
-    /// Before a write to the index and to `paths` that no checkout
-    /// records: what is there, where a command is kept track of.
-    pub(in crate::native) fn step_unrecorded(&self, paths: &[&BString]) -> Res<Option<Unrecorded>> {
-        if self.step.borrow().is_none() {
-            return Ok(None);
-        }
-        let among: HashSet<&[u8]> = paths.iter().map(|path| path.as_slice()).collect();
-        let found = |path: &&BString| Ok(((*path).clone(), self.found_at(path, &among)?));
-        let files = paths.iter().map(found).collect::<Res<_>>()?;
-        Ok(Some((self.index_snapshot()?, files)))
-    }
-
-    /// After that write: the change it made, as a checkout would have
-    /// recorded it.
-    pub(in crate::native) fn step_wrote(&self, before: Option<Unrecorded>) -> Res<()> {
-        let Some((index_before, files)) = before else {
-            return Ok(());
-        };
-        let among: HashSet<&[u8]> = files.iter().map(|(path, _)| path.as_slice()).collect();
-        let mut changes = Vec::new();
-        for (path, before) in &files {
-            let after = self.found_at(path, &among)?;
-            if *before != after {
-                changes.push(FileChange {
-                    path: path.to_vec(),
-                    before: before.clone(),
-                    after,
-                });
-            }
-        }
-        self.step_checkout(&CheckoutIntent {
-            version: 1,
-            workspace: self.workspace_identity()?,
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before,
-            index_after: self.index_snapshot()?,
-            files: changes,
-        });
-        Ok(())
     }
 
     /// The workspace the step `op` records was done in.

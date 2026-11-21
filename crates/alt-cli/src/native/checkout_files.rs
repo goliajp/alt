@@ -129,9 +129,11 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         let removed = |c: &&FileChange| c.after.is_none();
         for change in changes.clone().filter(removed) {
+            crash_point!("checkout-file:before");
             self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
         }
         for change in changes.filter(|c| !removed(c)) {
+            crash_point!("checkout-file:before");
             self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
         }
         Ok(())

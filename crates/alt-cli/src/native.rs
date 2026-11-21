@@ -1145,21 +1145,6 @@ impl<'a> NativeRepo<'a> {
         }
     }
 
-    fn make_entry(&self, w: &WorkEntry) -> Res<IndexEntry> {
-        // Gitlinks (submodules) have no on-disk file at the path — only an
-        // empty placeholder directory (or nothing, when the submodule has
-        // not been initialised). Git encodes their index entry with zero
-        // stat fields; do the same so the index round-trips cleanly.
-        if w.mode == 0o160000 {
-            return Ok(gitlink_entry(w));
-        }
-        let abs = self
-            .root
-            .join(w.path.to_path().map_err(|_| "non-utf8 path")?);
-        let meta = std::fs::symlink_metadata(&abs)?;
-        Ok(stat_entry(&meta, w))
-    }
-
     /// The HEAD commit's tree flattened to entries (empty when unborn).
     fn head_entries(&self) -> Res<Vec<WorkEntry>> {
         match self.store.refs.resolve(&self.head_branch()?)? {
@@ -1686,46 +1671,6 @@ impl<'a> NativeRepo<'a> {
     /// `old` that are absent from `target`, and rewrites the index to match.
     fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
         self.recoverable_checkout(old, target)
-    }
-
-    /// Writes one tree entry to the working tree (regular file, executable,
-    /// or symlink), creating parent dirs and replacing whatever was there.
-    /// Gitlink entries (mode 160000) point at a submodule commit that lives
-    /// in another repo — there is nothing to write at our odb's level. Match
-    /// git's plain `clone` (no `--recurse-submodules`) by ensuring the
-    /// placeholder directory exists and stopping there. Submodule
-    /// fetch/checkout is not implemented; this only avoids the materialise crash.
-    fn materialize(&self, w: &WorkEntry, attrs: &convert::Converter) -> Res<()> {
-        let abs = self.abs(&w.path)?;
-        if w.mode == 0o160000 {
-            if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                crate::durable::remove_file(&abs)?;
-            }
-            std::fs::create_dir_all(&abs)?;
-            return Ok(());
-        }
-        if let Some(parent) = abs.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if abs.symlink_metadata().is_ok() {
-            crate::durable::remove_file(&abs)?;
-        }
-        let obj = self
-            .store
-            .odb
-            .get(&w.oid)?
-            .ok_or("blob missing from store")?;
-        if w.mode == 0o120000 {
-            symlink_to(&obj.data, &abs)?;
-        } else {
-            let content = match alt_lfs::Pointer::parse(&obj.data) {
-                Some(p) => self.lfs_content(&p)?,
-                None => attrs.to_worktree(&w.path, &obj.data)?,
-            };
-            crate::durable::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
-            set_exec(&abs, w.mode == 0o100755)?;
-        }
-        Ok(())
     }
 
     /// Removes now-empty directories from `dir` up toward the root.
@@ -3561,14 +3506,6 @@ fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn set_exec(path: &Path, exec: bool) -> Res<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let perm = if exec { 0o755 } else { 0o644 };
-    crate::durable::set_permissions(path, std::fs::Permissions::from_mode(perm))?;
-    Ok(())
-}
-
 #[cfg(not(unix))]
 fn set_exec(_path: &Path, _exec: bool) -> Res<()> {
     Ok(())
@@ -4155,26 +4092,6 @@ fn stat_entry(meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
 
 #[cfg(not(unix))]
 fn stat_entry(_meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
-    IndexEntry {
-        ctime: (0, 0),
-        mtime: (0, 0),
-        dev: 0,
-        ino: 0,
-        mode: w.mode,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: w.oid,
-        flags: (w.path.len().min(0x0FFF)) as u16,
-        extended_flags: None,
-        path: w.path.clone(),
-    }
-}
-
-/// Zero-stat index entry for a gitlink (mode 160000). Git emits the same
-/// shape: there is no on-disk file to stat, only the recorded submodule
-/// commit oid. Keeps the index byte-comparable across alt and git.
-fn gitlink_entry(w: &WorkEntry) -> IndexEntry {
     IndexEntry {
         ctime: (0, 0),
         mtime: (0, 0),

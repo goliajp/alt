@@ -2,6 +2,8 @@
 //! index.
 
 use super::*;
+use checkout_recovery::{CheckoutIntent, FileChange, FileState};
+use recovery::canonical_index;
 
 /// The entries of the index that are in no conflict, by path.
 type Whole = std::collections::HashMap<BString, IndexEntry>;
@@ -51,6 +53,8 @@ impl NativeRepo<'_> {
     /// Writes a conflicted merge state to disk: each resolution's working-tree
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
+    /// Written as a checkout is: the intent in the log first, with all it
+    /// needs stored, so that one cut short is finished from the log.
     pub(in crate::native) fn write_merge_state(&mut self, resolved: &[Resolved]) -> Res<()> {
         // a path the merge leaves as it was keeps its file and its index
         // entry: only what changes is written
@@ -72,67 +76,90 @@ impl NativeRepo<'_> {
                 return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
             }
         }
-        let before = self.step_unrecorded(&changed)?;
-        self.write_merged(resolved, &was)?;
-        self.step_wrote(before)
+        let intent = self.merged_checkout(resolved, &was, &changed)?;
+        self.record_and_checkout(intent)
     }
 
-    fn write_merged(&mut self, resolved: &[Resolved], was: &Whole) -> Res<()> {
-        // the index written below names the blobs of the paths that merged
+    /// What writing a merge that stopped changes, as the intent of a
+    /// checkout: for each path the file that is there and the one to
+    /// come, and the index with the stages of each conflict. Nothing is
+    /// written to the working tree or the index.
+    fn merged_checkout(
+        &mut self,
+        resolved: &[Resolved],
+        was: &Whole,
+        changed: &[&BString],
+    ) -> Res<CheckoutIntent> {
+        // the index to come names the blobs of the paths that merged
         self.store.odb.flush_synced()?;
         // converted under the attribute files of the merge result, as a
         // checkout of it would be: those on disk are from before the merge
         let files = self.merged_attribute_files(resolved)?;
         let files: Vec<(&[u8], &[u8])> = files.iter().map(|(d, c)| (*d, c.as_slice())).collect();
         let attrs = self.converter_under(&files)?;
-        for r in resolved {
-            if untouched(r, was) {
-                continue;
-            }
-            let abs = self.abs(&r.path)?;
-            if let Some(bytes) = &r.worktree {
-                if let Some(parent) = abs.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                if abs.symlink_metadata().is_ok() {
-                    crate::durable::remove_file(&abs)?;
-                }
-                let converted = attrs.to_worktree(&r.path, bytes)?;
-                crate::durable::write(&abs, converted.as_deref().unwrap_or(bytes))?;
-                set_exec(&abs, r.mode == 0o100755)?;
-            } else {
-                match &r.entry {
-                    Some(e) => self.materialize(e, &attrs)?,
-                    None => {
-                        if abs.symlink_metadata().is_ok() {
-                            crate::durable::remove_file(&abs)?;
-                            self.prune_empty_dirs(abs.parent());
-                        }
-                    }
-                }
-            }
-        }
-
+        let among: std::collections::HashSet<&[u8]> =
+            changed.iter().map(|path| path.as_slice()).collect();
+        let mut changes = Vec::new();
+        let mut planned = std::collections::HashMap::new();
         let mut entries = Vec::new();
         for r in resolved {
             if r.conflicted {
-                for (stage, w) in &r.stages {
-                    entries.push(stage_entry(w, *stage));
-                }
+                entries.extend(r.stages.iter().map(|(stage, w)| stage_entry(w, *stage)));
             } else if kept(r, was) {
                 entries.push(was[&r.path].clone());
             } else if let Some(e) = &r.entry {
-                entries.push(self.make_entry(e)?);
+                entries.push(stage_entry(e, 0));
+            }
+            if untouched(r, was) {
+                continue;
+            }
+            let after = match (&r.worktree, &r.entry) {
+                (Some(bytes), _) => {
+                    let converted = attrs.to_worktree(&r.path, bytes)?;
+                    let mode = if r.mode == 0o100755 { r.mode } else { 0o100644 };
+                    let contents = self.snapshot(converted.as_deref().unwrap_or(bytes))?;
+                    Some(FileState { mode, contents })
+                }
+                (None, Some(e)) => {
+                    let state = self.target_state(e, &attrs)?;
+                    planned.insert(r.path.to_vec(), (state.mode, state.contents.clone()));
+                    Some(state)
+                }
+                (None, None) => None,
+            };
+            let modes = [
+                was.get(&r.path).map(|e| e.mode),
+                r.entry.as_ref().map(|e| e.mode),
+            ];
+            let gitlink = modes.contains(&Some(0o160000));
+            let before = self.observed(&r.path, true, gitlink, &|p| among.contains(p))?;
+            if before != after {
+                let path = r.path.to_vec();
+                changes.push(FileChange {
+                    path,
+                    before,
+                    after,
+                });
             }
         }
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries,
-                extensions: Vec::new(),
-            },
-            self.store.algo()?,
-        )
+        let algo = self.store.algo()?;
+        let index = Index {
+            version: 2,
+            entries,
+            extensions: Vec::new(),
+        };
+        let index_after = self.snapshot(&canonical_index(index, algo))?;
+        *self.planned.borrow_mut() = Some(tree_state::Planned {
+            index: index_after.clone(),
+            files: planned,
+        });
+        Ok(CheckoutIntent {
+            version: 1,
+            workspace: self.workspace_identity()?,
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+            index_before: self.snapshot(&canonical_index(self.index()?, algo))?,
+            index_after,
+            files: changes,
+        })
     }
 }
