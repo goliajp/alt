@@ -35,6 +35,11 @@ PAYLOAD = {
     "server-operator.md": "crates/alt-server/README.md",
     "example-config.json": "crates/alt-server/example-config.json",
     "examples/task-workflow.py": "examples/task-workflow.py",
+    "docs/shell.md": "docs/shell.md",
+    "share/alt/zsh/alt.plugin.zsh": "shell/zsh/alt.plugin.zsh",
+    "share/alt/zsh/_alt": "shell/zsh/_alt",
+    **{f"share/alt/zsh/functions/{name}": f"shell/zsh/functions/{name}"
+       for name in MANAGER["ZSH_FUNCTIONS"]},
 }
 
 
@@ -63,6 +68,7 @@ def inputs():
     paths = {ROOT / name for name in PAYLOAD.values()}
     paths.update(ROOT / name for name in ["Cargo.toml", "Cargo.lock", "scripts/package-internal.py",
                                          "scripts/gate.sh", "scripts/test-gate.py", "scripts/test-package.py",
+                                         "scripts/test-package-shell.py",
                                          "scripts/with-test-postgres.sh",
                                          "scripts/with-test-postgres-native.sh",
                                          "scripts/package-server.py",

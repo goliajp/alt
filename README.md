@@ -72,6 +72,20 @@ cover macOS arm64/APFS and Linux x86_64/ext4, and record their actual build
 environment. Public remotes may lag local internal candidates until an explicitly
 authorized push.
 
+### zsh
+
+```zsh
+eval "$(alt shell zsh)"      # in ~/.zshrc, after compinit
+```
+
+completes `alt` command lines (subcommands, options, branches, tags, remotes,
+paths by their state) and keeps the repository's state ready for the prompt:
+the branch, the operation under way, staged, unstaged and untracked changes,
+and the commits ahead of and behind the remote. `$(alt_prompt_info)` prints it
+in the manner of the prompt that comes with Git, and themes built on
+`vcs_info` or powerlevel10k show alt repositories too. See
+[alt in zsh](docs/shell.md).
+
 The [installed task example](docs/task-walkthrough.md) walks through validation,
 review, integration and a verified Git exit. Read [recovery and compatibility](docs/recovery.md)
 before using a new build with an existing repository.

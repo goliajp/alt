@@ -245,6 +245,7 @@ run_corpus() {
 
 run_package() {
     python3 scripts/test-package.py
+    python3 scripts/test-package-shell.py
 }
 
 case "$class" in
