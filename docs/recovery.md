@@ -552,6 +552,33 @@ intent was synced and whose blob the store has lost since. An index that is
 neither the one from before the add nor the one it prepared is left alone,
 and the operation stays pending.
 
+### A merge, pick, revert or rebase that was interrupted
+
+A command that begins one of these, goes on with it, gives it up or concludes
+it with a commit, and an `alt undo` of such a command, writes a mark to the
+operation log before its first change and one record of all it did after its
+last. Where it was interrupted between the two, the next command that writes
+in the workspace brings it to an end from the log: a checkout that was begun
+is finished, the file that says the operation is under way is written or
+removed as the log says, and the record is written. No `alt operation
+recover` is needed, and one that is run for an operation of such a command
+does the same.
+
+The workspace is then as it was before the command, as the command leaves
+it, or with the operation under way at the commit it had come to; `alt
+status` shows which. A revert or a rebase that had not come to its end is
+gone on with by `--continue` and given up by `--abort`. `alt undo` takes back
+all that the command had done.
+
+An alt from before the mark existed passes it over. Where such an alt wrote
+in the workspace after the interruption, what the command left is no longer
+what the log tells: nothing is touched, the mark is closed, and the command
+says:
+
+```
+warning: operation 5d0e8a1c6a3a2f0e1b9a4c7d8e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f was interrupted and another program has written since: it is left as it is; see `alt status`
+```
+
 ### A `durable` file that is gone or does not read
 
 When a `durable` file was deleted from a repository that had one, or is
