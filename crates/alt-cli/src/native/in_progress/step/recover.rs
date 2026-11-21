@@ -29,7 +29,6 @@ use std::collections::BTreeMap;
 use super::super::super::checkout_recovery::{CheckoutIntent, PREPARE_CHECKOUT};
 use super::super::super::recovery::{RefContext, decode};
 use super::super::super::*;
-use super::guard::is_guard;
 use super::mark::{StateText, StepMark};
 use super::{STATE_FILES, STEP, STEP_MARK, StepRecord, net_checkout, net_refs, state_changes};
 
@@ -40,15 +39,19 @@ pub(super) struct Told {
     pub(super) checkouts: Vec<CheckoutIntent>,
     /// records with a checkout that no record completes
     unfinished: Vec<alt_oplog::Op>,
-    /// those of them a later checkout of the step came after: it was
-    /// given up for that one, which puts back what it had written
+    /// those of them the step was given up after: what they had written
+    /// is put back and they are not gone on with
     given_up: Vec<alt_oplog::Op>,
+    /// the mark that waits gives the step up
+    gives_up: bool,
+    /// the step was given up: it ends as it began
+    undone: bool,
     /// what state files became
     pub(super) state: BTreeMap<String, Option<String>>,
     /// what they become if the next record is the one it holds with
     waiting: Vec<StateText>,
     /// the guard of the step, where no record closes it
-    guard: Option<OpId>,
+    pub(super) guard: Option<OpId>,
     /// a record of the workspace that is not the step's own came after
     /// the mark, other than an index change
     pub(super) foreign: bool,
@@ -59,17 +62,23 @@ pub(super) struct Told {
 impl Told {
     /// A mark tells what state files become, with the next record or at
     /// once. What an earlier mark waited with has not come to hold.
-    fn mark(&mut self, state: Vec<StateText>, with_effect: bool) {
-        self.waiting = state;
-        if !with_effect {
+    fn mark(&mut self, mark: StepMark) {
+        (self.waiting, self.gives_up) = (mark.state, mark.gives_up);
+        if !mark.with_effect {
             self.effect();
         }
     }
 
     /// A ref transaction or the intent of a checkout is the next record.
+    /// A mark that gives the step up holds as any other does: from then
+    /// on no checkout from before it is unfinished.
     fn effect(&mut self) {
         let held = std::mem::take(&mut self.waiting).into_iter();
         self.state.extend(held.map(|f| (f.name, f.text)));
+        if std::mem::take(&mut self.gives_up) {
+            self.given_up.append(&mut self.unfinished);
+            self.undone = true;
+        }
     }
 }
 
@@ -143,9 +152,9 @@ impl NativeRepo<'_> {
         let at = ops.iter().rposition(|op| op.id == begun.id);
         let after = &ops[at.ok_or("operation not found")? + 1..];
         let mut told = Told::default();
-        told.mark(mark.state.clone(), mark.with_effect);
         // the command the step is of, or the one that gives it up
         let mut request = mark.request_id.clone();
+        told.mark(decode(&begun.payload, STEP_MARK)?);
         for op in after {
             let (workspace, complete, _) = self.operation_info(op)?;
             if workspace.as_ref() != Some(&mark.workspace) {
@@ -154,8 +163,8 @@ impl NativeRepo<'_> {
             let kind = op.payload.first();
             if kind == Some(&STEP_MARK) {
                 let later: StepMark = decode(&op.payload, STEP_MARK)?;
-                request = later.request_id;
-                told.mark(later.state, later.with_effect);
+                request = later.request_id.clone();
+                told.mark(later);
                 continue;
             }
             if requests::operation_request(op)? != request {
@@ -168,12 +177,11 @@ impl NativeRepo<'_> {
             match kind {
                 Some(&PREPARE_CHECKOUT) => {
                     let intent: CheckoutIntent = decode(&op.payload, PREPARE_CHECKOUT)?;
-                    if is_guard(&intent) {
+                    if self.is_guard(&intent)? {
                         told.guard = (!complete).then_some(op.id);
                         continue;
                     }
                     told.effect();
-                    told.given_up.append(&mut told.unfinished);
                     told.checkouts.push(intent);
                 }
                 Some(&alt_refs::PAYLOAD_REF_TX) => {
@@ -182,9 +190,6 @@ impl NativeRepo<'_> {
                     let context = tx.context.ok_or("missing recovery scope")?;
                     let context: RefContext = alt_json::from_slice(&context)?;
                     told.refs.extend(tx.changes);
-                    if context.checkout.is_some() {
-                        told.given_up.append(&mut told.unfinished);
-                    }
                     told.checkouts.extend(context.checkout);
                 }
                 _ => told.foreign = true,
@@ -195,50 +200,6 @@ impl NativeRepo<'_> {
         }
         told.foreign |= told.added && !told.unfinished.is_empty();
         Ok(told)
-    }
-
-    /// Closes the mark `begun` of a step another program wrote after,
-    /// with a record that tells nothing. Where a state file is not as the
-    /// log says, only when `asked` to: `alt operation recover` is.
-    fn leave_as_it_is(
-        &mut self,
-        begun: &alt_oplog::Op,
-        told: &Told,
-        before: &[Option<String>],
-        mut step: StepRecord,
-        asked: bool,
-    ) -> Res<()> {
-        let id = begun.id;
-        let mut differ = Vec::new();
-        for (name, before) in STATE_FILES.iter().zip(before) {
-            if self.state_file(name)? != *told.state.get(*name).unwrap_or(before) {
-                differ.push(*name);
-            }
-        }
-        let differ = differ.join(", ");
-        if !differ.is_empty() && !asked {
-            let said = format!(
-                "operation {id} was interrupted and another program has written since: \
-                 {differ} is not as the operation log says, so what `alt status` shows of an \
-                 operation under way may be wrong; put it right or accept it as it is, then \
-                 close the operation with `alt operation recover {id}`"
-            );
-            return Err(crate::machine::Failure::pending(id, said).into());
-        }
-        let said = match differ.is_empty() {
-            true => String::new(),
-            false => format!(" ({differ} is not as the operation log says)"),
-        };
-        let said = format!(
-            "warning: operation {id} was interrupted and another program has written since: \
-             it is left as it is{said}; see `alt status`\n"
-        );
-        crate::diagnostics::emit(said.as_bytes())?;
-        step.abandoned = true;
-        if let Some(guard) = told.guard {
-            self.close_guard(guard)?;
-        }
-        self.record_step("recover", &step)
     }
 
     /// Brings a step of this workspace that was cut short to an end;
@@ -288,8 +249,12 @@ impl NativeRepo<'_> {
         for op in &told.given_up {
             self.record_checkout_done("recover", op.id)?;
         }
-        step.refs = net_refs(&told.refs);
-        step.checkout = net_checkout(told.checkouts);
+        // a step that was given up tells of no change, whatever was left
+        // as it is because it was changed since
+        if !told.undone {
+            step.refs = net_refs(&told.refs);
+            step.checkout = net_checkout(told.checkouts);
+        }
         step.state = state_changes(&before, &told.state);
         if let Some(guard) = told.guard {
             self.close_guard(guard)?;
@@ -309,22 +274,44 @@ mod tests {
         }]
     }
 
+    fn mark(state: Vec<StateText>, with_effect: bool, gives_up: bool) -> StepMark {
+        StepMark {
+            version: 1,
+            workspace: recovery::WorkspaceIdentity {
+                name: "default".to_owned(),
+                instance: String::new(),
+            },
+            request_id: None,
+            begin: None,
+            inverse_of: None,
+            before: Vec::new(),
+            state,
+            with_effect,
+            gives_up,
+        }
+    }
+
     #[test]
     fn a_mark_holds_with_the_record_that_comes_next_or_not_at_all() {
         let mut told = Told::default();
         // cut short between the mark and the record it holds with
-        told.mark(file("MERGE_HEAD", Some("a")), true);
+        told.mark(mark(file("MERGE_HEAD", Some("a")), true, false));
         assert!(told.state.is_empty());
         // a mark after it takes its place
-        told.mark(file("REVERT_STATE", Some("b")), true);
+        told.mark(mark(file("REVERT_STATE", Some("b")), true, false));
         told.effect();
         assert_eq!(told.state.len(), 1);
         assert_eq!(told.state["REVERT_STATE"].as_deref(), Some("b"));
         // one that holds at once needs no record
-        told.mark(file("REVERT_STATE", None), false);
+        told.mark(mark(file("REVERT_STATE", None), false, false));
         assert_eq!(told.state["REVERT_STATE"], None);
         // a record with no mark before it changes no state file
         told.effect();
         assert_eq!(told.state.len(), 1);
+        // a step is given up once the mark that says so holds, not before
+        told.mark(mark(Vec::new(), true, true));
+        assert!(!told.undone);
+        told.effect();
+        assert!(told.undone);
     }
 }

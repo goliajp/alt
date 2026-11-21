@@ -6,47 +6,55 @@
 //! its completion. So a step puts one in the log right after its mark, and
 //! its completion right before the record that closes the step: the intent
 //! of a checkout that changes nothing, from and to an index no workspace
-//! can have, which that alt cannot finish either. Until the step is closed,
+//! can have, which that alt cannot finish either. That index is what tells
+//! a guard from any other intent. Until the step is closed,
 //! by the command or by the recovery of this alt, the older one refuses
 //! every command that writes; from then on it finds a checkout that was
 //! completed, and works on.
 
 use super::super::super::checkout_recovery::{CheckoutIntent, PREPARE_CHECKOUT};
-use super::super::super::recovery::{canonical_index, encode};
+use super::super::super::recovery::{canonical_index, encode, hash};
 use super::super::super::*;
 
-/// Whether `intent` is the guard of a step: no checkout a command makes
-/// changes nothing.
-pub(super) fn is_guard(intent: &CheckoutIntent) -> bool {
-    intent.files.is_empty() && intent.index_before == intent.index_after
+/// The index a guard is from and to: one path under the control directory,
+/// which is in no index a workspace has.
+fn guard_index(algo: HashAlgo) -> Vec<u8> {
+    let entry = IndexEntry {
+        ctime: (0, 0),
+        mtime: (0, 0),
+        dev: 0,
+        ino: 0,
+        mode: 0o100644,
+        uid: 0,
+        gid: 0,
+        size: 0,
+        oid: ObjectId::hash_object(algo, ObjectKind::Blob, b""),
+        flags: 9,
+        extended_flags: None,
+        path: BString::from(".alt/step"),
+    };
+    let index = Index {
+        version: 2,
+        entries: vec![entry],
+        extensions: Vec::new(),
+    };
+    canonical_index(index, algo)
 }
 
 impl NativeRepo<'_> {
+    /// Whether `intent` is the guard of a step: it is from and to the
+    /// index kept for guards, which is told by what it holds and not by
+    /// the intent changing nothing. A checkout that gives a step up may
+    /// have nothing to change either, and is no guard.
+    pub(in crate::native) fn is_guard(&self, intent: &CheckoutIntent) -> Res<bool> {
+        let kept = hash(&guard_index(self.store.algo()?));
+        Ok(intent.files.is_empty() && intent.index_before == kept && intent.index_after == kept)
+    }
+
     /// Writes the guard of the step this command begins. Not synced: it
     /// is durable with the record of the step that comes next.
     pub(super) fn open_guard(&mut self) -> Res<OpId> {
-        let algo = self.store.algo()?;
-        // a path under the control directory is in no index
-        let entry = IndexEntry {
-            ctime: (0, 0),
-            mtime: (0, 0),
-            dev: 0,
-            ino: 0,
-            mode: 0o100644,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid: ObjectId::hash_object(algo, ObjectKind::Blob, b""),
-            flags: 9,
-            extended_flags: None,
-            path: BString::from(".alt/step"),
-        };
-        let index = Index {
-            version: 2,
-            entries: vec![entry],
-            extensions: Vec::new(),
-        };
-        let index = self.snapshot(&canonical_index(index, algo))?;
+        let index = self.snapshot(&guard_index(self.store.algo()?))?;
         let guard = CheckoutIntent {
             version: 1,
             workspace: self.workspace_identity()?,

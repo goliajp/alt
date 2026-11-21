@@ -91,11 +91,9 @@ impl NativeRepo<'_> {
                         )
                         .into());
                     }
-                    // one that changes nothing is the guard of a step, which
-                    // the recovery of the step has closed or this command holds
-                    let guard =
-                        pending.files.is_empty() && pending.index_before == pending.index_after;
-                    if !guard
+                    // the guard of a step is closed by the recovery of the
+                    // step, or this command holds it
+                    if !self.is_guard(&pending)?
                         && pending.workspace == identity
                         && !completed.contains(&op.id.to_string())
                     {

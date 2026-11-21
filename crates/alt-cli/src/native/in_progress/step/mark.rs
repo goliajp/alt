@@ -41,6 +41,10 @@ pub(super) struct StepMark {
     pub(super) state: Vec<StateText>,
     /// only once the next record of the step is there
     pub(super) with_effect: bool,
+    /// the step is given up with this mark: a checkout it left unfinished
+    /// is not gone on with, and the step ends as it began
+    #[json(default)]
+    pub(super) gives_up: bool,
 }
 
 impl Tracked {
@@ -129,6 +133,7 @@ impl NativeRepo<'_> {
             before,
             state,
             with_effect,
+            gives_up: false,
         };
         let actor = self.id.actor("step");
         let payload = encode(STEP_MARK, &mark)?;

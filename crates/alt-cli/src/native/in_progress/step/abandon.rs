@@ -67,17 +67,20 @@ impl NativeRepo<'_> {
                 kept.push(named.to_string());
                 continue;
             }
-            files.push(FileChange {
-                path: path.to_vec(),
-                before: now,
-                after: (*found).clone(),
-            });
+            if now != **found {
+                files.push(FileChange {
+                    path: path.to_vec(),
+                    before: now,
+                    after: (*found).clone(),
+                });
+            }
         }
         Ok((files, kept))
     }
 
     /// The checkout that puts each file the step wrote, and the index, as
-    /// the step found them, from what is there now; and what is left as it
+    /// the step found them, from what is there now, none where they are
+    /// so already; and what is left as it
     /// is because asked to `keep` it: a file that was changed since, and an
     /// index that is neither as the step found it nor as it left it.
     fn checkout_back(
@@ -109,6 +112,11 @@ impl NativeRepo<'_> {
             index_after,
             files,
         };
+        // where all is as the step found it there is no checkout to make:
+        // the mark that gives the step up says all there is to say
+        if back.files.is_empty() && back.index_before == back.index_after {
+            return Ok((None, kept));
+        }
         self.ensure_directories_replaceable(&back)?;
         Ok((Some(back), kept))
     }
@@ -179,6 +187,7 @@ impl NativeRepo<'_> {
             before: Vec::new(),
             state: mark.before.clone(),
             with_effect: checkout.is_some() || !refs.is_empty(),
+            gives_up: true,
         };
         let actor = self.id.actor("recover");
         let payload = encode(STEP_MARK, &said)?;
