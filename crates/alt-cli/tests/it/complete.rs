@@ -140,6 +140,10 @@ fn outside_a_repository_only_the_command_line_answers() {
     assert!(group(&options, "options").contains(&"--amend"), "{options}");
     let options = answer(root, "alt merge --a");
     assert!(group(&options, "options").contains(&"--abort"), "{options}");
+    let options = answer(root, "alt cherry-pick --");
+    let offered = group(&options, "options");
+    assert!(offered.contains(&"--continue"), "{options}");
+    assert!(offered.contains(&"--abort"), "{options}");
     assert_eq!(answer(root, "alt switch "), "");
     assert_eq!(answer(root, "alt init "), "files\tdir\n");
     assert_eq!(

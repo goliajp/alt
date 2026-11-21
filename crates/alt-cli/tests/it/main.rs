@@ -19,6 +19,7 @@ mod byte_names;
 mod capability_gate;
 mod charset;
 mod cherry_pick;
+mod cherry_pick_resume;
 mod ci_validate;
 mod clone;
 mod closed_fds;

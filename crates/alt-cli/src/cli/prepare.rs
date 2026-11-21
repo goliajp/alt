@@ -25,13 +25,17 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
         repo.ensure_exclude_files()?;
     }
     match cmd {
-        // one under way is ended all the same
+        // one under way is ended or gone on with all the same
         Merge { args } => {
             if let Some(branch) = &args.branch {
                 repo.ensure_exclude_files_to_merge(branch)?;
             }
         }
-        CherryPick { rev, .. } => repo.ensure_exclude_files_to_pick(rev)?,
+        CherryPick { args } => {
+            if let Some(rev) = &args.rev {
+                repo.ensure_exclude_files_to_pick(rev)?;
+            }
+        }
         // the tree to come is checked out by the rules that hold in it
         Workspace {
             op: WorkspaceOp::Add { path, .. },

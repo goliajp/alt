@@ -243,14 +243,7 @@ fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> 
             // git exits 1 when a revert stops in conflict
             Ok(if stopped { 1 } else { 0 })
         }
-        Command::CherryPick { rev, json } => {
-            // git exits 1 when a cherry-pick stops in conflict
-            Ok(if repo.cherry_pick(rev, *json, out)? {
-                1
-            } else {
-                0
-            })
-        }
+        Command::CherryPick { args } => sequence::cherry_pick(repo, args, out),
         Command::Merge { args } => sequence::merge(repo, args, out),
         _ => Err("not a native command".into()),
     }

@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod resume;
 mod state;
 
 impl NativeRepo<'_> {
@@ -55,7 +56,8 @@ impl NativeRepo<'_> {
                 say_conflicts(out, "cherry-pick", &conflicts)?;
                 writeln!(
                     out,
-                    "Automatic cherry-pick failed; fix conflicts and then commit the result."
+                    "error: could not apply {label_short}; fix the conflicts, `alt add` them \
+                     and run `alt cherry-pick --continue` (or `alt cherry-pick --abort`)"
                 )?;
             }
             return Ok(true);
@@ -81,24 +83,14 @@ impl NativeRepo<'_> {
         // `alt merge`'s success path does.
         let old = index_entries(&self.index()?);
 
-        // Build the commit: keep the original author ident, but
-        // committer + commit time are our own identity + now. Message
-        // is the target's plus a "(cherry picked from commit …)" trailer.
-        let author_sig = parse_ident(
-            target_commit
-                .author()
-                .map(|b| b.to_vec())
-                .unwrap_or_default(),
-        )?;
-        let when = (now_ms() / 1000) as i64;
+        let (author_sig, msg) = picked_identity(&target_commit, target_oid)?;
         let (committer_name, committer_email) = self.id.sig();
         let committer = Sig {
             name: committer_name,
             email: committer_email,
-            when,
+            when: (now_ms() / 1000) as i64,
             tz: "+0000",
         };
-        let msg = picked_message(target_commit.message().as_slice(), target_oid);
 
         let commit = write_commit(
             &mut self.store.odb,
@@ -112,29 +104,45 @@ impl NativeRepo<'_> {
         self.store.odb.flush()?;
         self.advance_branch_checkout(&head_ref, head_oid, commit, &old, &entries)?;
 
-        if json {
-            use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("result", Json::str("applied")),
-                    ("source", Json::str(target_oid.to_string())),
-                    ("commit", Json::str(commit.to_string())),
-                ],
-            )?;
-        } else {
-            let subject = target_commit
-                .message()
-                .as_slice()
-                .split(|&b| b == b'\n')
-                .next()
-                .map(String::from_utf8_lossy)
-                .unwrap_or_default()
-                .into_owned();
-            writeln!(out, "[{commit}] {subject}")?;
-        }
+        report_picked(&target_commit, target_oid, commit, json, out)?;
         Ok(false)
     }
+}
+
+/// The author a pick of `source` keeps and the message it is committed
+/// with.
+fn picked_identity(
+    source: &alt_git_codec::Commit,
+    picked: ObjectId,
+) -> Res<(Sig<'static>, String)> {
+    let author = parse_ident(source.author().map(|b| b.to_vec()).unwrap_or_default())?;
+    Ok((author, picked_message(source.message().as_slice(), picked)))
+}
+
+/// Says that `source`, the commit `picked`, was applied as `commit`.
+fn report_picked(
+    source: &alt_git_codec::Commit,
+    picked: ObjectId,
+    commit: ObjectId,
+    json: bool,
+    out: &mut impl Write,
+) -> Res<()> {
+    if json {
+        use crate::json::Json;
+        crate::json::emit(
+            out,
+            vec![
+                ("result", Json::str("applied")),
+                ("source", Json::str(picked.to_string())),
+                ("commit", Json::str(commit.to_string())),
+            ],
+        )?;
+    } else {
+        let message = source.message().as_slice();
+        let subject = message.split(|&b| b == b'\n').next().unwrap_or_default();
+        writeln!(out, "[{commit}] {}", String::from_utf8_lossy(subject))?;
+    }
+    Ok(())
 }
 
 /// The picked commit's message, ending in the trailer that names it.

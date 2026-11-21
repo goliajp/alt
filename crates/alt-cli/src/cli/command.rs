@@ -263,12 +263,8 @@ pub enum Command {
     },
     /// Apply the changes from a commit on top of the current branch
     CherryPick {
-        /// Revision of the commit to apply
-        #[arg(hint = "rev")]
-        rev: String,
-        /// Emit a structured JSON result instead of human lines.
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: sequence_args::CherryPick,
     },
     /// Read or update git-style config keys (`user.name`, …)
     Config {

@@ -126,3 +126,21 @@ fn merge_given_up() {
     s.json(&["op-log", "-n", "2", "--json"]);
     s.finish();
 }
+
+#[test]
+fn cherry_pick_gone_on_with_or_given_up() {
+    let mut s = diverged("cherry-pick-resume");
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["cherry-pick", "feat~1", "--json"]);
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["cherry-pick", "--abort", "--json"]);
+    s.json(&["status", "--json"]);
+    s.json(&["cherry-pick", "--abort", "--json"]);
+    s.json(&["cherry-pick", "feat~1", "--json"]);
+    s.write("f.txt", "l1\npicked\nl3\n");
+    s.setup(&["add", "."]);
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["show", "--json"]);
+    s.json(&["op-log", "-n", "4", "--json"]);
+    s.finish();
+}

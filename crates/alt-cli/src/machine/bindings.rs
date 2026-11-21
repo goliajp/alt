@@ -35,7 +35,13 @@ fn canonical_matches(matches: &Matches) -> Value {
         // when it is set: the commands recorded before it keep theirs
         let later = matches!(
             entry.id,
-            "renormalize" | "forced" | "update" | "all" | "abort_merge"
+            "renormalize"
+                | "forced"
+                | "update"
+                | "all"
+                | "continue_pick"
+                | "abort_pick"
+                | "abort_merge"
         );
         if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;

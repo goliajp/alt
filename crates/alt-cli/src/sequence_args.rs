@@ -3,6 +3,22 @@
 //! field the name a durable request records it under.
 
 #[derive(alt_args::Args)]
+pub struct CherryPick {
+    /// Revision of the commit to apply
+    #[arg(required_unless_present_any = ["continue_pick", "abort_pick"], hint = "rev")]
+    pub rev: Option<String>,
+    /// Commit the resolved cherry-pick
+    #[arg(long = "continue", conflicts_with_all = ["rev", "abort_pick"])]
+    pub continue_pick: bool,
+    /// Put the index and the files back as they were before the cherry-pick
+    #[arg(long = "abort", conflicts_with = "rev")]
+    pub abort_pick: bool,
+    /// Emit a structured JSON result instead of human lines.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(alt_args::Args)]
 pub struct Merge {
     /// Branch to merge into the current branch
     #[arg(required_unless_present = "abort_merge", hint = "branch")]
