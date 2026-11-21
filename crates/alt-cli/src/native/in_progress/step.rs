@@ -23,6 +23,7 @@ use super::super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::super::recovery::{WorkspaceIdentity, decode, encode};
 use super::super::*;
 
+mod abandon;
 mod mark;
 mod recover;
 mod undo;
@@ -98,6 +99,8 @@ pub(in crate::native) struct Tracked {
     now: BTreeMap<String, Option<String>>,
     /// those of them whose file is not yet so
     unapplied: Vec<String>,
+    /// the intent of a checkout is in the log and its completion is not
+    unfinished: bool,
 }
 
 /// Each state file that was there `before` or is there now, as it was
@@ -218,8 +221,15 @@ impl NativeRepo<'_> {
     pub(in crate::native) fn step_refs(&self, changes: &[RefChange]) {
         if let Some(tracked) = self.step.borrow_mut().as_mut() {
             tracked.refs.extend_from_slice(changes);
+            tracked.unfinished |= self.checkout_intent.is_some();
         }
         self.step_effected();
+    }
+
+    pub(in crate::native) fn step_unfinished(&self, unfinished: bool) {
+        if let Some(tracked) = self.step.borrow_mut().as_mut() {
+            tracked.unfinished = unfinished;
+        }
     }
 
     pub(in crate::native) fn step_checkout(&self, checkout: &CheckoutIntent) {
@@ -249,10 +259,12 @@ impl NativeRepo<'_> {
 
     /// The end of a command that is kept track of: where it became a
     /// step, the state files as the log says they are, and the record of
-    /// all it did.
+    /// all it did. A command that failed in the middle of a checkout
+    /// leaves its step without the record, as one that was killed there
+    /// does: the next command that writes brings it to an end.
     pub fn end_step(&mut self) -> Res<()> {
-        let begun = |tracked: &Tracked| tracked.begin.is_some();
-        if !self.step.borrow().as_ref().is_some_and(begun) {
+        let whole = |tracked: &Tracked| tracked.begin.is_some() && !tracked.unfinished;
+        if !self.step.borrow().as_ref().is_some_and(whole) {
             self.step.take();
             return Ok(());
         }

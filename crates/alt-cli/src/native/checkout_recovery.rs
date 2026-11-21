@@ -172,19 +172,7 @@ impl NativeRepo<'_> {
             durable_write(&self.index_path, &after)?;
         }
         self.snapshot_checked_out(&after)?;
-        self.store.refs.record_op(
-            &self.id.actor("recover"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: operation.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
-        Ok(())
+        self.record_checkout_done("recover", operation)
     }
 
     pub(super) fn recoverable_checkout(
@@ -209,8 +197,10 @@ impl NativeRepo<'_> {
         self.apply_prepared_checkout(prepared, &intent)
     }
 
-    /// Writes the intent of a checkout to the log.
+    /// Writes the intent of a checkout to the log, refused before that
+    /// where a directory in its way holds what it does not remove.
     pub(super) fn record_checkout(&mut self, verb: &str, intent: &CheckoutIntent) -> Res<OpId> {
+        self.ensure_directories_replaceable(intent)?;
         self.step_effect()?;
         let payload = encode(PREPARE_CHECKOUT, intent)?;
         crash_point!("checkout-intent:before");
@@ -218,6 +208,7 @@ impl NativeRepo<'_> {
         let prepared = self.store.refs.record_op(&actor, now_ms(), &payload)?;
         crash_point!("checkout-intent:after");
         self.step_effected();
+        self.step_unfinished(true);
         Ok(prepared)
     }
 
@@ -257,18 +248,21 @@ impl NativeRepo<'_> {
         durable_write(&self.index_path, &index)?;
         self.snapshot_checked_out(&index)?;
         crash_point!("checkout-done:before");
-        self.store.refs.record_op(
-            &self.id.actor("checkout"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: prepared.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
+        self.record_checkout_done("checkout", prepared)?;
+        self.step_unfinished(false);
+        Ok(())
+    }
+
+    /// Writes the record that closes the checkout `prepared` is the intent of.
+    pub(super) fn record_checkout_done(&mut self, verb: &str, prepared: OpId) -> Res<()> {
+        let done = CheckoutDone {
+            version: 1,
+            prepared: prepared.to_string(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+        };
+        let payload = encode(COMPLETE_CHECKOUT, &done)?;
+        let actor = self.id.actor(verb);
+        self.store.refs.record_op(&actor, now_ms(), &payload)?;
         Ok(())
     }
 }

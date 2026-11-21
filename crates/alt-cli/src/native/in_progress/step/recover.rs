@@ -10,6 +10,10 @@
 //! it, which is before it changed anything, after all it had to do, or at
 //! a point its operation is gone on with from.
 //!
+//! A checkout the step cannot be brought through, a directory or a file
+//! that cannot be written in its way, leaves the step open and says so;
+//! `abandon` gives such a step up.
+//!
 //! Where a program that does not know the mark wrote in the workspace
 //! after it, what the step left is no longer what the log tells. The mark
 //! is closed, and nothing is touched.
@@ -24,13 +28,16 @@ use super::{STATE_FILES, STEP, STEP_MARK, StepRecord, net_checkout, net_refs, st
 
 /// What the log tells of a step after its mark.
 #[derive(Default)]
-struct Told {
-    refs: Vec<RefChange>,
-    checkouts: Vec<CheckoutIntent>,
+pub(super) struct Told {
+    pub(super) refs: Vec<RefChange>,
+    pub(super) checkouts: Vec<CheckoutIntent>,
     /// records with a checkout that no record completes
     unfinished: Vec<alt_oplog::Op>,
+    /// those of them a later checkout of the step came after: it was
+    /// given up for that one, which puts back what it had written
+    given_up: Vec<alt_oplog::Op>,
     /// what state files became
-    state: BTreeMap<String, Option<String>>,
+    pub(super) state: BTreeMap<String, Option<String>>,
     /// what they become if the next record is the one it holds with
     waiting: Vec<StateText>,
 }
@@ -52,6 +59,17 @@ impl Told {
     }
 }
 
+/// Why the step `begun` began cannot be brought to an end, and the two ways on.
+fn stuck(begun: &alt_oplog::Op, why: &dyn std::error::Error) -> Box<dyn std::error::Error> {
+    let id = begun.id;
+    let said = format!(
+        "operation {id} was interrupted and cannot be brought to an end: {why}; \
+         clear what is in its way and run the command again, \
+         or give the operation up with `alt operation abandon {id}`"
+    );
+    crate::machine::Failure::pending(id, said).into()
+}
+
 fn unsupported() -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("unsupported_record", "unsupported step mark").into()
 }
@@ -59,7 +77,7 @@ fn unsupported() -> Box<dyn std::error::Error> {
 impl NativeRepo<'_> {
     /// The mark of the last step begun in this workspace, and whether a
     /// record closes it.
-    fn last_step_mark(&self) -> Res<Option<(alt_oplog::Op, StepMark, bool)>> {
+    pub(super) fn last_step_mark(&self) -> Res<Option<(alt_oplog::Op, StepMark, bool)>> {
         let identity = self.workspace_identity()?;
         let mut closed = std::collections::HashSet::new();
         for op in self.store.refs.oplog().ops()?.iter().rev() {
@@ -106,27 +124,32 @@ impl NativeRepo<'_> {
     /// What the log tells of the step `mark` began, from the records
     /// after it; nothing where a record of this workspace that is not the
     /// step's own is among them.
-    fn told_after(&self, begun: &alt_oplog::Op, mark: &StepMark) -> Res<Option<Told>> {
+    pub(super) fn told_after(&self, begun: &alt_oplog::Op, mark: &StepMark) -> Res<Option<Told>> {
         let ops = self.store.refs.oplog().ops()?;
         let at = ops.iter().rposition(|op| op.id == begun.id);
         let after = &ops[at.ok_or("operation not found")? + 1..];
         let mut told = Told::default();
         told.mark(mark.state.clone(), mark.with_effect);
+        // the command the step is of, or the one that gives it up
+        let mut request = mark.request_id.clone();
         for op in after {
             let (workspace, complete, _) = self.operation_info(op)?;
             if workspace.as_ref() != Some(&mark.workspace) {
                 continue;
             }
-            if requests::operation_request(op)? != mark.request_id {
+            if op.payload.first() == Some(&STEP_MARK) {
+                let later: StepMark = decode(&op.payload, STEP_MARK)?;
+                request = later.request_id;
+                told.mark(later.state, later.with_effect);
+                continue;
+            }
+            if requests::operation_request(op)? != request {
                 return Ok(None);
             }
             match op.payload.first() {
-                Some(&STEP_MARK) => {
-                    let later: StepMark = decode(&op.payload, STEP_MARK)?;
-                    told.mark(later.state, later.with_effect);
-                }
                 Some(&PREPARE_CHECKOUT) => {
                     told.effect();
+                    told.given_up.append(&mut told.unfinished);
                     told.checkouts.push(decode(&op.payload, PREPARE_CHECKOUT)?);
                 }
                 Some(&alt_refs::PAYLOAD_REF_TX) => {
@@ -135,6 +158,9 @@ impl NativeRepo<'_> {
                     let context = tx.context.ok_or("missing recovery scope")?;
                     let context: RefContext = alt_json::from_slice(&context)?;
                     told.refs.extend(tx.changes);
+                    if context.checkout.is_some() {
+                        told.given_up.append(&mut told.unfinished);
+                    }
                     told.checkouts.extend(context.checkout);
                 }
                 _ => return Ok(None),
@@ -192,7 +218,10 @@ impl NativeRepo<'_> {
             }
         }
         for op in &told.unfinished {
-            self.finish_prepared(op)?;
+            self.finish_prepared(op).map_err(|e| stuck(&begun, &*e))?;
+        }
+        for op in &told.given_up {
+            self.record_checkout_done("recover", op.id)?;
         }
         step.refs = net_refs(&told.refs);
         step.checkout = net_checkout(told.checkouts);

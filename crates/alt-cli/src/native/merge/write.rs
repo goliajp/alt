@@ -63,20 +63,36 @@ impl NativeRepo<'_> {
             .filter(|e| e.stage() == 0)
             .map(|e| (e.path.clone(), e))
             .collect();
-        let changed = resolved.iter().filter(|r| !untouched(r, &was));
-        let changed: Vec<&BString> = changed.map(|r| &r.path).collect();
-        // refused before the first write, as a checkout is
-        for path in changed.iter().filter(|path| !was.contains_key(**path)) {
-            if self
-                .abs(path)?
-                .symlink_metadata()
-                .is_ok_and(|m| !m.is_dir())
-            {
-                let why = format!("untracked working tree file '{path}' would be overwritten");
-                return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
+        let changed: Vec<&Resolved> = resolved.iter().filter(|r| !untouched(r, &was)).collect();
+        // refused before the first write, as a checkout is: over an
+        // untracked file, or a directory that holds one. A directory that
+        // holds only ignored files goes with them, as in git
+        let tracked = |p: &[u8]| was.contains_key(&BString::from(p.to_vec()));
+        let mut visible = checkout_plan::Visible::default();
+        let mut ignored = Vec::new();
+        for r in &changed {
+            let file = r.worktree.is_some() || r.entry.as_ref().is_some_and(|e| e.mode != 0o160000);
+            match self.abs(&r.path)?.symlink_metadata() {
+                Ok(m) if m.is_dir() && file => {
+                    ignored.extend(self.ignored_in_the_way(&r.path, &tracked, &mut visible)?);
+                }
+                Ok(m) if !m.is_dir() && !was.contains_key(&r.path) => {
+                    let path = &r.path;
+                    let why = format!("untracked working tree file '{path}' would be overwritten");
+                    return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
+                }
+                _ => {}
             }
         }
-        let intent = self.merged_checkout(resolved, &was, &changed)?;
+        let changed: Vec<&BString> = changed.iter().map(|r| &r.path).collect();
+        let mut intent = self.merged_checkout(resolved, &was, &changed)?;
+        for path in ignored {
+            intent.files.push(FileChange {
+                before: self.file_state(&path, true)?,
+                path: path.to_vec(),
+                after: None,
+            });
+        }
         self.record_and_checkout(intent)?;
         // the state file planned for the stop holds with what was written,
         // or by itself where the merge left everything as it was

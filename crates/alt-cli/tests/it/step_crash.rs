@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-mod bench;
+pub(crate) mod bench;
 use bench::{Bench, abort_killed_before_its_state_file, copy, killed_and_its_undo, restore, run};
 
 /// `main` and `side` part after one commit: both change `f.txt`; `side`

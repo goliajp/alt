@@ -46,7 +46,7 @@ impl NativeRepo<'_> {
                 .into());
             }
         }
-        Ok(CheckoutIntent {
+        let inverse = CheckoutIntent {
             version: 1,
             workspace: intent.workspace.clone(),
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
@@ -61,6 +61,9 @@ impl NativeRepo<'_> {
                     after: change.before.clone(),
                 })
                 .collect(),
-        })
+        };
+        // a file it puts back has no directory that holds something in its place
+        self.ensure_directories_replaceable(&inverse)?;
+        Ok(inverse)
     }
 }

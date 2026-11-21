@@ -23,6 +23,42 @@ impl NativeRepo<'_> {
         Ok(step.begin.filter(|_| none))
     }
 
+    /// The record of the step that `op`, a record of this workspace, is
+    /// one of: it lies between the mark of a step and the record that
+    /// closes the mark. Refused where no record closes it.
+    pub(in crate::native) fn step_of(&self, op: &alt_oplog::Op) -> Res<Option<alt_oplog::Op>> {
+        let ops = self.store.refs.oplog().ops()?;
+        let at = ops.iter().position(|known| known.id == op.id);
+        let at = at.ok_or("operation not found")?;
+        let workspace = self.operation_info(op)?.0;
+        let begins = |known: &&alt_oplog::Op| -> Res<bool> {
+            if known.payload.first() != Some(&super::STEP_MARK) {
+                return Ok(false);
+            }
+            let mark: super::mark::StepMark = decode(&known.payload, super::STEP_MARK)?;
+            Ok(mark.begin.is_none() && Some(mark.workspace) == workspace)
+        };
+        let mut begun = None;
+        for known in ops[..at].iter().rev() {
+            if begins(&known)? {
+                begun = Some(known.id.to_string());
+                break;
+            }
+        }
+        let Some(begun) = begun else {
+            return Ok(None);
+        };
+        for (later, known) in ops.iter().enumerate().rev() {
+            if known.payload.first() == Some(&STEP)
+                && decode::<StepRecord>(&known.payload, STEP)?.begin.as_ref() == Some(&begun)
+            {
+                return Ok((later > at).then(|| known.clone()));
+            }
+        }
+        let why = "the last operation is part of a command that was interrupted; recover it first";
+        Err(refusal(why))
+    }
+
     /// The step a record tells of, the ref changes that take it back and the
     /// checkout that does: refused where the workspace is no longer as the
     /// step left it.

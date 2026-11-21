@@ -9,6 +9,9 @@ impl NativeRepo<'_> {
     /// an undo looks, no step of this workspace is without one, so no
     /// record of a step is taken back by itself. A step that was cut
     /// short before it changed anything is passed over, mark and record.
+    /// A record of a step that is the last all the same, as the completion
+    /// of one of its checkouts written after the step was closed, stands
+    /// for the step.
     fn last_undoable(&self) -> Res<alt_oplog::Op> {
         let mut ops = self.store.refs.oplog().ops()?;
         while let Some(begin) = ops.last().map(|op| self.step_without_change(op)) {
@@ -37,6 +40,13 @@ impl NativeRepo<'_> {
                 .find(|op| op.id.to_string() == done.prepared)
                 .ok_or("missing checkout intent")?
                 .clone();
+        }
+        let kind = last.payload.first();
+        if (kind == Some(&checkout_recovery::PREPARE_CHECKOUT)
+            || kind == Some(&alt_refs::PAYLOAD_REF_TX))
+            && let Some(step) = self.step_of(&last)?
+        {
+            last = step;
         }
         Ok(last)
     }

@@ -20,7 +20,7 @@ fn task_workspace(op: &alt_oplog::Op) -> Res<WorkspaceIdentity> {
 }
 
 impl NativeRepo<'_> {
-    fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
+    pub(super) fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(crate::machine::Failure::usage(
                 "operation id must be 64 hexadecimal digits",
@@ -219,24 +219,23 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// Pending state is the reason for a recovery: unlike ordinary writes
+    /// it checks capabilities and takes the lock without rejecting pending.
+    pub(super) fn ensure_may_recover(&mut self) -> Res<()> {
+        for locked in [false, true] {
+            if locked {
+                self.lock_workspace()?;
+            }
+            if self.caps.read_only {
+                let why = "capability denied: principal cannot recover (read-only)";
+                return Err(crate::machine::Failure::refusal("capability_denied", why).into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn operation_recover(&mut self, id: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        // Pending state is the reason for this command; unlike ordinary writes
-        // it checks capabilities and takes the lock without rejecting pending.
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                "capability denied: principal cannot recover (read-only)",
-            )
-            .into());
-        }
-        self.lock_workspace()?;
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                "capability denied: principal cannot recover (read-only)",
-            )
-            .into());
-        }
+        self.ensure_may_recover()?;
         let op = self.operation_by_id(id)?;
         let (workspace, _, recoverable) = self.operation_info(&op)?;
         if workspace.as_ref() != Some(&self.workspace_identity()?) {

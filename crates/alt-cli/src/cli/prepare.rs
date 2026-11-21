@@ -15,9 +15,26 @@ fn several_records(cmd: &Command) -> bool {
     }
 }
 
+/// The state file of the operation `cmd` gives up, and what it says once
+/// that is given up.
+fn gives_up(cmd: &Command) -> Option<(&'static str, &'static str)> {
+    match cmd {
+        Command::Merge { args } if args.abort_merge => Some(("MERGE_HEAD", "Merge aborted.")),
+        Command::CherryPick { args } if args.abort_pick => {
+            Some(("CHERRY_PICK_HEAD", "Cherry-pick aborted."))
+        }
+        Command::Revert { abort: true, .. } => Some(("REVERT_STATE", "Revert aborted.")),
+        Command::Rebase { abort: true, .. } => Some(("REBASE_STATE", "Rebase aborted.")),
+        _ => None,
+    }
+}
+
 /// What comes before any command: git sets up its ignore rules for some
-/// and ends there where one of the files they are in cannot be one.
-pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
+/// and ends there where one of the files they are in cannot be one. An
+/// `--abort` may be done with here, and then this is what it says: the
+/// command that began the operation was cut short and could not be
+/// brought to an end, and giving that command up gave the operation up.
+pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'static str>> {
     use Command::{
         Add, CherryPick, Commit, Diff, Merge, Rebase, Revert, Status, Switch, Workspace,
     };
@@ -54,6 +71,11 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
         _ => {}
     }
     if mutates_command(cmd) && !matches!(cmd, Command::Operation { .. }) {
+        if let Some((state, said)) = gives_up(cmd)
+            && repo.begin_abort(state)?
+        {
+            return Ok(Some(said));
+        }
         repo.begin_workspace_write()?;
         repo.forget_stale_cherry_pick()?;
         let validate = matches!(cmd, Commit { validate: true, .. });
@@ -65,5 +87,5 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
             repo.begin_step(several_records(cmd))?;
         }
     }
-    Ok(())
+    Ok(None)
 }

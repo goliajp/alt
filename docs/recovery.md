@@ -570,6 +570,28 @@ status` shows which. A revert or a rebase that had not come to its end is
 gone on with by `--continue` and given up by `--abort`. `alt undo` takes back
 all that the command had done.
 
+A command that fails in the middle of a checkout, a file it cannot write in
+its way, is left as one that was interrupted there. Where the next command
+that writes cannot finish the checkout either, it changes nothing more and
+says why and what can be done:
+
+```
+fatal: operation 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16 was interrupted and cannot be brought to an end: cannot write 'z.txt': File too large (os error 27); clear what is in its way and run the command again, or give the operation up with `alt operation abandon 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16`
+```
+
+`alt operation abandon <id>` gives the interrupted command up as a whole:
+the refs it moved are moved back, the files it wrote and the index are put
+as the command found them, and no operation is under way that was not before
+it. It is refused, with nothing changed, where a file, the index or a ref is
+no longer as the command left it. The `--abort` of the operation does the
+same where the command that began it cannot be brought to an end. Giving up
+is itself finished by the next command that writes where it was interrupted,
+and leaves nothing for `alt undo` to take back.
+
+A merge, pick, revert or rebase that would have to write a file where a
+directory holds an untracked file is refused before it writes anything; a
+directory that holds only ignored files gives way, as in git.
+
 An alt from before the mark existed passes it over. Where such an alt wrote
 in the workspace after the interruption, what the command left is no longer
 what the log tells: nothing is touched, the mark is closed, and the command

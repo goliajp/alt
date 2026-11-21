@@ -66,6 +66,47 @@ fn a_merge_or_a_pick_that_would_stop_is_refused_over_an_untracked_file() {
 }
 
 #[test]
+fn a_merge_or_a_pick_that_would_stop_is_refused_over_a_directory_holding_an_untracked_file() {
+    let trees = diverged();
+    trees.write(".gitignore", "*.o\n");
+    commit(&trees, "ignore objects");
+    // an ignored file is no reason to refuse; the one beside it is
+    trees.write("new.txt/built.o", "built\n");
+    trees.write("new.txt/keep", "mine\n");
+    for command in [&["merge", "side"][..], &["cherry-pick", "side~1"]] {
+        let before: Vec<_> = TREES
+            .iter()
+            .map(|tree| working_tree(&trees, tree))
+            .collect();
+        assert_eq!(succeeded(&trees, command), [false; 3], "{command:?}");
+        let after: Vec<_> = TREES
+            .iter()
+            .map(|tree| working_tree(&trees, tree))
+            .collect();
+        assert_eq!(after, before, "{command:?}");
+        alike(&trees, "after the refusal");
+        assert_eq!(operation(&trees), "null", "{command:?}");
+        for (tree, daemon) in [("direct", false), ("served", true)] {
+            let said = crate::scan_daemon::output(&trees.at(tree), command, daemon);
+            let said = String::from_utf8_lossy(&said.stderr).into_owned();
+            let why = "checkout target 'new.txt' is a directory holding untracked files";
+            assert!(said.contains(why), "{said}");
+            // nothing waits to be recovered, and the next command writes
+            let pending =
+                crate::scan_daemon::run(&trees.at(tree), &["operation", "pending"], daemon);
+            assert_eq!(pending, "", "{command:?}");
+        }
+    }
+    assert_eq!(succeeded(&trees, &["merge", "--abort"]), [false; 3]);
+
+    // with only the ignored file in it the directory gives way, as in git
+    remove(&trees, "new.txt/keep");
+    assert_eq!(every(&trees, &["merge", "side"]), [Some(1); 3]);
+    alike(&trees, "after the merge stopped");
+    assert_eq!(working_tree(&trees, "direct")["new.txt"].0, b"new\n");
+}
+
+#[test]
 fn a_revert_that_would_stop_is_refused_over_an_untracked_file() {
     let trees = diverged();
     assert_eq!(every(&trees, &["switch", "side"]), [Some(0); 3]);

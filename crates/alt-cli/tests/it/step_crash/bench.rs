@@ -7,7 +7,7 @@ use std::process::Output;
 
 use crate::step_undo::STATE_FILES;
 
-pub(super) fn alt(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
+pub(crate) fn alt(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
     let mut command = crate::alt_command();
     command
         .current_dir(repo)
@@ -22,7 +22,7 @@ pub(super) fn alt(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
     command.output().unwrap()
 }
 
-pub(super) fn said(o: &Output) -> String {
+pub(crate) fn said(o: &Output) -> String {
     let (out, err) = (&o.stdout, &o.stderr);
     format!(
         "{}{}",
@@ -31,13 +31,13 @@ pub(super) fn said(o: &Output) -> String {
     )
 }
 
-pub(super) fn run(repo: &Path, args: &[&str], exit: i32) -> String {
+pub(crate) fn run(repo: &Path, args: &[&str], exit: i32) -> String {
     let done = alt(repo, args, None);
     assert_eq!(done.status.code(), Some(exit), "{args:?}: {}", said(&done));
     String::from_utf8(done.stdout).unwrap()
 }
 
-pub(super) fn copy(from: &Path, to: &Path) {
+pub(crate) fn copy(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
@@ -54,7 +54,7 @@ pub(super) fn copy(from: &Path, to: &Path) {
     }
 }
 
-pub(super) fn restore(repo: &Path, from: &Path) {
+pub(crate) fn restore(repo: &Path, from: &Path) {
     if repo.exists() {
         std::fs::remove_dir_all(repo).unwrap();
     }
@@ -80,22 +80,22 @@ fn files(dir: &Path, root: &Path, found: &mut BTreeMap<String, String>) {
 /// What a command leaves of a workspace, without the ids of the commits
 /// it makes: those differ from one run to the next.
 #[derive(Debug, PartialEq, Clone)]
-pub(super) struct Shape {
+pub(crate) struct Shape {
     index: String,
     files: BTreeMap<String, String>,
     state: Vec<Option<String>>,
     status: String,
     /// the tree, the number of parents and the message of the commit HEAD names
-    pub(super) head: (String, usize, String),
+    pub(crate) head: (String, usize, String),
     commits: usize,
 }
 
-pub(super) struct Bench {
+pub(crate) struct Bench {
     dir: alt_os::temp::TempDir,
 }
 
 impl Bench {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let dir = alt_os::temp::tempdir().unwrap();
         let git = dir.path().join("git");
         std::fs::create_dir(&git).unwrap();
@@ -108,26 +108,26 @@ impl Bench {
         Bench { dir }
     }
 
-    pub(super) fn repo(&self) -> PathBuf {
+    pub(crate) fn repo(&self) -> PathBuf {
         self.dir.path().join("repo")
     }
 
-    pub(super) fn kept(&self, name: &str) -> PathBuf {
+    pub(crate) fn kept(&self, name: &str) -> PathBuf {
         self.dir.path().join(name)
     }
 
-    pub(super) fn write(&self, file: &str, text: &str) {
+    pub(crate) fn write(&self, file: &str, text: &str) {
         let path = self.repo().join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
     }
 
-    pub(super) fn commit(&self, message: &str) {
+    pub(crate) fn commit(&self, message: &str) {
         run(&self.repo(), &["add", "."], 0);
         run(&self.repo(), &["commit", "-m", message], 0);
     }
 
-    pub(super) fn shape(&self) -> Shape {
+    pub(crate) fn shape(&self) -> Shape {
         let repo = self.repo();
         let listed = std::process::Command::new("git")
             .current_dir(self.dir.path().join("git"))
@@ -271,7 +271,7 @@ fn killed_everywhere(
 }
 
 /// [`killed_everywhere`] for `command`, and for the undo of it.
-pub(super) fn killed_and_its_undo(
+pub(crate) fn killed_and_its_undo(
     bench: &Bench,
     setup: &dyn Fn(&Path),
     command: &[&str],
@@ -289,7 +289,7 @@ pub(super) fn killed_and_its_undo(
 
 /// An abort killed before it removed its state file: the next command
 /// that writes brings it to its end, and there is nothing left to give up.
-pub(super) fn abort_killed_before_its_state_file(
+pub(crate) fn abort_killed_before_its_state_file(
     bench: &Bench,
     stopped: &dyn Fn(&Path),
     abort: &[&str],

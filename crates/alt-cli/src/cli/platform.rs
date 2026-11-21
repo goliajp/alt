@@ -103,6 +103,12 @@ pub enum OperationOp {
         #[arg(hint = none)]
         id: String,
     },
+    /// Give up the interrupted merge, cherry-pick, revert or rebase command an operation
+    /// belongs to: the workspace is put back as it was before that command
+    Abandon {
+        #[arg(hint = none)]
+        id: String,
+    },
 }
 
 #[derive(alt_args::Args, Debug)]
