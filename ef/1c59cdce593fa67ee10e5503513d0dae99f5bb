@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: perf
+summary: skip the checksum of an index file this boot saw whole, and know its snapshot by name
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/reading.rs
+touched: crates/alt-cli/src/native/recovery/as_read.rs
+touched: crates/alt-cli/src/native/recovery/index.rs
+touched: crates/alt-cli/src/native/recovery/prepared.rs
+touched: crates/alt-cli/src/native/recovery/whole.rs
+touched: crates/alt-cli/src/native/recovery/whole/left_by.rs
+touched: crates/alt-cli/src/native/recovery/whole/seen.rs
+touched: crates/alt-cli/src/native/recovery/whole/stopped.rs
+touched: crates/alt-cli/tests/it/index_link.rs
+touched: crates/alt-cli/tests/it/index_seen.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-git-index/src/lib.rs
+touched: crates/alt-os/src/boot.rs
+touched: crates/alt-os/src/lib.rs
