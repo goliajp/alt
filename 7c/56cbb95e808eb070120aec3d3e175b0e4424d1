@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: have a sink fsync only the object store files that grew past what an fsync covered
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-store/src/blob/sync.rs
