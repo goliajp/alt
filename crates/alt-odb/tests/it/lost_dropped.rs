@@ -15,7 +15,7 @@ use super::rewind_interrupted::{ALL, FILES, KEPT, lens, object, open, put, reads
 /// store whose last batch lost its content in `file`: the files recorded
 /// as synced the way it found them, each batch of `after` stored and
 /// synced past them, and the note of the boot before still there.
-fn older_alt_went_on(dir: &Path, file: usize, class: u32, after: &[Vec<u32>]) -> u32 {
+pub(super) fn older_alt_went_on(dir: &Path, file: usize, class: u32, after: &[Vec<u32>]) -> u32 {
     let (victim, kept, _) = store(dir, class);
     damage(dir, file, Fault::Missing, kept);
     synced_to(dir, lens(dir), 0);

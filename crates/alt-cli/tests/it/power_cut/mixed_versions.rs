@@ -11,6 +11,8 @@ use super::super::sync_order::{FILES, lens, objects_synced};
 use super::another_boot;
 
 mod head_lost;
+#[cfg(target_os = "linux")]
+mod synced_first;
 
 fn ok(out: std::process::Output) -> String {
     let said = String::from_utf8_lossy(&out.stderr).into_owned();

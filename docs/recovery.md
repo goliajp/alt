@@ -444,10 +444,13 @@ stored again, so that `alt add` stores such a blob again although the index
 holds the file as the commit does.
 
 The records that are moved are first kept in `.alt/odb.repair` and synced. A
-run that is interrupted leaves that file; commands that write then fail with
-`taking lost records out of the object store was interrupted`, and the next
-`alt fsck --drop-lost`, with or without `--yes`, finishes the removal before
-it lists anything.
+run that is interrupted leaves that file. The next command that writes
+finishes the removal before it does anything else, and so does the next
+`alt fsck --drop-lost`, with or without `--yes`, before it lists anything.
+Commands that only read change no file: they go on where every record reads,
+and where the interruption left a record half written they fail with `taking
+lost records out of the object store was interrupted` until a command that
+writes, or `alt fsck --drop-lost`, has finished the removal.
 
 ### An unconfirmed tail
 

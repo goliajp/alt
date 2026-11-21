@@ -85,18 +85,21 @@ impl Removal {
     }
 
     /// Writes the records that stay over the ones that go and fsyncs
-    /// them; the index runs that reach past the first of them go, and
-    /// that is fsynced too. The file keeps its length.
+    /// them. The index runs that reach past the first of them go before
+    /// anything is written, and that is fsynced: whoever opens the log
+    /// from then on reads these records, and no run is left naming a
+    /// place where another record has come to lie. The file keeps its
+    /// length.
     pub fn fill(&self, path: &Path) -> Result<(), StoreError> {
+        let from = self.moves.first().map_or(self.len, |(at, _)| *at);
+        let mut idx_dir = path.as_os_str().to_owned();
+        idx_dir.push(".idx");
+        crate::runs::remove_past(&PathBuf::from(idx_dir), from)?;
         let file = OpenOptions::new().write(true).open(path)?;
         for (at, record) in &self.moves {
             file.write_all_at(record, *at)?;
         }
         file.sync_all()?;
-        let from = self.moves.first().map_or(self.len, |(at, _)| *at);
-        let mut idx_dir = path.as_os_str().to_owned();
-        idx_dir.push(".idx");
-        crate::runs::remove_past(&PathBuf::from(idx_dir), from)?;
         Ok(())
     }
 

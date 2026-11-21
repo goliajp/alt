@@ -19,7 +19,7 @@ use alt_store::reclog::Removal;
 use super::Odb;
 use crate::lock::{hold_exclusive, release_exclusive};
 use crate::repair::{self, LOGS};
-use crate::synced::HEADER;
+use crate::synced::{HEADER, Marker};
 use crate::{BlobId, NativeOdb, OdbError};
 
 /// The records of a store that name content it does not hold.
@@ -143,14 +143,25 @@ impl Odb {
         if pack_torn || blobmap_torn || self.tier1()?.unfinished() || self.map.unfinished() {
             self.cut_back(self.holds()?, false)?;
         }
+        // records that were left unsynced come to lie where records were
+        // synced, and nobody looks at them there again: the pack is read
+        // as a writer that syncs reads it, and all four files are synced,
+        // content first
+        *self.left.lock().unwrap() = None;
+        self.blobs.look_again()?;
         if self.lost()? != *lost {
             return Ok(false);
         }
-        repair::save(&self.alt_dir, &lost.removals)?;
+        self.blobs.fsync()?;
+        self.tier1_mut()?.sync()?;
+        self.map.fsync()?;
+        repair::save(&self.alt_dir, &self.lock, &lost.removals)?;
         repair::carry_out(&self.alt_dir, &self.lock, &lost.removals)?;
-        repair::forget(&self.alt_dir)?;
+        repair::forget(&self.alt_dir, &self.lock)?;
         self.catch_up()?;
-        self.bound()?;
+        let (note, _) = crate::unsynced::read(&self.lock);
+        self.bound(Marker::read(&self.durable_path), note)?;
+        repair::note_generation(&self.lock, self.generation.unwrap_or_default());
         self.note_checked();
         self.save_head();
         Ok(true)

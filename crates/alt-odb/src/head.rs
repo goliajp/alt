@@ -44,8 +44,9 @@ use std::os::unix::fs::FileExt;
 use alt_store::Known;
 
 use crate::odb::Odb;
+use crate::repair::{NOTED_AT, NOTES, Notes, notes};
 use crate::synced::Lens;
-use crate::unsynced::{self, Left};
+use crate::unsynced::Left;
 
 const MAGIC: [u8; 4] = *b"ALTH";
 const VERSION: u8 = 1;
@@ -84,14 +85,15 @@ impl Head {
     }
 
     /// The same, how far the append files are known synced whole, when
-    /// the file says, and its note of unsynced appends.
-    pub fn read_with_synced(lock: &File) -> (Self, Option<Lens>, Option<Left>) {
-        let mut buf = [0u8; UNSYNCED_AT + unsynced::LEN];
+    /// the file says, its note of unsynced appends, and what it notes of
+    /// removals of lost records ([`crate::repair`]).
+    pub fn read_with_synced(lock: &File) -> (Self, Option<Lens>, Option<Left>, Notes) {
+        let mut buf = [0u8; NOTED_AT + NOTES];
         let have = lock.read_at(&mut buf, 0).unwrap_or(0);
         let head = Self::parse(&buf[..have.min(MAX_LEN)]).unwrap_or_default();
         let synced = buf[..have].get(SYNCED_AT..).and_then(parse_synced);
         let left = buf[..have].get(UNSYNCED_AT..).and_then(Left::parse);
-        (head, synced, left)
+        (head, synced, left, notes(buf[..have].get(NOTED_AT..)))
     }
 
     fn parse(data: &[u8]) -> Option<Self> {

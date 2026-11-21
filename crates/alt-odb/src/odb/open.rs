@@ -151,7 +151,16 @@ impl Odb {
         // exclusive append: a record that does not read is then one no
         // writer is still writing.
         lock_shared(&lock)?;
-        let (head, synced, left) = Head::read_with_synced(&lock);
+        let mut noted = Head::read_with_synced(&lock);
+        if noted.3.removal && !mode.read_only {
+            // a removal of lost records was interrupted: a handle that
+            // writes finishes it before it reads the store
+            let _ = unlock(&lock);
+            crate::repair::finish(&alt_dir)?;
+            lock_shared(&lock)?;
+            noted = Head::read_with_synced(&lock);
+        }
+        let (head, synced, left, notes) = noted;
         // an alt that keeps no record boundaries may have cut the files
         // back since, and does not take the note back
         let synced = synced.filter(|_| head.bounded);
@@ -171,6 +180,8 @@ impl Odb {
         }
         let tier1_tail = tail(Log::Tier1);
         let mut this = Self::holding(alt_dir, lock, head, files, tier1_tail, mode.deferred)?;
+        this.opened = (opts, mode.late);
+        (this.generation, this.noted) = (notes.generation, notes.generation);
         this.left = noted;
         this.confirmed = confirmed;
         this.confirm()?;
@@ -214,6 +225,9 @@ impl Odb {
             deferred,
             confirmed: None,
             left: Noted::default(),
+            generation: None,
+            noted: None,
+            opened: (BlobOptions::default(), false),
             alt_dir,
         })
     }

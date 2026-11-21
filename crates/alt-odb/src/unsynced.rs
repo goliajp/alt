@@ -75,11 +75,14 @@ impl Left {
     }
 }
 
-/// What the lock file notes of unsynced appends.
-pub(crate) fn read(lock: &File) -> Option<Left> {
-    let mut bytes = [0u8; LEN];
-    lock.read_exact_at(&mut bytes, UNSYNCED_AT as u64).ok()?;
-    Left::parse(&bytes)
+/// What the lock file notes of unsynced appends, and what it notes of
+/// removals of lost records ([`crate::repair`]), which follows in the
+/// file: one read.
+pub(crate) fn read(lock: &File) -> (Option<Left>, crate::repair::Notes) {
+    let mut bytes = [0u8; LEN + crate::repair::NOTES];
+    let have = lock.read_at(&mut bytes, UNSYNCED_AT as u64).unwrap_or(0);
+    let left = bytes[..have].get(..LEN).and_then(Left::parse);
+    (left, crate::repair::notes(bytes[..have].get(LEN..)))
 }
 
 /// Notes that appends past `whole` are left unsynced from now on, in the

@@ -74,8 +74,8 @@ impl NativeOdb {
 
     /// [`Self::refresh`] for a command that only reads: no lock is taken
     /// and nothing is written. A store whose files other writers appended
-    /// to, or cut, since this handle read them is let go of, and the next
-    /// read opens it as it is then; what a dead writer left unfinished is
+    /// to, or took records out of, since this handle read them is let go
+    /// of, and the next read opens it as it is then; what a dead writer left unfinished is
     /// passed over by that open and stays in the files. Must not be called
     /// mid-batch.
     pub fn follow(&mut self) -> Result<(), OdbError> {
@@ -85,7 +85,11 @@ impl NativeOdb {
         // a handle that is followed is one that lives across requests
         odb.map.keep_reads();
         odb.blobs.keep_reads();
-        if odb.changed_on_disk()? {
+        // records taken out and others appended since can leave a file
+        // as long as it was: the marker's generation tells of the first
+        let now = Marker::read(&odb.durable_path).generation();
+        let moved = odb.generation.replace(now).is_some_and(|at| at != now);
+        if moved || odb.changed_on_disk()? {
             self.odb.take();
         }
         Ok(())

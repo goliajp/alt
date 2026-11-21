@@ -183,6 +183,7 @@ impl Odb {
             })
         })?;
         head::note_synced(&self.lock, after);
+        self.generation = Some(Marker::read(&self.durable_path).generation());
         Ok(())
     }
 

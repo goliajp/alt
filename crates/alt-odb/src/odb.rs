@@ -99,6 +99,12 @@ pub(crate) struct Odb {
     /// it ([`crate::unsynced`]), shared with what judges a record of the
     /// files that does not read.
     pub(crate) left: Noted,
+    /// The marker's generation as of what this handle holds of the
+    /// store, and as the lock file notes it ([`crate::repair`]); how the
+    /// store is opened again in the handle's place.
+    pub(crate) generation: Option<u64>,
+    pub(crate) noted: Option<u64>,
+    pub(crate) opened: (alt_store::BlobOptions, bool),
 }
 
 impl Odb {
