@@ -1,0 +1,2216 @@
+### alt
+Usage: alt [OPTIONS] <COMMAND>
+
+Commands:
+  portable     Transfer signed repository snapshots with explicit cutover and durable request recovery
+  auth         Sign in to a server through explicit browser device consent
+  runner       Inspect tools or execute one immutable validation snapshot
+  task         Record an authorized task in an isolated workspace
+  candidate    Capture and inspect immutable candidates and complete input identities
+  evidence     Preserve validation reports and inspect their current validity
+  request      Inspect durable whole-command receipts without executing the command
+  cat-file     Provide contents or details of repository objects
+  rev-parse    Pick out and massage parameters
+  log          Show commit logs
+  intake       Verify and independently import a supported Git source for tasks
+  import       Import this git repository into a .alt store
+  export       Export this .alt store back to a git repository
+  init         Create an empty native .alt repository
+  add          Stage file contents into the index
+  commit       Record staged changes as a new commit
+  status       Show the working tree status
+  branch       List, create, or delete branches
+  switch       Switch branches, materializing the target tree into the work tree
+  show         Show a commit: header + per-file unified diff against its first parent
+  blame        Line-by-line origin attribution for one file (`git blame`-style)
+  meta         Show or change the metadata recorded with a commit (kept in git notes under refs/notes/alt/meta; the commit itself never changes)
+  lfs          Git LFS: the large contents behind the pointer files LFS paths commit
+  bisect       Find the commit that introduced a change by binary search
+  rebase       Replay the current branch's own commits onto another base
+  revert       Record new commits that undo earlier ones
+  cherry-pick  Apply the changes from a commit on top of the current branch
+  config       Read or update git-style config keys (`user.name`, …)
+  tag          List, create (lightweight or annotated), or delete tags
+  diff         Show changes between the index and the working tree (or HEAD)
+  merge        Join another branch into the current one
+  flow         git-flow workflow operations (atomic, undoable)
+  undo         Undo the last branch/HEAD operation (inverts one op log entry)
+  operation    Inspect and finish interrupted local operations
+  workspace    Manage parallel workspaces (isolated HEAD/index/working tree)
+  remote       Manage git remotes (persisted as `<alt-dir>/remotes/<name>`)
+  clone        Clone a remote repository: init + remote add origin + fetch + checkout
+  fetch        Fetch refs + objects from a configured remote (git smart-http v2)
+  push         Push refs + objects to a configured remote (git smart-http v1)
+  identity     Manage local identities + trusted public keys
+  op-log       Audit-view the op log: who did what, in order, with the parsed principal and any ref changes carried in each op's payload
+  ci           alt-CI workflow inspection. Subcommand surface; `alt ci validate` runs the schema-tier lint
+  fsck         Read and verify every record the repository stores: each chunk, blob and object against its hash, each index against the file it indexes, the whole operation log, and the refs against a replay of that log. Exits non-zero at the first record that fails
+  verify       Verify the `alt-sig` header on one or more commit objects. With no args, walks the current branch's commit chain back to root (newest first). Each row is one of: `signed-ok:<principal>` / `unsigned` / `bad-sig:<principal>` / `untrusted:<principal>`
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+  -V, --version                Print version
+### alt portable
+Transfer signed repository snapshots with explicit cutover and durable request recovery
+
+Usage: alt portable [OPTIONS] <COMMAND>
+
+Commands:
+  export           Download a complete signed snapshot without stopping source writes
+  export-status    Inspect the same immutable source export
+  freeze-source    Stop source writes only at the original export watermark
+  reopen-source    Explicitly remove the original source write barrier
+  retire-export    Release retention for the original export; a frozen source must be reopened first
+  import           Verify a local archive and stage it privately in a new empty target repository
+  import-status    Query the original target intent, including a lost activation response
+  activate-import  Atomically activate the original staged import under current target authority
+  abandon-import   Abandon a receiving import without deleting the source or accepted history
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt portable export
+Download a complete signed snapshot without stopping source writes
+
+Usage: alt portable export [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --output <OUTPUT>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --repository <REPOSITORY>
+          
+      --json
+          
+      --output <OUTPUT>
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable export-status
+Inspect the same immutable source export
+
+Usage: alt portable export-status [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable freeze-source
+Stop source writes only at the original export watermark
+
+Usage: alt portable freeze-source [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable reopen-source
+Explicitly remove the original source write barrier
+
+Usage: alt portable reopen-source [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable retire-export
+Release retention for the original export; a frozen source must be reopened first
+
+Usage: alt portable retire-export [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable import
+Verify a local archive and stage it privately in a new empty target repository
+
+Usage: alt portable import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL> --repository <REPOSITORY> --archive <ARCHIVE> --mappings <MAPPINGS> --source-installation <SOURCE_INSTALLATION> --source-repository <SOURCE_REPOSITORY> --source-epoch <SOURCE_EPOCH> --source-key <SOURCE_KEY>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --repository <REPOSITORY>
+          
+      --archive <ARCHIVE>
+          
+      --json
+          
+      --mappings <MAPPINGS>
+          JSON list of explicit source identity dispositions; null links preserve history only
+      --source-installation <SOURCE_INSTALLATION>
+          
+      --source-repository <SOURCE_REPOSITORY>
+          
+      --source-epoch <SOURCE_EPOCH>
+          
+      --source-key <SOURCE_KEY>
+          Source receipt public key obtained independently of the archive
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable import-status
+Query the original target intent, including a lost activation response
+
+Usage: alt portable import-status [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable activate-import
+Atomically activate the original staged import under current target authority
+
+Usage: alt portable activate-import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt portable abandon-import
+Abandon a receiving import without deleting the source or accepted history
+
+Usage: alt portable abandon-import [OPTIONS] --credential-file <CREDENTIAL_FILE> --journal <JOURNAL>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          Private credential created by alt auth login
+      --journal <JOURNAL>
+          Private durable journal; reuse this directory after an interrupted attempt
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          [default: 16777216]
+      --max-entries <MAX_ENTRIES>
+          [default: 1000000]
+      --max-publications <MAX_PUBLICATIONS>
+          [default: 100000]
+      --max-blob-bytes <MAX_BLOB_BYTES>
+          [default: 8589934592]
+      --max-total-bytes <MAX_TOTAL_BYTES>
+          [default: 68719476736]
+      --timeout-seconds <TIMEOUT_SECONDS>
+          [default: 120]
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth
+Sign in to a server through explicit browser device consent
+
+Usage: alt auth [OPTIONS] <COMMAND>
+
+Commands:
+  delegate      Give an agent a short credential with explicit repository and write bounds
+  delegations   List agent credentials belonging to the current human account
+  revoke-agent  Revoke one agent credential owned by the current human account
+  login         Save a private, origin-bound credential after explicit browser consent
+  status        Check the current principal and installation without printing secrets
+  logout        Revoke the saved credential before removing its private file
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt auth delegate
+Give an agent a short credential with explicit repository and write bounds
+
+Usage: alt auth delegate [OPTIONS] --credential-file <CREDENTIAL_FILE> --agent-file <AGENT_FILE>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          
+      --agent-file <AGENT_FILE>
+          
+      --plan <PLAN>
+          JSON purpose, agent_session, lifetime_seconds and scope
+      --resume
+          Retry the same privately saved delegation after interruption
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth delegations
+List agent credentials belonging to the current human account
+
+Usage: alt auth delegations [OPTIONS] --credential-file <CREDENTIAL_FILE>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          
+      --after <AFTER>
+          
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth revoke-agent
+Revoke one agent credential owned by the current human account
+
+Usage: alt auth revoke-agent [OPTIONS] --credential-file <CREDENTIAL_FILE> --credential-id <CREDENTIAL_ID>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          
+      --credential-id <CREDENTIAL_ID>
+          
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth login
+Save a private, origin-bound credential after explicit browser consent
+
+Usage: alt auth login [OPTIONS] --server <SERVER> --credential-file <CREDENTIAL_FILE>
+
+Options:
+      --server <SERVER>
+          
+      --credential-file <CREDENTIAL_FILE>
+          
+      --resume
+          Continue the same saved request after interruption
+      --no-wait
+          Save the request and print its public confirmation URL without polling
+      --allow-loopback-http
+          
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth status
+Check the current principal and installation without printing secrets
+
+Usage: alt auth status [OPTIONS] --credential-file <CREDENTIAL_FILE>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt auth logout
+Revoke the saved credential before removing its private file
+
+Usage: alt auth logout [OPTIONS] --credential-file <CREDENTIAL_FILE>
+
+Options:
+      --credential-file <CREDENTIAL_FILE>
+          
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt runner
+Inspect tools or execute one immutable validation snapshot
+
+Usage: alt runner [OPTIONS] <COMMAND>
+
+Commands:
+  probe    
+  execute  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt runner probe
+Usage: alt runner probe [OPTIONS] --bindings <BINDINGS> --environment <ENVIRONMENT>
+
+Options:
+      --bindings <BINDINGS>        
+      --environment <ENVIRONMENT>  
+      --json                       
+      --workspace <WORKSPACE>      Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>           Stable request identity for a write in an existing native repository
+  -h, --help                       Print help
+### alt runner execute
+Usage: alt runner execute [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task
+Record an authorized task in an isolated workspace
+
+Usage: alt task [OPTIONS] <COMMAND>
+
+Commands:
+  remote               Publish selected task history or receive and continue published work
+  changes              Show the complete candidate diff against the task baseline
+  review               Record explicit review of a current candidate and its observed evidence
+  review-show          
+  integrate            Atomically integrate a reviewed candidate into its unoccupied target
+  integration-show     
+  integration-collect  Collect an already recorded ref transaction without applying it again
+  export               Export a completed integration to a verified independent Git directory
+  delivery-show        
+  delivery-collect     Verify an existing delivery after a lost publication response
+  create               Record a task definition and current isolated-workspace baseline
+  list                 
+  show                 
+  abandon              Append an abandonment record; keep candidates, logs and workspace files
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote
+Publish selected task history or receive and continue published work
+
+Usage: alt task remote [OPTIONS] <COMMAND>
+
+Commands:
+  changes  Inspect and publish exact associations with Sentori
+  connect  Bind an HTTPS origin, repository and operator-provided receipt key
+  preview  Freeze the exact records, attachments and optional ref updates to publish
+  publish  Send or resume an already previewed publication using its original ID
+  attest   Sign the original completed evidence statement with a collector key
+  review   Download the complete ready selection for an independent current review
+  approve  Approve the exact previously inspected request as the current reviewer
+  status   Query the authoritative outcome without sending a new publication
+  list     List published roots, or the signed publications containing a root
+  receive  Receive an explicitly selected signed publication; never execute it
+  adopt    Accept a received task in this isolated workspace with its original ID
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes
+Inspect and publish exact associations with Sentori
+
+Usage: alt task remote changes [OPTIONS] <COMMAND>
+
+Commands:
+  channels       List the explicitly configured Sentori channels
+  list           List historical facts and their current delivery state
+  show           Read an original signed fact under current repository permission
+  repair         Inspect a repair request and any actually published native Task
+  repair-create  Create a local Task from a currently authorized repair request
+  preview        Save an exact Delivery mapping or withdrawal before sending it
+  send           Send or resume a saved association using its original request
+  status         Query a saved association without creating a new request
+  reauthorize    Explicitly resume a pending statement with this actor's current credential
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes channels
+List the explicitly configured Sentori channels
+
+Usage: alt task remote changes channels [OPTIONS] <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes list
+List historical facts and their current delivery state
+
+Usage: alt task remote changes list [OPTIONS] <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --after <AFTER>          
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes show
+Read an original signed fact under current repository permission
+
+Usage: alt task remote changes show [OPTIONS] <REMOTE> <DIGEST>
+
+Arguments:
+  <REMOTE>  
+  <DIGEST>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes repair
+Inspect a repair request and any actually published native Task
+
+Usage: alt task remote changes repair [OPTIONS] <REMOTE> <DIGEST>
+
+Arguments:
+  <REMOTE>  
+  <DIGEST>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes repair-create
+Create a local Task from a currently authorized repair request
+
+Usage: alt task remote changes repair-create [OPTIONS] --definition <DEFINITION> --target <TARGET> <REMOTE> <DIGEST>
+
+Arguments:
+  <REMOTE>  
+  <DIGEST>  
+
+Options:
+      --definition <DEFINITION>
+          Normal TaskSpec JSON; source is supplied by the verified request
+      --target <TARGET>
+          
+      --reconcile-request <RECONCILE_REQUEST>
+          Explicitly replace an interrupted local creation under a new request
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt task remote changes preview
+Save an exact Delivery mapping or withdrawal before sending it
+
+Usage: alt task remote changes preview [OPTIONS] --plan <PLAN> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --plan <PLAN>            
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes send
+Send or resume a saved association using its original request
+
+Usage: alt task remote changes send [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes status
+Query a saved association without creating a new request
+
+Usage: alt task remote changes status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote changes reauthorize
+Explicitly resume a pending statement with this actor's current credential
+
+Usage: alt task remote changes reauthorize [OPTIONS] <REMOTE> <CHANNEL> <DIGEST>
+
+Arguments:
+  <REMOTE>   
+  <CHANNEL>  
+  <DIGEST>   
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote connect
+Bind an HTTPS origin, repository and operator-provided receipt key
+
+Usage: alt task remote connect [OPTIONS] --url <URL> --repository <REPOSITORY> --receipt-key <RECEIPT_KEY> <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --url <URL>                  
+      --repository <REPOSITORY>    
+      --receipt-key <RECEIPT_KEY>  
+      --allow-loopback-http        
+      --json                       
+      --workspace <WORKSPACE>      Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>           Stable request identity for a write in an existing native repository
+  -h, --help                       Print help
+### alt task remote preview
+Freeze the exact records, attachments and optional ref updates to publish
+
+Usage: alt task remote preview [OPTIONS] --plan <PLAN> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --plan <PLAN>            JSON selection and optional ref updates; only these roots are followed
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote publish
+Send or resume an already previewed publication using its original ID
+
+Usage: alt task remote publish [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --prepare-only           
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote attest
+Sign the original completed evidence statement with a collector key
+
+Usage: alt task remote attest [OPTIONS] --key-file <KEY_FILE> <EVIDENCE>
+
+Arguments:
+  <EVIDENCE>  
+
+Options:
+      --key-file <KEY_FILE>    
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote review
+Download the complete ready selection for an independent current review
+
+Usage: alt task remote review [OPTIONS] --actor <ACTOR> --request <REQUEST> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --actor <ACTOR>          
+      --request <REQUEST>      
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote approve
+Approve the exact previously inspected request as the current reviewer
+
+Usage: alt task remote approve [OPTIONS] --actor <ACTOR> --request <REQUEST> --integration <INTEGRATION> --digest <DIGEST> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --actor <ACTOR>              
+      --request <REQUEST>          
+      --integration <INTEGRATION>  
+      --digest <DIGEST>            
+      --json                       
+      --workspace <WORKSPACE>      Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>           Stable request identity for a write in an existing native repository
+  -h, --help                       Print help
+### alt task remote status
+Query the authoritative outcome without sending a new publication
+
+Usage: alt task remote status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote list
+List published roots, or the signed publications containing a root
+
+Usage: alt task remote list [OPTIONS] --kind <KIND> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --kind <KIND>            
+      --id <ID>                
+      --after <AFTER>          
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task remote receive
+Receive an explicitly selected signed publication; never execute it
+
+Usage: alt task remote receive [OPTIONS] --kind <KIND> --id <ID> --publication <PUBLICATION> <REMOTE>
+
+Arguments:
+  <REMOTE>  
+
+Options:
+      --kind <KIND>                
+      --id <ID>                    
+      --publication <PUBLICATION>  
+      --json                       
+      --workspace <WORKSPACE>      Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>           Stable request identity for a write in an existing native repository
+  -h, --help                       Print help
+### alt task remote adopt
+Accept a received task in this isolated workspace with its original ID
+
+Usage: alt task remote adopt [OPTIONS] --publication <PUBLICATION> <TASK>
+
+Arguments:
+  <TASK>  
+
+Options:
+      --publication <PUBLICATION>
+          
+      --reconcile-request <RECONCILE_REQUEST>
+          Explicitly reauthorize an interrupted adoption under a new request
+      --json
+          
+      --workspace <WORKSPACE>
+          Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>
+          Stable request identity for a write in an existing native repository
+  -h, --help
+          Print help
+### alt task changes
+Show the complete candidate diff against the task baseline
+
+Usage: alt task changes [OPTIONS] <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task review
+Record explicit review of a current candidate and its observed evidence
+
+Usage: alt task review [OPTIONS] --evidence <EVIDENCE> --reviewer <REVIEWER> --reason <REASON> --message <MESSAGE> <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --evidence <EVIDENCE>    
+      --reviewer <REVIEWER>    
+      --reason <REASON>        
+  -m, --message <MESSAGE>      
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task review-show
+Usage: alt task review-show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task integrate
+Atomically integrate a reviewed candidate into its unoccupied target
+
+Usage: alt task integrate [OPTIONS] <REVIEW>
+
+Arguments:
+  <REVIEW>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task integration-show
+Usage: alt task integration-show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task integration-collect
+Collect an already recorded ref transaction without applying it again
+
+Usage: alt task integration-collect [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task export
+Export a completed integration to a verified independent Git directory
+
+Usage: alt task export [OPTIONS] <INTEGRATION> <TARGET>
+
+Arguments:
+  <INTEGRATION>  
+  <TARGET>       
+
+Options:
+      --git <GIT>              [default: /usr/bin/git]
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task delivery-show
+Usage: alt task delivery-show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task delivery-collect
+Verify an existing delivery after a lost publication response
+
+Usage: alt task delivery-collect [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --git <GIT>              [default: /usr/bin/git]
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task create
+Record a task definition and current isolated-workspace baseline
+
+Usage: alt task create [OPTIONS] --definition <DEFINITION> --target <TARGET>
+
+Options:
+      --definition <DEFINITION>  JSON TaskSpec; pass a file's contents with shell substitution
+      --target <TARGET>          Existing integration target, recorded with its expected object id
+      --json                     
+      --workspace <WORKSPACE>    Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>         Stable request identity for a write in an existing native repository
+  -h, --help                     Print help
+### alt task list
+Usage: alt task list [OPTIONS]
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task show
+Usage: alt task show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt task abandon
+Append an abandonment record; keep candidates, logs and workspace files
+
+Usage: alt task abandon [OPTIONS] --reason <REASON> <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --reason <REASON>        
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt candidate
+Capture and inspect immutable candidates and complete input identities
+
+Usage: alt candidate [OPTIONS] <COMMAND>
+
+Commands:
+  create  Snapshot index-selected source plus the task's explicit auxiliary roots
+  show    
+  check   Recompute current source and auxiliary inputs without accepting old evidence
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt candidate create
+Snapshot index-selected source plus the task's explicit auxiliary roots
+
+Usage: alt candidate create [OPTIONS] <TASK>
+
+Arguments:
+  <TASK>  
+
+Options:
+      --parent <PARENT>        
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt candidate show
+Usage: alt candidate show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt candidate check
+Recompute current source and auxiliary inputs without accepting old evidence
+
+Usage: alt candidate check [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence
+Preserve validation reports and inspect their current validity
+
+Usage: alt evidence [OPTIONS] <COMMAND>
+
+Commands:
+  run         Materialize the candidate and execute through the selected runner
+  collect     Read an existing run report without launching validation again
+  run-status  Inspect durable launch attribution and collection receipts
+  import      Preserve an external report; imported claims never become observed runs
+  show        
+  check       
+  log         Read an entire preserved output stream without truncation
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence run
+Materialize the candidate and execute through the selected runner
+
+Usage: alt evidence run [OPTIONS] --profile <PROFILE> <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --profile <PROFILE>      
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence collect
+Read an existing run report without launching validation again
+
+Usage: alt evidence collect [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence run-status
+Inspect durable launch attribution and collection receipts
+
+Usage: alt evidence run-status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence import
+Preserve an external report; imported claims never become observed runs
+
+Usage: alt evidence import [OPTIONS] --report <REPORT> <CANDIDATE>
+
+Arguments:
+  <CANDIDATE>  
+
+Options:
+      --report <REPORT>        
+      --stdout <STDOUT>        
+      --stderr <STDERR>        
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence show
+Usage: alt evidence show [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence check
+Usage: alt evidence check [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt evidence log
+Read an entire preserved output stream without truncation
+
+Usage: alt evidence log [OPTIONS] <ID> <STREAM>
+
+Arguments:
+  <ID>      
+  <STREAM>  [possible values: stdout, stderr, original-report]
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt request
+Inspect durable whole-command receipts without executing the command
+
+Usage: alt request [OPTIONS] <COMMAND>
+
+Commands:
+  pending  List requests without a durable completion
+  status   Inspect request scope, completion, and attributed operations
+  result   Read the entire recorded stdout, stderr, and exit code
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt request pending
+List requests without a durable completion
+
+Usage: alt request pending [OPTIONS]
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt request status
+Inspect request scope, completion, and attributed operations
+
+Usage: alt request status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt request result
+Read the entire recorded stdout, stderr, and exit code
+
+Usage: alt request result [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt cat-file
+Provide contents or details of repository objects
+
+Usage: alt cat-file [OPTIONS] <OBJECT>
+
+Arguments:
+  <OBJECT>  
+
+Options:
+  -t                           show object type
+  -s                           show object size
+  -p                           pretty-print object's content
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt rev-parse
+Pick out and massage parameters
+
+Usage: alt rev-parse [OPTIONS] <REV>
+
+Arguments:
+  <REV>  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt log
+Show commit logs
+
+Usage: alt log [OPTIONS] [REV]
+
+Arguments:
+  [REV]  start revision [default: HEAD]
+
+Options:
+      --pretty <PRETTY>        pretty-print commits: raw | oneline (ignored with --json) [default: oneline]
+  -n <MAX_COUNT>               limit the number of commits
+      --json                   emit the commit list as a stable JSON object
+  -p, --patch                  show a per-commit patch (unified diff for text, compact chunk + perceptual summary for binary so large-file history doesn't blow up the terminal). Ignored with --json
+      --cc                     with -p, show for a merge commit the combined diff of what the merge itself changed (hunks that differ from every parent)
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt intake
+Verify and independently import a supported Git source for tasks
+
+Usage: alt intake [OPTIONS] <SOURCE> <TARGET>
+
+Arguments:
+  <SOURCE>  
+  <TARGET>  New directory outside every repository (must not already exist)
+
+Options:
+      --git <GIT>              Absolute Git executable used for independent verification [default: /usr/bin/git]
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt import
+Import this git repository into a .alt store
+
+Usage: alt import [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  Destination directory: the store is created at <DIR>/.alt (keep it outside any git work tree — .alt does not coexist with .git)
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt export
+Export this .alt store back to a git repository
+
+Usage: alt export [OPTIONS] <TARGET>
+
+Arguments:
+  <TARGET>  Destination directory (must not exist or be empty): a .git is rebuilt at <DIR>/.git with L1 semantic fidelity
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt init
+Create an empty native .alt repository
+
+Usage: alt init [OPTIONS] [DIR]
+
+Arguments:
+  [DIR]  Directory to create the repo in (default: current directory)
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt add
+Stage file contents into the index
+
+Usage: alt add [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Paths to stage; `.` stages the directory the command runs in
+
+Options:
+      --renormalize            Store every tracked file among the paths again, as the attributes and line-ending settings now in force clean it
+  -f, --force                  Stage files that an ignore rule hides as well
+  -u, --update                 Stage what changed in the files the index has, and no new file: in the whole tree when no path is given
+  -A, --all                    Stage every change, new files as well: in the whole tree when no path is given
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt commit
+Record staged changes as a new commit
+
+Usage: alt commit [OPTIONS]
+
+Options:
+  -m <MESSAGE>                 Commit message (with --amend, defaults to the amended commit's)
+      --amend                  Replace the current branch tip with a new commit made from the index, keeping its parents and author
+      --no-edit                Keep the amended commit's message (alt never opens an editor, so this is already the default without -m; accepted as in git)
+      --allow-empty            Record the commit even when it changes nothing
+  -n, --no-verify              Skip the pre-commit checks (secret scan, large-file warning)
+      --validate               Only run the pre-commit checks on what is staged; commit nothing
+      --decision <TEXT>        Record a one-line decision in the commit's metadata (up to 3)
+      --meta <KEY=VALUE>       Record an extra metadata field (`key=value`, e.g. `model=…`)
+      --json                   Emit the new commit/tree oids (or, with --validate, the findings) as a JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt status
+Show the working tree status
+
+Usage: alt status [OPTIONS]
+
+Options:
+  -u, --untracked-files[=<MODE>]  Which untracked files to show: `no`, `normal` (a directory with nothing tracked in it as one path) or `all`, or a boolean for `normal` or `no`; `all` when the option is given without a mode, and without the option what `status.showUntrackedFiles` sets
+      --json                      Emit a stable JSON object instead of the human-readable view
+      --workspace <WORKSPACE>     Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>          Stable request identity for a write in an existing native repository
+  -h, --help                      Print help
+### alt branch
+List, create, or delete branches
+
+Usage: alt branch [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  Branch name to create (omit to list branches)
+
+Options:
+  -d <DELETE>                  Delete the named branch
+  -r, --remotes                With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
+      --json                   Emit the branch list as a stable JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt switch
+Switch branches, materializing the target tree into the work tree
+
+Usage: alt switch [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Branch to switch to
+
+Options:
+  -c                           Create the branch before switching
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt show
+Show a commit: header + per-file unified diff against its first parent
+
+Usage: alt show [OPTIONS] [REV]
+
+Arguments:
+  [REV]  Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves
+
+Options:
+      --json                   Emit a structured JSON diff instead of unified text
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt blame
+Line-by-line origin attribution for one file (`git blame`-style)
+
+Usage: alt blame [OPTIONS] <PATH> [REV]
+
+Arguments:
+  <PATH>  Path to the file to blame (relative to the current directory)
+  [REV]   Revision to start the walk from (default `HEAD`)
+
+Options:
+  -M                           Trace lines moved within the file. A number against the letter is how many letters and digits they must carry (20 if absent)
+      --follow                 Accepted for command lines written before renames were always followed; it changes nothing
+  -C                           Trace lines copied from files changed in the same commit; twice, from any file when the blamed file is created; three times, from any file in every commit. Implies -M. A number against the letter works as for -M (40 if absent)
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt meta
+Show or change the metadata recorded with a commit (kept in git notes under refs/notes/alt/meta; the commit itself never changes)
+
+Usage: alt meta [OPTIONS] <COMMAND>
+
+Commands:
+  show  Print a commit's metadata
+  set   Replace a commit's message or add to its metadata, leaving the commit itself untouched
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt meta show
+Print a commit's metadata
+
+Usage: alt meta show [OPTIONS] [REV]
+
+Arguments:
+  [REV]  The commit (default: HEAD) [default: HEAD]
+
+Options:
+      --json                   Emit a JSON object instead of the note text
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt meta set
+Replace a commit's message or add to its metadata, leaving the commit itself untouched
+
+Usage: alt meta set [OPTIONS] [REV]
+
+Arguments:
+  [REV]  The commit (default: HEAD) [default: HEAD]
+
+Options:
+  -m <MESSAGE>                 A message that stands in for the commit's own in `alt log`
+      --decision <TEXT>        Add a one-line decision (up to 3 in total)
+      --meta <KEY=VALUE>       Set an extra field (`key=value`)
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt lfs
+Git LFS: the large contents behind the pointer files LFS paths commit
+
+Usage: alt lfs [OPTIONS] <COMMAND>
+
+Commands:
+  fetch   Download the LFS contents HEAD needs from a remote's LFS server and check them out
+  import  Take the LFS contents HEAD needs from a git repository's local LFS storage (as after `alt import` of a git-lfs repository)
+  ls      List HEAD's LFS files: `*` when the content is here, `-` when not
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt lfs fetch
+Download the LFS contents HEAD needs from a remote's LFS server and check them out
+
+Usage: alt lfs fetch [OPTIONS] [REMOTE]
+
+Arguments:
+  [REMOTE]  [default: origin]
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt lfs import
+Take the LFS contents HEAD needs from a git repository's local LFS storage (as after `alt import` of a git-lfs repository)
+
+Usage: alt lfs import [OPTIONS] <GIT_DIR>
+
+Arguments:
+  <GIT_DIR>  The git directory (`.git`) holding `lfs/objects`
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt lfs ls
+List HEAD's LFS files: `*` when the content is here, `-` when not
+
+Usage: alt lfs ls [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect
+Find the commit that introduced a change by binary search
+
+Usage: alt bisect [OPTIONS] <COMMAND>
+
+Commands:
+  start  Start a session, optionally naming the bad commit and good ones
+  bad    Mark commits (default: the one being tested) as bad
+  good   Mark commits (default: the one being tested) as good
+  skip   Mark commits (default: the one being tested) as untestable
+  reset  End the session and go back to the branch
+  run    Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad, anything else stops
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect start
+Start a session, optionally naming the bad commit and good ones
+
+Usage: alt bisect start [OPTIONS] [BAD] [GOOD]...
+
+Arguments:
+  [BAD]      The bad commit
+  [GOOD]...  Known good commits
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect bad
+Mark commits (default: the one being tested) as bad
+
+Usage: alt bisect bad [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect good
+Mark commits (default: the one being tested) as good
+
+Usage: alt bisect good [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect skip
+Mark commits (default: the one being tested) as untestable
+
+Usage: alt bisect skip [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect reset
+End the session and go back to the branch
+
+Usage: alt bisect reset [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt bisect run
+Let a command judge each commit: exit 0 good, 125 skip, 1-127 bad, anything else stops
+
+Usage: alt bisect run [OPTIONS] <CMD>...
+
+Arguments:
+  <CMD>...  
+
+Options:
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt rebase
+Replay the current branch's own commits onto another base
+
+Usage: alt rebase [OPTIONS] [UPSTREAM]
+
+Arguments:
+  [UPSTREAM]  The base to replay onto
+
+Options:
+  -i, --interactive            Edit the list of commits first (pick, reword, squash, fixup, drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
+      --continue               Commit the resolved step and go on
+      --skip                   Drop the stopped step and go on
+      --abort                  Put the branch back as it was before the rebase
+      --json                   Emit a structured JSON result instead of human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt revert
+Record new commits that undo earlier ones
+
+Usage: alt revert [OPTIONS] [REVS]...
+
+Arguments:
+  [REVS]...  Commits to revert, in order
+
+Options:
+  -m, --mainline <MAINLINE>    For a merge commit, the parent (1-based) whose side is kept
+      --continue               Commit the resolved revert and go on with the rest
+      --abort                  Put the branch back where it was before the reverts
+      --no-edit                Use the generated message (alt never opens an editor; accepted as in git)
+      --json                   Emit a structured JSON result instead of human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt cherry-pick
+Apply the changes from a commit on top of the current branch
+
+Usage: alt cherry-pick [OPTIONS] <REV>
+
+Arguments:
+  <REV>  Revision of the commit to apply
+
+Options:
+      --json                   Emit a structured JSON result instead of human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt config
+Read or update git-style config keys (`user.name`, …)
+
+Usage: alt config [OPTIONS] [KEY] [VALUE]
+
+Arguments:
+  [KEY]    Dotted key (e.g. `user.name`). Omit when `--list` or `--unset` is set
+  [VALUE]  New value. When supplied, the key is set (overwriting any existing value); when omitted, the key is read
+
+Options:
+      --list                   List every entry as `section.key=value` (git's default `--list` shape)
+      --unset <UNSET>          Remove a key from the config file
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt tag
+List, create (lightweight or annotated), or delete tags
+
+Usage: alt tag [OPTIONS] [NAME] [REV]
+
+Arguments:
+  [NAME]  Tag name to create. Omit (and omit `-d`) to list all tags
+  [REV]   Revision the new tag should point to (default HEAD). Only honoured when creating a tag
+
+Options:
+  -d, --delete <DELETE>        Delete a tag by name. Mutually exclusive with `name`
+  -a, --annotate               Create an *annotated* tag (writes a tag object carrying the message + tagger ident, instead of a bare ref)
+  -m, --message <MESSAGE>      Annotated-tag message. Required when `-a` is set
+      --json                   JSON output for list mode (ignored otherwise)
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt diff
+Show changes between the index and the working tree (or HEAD)
+
+Usage: alt diff [OPTIONS]
+
+Options:
+      --cached                 Show staged changes (HEAD vs index) instead of unstaged [aliases: --staged]
+      --json                   Emit a structured JSON diff instead of unified text
+      --semantic               Show an AST-level diff per supported language: item-level logical vs format-only changes for `.rs` files; line/binary diff for files without a parser
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt merge
+Join another branch into the current one
+
+Usage: alt merge [OPTIONS] <BRANCH>
+
+Arguments:
+  <BRANCH>  Branch to merge into the current branch
+
+Options:
+      --json                   Emit a structured JSON result instead of the human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow
+git-flow workflow operations (atomic, undoable)
+
+Usage: alt flow [OPTIONS] <COMMAND>
+
+Commands:
+  init     Create the `develop` branch off `main` and switch to it
+  feature  Feature-branch operations
+  release  Release-branch operations
+  hotfix   Hotfix-branch operations
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow init
+Create the `develop` branch off `main` and switch to it
+
+Usage: alt flow init [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow feature
+Feature-branch operations
+
+Usage: alt flow feature [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow feature start
+Branch the topic off its base and switch to it
+
+Usage: alt flow feature start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow feature finish
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow feature finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow release
+Release-branch operations
+
+Usage: alt flow release [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow release start
+Branch the topic off its base and switch to it
+
+Usage: alt flow release start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow release finish
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow release finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow hotfix
+Hotfix-branch operations
+
+Usage: alt flow hotfix [OPTIONS] <COMMAND>
+
+Commands:
+  start   Branch the topic off its base and switch to it
+  finish  Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow hotfix start
+Branch the topic off its base and switch to it
+
+Usage: alt flow hotfix start [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt flow hotfix finish
+Merge the topic back into its target(s) and delete it (atomic ref transaction + single op-log entry, like every other flow op)
+
+Usage: alt flow hotfix finish [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt undo
+Undo the last branch/HEAD operation (inverts one op log entry)
+
+Usage: alt undo [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt operation
+Inspect and finish interrupted local operations
+
+Usage: alt operation [OPTIONS] <COMMAND>
+
+Commands:
+  pending  List incomplete operations belonging to this workspace instance
+  status   Show the durable state of one operation
+  recover  Finish a prepared operation after checking every affected prestate
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt operation pending
+List incomplete operations belonging to this workspace instance
+
+Usage: alt operation pending [OPTIONS]
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt operation status
+Show the durable state of one operation
+
+Usage: alt operation status [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt operation recover
+Finish a prepared operation after checking every affected prestate
+
+Usage: alt operation recover [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt workspace
+Manage parallel workspaces (isolated HEAD/index/working tree)
+
+Usage: alt workspace [OPTIONS] <COMMAND>
+
+Commands:
+  add     Create a workspace with its own working tree, checked out on a branch
+  list    List the workspaces
+  remove  Remove a workspace (its HEAD ref and control dir; files are kept)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt workspace add
+Create a workspace with its own working tree, checked out on a branch
+
+Usage: alt workspace add [OPTIONS] <NAME> <PATH> [BRANCH]
+
+Arguments:
+  <NAME>    Workspace name
+  <PATH>    Working-tree directory for the workspace
+  [BRANCH]  Branch to check out (defaults to a new branch named after the workspace, at the current commit)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt workspace list
+List the workspaces
+
+Usage: alt workspace list [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt workspace remove
+Remove a workspace (its HEAD ref and control dir; files are kept)
+
+Usage: alt workspace remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Workspace name
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt remote
+Manage git remotes (persisted as `<alt-dir>/remotes/<name>`)
+
+Usage: alt remote [OPTIONS] <COMMAND>
+
+Commands:
+  add     Register a git remote — typically `https://host/user/repo.git`
+  list    List configured remotes
+  remove  Drop a configured remote (refs/remotes/<name> are not touched)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt remote add
+Register a git remote — typically `https://host/user/repo.git`
+
+Usage: alt remote add [OPTIONS] <NAME> <URL>
+
+Arguments:
+  <NAME>  Remote name (e.g. `origin`)
+  <URL>   Remote URL
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt remote list
+List configured remotes
+
+Usage: alt remote list [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt remote remove
+Drop a configured remote (refs/remotes/<name> are not touched)
+
+Usage: alt remote remove [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Remote name
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt clone
+Clone a remote repository: init + remote add origin + fetch + checkout
+
+Usage: alt clone [OPTIONS] <URL> [DIR]
+
+Arguments:
+  <URL>  Remote URL (e.g. `https://github.com/user/repo.git`)
+  [DIR]  Destination directory (defaults to the URL's last path segment with any `.git` suffix stripped)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt fetch
+Fetch refs + objects from a configured remote (git smart-http v2)
+
+Usage: alt fetch [OPTIONS] [REMOTE] [REFSPECS]...
+
+Arguments:
+  [REMOTE]       Remote name (defaults to `origin`) [default: origin]
+  [REFSPECS]...  Refspecs to fetch (defaults to the remote's configured refspec)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt push
+Push refs + objects to a configured remote (git smart-http v1)
+
+Usage: alt push [OPTIONS] [REMOTE] [REFSPECS]...
+
+Arguments:
+  [REMOTE]       Remote name (defaults to `origin`) [default: origin]
+  [REFSPECS]...  Refspecs to push (`<src>:<dst>` or just `<src>` — defaults to the current branch onto its same-named remote branch)
+
+Options:
+  -f, --force                  Force the update (allow non-fast-forward); the server still enforces its own policy
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt identity
+Manage local identities + trusted public keys
+
+Usage: alt identity [OPTIONS] <COMMAND>
+
+Commands:
+  init   Generate a new Ed25519 keypair under `<alt-dir>/identity/<principal>.{pub,sec}`
+  list   List installed identities (no secret material; only `.pub` rows)
+  trust  Add a public key to the trust store (`<alt-dir>/trust/<principal>.pub`)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt identity init
+Generate a new Ed25519 keypair under `<alt-dir>/identity/<principal>.{pub,sec}`
+
+Usage: alt identity init [OPTIONS] [PRINCIPAL]
+
+Arguments:
+  [PRINCIPAL]  Principal id (defaults to `$ALT_PRINCIPAL_ID` or `$USER`)
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt identity list
+List installed identities (no secret material; only `.pub` rows)
+
+Usage: alt identity list [OPTIONS]
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt identity trust
+Add a public key to the trust store (`<alt-dir>/trust/<principal>.pub`)
+
+Usage: alt identity trust [OPTIONS] <PRINCIPAL> <PUB_FILE>
+
+Arguments:
+  <PRINCIPAL>  Principal id
+  <PUB_FILE>   Path to a `.pub` file produced by `alt identity init`
+
+Options:
+      --json                   Emit a structured JSON result instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt op-log
+Audit-view the op log: who did what, in order, with the parsed principal and any ref changes carried in each op's payload
+
+Usage: alt op-log [OPTIONS]
+
+Options:
+  -n <MAX_COUNT>               Limit the number of entries shown (newest first; default = all)
+      --json                   Emit a structured JSON list instead of the human view
+      --verify                 Check each op against the signature sidecar + trust store; rows tagged `signed-ok` / `unsigned` / `bad-sig` / `untrusted`
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt ci
+alt-CI workflow inspection. Subcommand surface; `alt ci validate` runs the schema-tier lint
+
+Usage: alt ci [OPTIONS] <COMMAND>
+
+Commands:
+  validate  Validate one or more `workflow.toml` files against the alt-CI schema. With no arguments, scans `.alt/ci/*/workflow.toml`
+
+Options:
+      --json                   Emit line-delimited JSON diagnostics instead of the human `<path>:<line>:<col>: <severity>: <message>` form
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt ci validate
+Validate one or more `workflow.toml` files against the alt-CI schema. With no arguments, scans `.alt/ci/*/workflow.toml`
+
+Usage: alt ci validate [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Specific `workflow.toml` files to check (default: scan `.alt/ci/<name>/workflow.toml`)
+
+Options:
+      --json                   Emit line-delimited JSON diagnostics instead of the human `<path>:<line>:<col>: <severity>: <message>` form
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt fsck
+Read and verify every record the repository stores: each chunk, blob and object against its hash, each index against the file it indexes, the whole operation log, and the refs against a replay of that log. Exits non-zero at the first record that fails
+
+Usage: alt fsck [OPTIONS]
+
+Options:
+      --json                   Emit the record counts as a JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt verify
+Verify the `alt-sig` header on one or more commit objects. With no args, walks the current branch's commit chain back to root (newest first). Each row is one of: `signed-ok:<principal>` / `unsigned` / `bad-sig:<principal>` / `untrusted:<principal>`
+
+Usage: alt verify [OPTIONS] [COMMITS]...
+
+Arguments:
+  [COMMITS]...  Commit oids to check (hex). Empty = walk HEAD
+
+Options:
+  -n, --max-count <MAX_COUNT>  Limit when walking HEAD (default 50; ignored when oids given)
+      --json                   Emit a structured JSON list instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help

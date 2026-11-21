@@ -9,12 +9,13 @@
 //! Concurrency: a multi-threaded accept loop. Each connection is served
 //! on a thread of its own, one that waits for a connection or a new one
 //! ([`Workers`]), but the held `(Store, Repository)` is wrapped in one
-//! `Mutex`, so request *execution* is serialized while connection accept and
-//! response write-back run concurrently (a slow request never blocks accepting
-//! the next connection). The in-process `Mutex` is load-bearing: `flock` does
-//! not make threads of one process mutually exclusive (the lock lives on the
-//! shared open file description), so the daemon cannot lean on the store's file
-//! locks to serialize its own threads — only across processes.
+//! `Mutex` ([`Held`]), so request *execution* is serialized while connection
+//! accept and response write-back run concurrently (a slow request never blocks
+//! accepting the next connection). The in-process `Mutex` is load-bearing:
+//! `flock` does not make threads of one process mutually exclusive (the lock
+//! lives on the shared open file description), so the daemon cannot lean on the
+//! store's file locks to serialize its own threads — only across processes. A
+//! request that panics while it runs on the store ends the daemon.
 //!
 //! Group commit: a write appends under the store `Mutex` but defers its
 //! fsync; the slow fsync is then performed *off* the `Mutex` by a [`GroupCommit`]
@@ -48,12 +49,12 @@ mod unix {
     use std::os::fd::AsRawFd;
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use alt_cli::daemon::{self, Request};
     use alt_cli::execution::Execution;
     use alt_cli::group_commit::GroupCommit;
+    use alt_cli::held::Held;
     use alt_cli::machine::{self, Failure};
     use alt_cli::native::{Identity, Store, StoreSink};
     use alt_cli::workers::Workers;
@@ -62,9 +63,9 @@ mod unix {
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
     /// The daemon's shared state: one open store + git-layer repository behind a
-    /// single `Mutex`. One lock for both avoids any lock-ordering question and
+    /// single lock. One lock for both avoids any lock-ordering question and
     /// matches how a request uses them together (refresh both, then dispatch).
-    type Shared = Arc<Mutex<(Store, Repository)>>;
+    type Shared = Arc<Held<(Store, Repository)>>;
 
     /// Exit when no request arrives within this window (overridable via
     /// `ALT_DAEMON_IDLE_MS`, mainly for tests).
@@ -100,22 +101,16 @@ mod unix {
         // fsyncs without the store Mutex and appends overlap the fsync
         let sink = Arc::new(store.sink()?);
         let repo = Repository::discover(&repo_root)?;
-        let shared: Shared = Arc::new(Mutex::new((store, repo)));
+        let shared: Shared = Arc::new(Held::new((store, repo)));
         let group = Arc::new(GroupCommit::new());
 
         let idle_ms = idle_ms();
 
-        // count of requests accepted but not yet fully served. Incremented in
-        // this thread before the worker spawns (so an immediate idle poll can't
-        // race past an in-flight request), decremented when the worker is done.
-        let active = Arc::new(AtomicUsize::new(0));
-        let served = Arc::clone(&active);
         let mut workers = Workers::new(move |stream| {
             alt_os::stack::cover_thread();
             if let Err(e) = serve(&shared, &group, &sink, stream) {
                 eprintln!("altd: request error: {e}");
             }
-            served.fetch_sub(1, Ordering::SeqCst);
         });
 
         // serve until an idle window with no request in flight, then exit and
@@ -124,11 +119,10 @@ mod unix {
         // I/O — only the shared store, via the Mutex inside `serve`.
         loop {
             match accept_with_timeout(&listener, idle_ms)? {
-                Some(stream) => {
-                    active.fetch_add(1, Ordering::SeqCst);
-                    workers.give(stream);
-                }
-                None if active.load(Ordering::SeqCst) == 0 => break,
+                // counted as in flight from here, in this thread, so that
+                // an idle window right after cannot pass it by
+                Some(stream) => workers.give(stream),
+                None if workers.unserved() == 0 => break,
                 None => {} // idle window elapsed but a request is still in flight
             }
         }
@@ -250,7 +244,7 @@ mod unix {
             }
         };
         let (response, operations, ticket, barrier_ok) = {
-            let mut guard = shared.lock().expect("daemon store mutex poisoned");
+            let mut guard = shared.take();
             let (store, repo) = &mut *guard;
             let refreshed = bring_up(store, repo, execution.writing);
             // operations that were never synced and name objects which are
