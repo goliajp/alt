@@ -10,9 +10,18 @@ use super::Spec;
 /// The paths a command was given, ready to be asked about names.
 pub struct Named<'a> {
     specs: &'a [Spec],
-    /// where every path is written out and none takes away: the paths in
-    /// order, each with whether it names a directory only
-    plain: Option<Vec<(&'a [u8], bool)>>,
+    /// where every path is written out and none takes away
+    plain: Option<Plain<'a>>,
+}
+
+/// Paths written out, none of which takes away.
+struct Plain<'a> {
+    /// in order, each with whether it names a directory only
+    paths: Vec<(&'a [u8], bool)>,
+    /// one of them is the whole tree
+    whole: bool,
+    /// how long the shortest and the longest of the others are
+    lens: (usize, usize),
 }
 
 impl<'a> Named<'a> {
@@ -24,7 +33,13 @@ impl<'a> Named<'a> {
             // of a path given twice, the one that names a file as well
             paths.sort_unstable();
             paths.dedup_by_key(|(path, _)| *path);
-            paths
+            let lens = paths.iter().map(|(path, _)| path.len());
+            let lens = lens.filter(|len| *len > 0);
+            Plain {
+                whole: paths.first().is_some_and(|(path, _)| path.is_empty()),
+                lens: (lens.clone().min().unwrap_or(1), lens.max().unwrap_or(0)),
+                paths,
+            }
         });
         Self { specs, plain }
     }
@@ -34,9 +49,13 @@ impl<'a> Named<'a> {
     /// take away from the whole tree. A `name` with `/` at the end is a
     /// directory reported as one path.
     pub fn has(&self, name: &[u8]) -> bool {
-        let Some(paths) = &self.plain else {
+        let Some(plain) = &self.plain else {
             return self.tried(name);
         };
+        if plain.whole {
+            return true;
+        }
+        let (paths, (shortest, longest)) = (&plain.paths, plain.lens);
         let (file, is_dir) = match name.strip_suffix(b"/") {
             Some(dir) => (dir, true),
             None => (name, false),
@@ -45,12 +64,12 @@ impl<'a> Named<'a> {
             let at = paths.binary_search_by(|(given, _)| (*given).cmp(path));
             at.ok().map(|at| paths[at].1)
         };
-        // the whole tree, the name itself, or a directory it lies in
-        given(b"").is_some()
-            || given(file).is_some_and(|dir| is_dir || !dir)
-            || (file.iter().enumerate())
-                .filter(|(_, byte)| **byte == b'/')
-                .any(|(at, _)| given(&file[..at]).is_some())
+        // the name itself, or a directory it lies in: one as long as a
+        // path given is
+        let within = (shortest..=longest).contains(&file.len());
+        within && given(file).is_some_and(|dir| is_dir || !dir)
+            || (shortest..file.len().min(longest + 1))
+                .any(|at| file[at] == b'/' && given(&file[..at]).is_some())
     }
 
     fn tried(&self, name: &[u8]) -> bool {
