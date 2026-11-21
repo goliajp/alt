@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: perf
+summary: index the pack records an add leaves unsynced in a boot run of the chunk index, so that no command after it walks the pack over them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut/many/boot_runs.rs
+touched: crates/alt-odb/src/odb/runs/boot.rs
+touched: crates/alt-odb/src/unsynced/boot_runs.rs
+touched: crates/alt-odb/tests/it/boot_runs.rs
+touched: crates/alt-store/src/blob/settle.rs
+touched: crates/alt-store/src/fresh.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/index/boot.rs
+touched: crates/alt-store/src/packs.rs
+touched: crates/alt-store/src/settle.rs
+touched: docs/recovery.md
