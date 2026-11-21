@@ -7,6 +7,7 @@
 //! never waits for a thread that is busy.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
@@ -20,7 +21,19 @@ struct State<T> {
 struct Shared<T, S> {
     state: Mutex<State<T>>,
     changed: Condvar,
+    /// how much of what was given is not served yet
+    unserved: AtomicUsize,
     serve: S,
+}
+
+/// Counts one piece of work as served when it is let go of: at the end of
+/// its serving, or when that panics.
+struct Served<'a>(&'a AtomicUsize);
+
+impl Drop for Served<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 pub struct Workers<T, S> {
@@ -43,6 +56,7 @@ impl<T, S: Fn(T)> Shared<T, S> {
                     None => return,
                 }
             };
+            let _served = Served(&self.unserved);
             (self.serve)(work);
         }
     }
@@ -60,6 +74,7 @@ impl<T: Send + 'static, S: Fn(T) + Send + Sync + 'static> Workers<T, S> {
             shared: Arc::new(Shared {
                 state: Mutex::new(state),
                 changed: Condvar::new(),
+                unserved: AtomicUsize::new(0),
                 serve,
             }),
             threads: Vec::new(),
@@ -68,6 +83,7 @@ impl<T: Send + 'static, S: Fn(T) + Send + Sync + 'static> Workers<T, S> {
 
     /// Gives `work` to a thread that waits, or to a new one.
     pub fn give(&mut self, work: T) {
+        self.shared.unserved.fetch_add(1, Ordering::SeqCst);
         let mut state = self.shared.state.lock().expect("workers mutex poisoned");
         state.given.push_back(work);
         if state.given.len() <= state.waiting {
@@ -78,6 +94,12 @@ impl<T: Send + 'static, S: Fn(T) + Send + Sync + 'static> Workers<T, S> {
         drop(state);
         let shared = Arc::clone(&self.shared);
         self.threads.push(std::thread::spawn(move || shared.run()));
+    }
+
+    /// How much of what was given is not served yet. Work whose serving
+    /// panicked is served.
+    pub fn unserved(&self) -> usize {
+        self.shared.unserved.load(Ordering::SeqCst)
     }
 
     /// How many threads were started.
@@ -170,5 +192,23 @@ mod tests {
         end_second.send(()).unwrap();
         workers.finish();
         assert!(first_on.try_recv().is_ok() && second_on.try_recv().is_ok());
+    }
+
+    #[test]
+    fn work_given_after_a_panic_is_served_and_none_is_left_unserved() {
+        let mut workers = workers();
+        // told nothing and left alone, the serving panics
+        let (lost, end_lost, lost_on) = work();
+        workers.give(lost);
+        assert_eq!(workers.unserved(), 1);
+        drop(end_lost);
+        assert!(lost_on.recv().is_err());
+        let (next, end_next, next_on) = work();
+        workers.give(next);
+        end_next.send(()).unwrap();
+        assert!(next_on.recv().is_ok());
+        let shared = Arc::clone(&workers.shared);
+        workers.finish();
+        assert_eq!(shared.unserved.load(Ordering::SeqCst), 0);
     }
 }

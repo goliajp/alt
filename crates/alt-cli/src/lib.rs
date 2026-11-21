@@ -18,6 +18,7 @@ pub mod daemon_meta;
 pub mod diagnostics;
 pub mod fsck;
 pub mod group_commit;
+pub mod held;
 pub mod index_tx;
 pub mod json;
 mod log2;
