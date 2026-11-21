@@ -37,6 +37,18 @@ pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> 
     sync_parents(path)
 }
 
+/// Puts `bytes` at `path` in one step and syncs the file and its entry in
+/// the directory it is in, and no directory above that one: for a
+/// directory whose own entry the caller has synced.
+pub fn write_entry(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
+    tmp.write_all(bytes)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path).map_err(|error| error.error)?;
+    File::open(parent)?.sync_all()
+}
+
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref();
     fs::remove_file(path)?;

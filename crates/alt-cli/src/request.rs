@@ -74,9 +74,7 @@ pub fn claim(
         .truncate(false)
         .open(directory.join("lock"))?;
     #[cfg(unix)]
-    {
-        alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX)?;
-    }
+    alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX)?;
     let binding_digest = digest(&alt_json::to_vec(binding)?);
     let intent_path = directory.join("intent.json");
     match std::fs::read(&intent_path) {
@@ -123,7 +121,16 @@ pub fn claim(
                 workspace,
                 started_ms: now_ms(),
             };
-            durable_write(&intent_path, &alt_json::to_vec(&intent)?)?;
+            crate::durable::write_entry(&intent_path, &alt_json::to_vec(&intent)?)?;
+            // the directory was made for this request: its entry is synced
+            // here, once, and so is the entry of the directory above it
+            for above in std::fs::canonicalize(&directory)?
+                .ancestors()
+                .skip(1)
+                .take(2)
+            {
+                File::open(above)?.sync_all()?;
+            }
             Ok(Claimed::Execute(Claim {
                 _lock: lock,
                 directory,
@@ -143,11 +150,11 @@ impl Claim {
             .checked_add(response.stderr.len())
             .and_then(|size| size.checked_add(9));
         if length.is_none_or(|size| size > u32::MAX as usize) {
-            durable_write(&self.directory.join("stdout.bin"), &response.stdout)?;
-            durable_write(&self.directory.join("stderr.bin"), &response.stderr)?;
+            crate::durable::write_entry(&self.directory.join("stdout.bin"), &response.stdout)?;
+            crate::durable::write_entry(&self.directory.join("stderr.bin"), &response.stderr)?;
             let artifacts = json!({"stdout":{"path":"stdout.bin","bytes":response.stdout.len(),"blake3":digest(&response.stdout)},
                 "stderr":{"path":"stderr.bin","bytes":response.stderr.len(),"blake3":digest(&response.stderr)},"exit_code":response.exit_code,"truncated":false});
-            durable_write(
+            crate::durable::write_entry(
                 &self.directory.join("output-artifacts.json"),
                 &alt_json::to_vec(&artifacts)?,
             )?;
@@ -158,7 +165,7 @@ impl Claim {
             return Err(failure.into());
         }
         let bytes = response.encode();
-        durable_write(&self.directory.join("response.bin"), &bytes)?;
+        crate::durable::write_entry(&self.directory.join("response.bin"), &bytes)?;
         let completion = Completion {
             version: 1,
             hash_algorithm: "blake3".into(),
@@ -170,10 +177,11 @@ impl Claim {
             operations,
             outcome: outcome.to_owned(),
         };
-        durable_write(
+        let completion = alt_json::to_vec(&completion)?;
+        Ok(crate::durable::write_entry(
             &self.directory.join("completed.json"),
-            &alt_json::to_vec(&completion)?,
-        )
+            &completion,
+        )?)
     }
 }
 
@@ -188,18 +196,6 @@ pub fn read_completion(directory: &Path, intent: &Intent) -> Res<Option<(Complet
     let response = alt_command_protocol::validate_completion(intent, &completion, &bytes)
         .map_err(|error| Failure::unknown(error.to_string()))?;
     Ok(Some((completion, response)))
-}
-
-fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {
-    let parent = path.parent().ok_or("missing state directory")?;
-    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
-    tmp.write_all(bytes)?;
-    tmp.as_file().sync_all()?;
-    tmp.persist(path)?;
-    for directory in std::fs::canonicalize(parent)?.ancestors().take(3) {
-        File::open(directory)?.sync_all()?;
-    }
-    Ok(())
 }
 
 /// Install an immutable repository identity without racing another caller.
@@ -443,7 +439,8 @@ mod tests {
         let Claimed::Execute(claim) = acquire(root.path(), binding.clone()).unwrap() else {
             panic!("new request must execute");
         };
-        durable_write(&claim.directory.join("response.bin"), b"partial result").unwrap();
+        crate::durable::write_entry(&claim.directory.join("response.bin"), b"partial result")
+            .unwrap();
         drop(claim);
         let error = acquire(root.path(), binding).err().unwrap();
         let failure = error.downcast_ref::<Failure>().unwrap();
