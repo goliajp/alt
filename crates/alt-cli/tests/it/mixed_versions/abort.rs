@@ -164,3 +164,39 @@ fn the_older_program_refuses_to_undo_a_step_and_works_on() {
     assert_eq!(merged.matches("\nparent ").count(), 2, "{merged}");
     same_reads(&old, repo);
 }
+
+/// A merge the older program stopped leaves no record: the step before it
+/// is not taken back from under it.
+#[test]
+#[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+fn a_step_is_not_undone_from_under_what_the_older_program_stopped() {
+    let (old, new) = (old_bin(), new_bin());
+    let dir = alt_os::temp::tempdir().unwrap();
+    let repo = dir.path();
+    diverged(repo);
+    let status = || ok(run(&new, repo, &["status", "--json"]));
+    ok(run(&new, repo, &["branch", "feature/other"]));
+
+    // the new program stops a pick and concludes it with a commit
+    let stopped = run(&new, repo, &["cherry-pick", "feature/side"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    std::fs::write(repo.join("f.txt"), "picked\n").unwrap();
+    ok(run(&new, repo, &["add", "f.txt"]));
+    ok(run(&new, repo, &["commit", "-m", "picked"]));
+    // the older one stops a merge on top of it
+    let stopped = run(&old, repo, &["merge", "feature/side"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    let merging = status();
+    let head = ok(run(&new, repo, &["rev-parse", "HEAD"]));
+
+    let refused = run(&new, repo, &["undo"]);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(said.contains("recovery precondition failed"), "{said}");
+    assert_eq!(status(), merging);
+    assert_eq!(ok(run(&new, repo, &["rev-parse", "HEAD"])), head);
+    assert!(repo.join(".alt/MERGE_HEAD").exists());
+    assert!(!repo.join(".alt/CHERRY_PICK_HEAD").exists());
+    ok(run(&new, repo, &["merge", "--abort"]));
+    same_reads(&old, repo);
+}
