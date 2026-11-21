@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: fsync only the object store files that grew past what an fsync covered
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blob/sync.rs
