@@ -203,7 +203,13 @@ pub fn write_frame(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let length = u32::try_from(payload.len())
         .map_err(|_| bad("daemon frame exceeds the 32-bit length limit"))?
         .to_le_bytes();
-    let written = w.write_vectored(&[io::IoSlice::new(&length), io::IoSlice::new(payload)])?;
+    let both = [io::IoSlice::new(&length), io::IoSlice::new(payload)];
+    let written = loop {
+        match w.write_vectored(&both) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            written => break written?,
+        }
+    };
     match written.checked_sub(length.len()) {
         Some(of_payload) => w.write_all(&payload[of_payload..])?,
         None => {
@@ -366,6 +372,69 @@ mod tests {
             write_frame(&mut out, &payload).unwrap();
             assert_eq!(out.0[..4], 200u32.to_le_bytes(), "{at_once}");
             assert_eq!(read_frame(&mut io::Cursor::new(out.0)).unwrap(), payload);
+        }
+    }
+
+    /// Takes at most `at_once` bytes of each write, of however many
+    /// buffers they come in, and none of the first `interrupted` writes.
+    struct Gathered {
+        out: Vec<u8>,
+        at_once: usize,
+        interrupted: usize,
+    }
+
+    impl Write for Gathered {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.write_vectored(&[io::IoSlice::new(bytes)])
+        }
+
+        fn write_vectored(&mut self, buffers: &[io::IoSlice<'_>]) -> io::Result<usize> {
+            if self.interrupted > 0 {
+                self.interrupted -= 1;
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            let mut left = self.at_once;
+            for buffer in buffers {
+                let taken = buffer.len().min(left);
+                self.out.extend_from_slice(&buffer[..taken]);
+                left -= taken;
+            }
+            Ok(self.at_once - left)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_frame_is_whole_wherever_a_write_of_both_parts_stops() {
+        let payload: Vec<u8> = (0..200u8).collect();
+        for at_once in [1, 3, 4, 5, 150, 203, 204, 1000] {
+            let mut out = Gathered {
+                out: Vec::new(),
+                at_once,
+                interrupted: 0,
+            };
+            write_frame(&mut out, &payload).unwrap();
+            assert_eq!(out.out.len(), 204, "{at_once}");
+            assert_eq!(out.out[..4], 200u32.to_le_bytes(), "{at_once}");
+            assert_eq!(out.out[4..], payload, "{at_once}");
+        }
+    }
+
+    #[test]
+    fn a_write_that_was_interrupted_is_made_again() {
+        let payload: Vec<u8> = (0..200u8).collect();
+        for at_once in [3, 150, 1000] {
+            let mut out = Gathered {
+                out: Vec::new(),
+                at_once,
+                interrupted: 2,
+            };
+            write_frame(&mut out, &payload).unwrap();
+            assert_eq!(out.out[..4], 200u32.to_le_bytes(), "{at_once}");
+            assert_eq!(out.out[4..], payload, "{at_once}");
         }
     }
 
