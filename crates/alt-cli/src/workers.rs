@@ -211,4 +211,33 @@ mod tests {
         workers.finish();
         assert_eq!(shared.unserved.load(Ordering::SeqCst), 0);
     }
+
+    #[test]
+    fn work_given_at_once_to_threads_that_wait_starts_no_thread() {
+        const THREADS: usize = 4;
+        let mut workers = workers();
+        // the first time a thread is started for each piece, the second
+        // time they all wait
+        for _ in 0..2 {
+            // every piece is given before any is told to end
+            let given: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    let (work, end, on) = work();
+                    workers.give(work);
+                    (end, on)
+                })
+                .collect();
+            assert_eq!(workers.unserved(), THREADS);
+            for (end, on) in given {
+                end.send(()).unwrap();
+                assert!(on.recv().is_ok());
+            }
+            while waiting(&workers) < THREADS {
+                std::thread::yield_now();
+            }
+            assert_eq!(workers.started(), THREADS);
+        }
+        assert_eq!(workers.unserved(), 0);
+        workers.finish();
+    }
 }

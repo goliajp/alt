@@ -279,6 +279,34 @@ mod tests {
         assert_eq!(forwarded, by_name);
     }
 
+    // the variables are given to a process of its own: set in this one,
+    // they would change under the tests that read them
+    #[cfg(unix)]
+    #[test]
+    fn a_variable_whose_value_is_not_utf8_is_not_forwarded() {
+        use std::os::unix::ffi::OsStrExt;
+        const CHILD: &str = "ALT_FORWARDED_ENV_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let forwarded = forwarded_env();
+            let has = |name: &str| forwarded.iter().any(|(key, _)| key == name);
+            assert!(!has("EDITOR"), "{forwarded:?}");
+            assert!(forwarded.contains(&("VISUAL".into(), "vi".into())));
+            std::process::exit(73);
+        }
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "daemon::tests::a_variable_whose_value_is_not_utf8_is_not_forwarded",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("EDITOR", std::ffi::OsStr::from_bytes(b"ed\xff"))
+            .env("VISUAL", "vi")
+            .output()
+            .unwrap();
+        assert_eq!(child.status.code(), Some(73), "{child:?}");
+    }
+
     #[test]
     fn request_without_id_round_trips() {
         let req = Request {
@@ -460,12 +488,53 @@ mod tests {
         }
     }
 
+    /// Records the most room any one read was given.
+    struct Roomiest<R>(R, usize);
+
+    impl<R: Read> Read for Roomiest<R> {
+        fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
+            self.1 = self.1.max(into.len());
+            self.0.read(into)
+        }
+    }
+
+    /// The error of reading a frame whose prefix says `said` and which
+    /// has `there` bytes, and the most room a read of it was given.
+    fn short_frame(said: u32, there: usize) -> (io::Error, usize) {
+        let mut frame = said.to_le_bytes().to_vec();
+        frame.resize(4 + there, 7);
+        let mut read = Roomiest(io::Cursor::new(frame), 0);
+        let error = read_frame(&mut read).unwrap_err();
+        (error, read.1)
+    }
+
     #[test]
     fn frame_shorter_than_its_length_prefix_is_an_error() {
-        let mut buf = u32::MAX.to_le_bytes().to_vec();
-        buf.extend_from_slice(b"abc");
-        let err = read_frame(&mut std::io::Cursor::new(buf)).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+        let first_room = FIRST_ROOM as usize;
+        // within the room a frame is first given, at its edge, and past it
+        let cases = [
+            (100, 40),
+            (60_000, 59_999),
+            (FIRST_ROOM as u32, first_room - 1),
+            (FIRST_ROOM as u32 + 1, first_room),
+            (200_000, 100_000),
+            (200_000, 199_999),
+        ];
+        for (said, there) in cases {
+            let (error, _) = short_frame(said, there);
+            assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof, "{said} {there}");
+        }
+    }
+
+    #[test]
+    fn a_length_prefix_alone_is_given_no_more_room_than_what_arrives() {
+        let (error, room) = short_frame(u32::MAX, 3);
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(room <= FIRST_ROOM as usize, "{room}");
+        // past the first room it grows with the bytes, not to the 4 GiB said
+        let (error, room) = short_frame(u32::MAX, 100_000);
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(room <= 1 << 20, "{room}");
     }
 
     #[test]
