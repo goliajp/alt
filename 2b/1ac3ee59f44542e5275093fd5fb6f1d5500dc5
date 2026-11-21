@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: give an interrupted command up for the abort of its own operation only
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/abort.rs
