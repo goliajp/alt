@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: keep the objects of a push once its ref transaction is in the log, whatever fails after
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/batch.rs
+touched: crates/alt-cli/src/receive/ref_tx.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_recorded.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-refs/src/commit.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/policy.rs
+touched: crates/alt-refs/tests/it/main.rs
+touched: crates/alt-refs/tests/it/recorded.rs
