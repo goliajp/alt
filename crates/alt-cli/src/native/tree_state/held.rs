@@ -84,7 +84,7 @@ mod tests {
     fn a_process_that_was_not_told_to_holds_nothing() {
         let dir = alt_os::temp::tempdir().unwrap();
         let path = dir.path().join("index.scan");
-        let first = snapshot(b"first");
+        let mut first = snapshot(b"first");
         first.save(&path).unwrap();
         let shelf = Shelf::new();
         shelf.put(&path, &first);
@@ -99,7 +99,7 @@ mod tests {
         shelf.start();
         assert!(shelf.get(&path).is_none());
 
-        let first = snapshot(b"first");
+        let mut first = snapshot(b"first");
         // nothing is held for a file that is not there
         shelf.put(&path, &first);
         assert!(shelf.get(&path).is_none());
@@ -115,9 +115,9 @@ mod tests {
         // kept under other names, so that none of them gives its inode,
         // and with it possibly its whole stat, to a later one
         std::fs::hard_link(&path, dir.path().join("first")).unwrap();
-        first.save(&path).unwrap();
+        snapshot(b"first").save(&path).unwrap();
         assert!(shelf.get(&path).is_none());
-        let second = snapshot(b"second");
+        let mut second = snapshot(b"second");
         std::fs::hard_link(&path, dir.path().join("again")).unwrap();
         second.save(&path).unwrap();
         assert!(shelf.get(&path).is_none());

@@ -42,6 +42,14 @@ impl AsRead {
     }
 }
 
+impl AsRead {
+    /// Whether the index was read from a file that ends in `checksum`.
+    pub(in crate::native) fn ends_in(&self, checksum: &[u8]) -> bool {
+        let ends = |bytes: &Vec<u8>| !checksum.is_empty() && bytes.ends_with(checksum);
+        self.bytes.as_ref().is_some_and(ends)
+    }
+}
+
 impl NativeRepo<'_> {
     /// The workspace's index, an empty one where there is no index file,
     /// with the bytes it was read from.

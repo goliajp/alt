@@ -125,7 +125,7 @@ impl NativeRepo<'_> {
         let after = index_of(entries);
         let staged = plan.staged;
         let touched = plan.touched;
-        self.put_staged(before, after, &touched, &snapshot, stats, &found.clock)?;
+        self.put_staged(before, after, &touched, snapshot, stats, &found.clock)?;
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {
@@ -211,31 +211,65 @@ impl NativeRepo<'_> {
 
     /// Puts the index `after` in place of `before` where they differ, and
     /// keeps the snapshot of what is then in place, with the stat each
-    /// staged file had before it was read.
+    /// staged file had before it was read. `snapshot` is the one the scan
+    /// went by.
     fn put_staged(
         &mut self,
         before: recovery::AsRead,
         after: Index,
         touched: &[BString],
-        snapshot: &Snapshot,
+        mut snapshot: Snapshot,
         stats: Vec<(BString, FileStat)>,
         clock: &alt_worktree::Clock,
     ) -> Res<()> {
         if after.entries == before.entries {
-            self.keep_snapshot(snapshot);
+            self.keep_snapshot(&mut snapshot);
             return Ok(());
         }
-        let mut next = Snapshot::of_index(&after, &[], self.store.algo()?, Some(snapshot));
+        let algo = self.store.algo()?;
+        // a snapshot of the index that is replaced becomes the one of the
+        // new index at the paths that differ; any other is made anew
+        let changes = before
+            .ends_in(&snapshot.index_id)
+            .then(|| replaced(&after, touched));
+        let anew = match changes {
+            Some(_) => None,
+            None => Some(Snapshot::of_index(&after, &[], algo, Some(&snapshot))),
+        };
         self.write_index_transaction(before, after, touched, None)?;
-        let raw = self.store.algo()?.raw_len();
-        next.index_id = tree_state::index_checksum(&self.index_path, raw)?.unwrap_or_default();
+        let id = tree_state::index_checksum(&self.index_path, algo.raw_len())?.unwrap_or_default();
+        let mut next = match (changes, anew) {
+            (Some(changes), _) => {
+                snapshot.replace_paths(&id, &changes);
+                snapshot
+            }
+            (None, anew) => {
+                let mut anew = anew.expect("made where there are no changes to go by");
+                anew.index_id = id;
+                anew
+            }
+        };
         for (path, stat) in stats {
             next.settle_path(&path, stat, clock);
         }
         next.fill_trees();
-        self.keep_snapshot(&next);
+        self.keep_snapshot(&mut next);
         Ok(())
     }
+}
+
+/// What `after` has at each of the paths `touched`, which are in order.
+fn replaced<'a>(after: &Index, touched: &'a [BString]) -> Vec<alt_worktree::Replaced<'a>> {
+    let entries = &after.entries;
+    let at = |path: &'a BString| {
+        let from = entries.partition_point(|e| e.path < *path);
+        let there = entries[from..].iter().take_while(|e| e.path == *path);
+        alt_worktree::Replaced {
+            path: path.as_slice(),
+            entries: there.map(|e| (e.mode, e.flags, e.oid)).collect(),
+        }
+    };
+    touched.iter().map(at).collect()
 }
 
 fn index_of(entries: Vec<IndexEntry>) -> Index {

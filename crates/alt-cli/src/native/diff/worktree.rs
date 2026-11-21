@@ -19,7 +19,7 @@ impl NativeRepo<'_> {
         let mut snapshot = self.worktree_snapshot()?;
         let (delta, _, scanned) =
             self.scan_delta_within(&mut snapshot, alt_worktree::Untracked::No, &[])?;
-        self.keep_snapshot(&snapshot);
+        self.keep_snapshot(&mut snapshot);
         let mut old: Vec<WorkEntry> = delta
             .changed
             .iter()

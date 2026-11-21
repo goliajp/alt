@@ -8,16 +8,14 @@
 //! from by that index's checksum, and a snapshot of an older index gives
 //! what it knows to the entries that did not change.
 
-use std::path::Path;
-
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_git_index::Index;
 
-const MAGIC: &[u8; 8] = b"ALTWTC01";
-const HEADER: usize = 80;
-const ENTRY: usize = 104;
-const DIR: usize = 56;
-const CHECKSUM: usize = 32;
+mod file;
+mod journal;
+mod replace;
+
+pub use replace::Replaced;
 
 /// What `lstat` says about a file, as far as it tells a changed file from
 /// an unchanged one.
@@ -72,6 +70,11 @@ pub struct Snapshot {
     pub dirs: Vec<Dir>,
     /// differs from the file it was read from
     pub changed: bool,
+    /// the file this was read from or written to, while what it says and
+    /// `noted` together are what this says
+    origin: Option<file::Origin>,
+    /// what was done to this since, as a record of the file tells it
+    noted: Vec<u8>,
 }
 
 impl Snapshot {
@@ -117,6 +120,7 @@ impl Snapshot {
         if self.entries[entry].stat != stat {
             self.entries[entry].stat = stat;
             self.changed = true;
+            self.note_stat(entry, stat);
         }
     }
 
@@ -178,10 +182,12 @@ impl Snapshot {
             entries,
             dirs: Vec::new(),
             changed: true,
+            origin: None,
+            noted: Vec::new(),
         };
         snapshot.build_dirs();
         if let Some(prior) = prior {
-            snapshot.keep_trees(prior, &same);
+            snapshot.keep_trees(&prior.dirs, &same);
         }
         snapshot
     }
@@ -239,7 +245,11 @@ impl Snapshot {
         self.dirs = dirs;
     }
 
-    fn keep_trees(&mut self, prior: &Snapshot, same: &[Option<u32>]) {
+    /// Gives each directory whose entries are all entries of one of the
+    /// directories `prior`, in the same order and none other between
+    /// them, the tree that one has. `same[i]`: which entry entry `i` was
+    /// when `prior` were the directories.
+    fn keep_trees(&mut self, prior: &[Dir], same: &[Option<u32>]) {
         // breaks[i]: how many of the entries before i do not continue the
         // run of unchanged neighbours they stand in
         let mut breaks = vec![0u32; same.len() + 1];
@@ -251,7 +261,6 @@ impl Snapshot {
             breaks[i + 1] = breaks[i] + u32::from(!joined);
         }
         let known: std::collections::HashMap<(u32, u32, u32), &Dir> = prior
-            .dirs
             .iter()
             .filter(|d| d.tree.is_some())
             .map(|d| ((d.first, d.end, d.path_len), d))
@@ -271,169 +280,6 @@ impl Snapshot {
             }
         }
     }
-
-    pub fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(
-            HEADER
-                + self.entries.len() * ENTRY
-                + self.paths.len()
-                + self.dirs.len() * DIR
-                + CHECKSUM,
-        );
-        out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&1u32.to_le_bytes());
-        out.extend_from_slice(&(self.algo.raw_len() as u32).to_le_bytes());
-        let mut id = [0u8; 32];
-        id[..self.index_id.len()].copy_from_slice(&self.index_id);
-        out.extend_from_slice(&id);
-        out.extend_from_slice(&(self.index_id.len() as u64).to_le_bytes());
-        out.extend_from_slice(&(self.entries.len() as u64).to_le_bytes());
-        out.extend_from_slice(&(self.paths.len() as u64).to_le_bytes());
-        out.extend_from_slice(&(self.dirs.len() as u64).to_le_bytes());
-        for e in &self.entries {
-            out.extend_from_slice(&e.path.0.to_le_bytes());
-            out.extend_from_slice(&e.path.1.to_le_bytes());
-            out.extend_from_slice(&e.mode.to_le_bytes());
-            out.extend_from_slice(&e.flags.to_le_bytes());
-            out.extend_from_slice(&[u8::from(e.stat.is_some()), 0]);
-            put_oid(&mut out, Some(&e.oid));
-            let s = e.stat.unwrap_or(FileStat {
-                mtime: (0, 0),
-                ctime: (0, 0),
-                dev: 0,
-                ino: 0,
-                size: 0,
-                mode: 0,
-            });
-            out.extend_from_slice(&s.mtime.0.to_le_bytes());
-            out.extend_from_slice(&s.ctime.0.to_le_bytes());
-            out.extend_from_slice(&s.mtime.1.to_le_bytes());
-            out.extend_from_slice(&s.ctime.1.to_le_bytes());
-            out.extend_from_slice(&s.dev.to_le_bytes());
-            out.extend_from_slice(&s.ino.to_le_bytes());
-            out.extend_from_slice(&s.size.to_le_bytes());
-            out.extend_from_slice(&s.mode.to_le_bytes());
-            out.extend_from_slice(&[0; 4]);
-        }
-        out.extend_from_slice(&self.paths);
-        for d in &self.dirs {
-            out.extend_from_slice(&d.first.to_le_bytes());
-            out.extend_from_slice(&d.end.to_le_bytes());
-            out.extend_from_slice(&d.path_len.to_le_bytes());
-            out.extend_from_slice(&d.descendants.to_le_bytes());
-            out.extend_from_slice(&[u8::from(d.tree.is_some()), 0, 0, 0, 0, 0, 0, 0]);
-            put_oid(&mut out, d.tree.as_ref());
-        }
-        let sum = alt_hash::blake3::hash(&out);
-        out.extend_from_slice(sum.as_bytes());
-        out
-    }
-
-    /// The snapshot in `bytes`; `None` when they are not one this version
-    /// wrote in full.
-    pub fn decode(bytes: &[u8], algo: HashAlgo) -> Option<Snapshot> {
-        let body = bytes.len().checked_sub(CHECKSUM)?;
-        if body < HEADER || &bytes[..8] != MAGIC || u32le(bytes, 8) != 1 {
-            return None;
-        }
-        if u32le(bytes, 12) as usize != algo.raw_len() {
-            return None;
-        }
-        let id_len = u64le(bytes, 48) as usize;
-        let (n, paths_len, n_dirs) = (
-            u64le(bytes, 56) as usize,
-            u64le(bytes, 64) as usize,
-            u64le(bytes, 72) as usize,
-        );
-        let paths_at = HEADER.checked_add(n.checked_mul(ENTRY)?)?;
-        let dirs_at = paths_at.checked_add(paths_len)?;
-        if id_len > 32 || dirs_at.checked_add(n_dirs.checked_mul(DIR)?)? != body {
-            return None;
-        }
-        if alt_hash::blake3::hash(&bytes[..body]).as_bytes()[..] != bytes[body..] {
-            return None;
-        }
-        let raw = algo.raw_len();
-        let mut entries = Vec::with_capacity(n);
-        for i in 0..n {
-            let b = &bytes[HEADER + i * ENTRY..][..ENTRY];
-            let path = (u32le(b, 0), u32le(b, 4));
-            if path.0 as usize + path.1 as usize > paths_len {
-                return None;
-            }
-            let stat = (b[14] != 0).then(|| FileStat {
-                mtime: (u64le(b, 48) as i64, u32le(b, 64)),
-                ctime: (u64le(b, 56) as i64, u32le(b, 68)),
-                dev: u64le(b, 72),
-                ino: u64le(b, 80),
-                size: u64le(b, 88),
-                mode: u32le(b, 96),
-            });
-            entries.push(Entry {
-                path,
-                mode: u32le(b, 8),
-                flags: u16::from_le_bytes([b[12], b[13]]),
-                oid: ObjectId::from_bytes(algo, &b[16..16 + raw]).ok()?,
-                stat,
-            });
-        }
-        let mut dirs = Vec::with_capacity(n_dirs);
-        for i in 0..n_dirs {
-            let b = &bytes[dirs_at + i * DIR..][..DIR];
-            let d = Dir {
-                first: u32le(b, 0),
-                end: u32le(b, 4),
-                path_len: u32le(b, 8),
-                descendants: u32le(b, 12),
-                tree: match b[16] {
-                    0 => None,
-                    _ => Some(ObjectId::from_bytes(algo, &b[24..24 + raw]).ok()?),
-                },
-            };
-            if d.first > d.end || d.end as usize > n || i + d.descendants as usize >= n_dirs {
-                return None;
-            }
-            dirs.push(d);
-        }
-        if dirs.is_empty() {
-            return None;
-        }
-        Some(Snapshot {
-            index_id: bytes[16..16 + id_len].to_vec(),
-            algo,
-            paths: bytes[paths_at..dirs_at].to_vec(),
-            entries,
-            dirs,
-            changed: false,
-        })
-    }
-
-    /// Reads the snapshot at `path`; `None` when there is none to use.
-    pub fn load(path: &Path, algo: HashAlgo) -> Option<Snapshot> {
-        Snapshot::decode(&std::fs::read(path).ok()?, algo)
-    }
-
-    /// Puts the snapshot at `path` in one step. It is not synced: a file
-    /// that did not reach the disk whole fails its checksum and is ignored.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        crate::control::put(path, &self.encode())
-    }
-}
-
-fn put_oid(out: &mut Vec<u8>, oid: Option<&ObjectId>) {
-    let mut raw = [0u8; 32];
-    if let Some(oid) = oid {
-        raw[..oid.as_bytes().len()].copy_from_slice(oid.as_bytes());
-    }
-    out.extend_from_slice(&raw);
-}
-
-fn u32le(b: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
-}
-
-fn u64le(b: &[u8], at: usize) -> u64 {
-    u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
 }
 
 #[cfg(test)]
@@ -442,11 +288,11 @@ mod tests {
     use alt_git_codec::ObjectKind;
     use alt_git_index::IndexEntry;
 
-    fn oid(b: u8) -> ObjectId {
+    pub(super) fn oid(b: u8) -> ObjectId {
         ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &[b])
     }
 
-    fn index(files: &[(&str, u8)]) -> Index {
+    pub(super) fn index(files: &[(&str, u8)]) -> Index {
         let entries = files
             .iter()
             .map(|(path, content)| IndexEntry {
@@ -471,7 +317,7 @@ mod tests {
         }
     }
 
-    fn stat(n: u64) -> FileStat {
+    pub(super) fn stat(n: u64) -> FileStat {
         FileStat {
             mtime: (n as i64, 1),
             ctime: (n as i64, 2),
@@ -526,31 +372,6 @@ mod tests {
         let paths: Vec<&[u8]> = (0..s.dirs.len()).map(|d| s.dir_path(d)).collect();
         assert_eq!(paths, vec![&b""[..], b"a", b"ab"]);
         assert_eq!((s.dirs[1].first, s.dirs[1].end), (1, 2));
-    }
-
-    #[test]
-    fn encoding_round_trips_and_damage_is_refused() {
-        let i = index(&[("a", 1), ("b/c", 2)]);
-        let mut s = Snapshot::of_index(&i, &[7; 20], HashAlgo::Sha1, None);
-        s.set_stat(1, Some(stat(9)));
-        s.dirs[1].tree = Some(oid(8));
-        let bytes = s.encode();
-        let back = Snapshot::decode(&bytes, HashAlgo::Sha1).unwrap();
-        assert!(!back.changed);
-        assert_eq!(back.entries, s.entries);
-        assert_eq!(back.dirs, s.dirs);
-        assert_eq!(back.index_id, vec![7; 20]);
-        assert_eq!(back.path(1), b"b/c");
-        for at in [0, 20, HEADER + 3, bytes.len() - 1] {
-            let mut bad = bytes.clone();
-            bad[at] ^= 1;
-            assert!(
-                Snapshot::decode(&bad, HashAlgo::Sha1).is_none(),
-                "byte {at}"
-            );
-        }
-        assert!(Snapshot::decode(&bytes[..bytes.len() - 1], HashAlgo::Sha1).is_none());
-        assert!(Snapshot::decode(&bytes, HashAlgo::Sha256).is_none());
     }
 
     #[test]

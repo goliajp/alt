@@ -26,9 +26,10 @@ impl Snapshot {
                 continue;
             }
             if let Some(bytes) = self.tree_bytes(d) {
-                self.dirs[d].tree =
-                    Some(ObjectId::hash_object(self.algo, ObjectKind::Tree, &bytes));
+                let tree = ObjectId::hash_object(self.algo, ObjectKind::Tree, &bytes);
+                self.dirs[d].tree = Some(tree);
                 self.changed = true;
+                self.note_tree(d, &tree);
             }
         }
     }

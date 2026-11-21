@@ -41,7 +41,7 @@ pub use commit::{Sig, build_commit_bytes, write_commit};
 pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use error::WorktreeError;
 pub use kind::ChangeKind;
-pub use snapshot::{Dir, Entry, FileStat, Snapshot};
+pub use snapshot::{Dir, Entry, FileStat, Replaced, Snapshot};
 #[cfg(unix)]
 pub use untracked::{Untracked, hidden_by};
 #[cfg(target_os = "linux")]

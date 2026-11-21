@@ -70,7 +70,7 @@ impl NativeRepo<'_> {
 
     /// Keeps what a scan learned. The snapshot is a cache: where it cannot
     /// be written, the next scan reads the files again.
-    pub(super) fn keep_snapshot(&self, snapshot: &Snapshot) {
+    pub(super) fn keep_snapshot(&self, snapshot: &mut Snapshot) {
         let path = self.snapshot_path();
         if snapshot.changed && snapshot.save(&path).is_ok() {
             HELD.put(&path, snapshot);
@@ -203,7 +203,7 @@ impl NativeRepo<'_> {
         if let Some(prior) = &prior {
             self.follow_index(prior, &mut next);
         }
-        self.keep_snapshot(&next);
+        self.keep_snapshot(&mut next);
         Ok(())
     }
 
@@ -231,7 +231,7 @@ impl NativeRepo<'_> {
         snapshot.fill_trees();
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
         let delta = self.scan_delta(&mut snapshot, untracked)?;
-        self.keep_snapshot(&snapshot);
+        self.keep_snapshot(&mut snapshot);
         Ok(TreeState {
             snapshot,
             staged,
@@ -277,7 +277,7 @@ impl NativeRepo<'_> {
         let mut snapshot = self.worktree_snapshot()?;
         snapshot.fill_trees();
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
-        self.keep_snapshot(&snapshot);
+        self.keep_snapshot(&mut snapshot);
         Ok(staged)
     }
 }
