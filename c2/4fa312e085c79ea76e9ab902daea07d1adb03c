@@ -1,0 +1,26 @@
+schema: alt-meta/1
+type: feat
+summary: name the operation under way in status --json from one query
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/in_progress.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/tests/fixtures/cli/commits-branches-tags.txt
+touched: crates/alt-cli/tests/fixtures/cli/empty-repository.txt
+touched: crates/alt-cli/tests/fixtures/cli/flow-workspaces.txt
+touched: crates/alt-cli/tests/fixtures/cli/identities-signatures.txt
+touched: crates/alt-cli/tests/fixtures/cli/intake.txt
+touched: crates/alt-cli/tests/fixtures/cli/lfs-pointers.txt
+touched: crates/alt-cli/tests/fixtures/cli/merge-conflict.txt
+touched: crates/alt-cli/tests/fixtures/cli/rebase.txt
+touched: crates/alt-cli/tests/fixtures/cli/remotes-push-fetch-clone.txt
+touched: crates/alt-cli/tests/fixtures/cli/revert-cherry-pick.txt
+touched: crates/alt-cli/tests/fixtures/cli/state-rebase-stopped.txt
+touched: crates/alt-cli/tests/fixtures/cli/state-revert-stopped.txt
+touched: crates/alt-cli/tests/fixtures/cli/uncommitted-changes.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/operation_state.rs
