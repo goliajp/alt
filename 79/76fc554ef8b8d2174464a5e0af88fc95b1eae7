@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: parse and hash the index once less for each side of an index change
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/as_read.rs
+touched: crates/alt-cli/src/native/recovery/prepared.rs
+touched: crates/alt-git-index/src/lib.rs
+touched: crates/alt-git-index/src/serialize.rs
