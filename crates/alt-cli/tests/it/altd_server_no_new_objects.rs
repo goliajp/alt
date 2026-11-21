@@ -8,7 +8,7 @@ use std::process::Command;
 use crate::altd_server::{alt, ok, spawn_server};
 
 /// An alt repository with one commit on `main`; returns the commit too.
-fn seeded() -> (alt_os::temp::TempDir, String) {
+pub(crate) fn seeded() -> (alt_os::temp::TempDir, String) {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     ok(alt(root, &["init", "."]));
@@ -19,7 +19,7 @@ fn seeded() -> (alt_os::temp::TempDir, String) {
     (dir, seed)
 }
 
-fn tip(root: &Path, rev: &str) -> String {
+pub(crate) fn tip(root: &Path, rev: &str) -> String {
     ok(alt(root, &["log", "--pretty=oneline", "-n", "1", rev]))
         .split_whitespace()
         .next()
@@ -86,17 +86,25 @@ fn git_creates_a_branch_and_a_tag_at_a_commit_the_server_has() {
     assert_eq!(tip(origin.path(), "refs/tags/v1"), seed);
 }
 
-/// One create command, with `pack` behind the flush.
-fn create(url: &str, name: &str, new: &str, pack: &[u8]) -> alt_wire::ReportStatus {
-    let update = alt_wire::RefUpdate {
+/// The command that points `name`, absent so far, at `new`.
+pub(crate) fn creation(name: &str, new: &str) -> alt_wire::RefUpdate {
+    alt_wire::RefUpdate {
         old: None,
         new: Some(new.parse().unwrap()),
         name: name.into(),
-    };
+    }
+}
+
+/// A push of `updates`, with `pack` behind the flush.
+pub(crate) fn push(
+    url: &str,
+    updates: &[alt_wire::RefUpdate],
+    pack: &[u8],
+) -> alt_wire::ReportStatus {
     let mut body = Vec::new();
     alt_wire::encode_push_request(
         &mut body,
-        &[update],
+        updates,
         &["report-status"],
         alt_git_codec::HashAlgo::Sha1,
         pack,
@@ -108,18 +116,27 @@ fn create(url: &str, name: &str, new: &str, pack: &[u8]) -> alt_wire::ReportStat
     alt_wire::parse_report_status(&mut reply.as_slice()).unwrap()
 }
 
-#[test]
-fn a_create_needs_its_object_with_an_empty_pack_or_none() {
-    let (origin, seed) = seeded();
-    let server = spawn_server(origin.path());
-    let url = format!("http://{}/", server.addr);
+fn create(url: &str, name: &str, new: &str, pack: &[u8]) -> alt_wire::ReportStatus {
+    push(url, &[creation(name, new)], pack)
+}
+
+/// A pack of no objects.
+fn empty_pack() -> Vec<u8> {
     let scratch = alt_os::temp::tempdir().unwrap();
     let written =
         alt_git_pack::PackWriter::create(scratch.path(), alt_git_codec::HashAlgo::Sha1, 0)
             .unwrap()
             .finish()
             .unwrap();
-    let empty = std::fs::read(&written.pack_path).unwrap();
+    std::fs::read(&written.pack_path).unwrap()
+}
+
+#[test]
+fn a_create_needs_its_object_with_an_empty_pack_or_none() {
+    let (origin, seed) = seeded();
+    let server = spawn_server(origin.path());
+    let url = format!("http://{}/", server.addr);
+    let empty = empty_pack();
     let accepted = |name: &str| vec![alt_wire::CommandStatus::Ok(name.to_owned())];
 
     let report = create(&url, "refs/heads/with-pack", &seed, &empty);
@@ -148,5 +165,43 @@ fn a_create_needs_its_object_with_an_empty_pack_or_none() {
     assert_eq!(tip(origin.path(), "refs/heads/with-pack"), seed);
     assert_eq!(tip(origin.path(), "refs/heads/without-pack"), seed);
     let branches = ok(alt(origin.path(), &["branch"]));
+    assert!(!branches.contains("absent"), "{branches}");
+}
+
+/// A creation at an object the server lacks refuses the commands sent with
+/// it: neither the creation nor the deletion beside it takes effect.
+#[test]
+fn an_absent_object_refuses_the_creations_and_deletions_sent_with_it() {
+    let (origin, seed) = seeded();
+    ok(alt(origin.path(), &["branch", "kept"]));
+    let server = spawn_server(origin.path());
+    let url = format!("http://{}/", server.addr);
+    let empty = empty_pack();
+    let absent = "1".repeat(40);
+    let delete = alt_wire::RefUpdate {
+        old: Some(seed.parse().unwrap()),
+        new: None,
+        name: "refs/heads/kept".into(),
+    };
+    for (n, pack) in [&empty[..], &[][..]].into_iter().enumerate() {
+        let updates = [
+            creation(&format!("refs/heads/present-{n}"), &seed),
+            delete.clone(),
+            creation(&format!("refs/heads/absent-{n}"), &absent),
+        ];
+        let report = push(&url, &updates, pack);
+        assert_eq!(report.commands.len(), 3, "{report:?}");
+        for status in &report.commands {
+            assert!(
+                matches!(status, alt_wire::CommandStatus::Ng { .. }),
+                "pack of {} bytes: {report:?}",
+                pack.len()
+            );
+        }
+    }
+    drop(server);
+    assert_eq!(tip(origin.path(), "refs/heads/kept"), seed);
+    let branches = ok(alt(origin.path(), &["branch"]));
+    assert!(!branches.contains("present"), "{branches}");
     assert!(!branches.contains("absent"), "{branches}");
 }

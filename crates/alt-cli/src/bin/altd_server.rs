@@ -40,7 +40,7 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 #[path = "altd_server/pack_ingest.rs"]
 mod pack_ingest;
-use pack_ingest::{absent_tip_block, apply_pack_into_store, prepare_pack_for_ingest};
+use pack_ingest::{land, prepare_pack_for_ingest};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
@@ -1192,7 +1192,6 @@ fn handle_receive_pack(
         (_, false) => None,
     };
 
-    let mut new_commits: Vec<ObjectId> = Vec::new();
     if pack_bytes_streamed > max {
         let r = Response::from_string(format!("payload too large: pack body exceeds cap {max}"))
             .with_status_code(StatusCode(413));
@@ -1200,165 +1199,45 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    // checkpoint + apply + post-ingest snapshot run under a
-    // single store guard so other writers cannot advance the odb cursor
-    // between them. That makes the rewind below atomic against
-    // concurrent pushes without serialising the receive-pack flow as a
-    // whole: ingest is briefly serial via `store.lock()` (already true
-    // before the rewind window existed), but commit + `await_durable` still overlap with other
-    // pushes — group-commit fsync coalescing is preserved. The
-    // post-ingest snapshot lets the rewind site detect (and skip) a
-    // rollback that would otherwise trample a concurrent push's
-    // writes appended after ours.
+    // a pack that fails to index is told to `land` as packed but not
+    // prepared, which reports it as the unpack error
     let prepared = if sig_block.is_some() || pack_bytes_streamed == 0 {
         None
     } else {
-        // Failure here is surfaced as unpack_result error below; we drop
-        // the Err and let the match arm in the locked block turn it into
-        // the right `index-pack: failed to prepare pack` reason.
         prepare_pack_for_ingest(&pack_tmp_path).ok()
     };
-    let (ingest_ckpt, post_ingest_ckpt, unpack_result): (
-        alt_odb::OdbCheckpoint,
-        alt_odb::OdbCheckpoint,
-        Result<(), String>,
-    ) = {
-        let mut g = store.lock().unwrap();
-        // Cheap pre-snapshot: just read in-memory `appended_lens` (no
-        // flock, no sync_from_disk). Safe because the server is the only
-        // writer to this store — no other *process* can be appending,
-        // and the in-process store mutex above serialises threads. The
-        // first `put()` in apply still does its own acquire+sync, so
-        // the actual write happens against a freshly reconciled state.
-        // Skipping the sync here was group-commit critical: pushes
-        // need to pile up at await_durable in a tight enough window to
-        // coalesce, and even a few hundred µs of extra syscalls per
-        // push spread them past the leader's fsync.
-        let pre = g.odb().cursor()?;
-        let result: Result<(), String> = match (&prepared, sig_block.is_some(), pack_bytes_streamed)
-        {
-            (None, true, _) => Ok(()),
-            (None, false, 0) => Ok(()),
-            (None, false, _) => Err("index-pack: failed to prepare pack".into()),
-            (Some((ip, order)), _, _) => match apply_pack_into_store(&mut g, ip, order) {
-                Ok(commits) => {
-                    new_commits = commits;
-                    Ok(())
-                }
-                Err(e) => Err(format!("index-pack: {e}")),
-            },
+    let (unpack_result, moved) = land(
+        writer,
+        prepared.as_ref(),
+        pack_bytes_streamed != 0,
+        sig_block,
+        &head.updates,
+        &effective_principal,
+        sig_label,
+    )?;
+    // wait for the group-commit leader's fsync to cover us, outside the
+    // store lock: this is the only place we touch disk durability on the
+    // receive-pack path. Other concurrent pushes coalesce into the same
+    // flush, so 4-way concurrent traffic pays ~1 fsync instead of 4.
+    let moved = moved.and_then(|ticket| {
+        let durable = match ticket {
+            Some(t) => writer.group.await_durable(&writer.sink, t),
+            None => Ok(()),
         };
-        // Failed ingest may have appended objects before returning an error.
-        // Finish that batch before another thread starts a durability barrier.
-        let result = match g.odb_mut().flush_pending() {
-            Ok(()) => result,
-            Err(e) => Err(format!("index-pack: {e}")),
-        };
-        // Same cheap snapshot for the post-ingest cursor.
-        let post = g.odb().cursor()?;
-        (pre, post, result)
-    };
-
-    // if the policy requires every commit to carry a verified
-    // alt-sig header, scan the new commits *after* ingest and decide
-    // before touching any refs. A failure here flips into a per-command
-    // ng identical in shape to the push-level signature gate above.
-    let commit_block: Option<String> = if sig_block.is_none() && unpack_result.is_ok() {
-        require_signed_commits_block(store, &effective_principal, &new_commits)?
-    } else {
-        None
-    };
-
-    // Apply ref changes only if the pack unpacked cleanly *and* the
-    // signature gate(s) passed; otherwise mark every command `ng` so
-    // the client sees a coherent reason.
-    let mut command_status: Vec<CommandStatus> = Vec::new();
-    let absent_block = match &unpack_result {
-        Ok(()) => absent_tip_block(store, &head.updates)?,
-        Err(_) => None,
-    };
-    let any_block = sig_block.clone().or(commit_block).or(absent_block);
-    // flips to true the moment commit_ref_updates returns Ok.
-    // While this is still false at the rewind site below, the new
-    // append-only writes are rolled back to `ingest_ckpt` so the odb is
-    // bit-identical to its pre-push state. A successful commit makes
-    // those bytes part of the history we serve; flipping the flag
-    // short-circuits the rewind so a *durable* push isn't undone.
-    let mut committed = false;
-    if let Some(reason) = &any_block {
-        for u in &head.updates {
-            command_status.push(CommandStatus::Ng {
+        log.fsync_seq = Some(writer.group.fsync_count());
+        durable.map_err(|e| format!("durability: {e}"))
+    });
+    let command_status: Vec<CommandStatus> = head
+        .updates
+        .iter()
+        .map(|u| match &moved {
+            Ok(()) => CommandStatus::Ok(u.name.clone()),
+            Err(reason) => CommandStatus::Ng {
                 name: u.name.clone(),
                 reason: reason.clone(),
-            });
-        }
-    } else if unpack_result.is_ok() {
-        match commit_ref_updates(writer, &head.updates, &effective_principal, sig_label) {
-            Ok(ticket) => {
-                committed = true;
-                // wait for the group-commit leader's fsync to
-                // cover us — this is the only place we touch disk
-                // durability on the receive-pack path. Other concurrent
-                // pushes coalesce into the same flush, so 4-way
-                // concurrent traffic pays ~1 fsync instead of 4.
-                let durable: Result<(), String> = match ticket {
-                    Some(t) => writer.group.await_durable(&writer.sink, t),
-                    None => Ok(()),
-                };
-                log.fsync_seq = Some(writer.group.fsync_count());
-                if let Err(e) = durable {
-                    for u in &head.updates {
-                        command_status.push(CommandStatus::Ng {
-                            name: u.name.clone(),
-                            reason: format!("durability: {e}"),
-                        });
-                    }
-                } else {
-                    for u in &head.updates {
-                        command_status.push(CommandStatus::Ok(u.name.clone()));
-                    }
-                }
-            }
-            Err(reason) => {
-                for u in &head.updates {
-                    command_status.push(CommandStatus::Ng {
-                        name: u.name.clone(),
-                        reason: reason.clone(),
-                    });
-                }
-            }
-        }
-    } else {
-        for u in &head.updates {
-            command_status.push(CommandStatus::Ng {
-                name: u.name.clone(),
-                reason: "pack unpack failed".into(),
-            });
-        }
-    }
-
-    // if we ingested objects but never reached a durable
-    // commit (signature / commit-signing gate rejected, ref-tx returned
-    // Err, or the pack itself failed mid-ingest), roll the odb back to
-    // the pre-ingest checkpoint. Rewind is skipped (orphans left for a
-    // future GC pass) when another push committed in the same window
-    // — detected by comparing the live cursor to our post-ingest
-    // snapshot. push_lock is intentionally NOT held here: holding it
-    // through commit would serialize fsyncs and break the group
-    // commit coalescing that makes high-concurrency pushes cheap. The
-    // race trades a rare orphan leak for steady-state throughput.
-    if !committed {
-        let mut g = store.lock().unwrap();
-        if g.odb_mut().checkpoint()? == post_ingest_ckpt {
-            if let Err(e) = g.odb_mut().rewind(ingest_ckpt) {
-                eprintln!("altd-server: rewind after rejected push failed: {e}");
-            }
-        } else {
-            eprintln!(
-                "altd-server: skipping rewind after rejected push (another writer interleaved)"
-            );
-        }
-    }
+            },
+        })
+        .collect();
 
     let mut out = Vec::new();
     let want_sideband = head.capabilities.iter().any(|c| c == "side-band-64k");
@@ -1515,29 +1394,19 @@ fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
 /// `Ok(None)` when either the policy doesn't require commit signatures
 /// or every new commit passes.
 fn require_signed_commits_block(
-    store: &Mutex<Store>,
+    store: &Store,
     principal: &Principal,
     new_commits: &[ObjectId],
 ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let (require, trust) = {
-        let guard = store.lock().unwrap();
-        let caps = guard.capabilities_for(principal);
-        if !caps.require_signed_commits {
-            return Ok(None);
-        }
-        (caps.require_signed_commits, guard.trust_keys()?)
-    };
-    if !require {
+    if !store.capabilities_for(principal).require_signed_commits {
         return Ok(None);
     }
+    let trust = store.trust_keys()?;
     for oid in new_commits {
-        let bytes = {
-            let guard = store.lock().unwrap();
-            let Some(raw) = guard.odb_get(oid)? else {
-                return Ok(Some(format!("commit {oid} missing from odb after ingest")));
-            };
-            raw.data
+        let Some(raw) = store.odb_get(oid)? else {
+            return Ok(Some(format!("commit {oid} missing from odb after ingest")));
         };
+        let bytes = raw.data;
         match alt_cli::commit_sign::extract_alt_sig(&bytes)? {
             None => {
                 return Ok(Some(format!(
@@ -1563,8 +1432,8 @@ fn require_signed_commits_block(
     Ok(None)
 }
 
-/// Commit the ref tx under the store mutex, then assign a group-commit
-/// ticket *still under that same mutex* so the appended bytes are
+/// Commit the ref tx under the store mutex the caller holds, then assign a
+/// group-commit ticket *still under that same mutex* so the appended bytes are
 /// visibly-ordered before the ticket is observable. The returned
 /// ticket should be passed to `writer.group.await_durable(&writer.sink, ticket)`
 /// **after** the store mutex is released — that's the overlap which
@@ -1573,7 +1442,8 @@ fn require_signed_commits_block(
 /// Returns `Ok(None)` for an empty-updates push (no append happened,
 /// no durability needed).
 fn commit_ref_updates(
-    writer: &WriteCoordinator,
+    store_guard: &mut Store,
+    group: &alt_cli::group_commit::GroupCommit,
     updates: &[RefUpdate],
     principal: &alt_cli::native::Principal,
     sig_label: &str,
@@ -1581,7 +1451,6 @@ fn commit_ref_updates(
     if updates.is_empty() {
         return Ok(None);
     }
-    let mut store_guard = writer.store.lock().unwrap();
     let mut changes = Vec::with_capacity(updates.len());
     for u in updates {
         changes.push(RefChange {
@@ -1628,7 +1497,7 @@ fn commit_ref_updates(
     // Under the same lock: hand out the durability ticket. The bytes
     // for this commit are on disk before the ticket is observable
     // from outside the lock — that's the group-commit invariant.
-    let ticket = writer.group.assign();
+    let ticket = group.assign();
     Ok(Some(ticket))
 }
 

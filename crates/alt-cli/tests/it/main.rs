@@ -11,6 +11,7 @@ mod add_star;
 mod add_unmerged;
 mod altd_server;
 mod altd_server_no_new_objects;
+mod altd_server_refused_objects;
 mod amend;
 mod argument_bindings;
 mod bisect;

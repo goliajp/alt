@@ -35,7 +35,7 @@ pub(crate) fn ok(o: Output) -> String {
 pub(crate) struct Server {
     child: Child,
     pub(crate) addr: String,
-    stderr: Option<BufReader<std::process::ChildStderr>>,
+    pub(crate) stderr: Option<BufReader<std::process::ChildStderr>>,
 }
 
 impl Server {
