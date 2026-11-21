@@ -1,6 +1,7 @@
 //! The help of every command of the command line, at every level of its
 //! subcommands, is the recorded one: a change to what a command takes or
 //! says of itself shows as a change to `fixtures/args/help.txt`.
+//! `ALT_HELP_RECORD=1` rewrites it.
 
 use alt_args::{Command, ErrorKind, Parser};
 use alt_cli::cli::Cli;
@@ -26,6 +27,11 @@ fn record(command: &Command, path: &mut Vec<&'static str>, helps: &mut Vec<Strin
 fn every_command_gives_its_recorded_help() {
     let mut helps = Vec::new();
     record(&Cli::command(), &mut Vec::new(), &mut helps);
+    if std::env::var_os("ALT_HELP_RECORD").is_some() {
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/args/help.txt");
+        std::fs::write(fixture, helps.concat()).unwrap();
+        return;
+    }
     let recorded = include_str!("../fixtures/args/help.txt");
     let recorded: Vec<&str> = recorded.split_inclusive("\n").collect();
     let mut at = 0;

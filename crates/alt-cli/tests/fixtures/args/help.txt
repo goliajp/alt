@@ -46,6 +46,8 @@ Commands:
   ci           alt-CI workflow inspection. Subcommand surface; `alt ci validate` runs the schema-tier lint
   fsck         Read and verify every record the repository stores: each chunk, blob and object against its hash, each index against the file it indexes, the whole operation log, and the refs against a replay of that log. Exits non-zero at the first record that fails
   verify       Verify the `alt-sig` header on one or more commit objects. With no args, walks the current branch's commit chain back to root (newest first). Each row is one of: `signed-ok:<principal>` / `unsigned` / `bad-sig:<principal>` / `untrusted:<principal>`
+  prompt       Print the state of the repository for a shell prompt
+  shell        Print the plugin that completes alt commands and shows the repository's state in a shell
 
 Options:
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
@@ -2211,6 +2213,45 @@ Arguments:
 Options:
   -n, --max-count <MAX_COUNT>  Limit when walking HEAD (default 50; ignored when oids given)
       --json                   Emit a structured JSON list instead of the human view
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt prompt
+Print the state of the repository for a shell prompt
+
+Usage: alt prompt [OPTIONS]
+
+Options:
+      --format <FORMAT>        `lines` for a key and its value on each line, `zsh` for one line a zsh evaluates into the associative array `alt_prompt` [default: lines] [possible values: lines, zsh]
+      --no-untracked           Do not look for untracked files
+      --no-ahead-behind        Do not count commits against the remotes
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt shell
+Print the plugin that completes alt commands and shows the repository's state in a shell
+
+Usage: alt shell [OPTIONS] <SHELL>
+
+Arguments:
+  <SHELL>  The shell to print the plugin for [possible values: zsh]
+
+Options:
+      --completion             Print only the completion function, as the file `_alt` to put on `fpath`
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt complete
+Say what may stand at the cursor of a command line, for a shell
+
+Usage: alt complete [OPTIONS] --shell <SHELL> --current <CURRENT> [WORDS]...
+
+Arguments:
+  [WORDS]...  The words of the command line, the program first
+
+Options:
+      --shell <SHELL>          The shell that asks [possible values: zsh]
+      --current <CURRENT>      Which of the words the cursor is in, the program being word 0
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
