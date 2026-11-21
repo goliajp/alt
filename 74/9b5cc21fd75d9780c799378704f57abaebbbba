@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: look the paths an add is given up by the path of a file and the directories above it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add.rs
+touched: crates/alt-cli/src/native/pathspec.rs
+touched: crates/alt-cli/src/native/pathspec/set.rs
+touched: crates/alt-cli/src/native/pathspec/spec.rs
