@@ -218,6 +218,20 @@ mod tests {
     }
 
     #[test]
+    fn a_commit_found_common_late_hands_that_on_to_its_parents() {
+        // ours 1 ← 2 ← 4, theirs 2 ← 3 ← 5; 3 is dated before 2 and 1,
+        // so both are counted for ours before 3 is read
+        let history: &[(u32, i64, &[u32])] = &[
+            (1, 40, &[]),
+            (2, 50, &[1]),
+            (3, 10, &[2]),
+            (4, 60, &[2]),
+            (5, 100, &[3]),
+        ];
+        assert_eq!(apart(history, 4, 5, 100).0, counts(1, 2));
+    }
+
+    #[test]
     fn a_walk_past_the_most_commits_is_cut_and_says_so() {
         let found = apart(FORKED, 5, 7, 3).0;
         assert!(found.cut);

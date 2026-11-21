@@ -4,6 +4,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 
 use super::{alt, answer, asked, repository};
+use crate::unconfirmed::{Lost, power_cut};
 
 /// Every file under `dir` with its length and the time it was last
 /// written.
@@ -57,4 +58,15 @@ fn the_daemon_answers_as_the_command_itself_does() {
     }
     let sock = root.join(".alt").join("daemon.sock");
     assert!(UnixStream::connect(&sock).is_ok(), "no daemon came up");
+}
+
+#[test]
+fn operations_that_were_never_synced_are_passed_over_without_a_word() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    power_cut(dir.path(), Lost::NotesCommit);
+    // `answer` holds every answer to an empty stderr
+    assert_eq!(
+        answer(dir.path(), "alt switch "),
+        "group\tbranches\tbranch\nmain\t\nwithout\t\n"
+    );
 }
