@@ -1,6 +1,7 @@
 //! What a command is preceded by.
 
-use super::{Command, NativeRepo, WorkspaceOp, mutates_command};
+use super::{Command, WorkspaceOp, mutates_command};
+use crate::native::NativeRepo;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
