@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: carry the zsh plugin in the internal package and describe it
+author-type: human
+author: doracawl
+touched: README.md
+touched: docs/internal-install.md
+touched: docs/shell.md
+touched: scripts/gate.sh
+touched: scripts/install-internal.py
+touched: scripts/package-internal.py
+touched: scripts/test-gate.py
+touched: scripts/test-package-shell.py
