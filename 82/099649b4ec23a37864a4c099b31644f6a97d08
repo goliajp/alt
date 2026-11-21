@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say of the completion answer only what its reader does
+author-type: human
+author: doracawl
+touched: docs/shell.md
