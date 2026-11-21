@@ -68,6 +68,7 @@ impl NativeRepo<'_> {
                 }
                 let converted = attrs.to_worktree(&r.path, bytes)?;
                 crate::durable::write(&abs, converted.as_deref().unwrap_or(bytes))?;
+                set_exec(&abs, r.mode == 0o100755)?;
             } else {
                 match &r.entry {
                     Some(e) => self.materialize(e, &attrs)?,

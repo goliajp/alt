@@ -234,11 +234,20 @@ impl NativeRepo<'_> {
         Ok(precommit::check(&changes))
     }
 
-    /// The index's stage-0 entries written out as a tree. The blob of
-    /// every entry that `base`, the tree of a commit, does not have is
-    /// looked up first: the index can name one that was never stored.
+    /// The index's stage-0 entries written out as a tree. Refused while a
+    /// conflict is unresolved: a tree without its path would delete the file.
+    /// The blob of every entry that `base`, the tree of a commit, does not
+    /// have is looked up first: the index can name one that was never stored.
     pub(super) fn staged_tree(&mut self, base: Option<ObjectId>) -> Res<ObjectId> {
-        let staged = index_entries(&self.index()?);
+        let index = self.index()?;
+        if index.entries.iter().any(|e| e.stage() > 0) {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "unmerged paths remain: resolve the conflicts and `alt add` them first",
+            )
+            .into());
+        }
+        let staged = index_entries(&index);
         if staged.is_empty() {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",

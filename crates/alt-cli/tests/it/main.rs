@@ -63,6 +63,7 @@ mod log_tails;
 mod machine_results;
 mod merge;
 mod merge_criss_cross;
+mod merge_modes;
 mod mixed_versions;
 mod monorepo_bench;
 mod nested_repo;
