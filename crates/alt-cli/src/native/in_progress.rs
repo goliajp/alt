@@ -48,10 +48,9 @@ impl Operation {
 }
 
 impl NativeRepo<'_> {
-    /// Which operation is under way, by what each leaves behind while it
-    /// waits. A cherry-pick that stopped leaves only its conflicts in the
-    /// index, so `conflicted` says whether the index holds any.
-    pub(super) fn operation_kind(&self, conflicted: bool) -> Res<Option<OperationKind>> {
+    /// Which operation is under way, by the file each leaves behind while
+    /// it waits.
+    pub(super) fn operation_kind(&self) -> Res<Option<OperationKind>> {
         Ok(if self.merge_head()?.is_some() {
             Some(OperationKind::Merge)
         } else if self.bisect_in_progress() {
@@ -60,7 +59,7 @@ impl NativeRepo<'_> {
             Some(OperationKind::Rebase)
         } else if self.revert_state()?.is_some() {
             Some(OperationKind::Revert)
-        } else if conflicted {
+        } else if self.cherry_pick_in_progress()? {
             Some(OperationKind::CherryPick)
         } else {
             None
@@ -68,8 +67,8 @@ impl NativeRepo<'_> {
     }
 
     /// The operation under way with how far it has come.
-    pub(super) fn operation(&self, conflicted: bool) -> Res<Option<Operation>> {
-        let Some(kind) = self.operation_kind(conflicted)? else {
+    pub(super) fn operation(&self) -> Res<Option<Operation>> {
+        let Some(kind) = self.operation_kind()? else {
             return Ok(None);
         };
         let mut operation = Operation {

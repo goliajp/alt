@@ -116,16 +116,55 @@ fn a_revert_of_several_commits_counts_them_and_one_alone_does_not() {
 }
 
 #[test]
-fn a_cherry_pick_is_under_way_while_its_conflicts_are_in_the_index() {
+fn a_cherry_pick_that_stopped_is_under_way_until_it_is_committed() {
     let dir = diverged();
     let repo = dir.path();
+    let marker = repo.join(".alt/CHERRY_PICK_HEAD");
+    let tip = alt(repo, &["rev-parse", "HEAD"]);
+    let picked = alt(repo, &["rev-parse", "feature/side"]);
     let stopped = run(repo, &["cherry-pick", "feature/side"]);
     assert_eq!(stopped.status.code(), Some(1));
+    assert_eq!(
+        std::fs::read_to_string(&marker).unwrap(),
+        format!("picked {}head {}", picked, tip)
+    );
     assert_eq!(operation(repo), r#"{"kind":"cherry-pick"}"#);
-    // it leaves nothing but the conflicts behind, so staging the
-    // resolution ends what can be told of it
     std::fs::write(repo.join("f.txt"), "both\n").unwrap();
     alt(repo, &["add", "f.txt"]);
+    assert_eq!(operation(repo), r#"{"kind":"cherry-pick"}"#);
+    alt(repo, &["commit", "-m", "picked"]);
+    assert_eq!(operation(repo), "null");
+    assert!(!marker.exists());
+}
+
+#[test]
+fn a_cherry_pick_head_has_moved_away_from_is_over_and_the_next_write_forgets_it() {
+    let dir = diverged();
+    let repo = dir.path();
+    let marker = repo.join(".alt/CHERRY_PICK_HEAD");
+    let stopped = run(repo, &["cherry-pick", "feature/side"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    // takes back the commit before the pick: HEAD is no longer where it stopped
+    alt(repo, &["undo"]);
+    assert_eq!(operation(repo), "null");
+    // a command that only reads leaves the file
+    assert!(marker.exists());
+    std::fs::write(repo.join("f.txt"), "both\n").unwrap();
+    alt(repo, &["add", "f.txt"]);
+    assert!(!marker.exists());
+    assert_eq!(operation(repo), "null");
+}
+
+#[test]
+fn a_cherry_pick_that_goes_through_leaves_nothing() {
+    let dir = diverged();
+    let repo = dir.path();
+    std::fs::write(repo.join("other.txt"), "o\n").unwrap();
+    alt(repo, &["add", "other.txt"]);
+    alt(repo, &["commit", "-m", "other"]);
+    alt(repo, &["switch", "feature/side"]);
+    alt(repo, &["cherry-pick", "main"]);
+    assert!(!repo.join(".alt/CHERRY_PICK_HEAD").exists());
     assert_eq!(operation(repo), "null");
 }
 

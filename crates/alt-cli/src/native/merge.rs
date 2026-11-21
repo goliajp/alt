@@ -231,7 +231,7 @@ impl NativeRepo<'_> {
     /// finished.
     pub(super) fn ensure_no_merge_in_progress(&self, verb: &str) -> Res<()> {
         use in_progress::OperationKind;
-        let hint = match self.operation_kind(false)? {
+        let hint = match self.operation_kind()? {
             None | Some(OperationKind::CherryPick) => return Ok(()),
             Some(OperationKind::Merge) => {
                 "a merge is in progress; resolve the conflicts and commit it first"

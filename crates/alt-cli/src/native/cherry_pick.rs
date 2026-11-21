@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod state;
+
 impl NativeRepo<'_> {
     /// `alt cherry-pick <rev>`: take the changes introduced by commit
     /// `<rev>` (the diff between it and its first parent) and apply
@@ -41,6 +43,7 @@ impl NativeRepo<'_> {
 
         if resolved.iter().any(|r| r.conflicted) {
             self.write_conflicted(&resolved)?;
+            self.start_cherry_pick(target_oid, head_oid)?;
             let conflicts: Vec<BString> = resolved
                 .iter()
                 .filter(|r| r.conflicted)

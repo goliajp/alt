@@ -88,8 +88,7 @@ impl NativeRepo<'_> {
         if merging.is_some() {
             self.finish_merge()?;
         }
-        self.revert_committed()?;
-        self.rebase_committed()?;
+        self.sequence_committed()?;
         report_commit(&branch, commit, tree, json, out)
     }
 

@@ -24,8 +24,7 @@ impl NativeRepo<'_> {
             false => self.untracked_mode(None),
         };
         let trees = untracked.and_then(|mode| self.tree_state(mode));
-        let conflicts = trees.as_ref().map_or(0, |trees| trees.conflicts().len());
-        let operation = self.operation(conflicts > 0).unwrap_or_else(|error| {
+        let operation = self.operation().unwrap_or_else(|error| {
             failed.push(error);
             None
         });

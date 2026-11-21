@@ -46,7 +46,7 @@ impl NativeRepo<'_> {
 
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         if json {
-            let operation = self.operation(!unmerged.is_empty())?;
+            let operation = self.operation()?;
             let who = &self.id.principal;
             return render_status_json(out, short, who, &st, &unmerged, operation.as_ref());
         }
