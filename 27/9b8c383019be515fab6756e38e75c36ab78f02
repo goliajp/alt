@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: have an import sync what adds left unsynced before it records their operations as synced
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/import_again.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-import/src/report.rs
