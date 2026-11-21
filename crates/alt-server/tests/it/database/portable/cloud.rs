@@ -2,9 +2,10 @@
 //! The protocol provider and the database controller stay outside the paused
 //! server process. No product failpoints or locally extended leases are used.
 use super::*;
+use crate::database::cloud::{lease, secret, time as now};
 use golia_platform_contract::{
-    AccountAuthorization, AltLimits, AltServiceAuthorization, Audience, Capability, Counter, Lease,
-    Product, Secret,
+    AccountAuthorization, AltLimits, AltServiceAuthorization, Audience, Capability, Counter,
+    Product,
 };
 use std::{
     io::{BufRead, BufReader},
@@ -18,25 +19,6 @@ use std::{
 };
 use tiny_http::{Header, Response, Server};
 
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-fn secret(value: &str) -> Secret {
-    value.to_owned().try_into().unwrap()
-}
-fn lease(audience: &Audience, sequence: u64) -> Lease {
-    Lease {
-        version: 1,
-        audience: audience.clone(),
-        sequence: Counter(sequence),
-        revocation_generation: Counter(1),
-        issued_at_unix_ms: Counter(now()),
-        expires_at_unix_ms: Counter(now() + 60_000),
-    }
-}
 fn account(audience: &Audience, sequence: u64) -> AccountAuthorization {
     AccountAuthorization {
         lease: lease(audience, sequence),
