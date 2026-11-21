@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: feat
+summary: add cherry-pick --continue and --abort
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/cli/prepare.rs
+touched: crates/alt-cli/src/cli/sequence.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native/cherry_pick.rs
+touched: crates/alt-cli/src/native/cherry_pick/resume.rs
+touched: crates/alt-cli/src/native/cherry_pick/state.rs
+touched: crates/alt-cli/src/sequence_args.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/fixtures/cli/cherry-pick-resume.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-cli/tests/it/cherry_pick_resume.rs
+touched: crates/alt-cli/tests/it/complete.rs
+touched: crates/alt-cli/tests/it/json_outputs/conflicts.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions/abort.rs
