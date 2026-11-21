@@ -7,6 +7,7 @@ use alt_refs::{RefChange, RefStore, RefTarget};
 
 mod paths;
 mod reading;
+mod shell;
 
 fn alt_with(cwd: &Path, args: &[&str], daemon: bool) -> Output {
     let mut cmd = crate::alt_command();

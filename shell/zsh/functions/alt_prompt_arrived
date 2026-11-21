@@ -1,0 +1,16 @@
+# The state asked for in the background has arrived on descriptor $1.
+
+local fd=$1 answer
+IFS= read -r -u $fd answer
+zle -F $fd
+exec {fd}<&-
+# only the answer last asked for counts
+(( fd == _alt_prompt_fd )) || return 0
+_alt_prompt_fd=0
+if [[ $answer == 'typeset -gA alt_prompt=('*')' ]]; then
+  eval $answer
+else
+  alt_prompt=()
+fi
+zle reset-prompt 2>/dev/null
+return 0

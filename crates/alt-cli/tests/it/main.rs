@@ -95,6 +95,7 @@ mod scan_daemon_mounts;
 mod scan_daemon_switch;
 #[cfg(target_os = "linux")]
 mod scan_daemon_watches;
+mod shell;
 mod show;
 mod status_json;
 mod status_labels;

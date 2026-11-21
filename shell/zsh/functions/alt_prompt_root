@@ -1,0 +1,18 @@
+# Sets REPLY to the root of the alt working tree the shell is in, empty
+# outside one. Looked for once per directory, without running alt: `.alt` is
+# a directory in a repository and a file in a parallel workspace.
+
+if [[ $_alt_prompt_pwd != $PWD ]]; then
+  local dir=$PWD
+  _alt_prompt_root=
+  while true; do
+    if [[ -e $dir/.alt ]]; then
+      _alt_prompt_root=$dir
+      break
+    fi
+    [[ $dir == / || -z $dir ]] && break
+    dir=${dir:h}
+  done
+  _alt_prompt_pwd=$PWD
+fi
+REPLY=$_alt_prompt_root

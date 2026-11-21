@@ -8,6 +8,7 @@ use alt_refs::{RefChange, RefStore, RefTarget};
 use super::unconfirmed::{Lost, power_cut};
 
 mod remotes;
+mod shell;
 
 fn run_with(repo: &Path, args: &[&str], daemon: bool) -> Output {
     let mut cmd = crate::alt_command();

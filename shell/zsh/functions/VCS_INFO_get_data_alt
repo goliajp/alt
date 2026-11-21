@@ -1,0 +1,37 @@
+## vim:ft=zsh
+## alt support for vcs_info: %b the branch, %a the operation under way, %c
+## and %u staged and unstaged changes (with `check-for-changes`), %m how far
+## the branch is ahead of and behind its remote
+
+setopt localoptions NO_shwordsplit
+local answer branch action staged unstaged misc name
+local -a counts
+local -A alt_prompt
+
+answer=$(${vcs_comm[cmd]} prompt --format=zsh 2>/dev/null)
+[[ $answer == 'typeset -gA alt_prompt=('*')' ]] || return 1
+# into the local array, not the one the prompt hook keeps
+eval ${answer/#typeset -gA /}
+
+branch=${alt_prompt[branch]:-${alt_prompt[unborn]:-${alt_prompt[tag]:-$alt_prompt[detached]}}}
+action=$alt_prompt[operation]
+(( $+alt_prompt[step] )) && action+=" ${alt_prompt[step]/ //}"
+
+if zstyle -t ":vcs_info:${vcs}:${usercontext}:${rrn}" check-for-changes; then
+  if (( $+alt_prompt[staged] )); then
+    zstyle -s ":vcs_info:${vcs}:${usercontext}:${rrn}" stagedstr staged || staged=S
+  fi
+  if (( $+alt_prompt[unstaged] + $+alt_prompt[unmerged] )); then
+    zstyle -s ":vcs_info:${vcs}:${usercontext}:${rrn}" unstagedstr unstaged || unstaged=U
+  fi
+fi
+
+name=${${=alt_prompt[remotes]}[1]}
+if [[ -n $name ]]; then
+  counts=(${=alt_prompt[remote:$name]})
+  [[ $counts[1] != 0 ]] && misc+="+$counts[1]"
+  [[ $counts[2] != 0 ]] && misc+="-$counts[2]"
+fi
+
+VCS_INFO_formats "$action" "$branch" "${vcs_comm[basedir]}" "$staged" "$unstaged" '' "$misc"
+return 0

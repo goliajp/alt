@@ -20,6 +20,7 @@ pub(super) const COMMANDS: &[&[&str]] = &[
     &["blame", "a.txt"],
     &["status"],
     &["status", "--json"],
+    &["shell", "zsh"],
     &["prompt"],
     &["prompt", "--format=zsh"],
     &[

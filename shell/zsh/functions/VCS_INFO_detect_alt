@@ -1,0 +1,11 @@
+## vim:ft=zsh
+## alt support for vcs_info
+
+setopt localoptions NO_shwordsplit
+
+[[ $1 == '--flavours' ]] && return 1
+VCS_INFO_check_com ${vcs_comm[cmd]} || return 1
+alt_prompt_root
+[[ -n $REPLY ]] || return 1
+vcs_comm[basedir]=$REPLY
+return 0

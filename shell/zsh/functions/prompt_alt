@@ -1,0 +1,15 @@
+# A powerlevel10k segment: add `alt` to POWERLEVEL9K_LEFT_PROMPT_ELEMENTS.
+# The states are those of p10k's own vcs segment, so its colours are set
+# the same way (POWERLEVEL9K_ALT_MODIFIED_FOREGROUND and so on).
+
+(( $#alt_prompt )) || return 0
+local state=CLEAN colour=2 text
+if (( $+alt_prompt[unmerged] )); then
+  state=CONFLICTED colour=1
+elif (( $+alt_prompt[staged] + $+alt_prompt[unstaged] )); then
+  state=MODIFIED colour=3
+elif (( $+alt_prompt[untracked] )); then
+  state=UNTRACKED colour=2
+fi
+text=$(alt_prompt_info plain)
+p10k segment -s $state -f $colour -t "$text"

@@ -1,0 +1,40 @@
+# Brings `alt_prompt` up to date, before each prompt. With the line editor
+# running the state is asked for in the background and the prompt redrawn
+# when it arrives, so a slow repository never holds the prompt back; the
+# prompt shows the state of the last time meanwhile. `alt_prompt_update now`
+# waits for the answer.
+
+local -a options
+zstyle -T ':alt:prompt' untracked || options+=(--no-untracked)
+zstyle -T ':alt:prompt' ahead-behind || options+=(--no-ahead-behind)
+
+# an answer still on its way is for a prompt that is gone
+if (( _alt_prompt_fd )); then
+  zle -F $_alt_prompt_fd 2>/dev/null
+  exec {_alt_prompt_fd}<&-
+  _alt_prompt_fd=0
+fi
+
+alt_prompt_root
+if [[ -z $REPLY ]]; then
+  alt_prompt=()
+  _alt_prompt_shown=
+  return 0
+fi
+# what is shown meanwhile is of this repository or nothing
+[[ $REPLY == $_alt_prompt_shown ]] || alt_prompt=()
+_alt_prompt_shown=$REPLY
+
+if [[ $1 != now && -o zle ]] && zstyle -T ':alt:prompt' async; then
+  exec {_alt_prompt_fd}< <(command alt prompt --format=zsh $options 2>/dev/null)
+  zle -F $_alt_prompt_fd alt_prompt_arrived
+else
+  local answer
+  answer=$(command alt prompt --format=zsh $options 2>/dev/null)
+  if [[ $answer == 'typeset -gA alt_prompt=('*')' ]]; then
+    eval $answer
+  else
+    alt_prompt=()
+  fi
+fi
+return 0

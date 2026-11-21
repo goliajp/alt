@@ -1,0 +1,108 @@
+# Prints the state of the alt repository for a prompt, nothing outside one:
+#
+#   develop                 clean
+#   develop *+%             * unstaged  + staged  % untracked
+#   develop|MERGING !1      merging, 1 path in conflict
+#   feature/x|REBASE 3/7
+#   (6d1f3128)              HEAD on no branch
+#   develop ↑2↓1            2 ahead of the remote, 1 behind
+#   develop [side]          in the workspace `side`
+#   develop ⚠               the repository needs attention
+#
+# Use it as `$(alt_prompt_info)` in PROMPT with `setopt prompt_subst`. Styles
+# under ':alt:prompt': `format` (%b branch, %o operation, %f flags, %u
+# unmerged, %r ahead and behind, %w workspace, %a attention), `remote` (a
+# name, or `all`), `color` (no to print without colours); under
+# ':alt:prompt:symbols' and ':alt:prompt:colors' one style per part.
+# `alt_prompt_info plain` prints without colours whatever the styles say.
+
+(( $#alt_prompt )) || return 0
+
+local plain=$1 symbol colour format remote shown name head operation flags unmerged apart workspace attention
+local -a remotes counts
+
+_alt_prompt_symbol() {
+  zstyle -s ':alt:prompt:symbols' $1 symbol || symbol=$2
+}
+# a part in its colour; `%` in it is not for the prompt to expand
+_alt_prompt_part() {
+  REPLY=${2//\%/%%}
+  [[ -n $REPLY ]] || return 0
+  [[ $plain == plain ]] && return 0
+  zstyle -T ':alt:prompt' color || return 0
+  zstyle -s ':alt:prompt:colors' $1 colour || colour=$3
+  [[ -n $colour ]] && REPLY="%F{$colour}$REPLY%f"
+  return 0
+}
+
+if (( $+alt_prompt[branch] )); then
+  head=$alt_prompt[branch]
+elif (( $+alt_prompt[unborn] )); then
+  head=$alt_prompt[unborn]
+elif (( $+alt_prompt[detached] )); then
+  head="(${alt_prompt[tag]:-$alt_prompt[detached]})"
+fi
+
+case $alt_prompt[operation] in
+  (merge) operation='|MERGING' ;;
+  (rebase) operation='|REBASE' ;;
+  (cherry-pick) operation='|CHERRY-PICKING' ;;
+  (revert) operation='|REVERTING' ;;
+  (bisect) operation='|BISECTING' ;;
+esac
+(( $+alt_prompt[step] )) && operation+=" ${alt_prompt[step]/ //}"
+
+if (( $+alt_prompt[unstaged] )); then
+  _alt_prompt_symbol unstaged '*'
+  flags+=$symbol
+fi
+if (( $+alt_prompt[staged] )); then
+  _alt_prompt_symbol staged '+'
+  flags+=$symbol
+fi
+if (( $+alt_prompt[untracked] )); then
+  _alt_prompt_symbol untracked '%'
+  flags+=$symbol
+fi
+[[ -n $flags ]] && flags=" $flags"
+
+if (( $+alt_prompt[unmerged] )); then
+  _alt_prompt_symbol unmerged '!'
+  unmerged=" $symbol$alt_prompt[unmerged]"
+fi
+
+remotes=(${=alt_prompt[remotes]})
+zstyle -s ':alt:prompt' remote remote || remote=$remotes[1]
+for name in $remotes; do
+  [[ $remote == all || $name == "$remote" ]] || continue
+  counts=(${=alt_prompt[remote:$name]})
+  shown=
+  if [[ $counts[1] != 0 ]]; then
+    _alt_prompt_symbol ahead '↑'
+    shown+=$symbol$counts[1]
+  fi
+  if [[ $counts[2] != 0 ]]; then
+    _alt_prompt_symbol behind '↓'
+    shown+=$symbol$counts[2]
+  fi
+  [[ -n $shown ]] && apart+=" $shown"
+done
+
+[[ ${alt_prompt[workspace]:-default} == default ]] || workspace=" [$alt_prompt[workspace]]"
+
+if (( $+alt_prompt[attention] )); then
+  _alt_prompt_symbol attention '⚠'
+  attention=" $symbol"
+fi
+
+zstyle -s ':alt:prompt' format format || format='%b%o%f%u%r%w%a'
+_alt_prompt_part branch "$head" green; head=$REPLY
+_alt_prompt_part operation "$operation" yellow; operation=$REPLY
+_alt_prompt_part flags "$flags" red; flags=$REPLY
+_alt_prompt_part unmerged "$unmerged" red; unmerged=$REPLY
+_alt_prompt_part remote "$apart" cyan; apart=$REPLY
+_alt_prompt_part workspace "$workspace" blue; workspace=$REPLY
+_alt_prompt_part attention "$attention" red; attention=$REPLY
+zformat -f REPLY "$format" b:"$head" o:"$operation" f:"$flags" u:"$unmerged" \
+  r:"$apart" w:"$workspace" a:"$attention"
+print -rn -- "$REPLY"

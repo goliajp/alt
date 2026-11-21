@@ -265,6 +265,10 @@ pub fn for_shell<'a>(command: &Command) -> Option<Box<dyn FnOnce(Attempt<'a>) ->
                 crate::prompt::respond(&asked, attempt)
             }))
         }
+        Command::Shell(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |_| crate::shell::respond(&asked)))
+        }
         _ => None,
     }
 }

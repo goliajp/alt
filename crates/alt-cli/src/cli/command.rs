@@ -474,6 +474,9 @@ pub enum Command {
     },
     /// Print the state of the repository for a shell prompt
     Prompt(crate::prompt::PromptArgs),
+    /// Print the plugin that completes alt commands and shows the
+    /// repository's state in a shell
+    Shell(crate::shell::ShellArgs),
     /// Say what may stand at the cursor of a command line, for a shell
     #[command(hide)]
     Complete(crate::complete::CompleteArgs),
