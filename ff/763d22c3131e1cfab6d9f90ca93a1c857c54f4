@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: end the process when the sync of a group of commits panics, instead of leaving every later commit waiting
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/group_commit.rs
