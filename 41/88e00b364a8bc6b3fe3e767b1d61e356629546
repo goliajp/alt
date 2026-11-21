@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: leave the working-tree snapshot out of what a reading command must not change
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/unconfirmed.rs
