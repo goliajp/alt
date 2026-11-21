@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: name a lost blob at two paths and a submodule commit of its own in the checks of what fsck reaches
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/fsck_reach.rs
