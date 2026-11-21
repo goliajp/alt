@@ -855,8 +855,8 @@ impl<'a> NativeRepo<'a> {
         }
         for c in changes {
             let force = match (&c.old, &c.new) {
-                // deletion is the canonical force op
-                (Some(_), None) => true,
+                // deletion is the canonical force op, but of the ref a rebase works on
+                (Some(_), None) => c.name != self.scratch_ref(),
                 // creation cannot rewrite history
                 (None, _) => false,
                 // symref move: the source/destination are names, not commits;

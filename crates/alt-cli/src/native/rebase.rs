@@ -30,7 +30,7 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("rebase")?;
-        self.ensure_no_merge_in_progress("rebase")?;
+        self.ensure_rebase_allowed()?;
         self.ensure_clean("rebase")?;
         let branch = self.head_branch()?;
         if !branch.starts_with("refs/heads/") {
@@ -403,7 +403,7 @@ impl NativeRepo<'_> {
     }
 
     /// The ref carrying the replayed commits while this workspace rebases.
-    fn scratch_ref(&self) -> String {
+    pub(super) fn scratch_ref(&self) -> String {
         format!("rebase/{}", self.workspace)
     }
 

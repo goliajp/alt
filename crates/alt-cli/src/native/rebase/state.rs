@@ -44,6 +44,20 @@ impl NativeRepo<'_> {
         self.index_path.with_file_name("REBASE_STATE")
     }
 
+    /// Refuses to begin a rebase while another operation waits, or where
+    /// the policy forbids force: a rebase ends by putting the branch on
+    /// commits that do not descend from the one it is on, and one that
+    /// could not end is not begun.
+    pub(super) fn ensure_rebase_allowed(&self) -> Res<()> {
+        self.ensure_no_merge_in_progress("rebase")?;
+        if self.caps.forbid_force {
+            let why = "capability denied: forbid_force is set and a rebase would not leave \
+                       the branch a fast-forward";
+            return Err(crate::machine::Failure::refusal("capability_denied", why).into());
+        }
+        Ok(())
+    }
+
     pub(in crate::native) fn rebase_in_progress(&self) -> bool {
         self.rebase_state_path().exists()
     }

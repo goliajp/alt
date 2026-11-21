@@ -52,3 +52,36 @@ fn an_undo_the_policy_refuses_leaves_the_merge_concluded() {
     let merged = ok(alt(repo, &["cat-file", "-p", "HEAD"]));
     assert_eq!(merged.matches("\nparent ").count(), 2, "{merged}");
 }
+
+#[test]
+fn a_rebase_the_policy_forbids_is_not_begun_and_one_begun_is_given_up() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let repo = fixture(&tmp);
+    let commit = |text: &str, message: &str| {
+        std::fs::write(repo.join("a.txt"), text).unwrap();
+        ok(alt(repo, &["add", "a.txt"]));
+        ok(alt(repo, &["commit", "-m", message]));
+    };
+    ok(alt(repo, &["switch", "-c", "feature/side"]));
+    commit("side\n", "side");
+    ok(alt(repo, &["switch", "main"]));
+    commit("main\n", "main");
+    ok(alt(repo, &["switch", "feature/side"]));
+    write_policy(repo, "agent:* -> forbid-force\n");
+    let before = seen(repo);
+
+    // it would end by moving the branch off its commits, which the policy
+    // forbids: refused before HEAD is handed to a scratch ref
+    fails_with(
+        alt_as(repo, &["rebase", "main"], "bot"),
+        "capability denied",
+    );
+    assert_eq!(seen(repo), before);
+
+    // one that another began is given up all the same: the scratch ref
+    // goes, and no branch moves
+    let stopped = alt(repo, &["rebase", "main"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    ok(alt_as(repo, &["rebase", "--abort"], "bot"));
+    assert_eq!(seen(repo), before);
+}
