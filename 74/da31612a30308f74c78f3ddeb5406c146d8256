@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: bring an interrupted step to an end around a conflict file changed since, name any other file in its way, and let the step be given up with such a file kept
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/cli/platform.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/checkout_recovery/finish.rs
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/recover.rs
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/step_changed.rs
