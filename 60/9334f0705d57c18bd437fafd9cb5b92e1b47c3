@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: build index runs over synced records only, so that an add that is not synced leaves what it appended where every opener reads it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut.rs
+touched: crates/alt-cli/tests/it/power_cut/base.rs
+touched: crates/alt-cli/tests/it/power_cut/many.rs
+touched: crates/alt-odb/src/map.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/bulk.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/runs.rs
+touched: crates/alt-odb/src/tier1.rs
+touched: crates/alt-os/src/durability.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blob/settle.rs
+touched: crates/alt-store/src/blobmap.rs
+touched: crates/alt-store/src/indexing.rs
+touched: crates/alt-store/src/reclog/sync.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/src/runs/named.rs
+touched: crates/alt-store/tests/it/index_gap.rs
+touched: crates/alt-store/tests/it/stale_index.rs
