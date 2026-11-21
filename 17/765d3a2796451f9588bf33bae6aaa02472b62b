@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: hold an ignore pattern without a slash against the name of a path alone, as git does, and tell a literal or an ending from a glob when the rule is read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/add_ignore.rs
+touched: crates/alt-worktree/src/ignore.rs
+touched: crates/alt-worktree/src/ignore/rule.rs
+touched: crates/alt-worktree/src/scan.rs
