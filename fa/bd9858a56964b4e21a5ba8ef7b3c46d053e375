@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: record the help of the abort options and of giving an operation up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
