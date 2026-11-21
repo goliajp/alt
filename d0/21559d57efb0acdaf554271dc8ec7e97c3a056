@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: hold a pusher to signed commits for all it adds, and roll back only its own objects
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/pack_ingest.rs
+touched: crates/alt-cli/src/bin/altd_server/signed_commits.rs
+touched: crates/alt-cli/tests/it/altd_server_refused_objects.rs
+touched: crates/alt-cli/tests/it/altd_server_signed_commits.rs
+touched: crates/alt-cli/tests/it/main.rs
