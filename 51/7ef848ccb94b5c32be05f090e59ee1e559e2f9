@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: chore
+summary: merge develop into feature/cli-startup
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/commit.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/merge/write.rs
+touched: crates/alt-cli/tests/fixtures/cli/merge-conflict.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/merge.rs
+touched: crates/alt-cli/tests/it/merge_modes.rs
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/unread_body.rs
