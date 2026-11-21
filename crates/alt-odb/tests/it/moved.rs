@@ -8,7 +8,7 @@ use alt_odb::NativeOdb;
 use super::dangling::{Fault, UNSYNCED_APPENDS, damage, store, synced_to};
 use super::left_unsynced::left_unsynced;
 use super::lost_dropped::older_alt_went_on;
-use super::rewind_interrupted::{lens, object, open, put, reads};
+use super::rewind_interrupted::{lens, object, older_marker, open, put, reads};
 
 #[test]
 fn handles_held_across_a_cut_that_was_appended_over_read_the_store_anew() {
@@ -79,4 +79,39 @@ fn handles_opened_before_a_removal_of_lost_records_read_the_store_anew() {
     reads(&held, 101);
     put(&mut held, victim..victim + 1);
     reads(&held, victim);
+}
+
+#[test]
+fn a_handle_that_only_reads_is_not_kept_across_a_cut_an_older_alt_appended_over() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let (victim, kept, whole) = store(dir, 0);
+    synced_to(dir, kept, UNSYNCED_APPENDS);
+    left_unsynced(dir, kept, true);
+    let mut reader = NativeOdb::reading(dir);
+    let lost = object(victim).0;
+    assert!(reader.contains(&lost).unwrap());
+    reader.follow().unwrap();
+    // the content goes in that boot; an older alt cuts the record,
+    // stores an object of the same length and leaves its own marker,
+    // which records no generation: the one before it was at none
+    damage(dir, 0, Fault::Missing, kept);
+    let mut other = open(dir);
+    put(&mut other, victim + 3..victim + 4);
+    drop(other);
+    older_marker(dir, lens(dir));
+    assert_eq!(lens(dir), whole, "the cut was appended over to the byte");
+    reader.follow().unwrap();
+    assert!(!reader.contains(&lost).unwrap());
+    reads(&reader, victim + 3);
+    // while that marker is there the handle reads the store anew each
+    // time, and again holds it once a marker of this format is back
+    reader.follow().unwrap();
+    reads(&reader, victim + 3);
+    let mut writer = open(dir);
+    put(&mut writer, victim..victim + 1);
+    drop(writer);
+    reader.follow().unwrap();
+    reads(&reader, victim);
+    reads(&reader, victim + 3);
 }

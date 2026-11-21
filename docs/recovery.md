@@ -739,6 +739,15 @@ still running for the repository is stopped by the first command of this
 alt that would use it, which starts its own; an older alt does the same to
 this one's daemon, so the two can be used in turn.
 
+A daemon of this alt keeps what it has read of the store from one command
+that only reads to the next, and reads the store again when a file of it has
+another length or the generation the synced marker records has moved. An
+older alt records no generation: it can take records that were never synced
+out of a file and append others until the file is as long as it was. So while
+the marker is one an older alt wrote, the daemon reads the store again for
+each command. That costs what a command without a daemon pays to open the
+store, and ends with the first command of this alt that writes.
+
 What `alt add` leaves unsynced, and commits made with
 `ALT_RELAXED_DURABILITY` set, are not synced, and what was recorded is marked
 as no longer holding until a command that syncs writes: in between, too, only
