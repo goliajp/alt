@@ -45,6 +45,21 @@ struct GroupInner {
     fsync_count: u64,
 }
 
+/// The thread that syncs for a group, while it does. A sync that panics
+/// leaves nothing known of what is durable, and every commit after it
+/// would wait for a leader that is gone: the process ends there, as over
+/// a panic with the store in hand ([`crate::held`]).
+struct Leading;
+
+impl Drop for Leading {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("the sync of a group of commits panicked: ending");
+            std::process::exit(crate::held::IN_DOUBT);
+        }
+    }
+}
+
 impl Default for GroupCommit {
     fn default() -> Self {
         Self::new()
@@ -119,7 +134,9 @@ impl GroupCommit {
             led = true;
             let covered = g.next_ticket;
             drop(g);
+            let leading = Leading;
             let outcome = flush().map(|()| covered).map_err(|e| e.to_string());
+            drop(leading);
             g = self.inner.lock().expect("group mutex poisoned");
             g.syncing = false;
             g.fsync_count += 1;
@@ -194,6 +211,38 @@ mod tests {
         }
         assert_eq!(flushes.load(Ordering::SeqCst), 2);
         assert_eq!(group.fsync_count(), 2);
+    }
+
+    // run in a process of its own by the test below: one that goes on
+    // after the panic ends with the status of a test that passed
+    #[test]
+    fn a_sync_that_panics_ends_the_process() {
+        const CHILD: &str = "ALT_GROUP_COMMIT_TEST_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let group = Arc::new(GroupCommit::new());
+            let ticket = group.assign();
+            let leader = std::thread::spawn(move || {
+                group.await_durable_with(ticket, || -> Result<(), std::io::Error> {
+                    panic!("in the sync");
+                })
+            });
+            let _ = leader.join();
+            return;
+        }
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "group_commit::tests::a_sync_that_panics_ends_the_process",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            child.status.code(),
+            Some(crate::held::IN_DOUBT),
+            "{child:?}"
+        );
     }
 
     #[test]
