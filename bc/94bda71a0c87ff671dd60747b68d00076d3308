@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: feat
+summary: print the state a shell prompt shows from one command
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/classify.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/client.rs
+touched: crates/alt-cli/src/execution.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/ahead_behind.rs
+touched: crates/alt-cli/src/native/bisect.rs
+touched: crates/alt-cli/src/native/in_progress.rs
+touched: crates/alt-cli/src/native/prompt.rs
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/status.rs
+touched: crates/alt-cli/src/prompt.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/prompt.rs
+touched: crates/alt-cli/tests/it/prompt/remotes.rs
