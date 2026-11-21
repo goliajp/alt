@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: hold the store lock from a push's objects to its refs or its rewind
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/pack_ingest.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_no_new_objects.rs
+touched: crates/alt-cli/tests/it/altd_server_refused_objects.rs
+touched: crates/alt-cli/tests/it/main.rs
