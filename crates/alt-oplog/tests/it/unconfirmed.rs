@@ -211,7 +211,7 @@ fn a_cut_made_while_what_the_ops_name_is_synced_refuses_the_append() {
     assert_eq!(victim.len(), 4);
     let (cut, path) = (Arc::new(AtomicBool::new(false)), dir.path().to_owned());
     let done = cut.clone();
-    victim.sync_named_with(Arc::new(move || {
+    victim.sync_named_with(Arc::new(move |_| {
         if !done.swap(true, Ordering::Relaxed) {
             let mut other = OpLog::open(&path).unwrap();
             assert!(other.settle(held).unwrap().is_some());

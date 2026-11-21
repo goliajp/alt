@@ -5,10 +5,12 @@ use super::*;
 
 mod as_read;
 mod index;
+mod left;
 mod prepared;
 mod undo;
 pub(super) use as_read::AsRead;
 pub(super) use index::ABANDON;
+pub(super) use left::sync_left;
 pub use prepared::{export_git, prepared_blobs};
 
 pub(super) const PREPARE: u8 = 0x30;
@@ -118,21 +120,7 @@ pub(super) fn hash(bytes: &[u8]) -> String {
     alt_hash::blake3::hash(bytes).to_hex().to_string()
 }
 
-pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {
-    let parent = path.parent().ok_or("state path has no parent")?;
-    std::fs::create_dir_all(parent)?;
-    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
-    tmp.write_all(bytes)?;
-    tmp.as_file().sync_all()?;
-    tmp.persist(path)?;
-    // Canonicalize the existing directory: Path::parent of a one-component
-    // relative path is the empty path, which cannot be opened for fsync.
-    let parent = std::fs::canonicalize(parent)?;
-    for directory in parent.ancestors().take(3) {
-        std::fs::File::open(directory)?.sync_all()?;
-    }
-    Ok(())
-}
+pub(super) use crate::durable::write_state as durable_write;
 
 pub(super) fn workspace_identity_at(index_path: &Path, name: &str) -> Res<WorkspaceIdentity> {
     let path = index_path.with_file_name("workspace-id");

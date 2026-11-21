@@ -129,7 +129,7 @@ fn what_the_ops_name_is_synced_with_the_log_unlocked() {
     let mut log = OpLog::open(dir.path()).unwrap();
     let free = Arc::new(Mutex::new(Vec::new()));
     let (seen, path) = (free.clone(), dir.path().join("log"));
-    log.sync_named_with(Arc::new(move || {
+    log.sync_named_with(Arc::new(move |_| {
         let other = fs::File::open(&path)?;
         let taken = alt_os::sys::flock(&other, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB);
         seen.lock().unwrap().push(taken.is_ok());
@@ -163,7 +163,7 @@ fn a_boundary_recorded_while_the_log_was_unlocked_is_not_lowered() {
     let mut log = OpLog::open(dir.path()).unwrap();
     let synced = Arc::new(AtomicU64::new(0));
     let (recorded_to, path) = (synced.clone(), dir.path().to_owned());
-    log.sync_named_with(Arc::new(move || {
+    log.sync_named_with(Arc::new(move |_| {
         if recorded_to.load(Ordering::Relaxed) == 0 {
             let mut other = OpLog::open(&path).unwrap();
             other.append("other", 2, b"two").unwrap();

@@ -34,7 +34,7 @@ pub(super) fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
     let before = lens(dir);
     let index = fs::read(dir.join(".alt/index")).unwrap();
     fs::write(dir.join("new.txt"), "never arrived\n").unwrap();
-    ok(relaxed(dir, &["add", "new.txt"]));
+    ok(alt(dir, &["add", "new.txt"]));
     for (file, len) in LOGS.iter().zip(before).take(4) {
         let file = fs::OpenOptions::new()
             .write(true)

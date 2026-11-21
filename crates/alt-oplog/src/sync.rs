@@ -54,7 +54,10 @@ impl OpLog {
     /// nobody has recorded yet. What such an op names its writer stored
     /// before appending it but may not have synced: `sync` syncs it, so
     /// that no op is recorded as synced ahead of what it names. It is
-    /// called with no lock of the log held.
+    /// called with no lock of the log held. Where a boundary is about to
+    /// be set over ops that were appended while appends were left
+    /// unsynced, `sync` is given those ops: whatever else their writers
+    /// left unsynced is to be synced as well. Otherwise it is given none.
     pub fn sync_named_with(&mut self, sync: SyncNamed) {
         self.named = Some(sync);
     }

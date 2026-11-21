@@ -421,7 +421,7 @@ impl RecLog {
 impl Drop for RecLog {
     fn drop(&mut self) {
         // best-effort durability; explicit sync() is the checked path
-        if self.unsynced {
+        if self.unsynced && !crate::relaxed_durability() {
             let _ = self.file.sync_all();
         }
     }

@@ -187,7 +187,7 @@ impl OpLog {
 
     /// The first op at or past byte `from` that `held` does not vouch for,
     /// with the ops after it.
-    fn first_unheld<E: From<OpLogError>>(
+    pub(crate) fn first_unheld<E: From<OpLogError>>(
         &self,
         from: u64,
         mut held: impl FnMut(&Op) -> Result<bool, E>,

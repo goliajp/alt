@@ -349,10 +349,10 @@ pub struct ChunkStore {
     tail: Tail,
 }
 
-/// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
-/// fsyncs to open the concurrency race window for investigation.
+/// Whether the running thread leaves what it writes unsynced: a command
+/// that only stages does ([`alt_os::durability`]).
 pub fn relaxed_durability() -> bool {
-    std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
+    alt_os::durability::unsynced()
 }
 
 /// Total on-disk bytes of the given pack files.

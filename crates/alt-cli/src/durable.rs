@@ -1,9 +1,32 @@
 //! Filesystem state writes used before publishing a command receipt.
+//!
+//! Each is synced before it returns, unless the thread runs a command that
+//! leaves what it writes unsynced ([`alt_os::durability`]): the write is
+//! made the same way then, and no file or directory is synced.
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 
+/// Syncs `file`, where the running thread syncs what it writes.
+pub fn sync(file: &File) -> io::Result<()> {
+    match alt_os::durability::unsynced() {
+        true => Ok(()),
+        false => file.sync_all(),
+    }
+}
+
+/// [`sync`] of the file or directory at `path`, opened only to be synced.
+pub fn sync_at(path: &Path) -> io::Result<()> {
+    match alt_os::durability::unsynced() {
+        true => Ok(()),
+        false => File::open(path)?.sync_all(),
+    }
+}
+
 fn sync_parents(path: &Path) -> io::Result<()> {
+    if alt_os::durability::unsynced() {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         let parent = fs::canonicalize(if parent.as_os_str().is_empty() {
             Path::new(".")
@@ -32,9 +55,31 @@ pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> 
         tmp.as_file().set_permissions(metadata.permissions())?;
     }
     tmp.write_all(bytes.as_ref())?;
-    tmp.as_file().sync_all()?;
+    sync(tmp.as_file())?;
     tmp.persist(path).map_err(|error| error.error)?;
     sync_parents(path)
+}
+
+/// Puts `bytes` at `path` in one step, making the directory it is in where
+/// that is missing, and syncs the file, that directory and the two above
+/// it: state of a workspace or of the recovery of one, whose directories
+/// may be as new as the file.
+pub fn write_state(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    fs::create_dir_all(parent)?;
+    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
+    tmp.write_all(bytes)?;
+    sync(tmp.as_file())?;
+    tmp.persist(path).map_err(|error| error.error)?;
+    if alt_os::durability::unsynced() {
+        return Ok(());
+    }
+    // the directory as it is named in full: the parent of a relative path
+    // of one component is the empty path, which cannot be opened
+    for directory in fs::canonicalize(parent)?.ancestors().take(3) {
+        File::open(directory)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// Puts `bytes` at `path` in one step and syncs the file and its entry in
@@ -44,9 +89,9 @@ pub fn write_entry(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
     let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
     tmp.write_all(bytes)?;
-    tmp.as_file().sync_all()?;
+    sync(tmp.as_file())?;
     tmp.persist(path).map_err(|error| error.error)?;
-    File::open(parent)?.sync_all()
+    sync_at(parent)
 }
 
 /// Whether the file at `path` holds `bytes` and nothing else; `None` where
@@ -78,6 +123,9 @@ pub fn holds(path: &Path, mut bytes: &[u8]) -> io::Result<Option<bool>> {
 /// directory that was just made, and the entries of those it lies in. Once
 /// that is done, what is put into the directory needs [`write_entry`] only.
 pub fn sync_above(directory: &Path, levels: usize) -> io::Result<()> {
+    if alt_os::durability::unsynced() {
+        return Ok(());
+    }
     for above in fs::canonicalize(directory)?
         .ancestors()
         .skip(1)
@@ -99,7 +147,7 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let to = to.as_ref();
     fs::rename(from, to)?;
     let metadata = fs::symlink_metadata(to)?;
-    if metadata.is_file() {
+    if metadata.is_file() && !alt_os::durability::unsynced() {
         File::open(to)?.sync_all()?;
     }
     sync_parents(from)?;
@@ -109,7 +157,7 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
 pub fn set_permissions(path: impl AsRef<Path>, permissions: fs::Permissions) -> io::Result<()> {
     let path = path.as_ref();
     fs::set_permissions(path, permissions)?;
-    File::open(path)?.sync_all()
+    sync_at(path)
 }
 
 pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {

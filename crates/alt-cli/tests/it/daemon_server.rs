@@ -76,14 +76,18 @@ impl Daemon {
                 ("USER".into(), "tester".into()),
             ],
             id: None,
+            drawn: false,
         };
-        let mut stream = UnixStream::connect(&self.sock).unwrap();
-        daemon::write_frame(&mut stream, &req.encode()).unwrap();
-        let mut buf = Vec::new();
-        // the daemon writes one framed response then we read to EOF
-        let len = read_one_frame(&mut stream, &mut buf);
-        Response::decode(&buf[..len]).unwrap()
+        exchange(&self.sock, &req)
     }
+}
+
+fn exchange(sock: &Path, req: &Request) -> Response {
+    let mut stream = UnixStream::connect(sock).unwrap();
+    daemon::write_frame(&mut stream, &req.encode()).unwrap();
+    let mut buf = Vec::new();
+    let len = read_one_frame(&mut stream, &mut buf);
+    Response::decode(&buf[..len]).unwrap()
 }
 
 /// Reads exactly one length-prefixed frame's bytes into `buf`, returning its
@@ -203,12 +207,9 @@ fn run_with_env(sock: &Path, cwd: &Path, args: &[&str], env: Vec<(String, String
         cwd: cwd.to_path_buf(),
         env,
         id: None,
+        drawn: false,
     };
-    let mut stream = UnixStream::connect(sock).unwrap();
-    daemon::write_frame(&mut stream, &req.encode()).unwrap();
-    let mut buf = Vec::new();
-    let len = read_one_frame(&mut stream, &mut buf);
-    Response::decode(&buf[..len]).unwrap()
+    exchange(sock, &req)
 }
 
 /// Like [`run_as`] but carries an explicit idempotency `id` (the
@@ -229,12 +230,9 @@ fn run_keyed(
             ("USER".into(), author.into()),
         ],
         id,
+        drawn: false,
     };
-    let mut stream = UnixStream::connect(sock).unwrap();
-    daemon::write_frame(&mut stream, &req.encode()).unwrap();
-    let mut buf = Vec::new();
-    let len = read_one_frame(&mut stream, &mut buf);
-    Response::decode(&buf[..len]).unwrap()
+    exchange(sock, &req)
 }
 
 /// Stages a no-diff change so a `commit` always has a non-empty index: without
@@ -545,6 +543,7 @@ fn daemon_reads_stay_coherent_under_concurrent_external_writers() {
                         cwd: root.clone(),
                         env: vec![("USER".into(), "tester".into())],
                         id: None,
+                        drawn: false,
                     };
                     if daemon::write_frame(&mut s, &req.encode()).is_ok() {
                         let mut hdr = [0u8; 4];
@@ -929,6 +928,7 @@ fn lost_response_after_execution_replays_the_durable_bytes_after_restart() {
                 ("USER".into(), "tester".into()),
             ],
             id: Some(id),
+            drawn: false,
         };
         let mut stream = UnixStream::connect(&daemon.sock).unwrap();
         daemon::write_frame(&mut stream, &req.encode()).unwrap();
@@ -1021,6 +1021,7 @@ fn protected_override_is_per_request_in_a_warm_daemon() {
             ("ALT_PROTECTED_OVERRIDE".into(), "1".into()),
         ],
         id: Some([90; 16]),
+        drawn: false,
     };
     let first = exchange(&request);
     assert_eq!(first.exit_code, 0, "{}", err_str(&first));

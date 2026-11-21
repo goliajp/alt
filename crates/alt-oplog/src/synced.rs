@@ -64,7 +64,7 @@ pub(crate) type Deferred = Arc<Mutex<(u32, u64, u64)>>;
 
 /// Syncs what the ops in the log name (see
 /// [`crate::OpLog::sync_named_with`]).
-pub type SyncNamed = Arc<dyn Fn() -> std::io::Result<()> + Send + Sync>;
+pub type SyncNamed = Arc<dyn Fn(&[crate::Op]) -> std::io::Result<()> + Send + Sync>;
 
 /// Before the marker is moved past `others_to`, where the ops of other
 /// writers end: when it does not record them as synced yet, what they name
@@ -75,7 +75,7 @@ pub(crate) fn sync_named(
     others_to: u64,
 ) -> std::io::Result<()> {
     match named {
-        Some(sync) if !marker.records(others_to) => sync(),
+        Some(sync) if !marker.records(others_to) => sync(&[]),
         _ => Ok(()),
     }
 }

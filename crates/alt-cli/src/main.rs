@@ -129,11 +129,11 @@ fn attempt() -> Response {
             args: (words.map(|s| s.to_str().expect("validated arguments").to_owned())).collect(),
             cwd: cwd.clone(),
             env: forwarded,
-            id: None,
+            ..Default::default()
         };
         let outcome = if native_write {
             let id = parsed.cli.request_id.as_deref().expect("write id");
-            request.id = Some(alt_cli::request::parse_id(id).expect("validated id"));
+            (request.id, request.drawn) = (alt_cli::request::parse_id(id).ok(), drawn);
             alt_cli::client::serve_write(&alt_dir, &request)
         } else {
             alt_cli::client::try_serve(&alt_dir, &request)
@@ -163,8 +163,8 @@ fn attempt() -> Response {
             Outcome::NotSent | Outcome::LostAfterSend => {}
         }
     }
-    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None) {
-        Ok(execution) => execution.with_its_id_drawn(drawn),
+    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None, drawn) {
+        Ok(execution) => execution,
         Err(response) => return response,
     };
     if cli::is_native(&execution.parsed.cli.command) {

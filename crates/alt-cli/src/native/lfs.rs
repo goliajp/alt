@@ -97,6 +97,9 @@ impl NativeRepo<'_> {
         if link.exists() {
             return Ok(pointer);
         }
+        // synced also by a command that leaves what it stages unsynced:
+        // no op names the link, and nothing would sync it later
+        let _synced = alt_os::durability::leave_unsynced(false);
         let id = self.store.odb.put_content(content)?;
         // the content is durable before the link names it
         self.store.odb.flush_synced()?;

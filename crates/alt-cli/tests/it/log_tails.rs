@@ -99,11 +99,11 @@ fn marker_flags(path: &Path, first: usize, slot: usize, flags: usize) -> u32 {
     u32::from_le_bytes(data[at + flags..at + flags + 4].try_into().unwrap())
 }
 
-fn odb_flags(alt_dir: &Path) -> u32 {
+pub(super) fn odb_flags(alt_dir: &Path) -> u32 {
     marker_flags(&alt_dir.join("odb.durable"), 32, 96, 16)
 }
 
-fn oplog_flags(alt_dir: &Path) -> u32 {
+pub(super) fn oplog_flags(alt_dir: &Path) -> u32 {
     marker_flags(&alt_dir.join("oplog/durable"), 16, 36, 8)
 }
 

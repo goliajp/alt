@@ -1,6 +1,7 @@
 //! Shared request preparation, command capture, and durable result publication.
 use crate::cli::{self, Command};
 use crate::daemon::{RequestId, Response};
+use crate::hardening;
 use crate::machine::{self, Failure, Parsed};
 use crate::native::{self, Identity, Store};
 use crate::request::{self, Claim, Claimed};
@@ -18,6 +19,11 @@ pub struct Execution {
     /// the request id was drawn at random for this very run: no operation
     /// recorded before it can carry it
     drawn: bool,
+    /// for as long as the command runs, its thread leaves what it writes
+    /// unsynced where the command does ([`hardening::enter`])
+    _left: Option<alt_os::durability::Unsynced>,
+    /// warnings of the configuration the command syncs by, told once it runs
+    said: Option<String>,
     claim: Option<Claim>,
     outcome: std::cell::Cell<&'static str>,
 }
@@ -59,7 +65,16 @@ pub fn submit(
         parsed = machine::parse(args.clone())?;
     }
     binding(&parsed, cwd, identity)
-        .and_then(|(dir, _, _, value)| request::record_submission(&dir, id, &value))
+        .and_then(|(dir, _, _, value)| {
+            // this process runs the one command: what it says here stands
+            std::mem::forget(hardening::enter(
+                &parsed.cli.command,
+                drawn,
+                &dir,
+                identity,
+            )?);
+            request::record_submission(&dir, id, &value)
+        })
         .map_err(|error| {
             machine::from_error(error.as_ref(), false)
                 .response(parsed.json, Some(&machine::hex(&id)))
@@ -68,26 +83,6 @@ pub fn submit(
 }
 
 impl Execution {
-    fn of(
-        parsed: Parsed,
-        identity: Identity,
-        id: Option<RequestId>,
-        cwd: PathBuf,
-        writing: bool,
-        claim: Option<Claim>,
-    ) -> Self {
-        Self {
-            parsed,
-            identity,
-            id,
-            cwd,
-            writing,
-            drawn: false,
-            claim,
-            outcome: std::cell::Cell::new("unknown"),
-        }
-    }
-
     /// Refuses a request id an older alt recorded effects under without a
     /// receipt. An id drawn for this run is on no operation older than it.
     fn ensure_not_legacy(&self, store: &Store) -> Res<()> {
@@ -97,19 +92,15 @@ impl Execution {
         }
     }
 
-    /// Says whether the request id was drawn for this run ([`submit`]).
-    pub fn with_its_id_drawn(mut self, drawn: bool) -> Self {
-        self.drawn = drawn;
-        self
-    }
-
     /// Claim before acquiring any daemon store mutex. A retry can block here
     /// while the original publishes its result, without holding up durability.
+    /// `drawn`: the request id was drawn for this run ([`submit`]).
     pub fn prepare(
         parsed: Parsed,
         cwd: PathBuf,
         identity: Identity,
         wire_id: Option<RequestId>,
+        drawn: bool,
     ) -> Result<Self, Response> {
         let writing = cli::mutates_command(&parsed.cli.command);
         let reported_id = parsed
@@ -142,17 +133,36 @@ impl Execution {
                     None => request::new_id()?,
                 };
                 let (alt_dir, repository, workspace, value) = binding(&parsed, &cwd, &identity)?;
+                let left = hardening::enter(&parsed.cli.command, drawn, &alt_dir, &identity)?;
+                // what was found to say of `core.fsync`, here or in `submit`
+                let left = (left, hardening::take_warnings());
                 match request::claim(&alt_dir, id, repository, workspace, &value)? {
-                    Claimed::Execute(claim) => Ok((Some(id), Some(claim), None)),
+                    Claimed::Execute(claim) => Ok((Some(id), Some((claim, left)), None)),
                     Claimed::Replay(response) => Ok((Some(id), None, Some(response))),
                 }
             } else {
                 Ok((None, None, None))
             }
         })();
+        let outcome = std::cell::Cell::new("unknown");
         match result {
             Ok((_, _, Some(response))) => Err(response),
-            Ok((id, claim, None)) => Ok(Self::of(parsed, identity, id, cwd, writing, claim)),
+            Ok((id, claimed, None)) => {
+                let (claim, left) = claimed.unzip();
+                let (_left, said) = left.unzip();
+                Ok(Self {
+                    parsed,
+                    identity,
+                    id,
+                    cwd,
+                    writing,
+                    drawn,
+                    _left,
+                    said,
+                    claim,
+                    outcome,
+                })
+            }
             Err(error) => Err(machine::from_error(error.as_ref(), writing)
                 .response(parsed.json, reported_id.as_deref())),
         }
@@ -187,6 +197,7 @@ impl Execution {
     ) -> (Response, Vec<String>) {
         let capture = crate::diagnostics::Capture::start(self.parsed.json);
         let _caller = self.identity.outer_environment();
+        let _ = crate::diagnostics::emit(self.said.as_deref().unwrap_or("").as_bytes());
         // an id drawn for this run is on no operation older than the run
         let began = self.drawn.then(|| store.log_anchor());
         let mut stdout = Vec::new();

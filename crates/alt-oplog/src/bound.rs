@@ -11,7 +11,8 @@ impl OpLog {
     /// lock is held when this returns.
     ///
     /// A boundary takes in the ops other writers appended, and what those
-    /// name has to be synced before it does. That is done with the lock
+    /// name has to be synced before it does, with whatever else a writer
+    /// that left its appends unsynced wrote. That is done with the lock
     /// given up: whoever syncs it takes locks of its own, and those come
     /// before this one. The boundary is then set where the log ended
     /// before the lock was given up, and ops appended since lie past it.
@@ -26,8 +27,23 @@ impl OpLog {
             return self.bound(&marker, self.len_bytes);
         };
         let upto = self.len_bytes;
+        // what was appended since the last boundary that held, or all of
+        // it where none is recorded
+        let held = match marker.recorded() {
+            Some(state) => state.whole,
+            None => marker.unsynced_from().unwrap_or(0),
+        };
+        let left = match self.first_unheld(held, |_| Ok::<_, OpLogError>(false))? {
+            // the ops this handle read last hold them, unless they began
+            // before those
+            Some(first) => match self.ops.len().checked_sub(first.ops) {
+                Some(from) => self.ops[from..].to_vec(),
+                None => self.ops()?[self.len() - first.ops..].to_vec(),
+            },
+            None => Vec::new(),
+        };
         let _ = unlock(&self.file);
-        let synced = sync();
+        let synced = sync(&left);
         lock_exclusive(&self.file)?;
         synced?;
         self.catch_up()?;

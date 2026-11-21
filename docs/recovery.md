@@ -515,6 +515,58 @@ fails with before it changes anything: it holds every file against what was
 synced before it appends. Commands that only read do not look, and go on
 reading what is left.
 
+### What a command syncs before it answers
+
+A command that moves a ref or writes files of the working tree (`alt commit`,
+`merge`, `switch`, `branch`, `tag`, `cherry-pick`, `revert`, `rebase`, `undo`,
+`fetch` and the rest) syncs what it wrote before it answers. Once
+`alt commit` has answered, the commit, every object it refers to, the
+operation log and the index it was made from are on disk.
+
+`alt add` only stages, and by default it does not sync: it answers once the
+kernel has what it wrote, as `git add` does under git's default `core.fsync`.
+The next command that syncs makes the staged content durable together with
+its own writes: the objects, the operation log, the recovery snapshots of the
+adds and the index of every workspace. A power cut before that can lose the
+adds made since the last command that synced, whole or in part, and nothing
+else. What is left of them is dealt with as the sections above and below
+describe: records that did not arrive whole are cut by the next command that
+writes, an index entry whose blob is not stored is reported with
+`add the file again`, and an add that was cut short is abandoned.
+
+The index file is put in place by a rename without a sync, as git's is. On a
+file system that does not write a file out before it records the rename, a
+power cut can leave the index empty or cut short. Every command then fails
+with `index file is truncated` or `index format: ...`. Remove `.alt/index`
+(for a named workspace, `.alt/workspaces/<name>/index`) and add the files
+again: without the file the index is empty, and the commits, the working
+tree and the object store are as they were.
+
+To have `alt add` sync before it answers:
+
+```
+alt config core.fsync added
+```
+
+`core.fsync` is read from the system's, the user's and the repository's
+configuration as git reads it: a comma-separated list that starts from the
+default, where `none` empties the list, a name adds a component and `-name`
+takes one out. The component alt acts on is `index`, alone or as part of
+`added` or `all`: with it in the list, `alt add` syncs everything it writes.
+The other names git has (`loose-object`, `pack`, `pack-metadata`,
+`commit-graph`, `objects`, `reference`, `derived-metadata`, `committed`) are
+accepted and change nothing, because alt syncs what they stand for whenever a
+command moves a ref and never before. A name git does not have is ignored
+with a warning. `core.fsyncMethod` is not read; alt syncs with `fsync`.
+
+A command given a request id with `--request-id` syncs whatever it does, an
+`alt add` included: the caller may ask for the result of that id after a power
+cut, and the receipt must then be there with everything it records.
+
+`ALT_RELAXED_DURABILITY` in the environment has every command leave what it
+writes unsynced, commits included, whatever `core.fsync` says. It is for tests
+and for diagnosis.
+
 ### Older repositories, upgrades and unsynced commits
 
 A repository that an older alt wrote records only how long its files were
@@ -527,12 +579,13 @@ still running for the repository is stopped by the first command of this
 alt that would use it, which starts its own; an older alt does the same to
 this one's daemon, so the two can be used in turn.
 
-Commits made with `ALT_RELAXED_DURABILITY` set are not synced, and what was
-recorded is marked as no longer holding until a command without it writes:
-in between, too, only the last record of a file can be an unfinished one, and
-a power cut can lose such commits whole or in part.
+What `alt add` leaves unsynced, and commits made with
+`ALT_RELAXED_DURABILITY` set, are not synced, and what was recorded is marked
+as no longer holding until a command that syncs writes: in between, too, only
+the last record of a file can be an unfinished one, and a power cut can lose
+such adds and commits whole or in part.
 
-An `alt add` that a power cut interrupts while syncs are skipped can leave its
+An `alt add` that was not synced and that a power cut interrupts can leave its
 intent in the log and its blobs nowhere, like the one described under Records
 whose content never arrived. Here nothing says the intent was never synced, so
 it is not discarded with the end of the log. The next command that writes in

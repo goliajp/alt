@@ -55,12 +55,14 @@ fn held(op: &Op, also: &alt_refs::AlsoNamed, stored: &dyn Fn(&ObjectId) -> Res<b
 
 /// The ref store of a repository whose objects are in the object store
 /// beside it: before it records as synced an op another writer appended,
-/// the objects stored by then are synced, that writer's among them.
+/// the objects stored by then are synced, that writer's among them, and
+/// the files an index change that was left unsynced wrote.
 pub(super) fn open_refs(alt_dir: &Path) -> Res<RefStore> {
     let mut refs = RefStore::open(alt_dir)?;
     let alt_dir = alt_dir.to_owned();
-    refs.sync_objects_with(std::sync::Arc::new(move || {
-        NativeOdb::sync_stored(&alt_dir).map_err(std::io::Error::other)
+    refs.sync_objects_with(std::sync::Arc::new(move |left| {
+        NativeOdb::sync_stored(&alt_dir).map_err(std::io::Error::other)?;
+        recovery::sync_left(&alt_dir, left)
     }));
     Ok(refs)
 }
@@ -129,8 +131,12 @@ impl Store {
     /// Syncs the object database and the log ([`StoreSink::fsync_all`])
     /// unless their markers already record as synced every record this
     /// store holds of them: what it read and what it wrote. A command that
-    /// synced each of its writes as it made them has nothing left to sync.
+    /// synced each of its writes as it made them has nothing left to sync,
+    /// and one that leaves what it writes unsynced syncs nothing here.
     pub fn sync_held(&self) -> Res<()> {
+        if alt_os::durability::unsynced() {
+            return Ok(());
+        }
         if self.refs.confirmed() && self.odb.held_confirmed()? {
             return Ok(());
         }

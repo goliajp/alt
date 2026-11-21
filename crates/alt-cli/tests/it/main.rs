@@ -95,6 +95,7 @@ mod scan_daemon_switch;
 #[cfg(target_os = "linux")]
 mod scan_daemon_watches;
 mod show;
+mod staged_durability;
 mod status_json;
 mod status_labels;
 mod status_replaced;
@@ -102,6 +103,8 @@ mod status_untracked;
 mod store_refresh;
 mod switch_kinds;
 mod sync_order;
+#[cfg(target_os = "linux")]
+mod synced_files;
 mod tag;
 mod task_delivery;
 mod task_evidence;

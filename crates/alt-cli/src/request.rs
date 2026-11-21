@@ -225,11 +225,11 @@ pub fn record_submission(alt_dir: &Path, id: RequestId, binding: &Value) -> Res<
     )?;
     let mut tmp = alt_os::temp::NamedTempFile::new_in(&directory)?;
     tmp.write_all(&bytes)?;
-    tmp.as_file().sync_all()?;
+    crate::durable::sync(tmp.as_file())?;
     match tmp.persist_noclobber(&path) {
         Ok(_) => {
-            File::open(&directory)?.sync_all()?;
-            File::open(alt_dir)?.sync_all()?;
+            crate::durable::sync_at(&directory)?;
+            crate::durable::sync_at(alt_dir)?;
         }
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
             if std::fs::read(path)? != bytes {

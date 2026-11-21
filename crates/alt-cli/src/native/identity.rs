@@ -188,6 +188,12 @@ impl Identity {
         }
     }
 
+    /// Whether the caller has `ALT_RELAXED_DURABILITY` set: every command
+    /// it runs leaves what it writes unsynced.
+    pub fn relaxed(&self) -> bool {
+        (self.execution_environment).contains_key("ALT_RELAXED_DURABILITY")
+    }
+
     /// The caller's variables for the configuration outside the
     /// repository, to read them by while its command runs.
     pub fn outer_environment(&self) -> crate::git_settings::Caller {
