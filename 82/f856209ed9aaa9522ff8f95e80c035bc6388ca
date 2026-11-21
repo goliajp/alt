@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what becomes of a merge, pick, revert or rebase that was interrupted
+author-type: human
+author: doracawl
+touched: docs/recovery.md
