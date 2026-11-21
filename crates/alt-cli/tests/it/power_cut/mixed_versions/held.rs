@@ -211,3 +211,65 @@ fn a_removal_goes_through_where_an_add_of_the_workspace_was_left_open() {
     same_reads(&old, dir);
     assert!(ok(run(&new, dir, &["fsck"])).ends_with("every record verified\n"));
 }
+
+#[test]
+#[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
+fn an_add_left_open_is_abandoned_by_the_next_add_once_a_blob_of_its_index_was_taken_out() {
+    let (old, new) = (old_bin(), new_bin());
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let base = tmp.path().join("base");
+    fs::create_dir(&base).unwrap();
+    repo(&base);
+    an_older_build_wrote_past_a_lost_blob(&old, &base);
+    fs::write(base.join("d.txt"), "d\n").unwrap();
+    let library = dying(tmp.path());
+    let cuts = each_cut_short(&library, &base, &old, &["add", "d.txt"]);
+    let (dir, left) = cuts
+        .filter_map(|(_, dir)| match &pending(&new, &dir)[..] {
+            [left] => Some((dir.clone(), left.clone())),
+            _ => None,
+        })
+        .last()
+        .expect("a sync the add is left open at");
+    let dir = &dir;
+    fs::write(dir.join("e.txt"), "e\n").unwrap();
+    // beside the lost record the open add is in the way of every add
+    let refused = run(&new, dir, &["add", "e.txt"]);
+    assert!(!refused.status.success(), "{}", text(&refused.stdout));
+    let said = text(&refused.stderr);
+    let open = format!("operation {left} has no durable completion; recovery required");
+    assert!(said.contains(&open), "{said}");
+    ok(run(&new, dir, &TAKE_OUT));
+    assert_eq!(pending(&new, dir), std::slice::from_ref(&left));
+    // the index the add prepared names b.txt, whose blob is now known
+    // not to be stored: the add cannot be completed, and the next
+    // command that writes abandons it and goes on
+    let added = run(&new, dir, &["add", "e.txt"]);
+    let said = text(&added.stderr);
+    assert!(added.status.success(), "{said}");
+    assert_eq!(text(&added.stdout), "staged 1 path(s)\n");
+    let abandoned = format!("warning: abandoned operation {left}: it was interrupted");
+    assert!(said.contains(&abandoned), "{said}");
+    let why = "index entry b.txt of the index it prepared names blob ";
+    assert!(
+        said.contains(why) && said.contains("add the file again"),
+        "{said}"
+    );
+    assert!(pending(&new, dir).is_empty());
+    let told = ok(run(&new, dir, &["operation", "status", &left]));
+    assert!(told.contains("abandoned"), "{told}");
+    // the index is the one from before that add, with what was added now
+    let status = ok(run(&new, dir, &["status"]));
+    let (staged, untracked) = status.split_once("Untracked files:").unwrap();
+    assert!(
+        untracked.contains("d.txt") && !staged.contains("d.txt"),
+        "{status}"
+    );
+    for name in ["b.txt", "c.txt", "e.txt"] {
+        assert!(staged.contains(name), "{status}");
+    }
+    ok(run(&new, dir, &["add", "b.txt", "d.txt"]));
+    ok(run(&new, dir, &["commit", "-m", "second"]));
+    same_reads(&old, dir);
+    assert!(ok(run(&new, dir, &["fsck"])).ends_with("every record verified\n"));
+}
