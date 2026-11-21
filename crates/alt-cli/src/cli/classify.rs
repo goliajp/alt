@@ -37,6 +37,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Verify { .. }
             | Command::Fsck { .. }
             | Command::Complete(_)
+            | Command::Prompt(_)
     )
 }
 
@@ -117,6 +118,7 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Verify { .. }
             | Command::Fsck { .. }
             | Command::Complete(_)
+            | Command::Prompt(_)
             | Command::Commit { validate: true, .. }
             | Command::Branch {
                 name: None,

@@ -61,6 +61,7 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             }
         }
         Command::Complete(args) => repo.complete(args, out)?,
+        Command::Prompt(args) => repo.prompt(args, out)?,
         Command::Status { args } => repo.status(args.untracked(), args.json, out)?,
         Command::Branch {
             name,

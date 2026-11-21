@@ -76,6 +76,7 @@ mod imp {
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
                 | Cmd::Complete(_)
+                | Cmd::Prompt(_)
         )
     }
 
@@ -94,6 +95,7 @@ mod imp {
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
                 | Cmd::Complete(_)
+                | Cmd::Prompt(_)
                 | Cmd::Branch {
                     name: None,
                     delete: None,

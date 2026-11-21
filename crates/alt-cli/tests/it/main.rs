@@ -76,6 +76,7 @@ mod path_gate;
 mod pathspec_git;
 mod patterns;
 mod precommit;
+mod prompt;
 mod push;
 mod push_policy;
 mod push_wire_ext;

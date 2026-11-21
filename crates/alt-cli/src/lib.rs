@@ -33,6 +33,7 @@ pub mod patterns;
 pub mod policy;
 pub mod portable;
 pub mod precommit;
+pub mod prompt;
 pub mod quote;
 pub mod request;
 pub mod runner;

@@ -70,12 +70,9 @@ fn deliver(response: &Response) -> u8 {
 fn run() -> Response {
     let args = std::env::args_os().collect::<Vec<_>>();
     let response = match machine::parse(args.clone()) {
-        Ok(parsed) => match &parsed.cli.command {
-            Command::Complete(asked) => {
-                let asked = asked.clone();
-                return alt_cli::complete::respond(&asked, || attempt(args, parsed));
-            }
-            _ => attempt(args, parsed),
+        Ok(parsed) => match alt_cli::execution::for_shell(&parsed.cli.command) {
+            Some(respond) => return respond(Box::new(|| attempt(args, parsed))),
+            None => attempt(args, parsed),
         },
         Err(response) => response,
     };

@@ -244,3 +244,27 @@ pub fn outside_repository(parsed: &Parsed, refused: &str, run: OwnRun) -> Respon
         Err(error) => machine::from_error(error.as_ref(), false).response(parsed.json, None),
     }
 }
+
+/// Runs a command as any other is run.
+pub type Attempt<'a> = Box<dyn FnOnce() -> Response + 'a>;
+
+/// How a command a shell runs on its own is answered: it gets no error
+/// and nothing on stderr, whatever state the repository is in. `None`
+/// for every other command.
+pub fn for_shell<'a>(command: &Command) -> Option<Box<dyn FnOnce(Attempt<'a>) -> Response>> {
+    match command {
+        Command::Complete(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |attempt| {
+                crate::complete::respond(&asked, attempt)
+            }))
+        }
+        Command::Prompt(asked) => {
+            let asked = asked.clone();
+            Some(Box::new(move |attempt| {
+                crate::prompt::respond(&asked, attempt)
+            }))
+        }
+        _ => None,
+    }
+}

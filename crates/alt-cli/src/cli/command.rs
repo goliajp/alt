@@ -472,6 +472,8 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print the state of the repository for a shell prompt
+    Prompt(crate::prompt::PromptArgs),
     /// Say what may stand at the cursor of a command line, for a shell
     #[command(hide)]
     Complete(crate::complete::CompleteArgs),

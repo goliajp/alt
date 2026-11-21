@@ -21,6 +21,7 @@ use alt_worktree::{
 use http_auth::{build_transport, http_auth};
 
 mod add;
+mod ahead_behind;
 mod bisect;
 mod checkout_files;
 mod checkout_plan;
@@ -44,6 +45,7 @@ mod op_log;
 mod operation;
 mod path_gate;
 pub mod pathspec;
+mod prompt;
 mod push_pack;
 use op_log::render_op_log_json;
 pub mod notes;

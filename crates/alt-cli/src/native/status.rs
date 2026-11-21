@@ -7,7 +7,7 @@ use super::*;
 impl NativeRepo<'_> {
     /// The mode named `given`, or without one what `status.showUntrackedFiles`
     /// sets, which may be a boolean as for git; `normal` when nothing does.
-    fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
+    pub(super) fn untracked_mode(&self, given: Option<&str>) -> Res<Untracked> {
         let invalid = |mode: &[u8]| {
             let mode = String::from_utf8_lossy(mode);
             format!("invalid untracked files mode '{mode}'")

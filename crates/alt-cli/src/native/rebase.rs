@@ -16,7 +16,7 @@ use super::*;
 pub(super) struct RebaseState {
     recovery: Option<String>,
     /// The branch being rebased (`refs/heads/…`).
-    branch: String,
+    pub(super) branch: String,
     /// Where the branch pointed before the rebase.
     orig: ObjectId,
     /// The base the commits go onto.

@@ -29,6 +29,8 @@ pub struct Operation {
     /// the step it stands at and how many there are, where it goes
     /// through several commits
     pub step: Option<(usize, usize)>,
+    /// the branch it was started on, where it took HEAD off that branch
+    pub branch: Option<String>,
 }
 
 impl Operation {
@@ -70,13 +72,18 @@ impl NativeRepo<'_> {
         let Some(kind) = self.operation_kind(conflicted)? else {
             return Ok(None);
         };
-        let mut operation = Operation { kind, step: None };
+        let mut operation = Operation {
+            kind,
+            step: None,
+            branch: None,
+        };
         match kind {
             OperationKind::Rebase => {
                 let state = self.rebase_state()?.ok_or("corrupt REBASE_STATE")?;
                 let done = self.commits_since(self.rebase_head()?, state.onto)?;
                 let stopped = usize::from(state.current.is_some());
                 operation.step = Some((done + stopped, done + stopped + state.todo.len()));
+                operation.branch = Some(state.branch);
             }
             OperationKind::Revert => {
                 let state = self.revert_state()?.ok_or("corrupt REVERT_STATE")?;
@@ -89,7 +96,11 @@ impl NativeRepo<'_> {
                 let steps = done + stopped + state.todo.len();
                 operation.step = (steps > 1).then_some((done + stopped, steps));
             }
-            OperationKind::Merge | OperationKind::CherryPick | OperationKind::Bisect => {}
+            OperationKind::Bisect => {
+                let state = self.bisect_state()?.ok_or("corrupt BISECT_STATE")?;
+                operation.branch = Some(state.branch);
+            }
+            OperationKind::Merge | OperationKind::CherryPick => {}
         }
         Ok(Some(operation))
     }
