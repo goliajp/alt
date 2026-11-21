@@ -2,7 +2,39 @@
 
 use alt_git_codec::{ObjectId, ObjectKind};
 
+use super::MISSING;
 use super::tests::{Held, id};
+
+#[test]
+fn the_tree_of_an_added_commit_has_to_be_whole() {
+    let mut held = Held::default();
+    let blob = held.put(ObjectKind::Blob, b"held");
+    let absent_blob = id(ObjectKind::Blob, b"absent");
+    let absent_tree = id(ObjectKind::Tree, b"absent");
+    let missing = Some(MISSING.to_owned());
+
+    let whole = held.tree(&[("a", false, blob)]);
+    let dir = held.tree(&[("dir", true, whole)]);
+    let root = held.commit_of(dir, &[], 1);
+    assert_eq!(held.refusal(&[root], &[], &[root]), None);
+
+    // no tree at all, a blob three levels down, a tree one level down
+    let cases = [
+        absent_tree,
+        {
+            let low = held.tree(&[("a", false, blob), ("b", false, absent_blob)]);
+            let mid = held.tree(&[("low", true, low)]);
+            held.tree(&[("dir", true, whole), ("mid", true, mid)])
+        },
+        held.tree(&[("dir", true, absent_tree)]),
+    ];
+    for (n, tree) in cases.into_iter().enumerate() {
+        let commit = held.commit_of(tree, &[root], 2 + n as u64);
+        assert_eq!(held.refusal(&[commit], &[root], &[commit]), missing, "{n}");
+        // a new value that is the tree itself
+        assert_eq!(held.refusal(&[], &[root], &[tree]), missing, "{n}");
+    }
+}
 
 /// A gitlink names a commit of another repository: nothing asks for it.
 #[test]
