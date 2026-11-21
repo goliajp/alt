@@ -103,76 +103,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             LfsOp::Import { git_dir } => repo.lfs_import(git_dir, out)?,
             LfsOp::Ls => repo.lfs_ls(out)?,
         },
-        Command::Bisect { op } => {
-            match op {
-                BisectOp::Start { bad, good } => repo.bisect_start(bad.as_deref(), good, out)?,
-                BisectOp::Bad { revs } => repo.bisect_mark("bad", revs, out)?,
-                BisectOp::Good { revs } => repo.bisect_mark("good", revs, out)?,
-                BisectOp::Skip { revs } => repo.bisect_mark("skip", revs, out)?,
-                BisectOp::Reset => repo.bisect_reset(out)?,
-                BisectOp::Run { cmd } => repo.bisect_run(cmd, out)?,
-            }
-            return Ok(0);
-        }
-        Command::Rebase {
-            upstream,
-            interactive,
-            cont,
-            skip,
-            abort,
-            json,
-        } => {
-            if *abort {
-                repo.rebase_abort(out)?;
-                return Ok(0);
-            }
-            let stopped = if *cont {
-                repo.rebase_continue(*json, out)?
-            } else if *skip {
-                repo.rebase_skip(*json, out)?
-            } else {
-                let upstream = upstream.as_deref().unwrap_or_default();
-                repo.rebase(upstream, *interactive, *json, out)?
-            };
-            // git exits 1 when a rebase stops in conflict
-            return Ok(if stopped { 1 } else { 0 });
-        }
-        Command::Revert {
-            revs,
-            mainline,
-            cont,
-            abort,
-            json,
-            ..
-        } => {
-            if *abort {
-                repo.revert_abort(out)?;
-                return Ok(0);
-            }
-            let stopped = if *cont {
-                repo.revert_continue(*json, out)?
-            } else {
-                repo.revert(revs, *mainline, *json, out)?
-            };
-            // git exits 1 when a revert stops in conflict
-            return Ok(if stopped { 1 } else { 0 });
-        }
-        Command::CherryPick { rev, json } => {
-            // git exits 1 when a cherry-pick stops in conflict
-            return Ok(if repo.cherry_pick(rev, *json, out)? {
-                1
-            } else {
-                0
-            });
-        }
-        Command::Merge { branch, json } => {
-            // git exits 1 when a merge stops in conflict
-            return Ok(if repo.merge(branch, *json, out)? {
-                1
-            } else {
-                0
-            });
-        }
+        Command::Bisect { .. }
+        | Command::Rebase { .. }
+        | Command::Revert { .. }
+        | Command::CherryPick { .. }
+        | Command::Merge { .. } => return run_sequence(repo, cmd, out),
         Command::Flow { op, json } => match op {
             FlowOp::Init => repo.flow_init(*json, out)?,
             FlowOp::Feature {
@@ -246,4 +181,82 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         _ => return Err("not a native command".into()),
     }
     Ok(0)
+}
+
+/// Runs a command that goes through commits one by one and may stop in
+/// conflict, which its exit code tells.
+fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
+    match cmd {
+        Command::Bisect { op } => {
+            match op {
+                BisectOp::Start { bad, good } => repo.bisect_start(bad.as_deref(), good, out)?,
+                BisectOp::Bad { revs } => repo.bisect_mark("bad", revs, out)?,
+                BisectOp::Good { revs } => repo.bisect_mark("good", revs, out)?,
+                BisectOp::Skip { revs } => repo.bisect_mark("skip", revs, out)?,
+                BisectOp::Reset => repo.bisect_reset(out)?,
+                BisectOp::Run { cmd } => repo.bisect_run(cmd, out)?,
+            }
+            Ok(0)
+        }
+        Command::Rebase {
+            upstream,
+            interactive,
+            cont,
+            skip,
+            abort,
+            json,
+        } => {
+            if *abort {
+                repo.rebase_abort(out)?;
+                return Ok(0);
+            }
+            let stopped = if *cont {
+                repo.rebase_continue(*json, out)?
+            } else if *skip {
+                repo.rebase_skip(*json, out)?
+            } else {
+                let upstream = upstream.as_deref().unwrap_or_default();
+                repo.rebase(upstream, *interactive, *json, out)?
+            };
+            // git exits 1 when a rebase stops in conflict
+            Ok(if stopped { 1 } else { 0 })
+        }
+        Command::Revert {
+            revs,
+            mainline,
+            cont,
+            abort,
+            json,
+            ..
+        } => {
+            if *abort {
+                repo.revert_abort(out)?;
+                return Ok(0);
+            }
+            let stopped = if *cont {
+                repo.revert_continue(*json, out)?
+            } else {
+                repo.revert(revs, *mainline, *json, out)?
+            };
+            // git exits 1 when a revert stops in conflict
+            Ok(if stopped { 1 } else { 0 })
+        }
+        Command::CherryPick { rev, json } => {
+            // git exits 1 when a cherry-pick stops in conflict
+            Ok(if repo.cherry_pick(rev, *json, out)? {
+                1
+            } else {
+                0
+            })
+        }
+        Command::Merge { branch, json } => {
+            // git exits 1 when a merge stops in conflict
+            Ok(if repo.merge(branch, *json, out)? {
+                1
+            } else {
+                0
+            })
+        }
+        _ => Err("not a native command".into()),
+    }
 }
