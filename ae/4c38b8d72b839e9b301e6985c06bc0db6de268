@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: read the whole part of the working-tree snapshot through a mapping of its file
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/map.rs
+touched: crates/alt-worktree/src/snapshot.rs
+touched: crates/alt-worktree/src/snapshot/file.rs
+touched: crates/alt-worktree/src/snapshot/load.rs
