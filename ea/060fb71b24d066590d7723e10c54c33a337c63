@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: check how a shell is answered apart from where the command runs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/complete.rs
+touched: crates/alt-cli/src/prompt.rs
