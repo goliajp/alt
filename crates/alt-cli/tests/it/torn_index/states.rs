@@ -8,7 +8,7 @@ use std::path::Path;
 use super::super::staged_durability::{add, power_cut, repo};
 use super::super::sync_order::{FILES, objects_synced};
 use super::super::unconfirmed::{alt, ok, stderr};
-use super::{INDEX, NOT_WHOLE, Torn, VERIFIED, parents, tear, tree};
+use super::{INDEX, NOT_WHOLE, Run, Torn, VERIFIED, parents, served, tear, tree};
 
 #[test]
 fn what_an_add_staged_stays_staged_where_all_but_the_index_file_outlived_the_cut() {
@@ -34,25 +34,47 @@ fn what_an_add_staged_stays_staged_where_all_but_the_index_file_outlived_the_cut
     assert!(ok(alt(dir, &["fsck"])).ends_with(VERIFIED));
 }
 
-#[test]
-fn an_index_that_names_a_blob_the_power_cut_took_does_not_take_the_place_of_a_torn_one() {
+/// One synced commit, `b.txt` added and not synced, then a power cut that
+/// took the blob of the add and left its record in the log, its snapshot
+/// and, with `named`, the record that names the blob: no command takes
+/// the add for staged.
+fn blob_lost(named: bool, run: Run) {
     let tmp = alt_os::temp::tempdir().unwrap();
     let dir = tmp.path();
     repo(dir);
     add(dir, "b.txt");
-    // the log and the snapshot of the add outlived the cut, its blob did not
     let alt_dir = dir.join(".alt");
     for (name, len) in FILES.iter().zip(objects_synced(&alt_dir)) {
+        if named && *name == "map.alt" {
+            continue;
+        }
         let file = fs::OpenOptions::new().write(true).open(alt_dir.join(name));
         file.unwrap().set_len(len).unwrap();
     }
     tear(&dir.join(INDEX), Torn::Empty);
-    let status = ok(alt(dir, &["status"]));
-    assert!(!status.contains("new file"), "{status}");
+    let status = ok(run(dir, &["status"]));
+    assert!(!status.contains("new file"), "named {named}: {status}");
     assert!(status.contains("Untracked files:") && status.contains("b.txt"));
-    ok(alt(dir, &["add", "b.txt"]));
-    ok(alt(dir, &["commit", "-m", "second"]));
+    ok(run(dir, &["add", "b.txt"]));
+    ok(run(dir, &["commit", "-m", "second"]));
     assert!(ok(alt(dir, &["fsck"])).ends_with(VERIFIED));
+}
+
+#[test]
+fn an_index_that_names_a_blob_the_power_cut_took_does_not_take_the_place_of_a_torn_one() {
+    blob_lost(false, alt);
+}
+
+#[test]
+fn a_daemon_takes_no_index_that_names_a_blob_the_power_cut_took_for_a_torn_one() {
+    blob_lost(false, served);
+}
+
+#[test]
+#[ignore = "fails: the record of map.alt that names the lost blob is not cut, and the add is taken for staged"]
+fn an_index_is_not_taken_for_a_torn_one_where_only_the_name_of_its_blob_outlived_the_cut() {
+    blob_lost(true, alt);
+    blob_lost(true, served);
 }
 
 fn snapshots(dir: &Path) -> Vec<std::path::PathBuf> {

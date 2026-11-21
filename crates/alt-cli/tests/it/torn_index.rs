@@ -46,11 +46,11 @@ pub(super) fn tear(index: &Path, how: Torn) -> Vec<u8> {
     left
 }
 
-type Run = fn(&Path, &[&str]) -> Output;
+pub(super) type Run = fn(&Path, &[&str]) -> Output;
 
 /// Through a daemon, which the first command starts: one that ran before
 /// the power cut did not outlive it.
-fn served(dir: &Path, args: &[&str]) -> Output {
+pub(super) fn served(dir: &Path, args: &[&str]) -> Output {
     let mut command = alt_command(dir, args);
     command
         .env_remove("ALT_NO_DAEMON")
