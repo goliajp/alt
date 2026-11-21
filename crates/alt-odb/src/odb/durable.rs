@@ -311,37 +311,4 @@ impl Odb {
         let _ = unlock(&sync_lock);
         result
     }
-
-    /// Under the sync lock and the shared append lock (so no rewind and no
-    /// writer's cut is under way): fsyncs unless one since the last rewind
-    /// covered the files as far as `target`, and records it.
-    fn sync_locked(&mut self, target: Lens, generation: u64) -> Result<(), OdbError> {
-        let covered = Marker::read(&self.durable_path)
-            .recorded()
-            .is_some_and(|state| state.generation == generation && state.eof.reaches(&target));
-        let eof = if covered {
-            None
-        } else {
-            let (pack, blobmap) = self.blobs.file_lens()?;
-            let eof = Lens {
-                seq: target.seq,
-                pack,
-                blobmap,
-                // not opened, not fsynced
-                tier1: self.tier1.get().map_or(Ok(0), Tier1Map::file_len)?,
-                map: self.map.file_len()?,
-            };
-            self.blobs.fsync()?; // chunks then blobmap, in order
-            // then tier1 (references blob ids above)
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.sync()?;
-            }
-            self.map.fsync()?; // then map.alt (may reference tier1 ids)
-            Some(eof)
-        };
-        if let Some(whole) = synced::record(&self.durable_path, generation, target, eof)? {
-            head::note_synced(&self.lock, whole);
-        }
-        Ok(())
-    }
 }
