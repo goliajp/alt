@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: fix
+summary: finish an interrupted removal of lost records before anything is appended, sync the files before one, and read the store anew in a handle whose records were taken out
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions.rs
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions/synced_first.rs
+touched: crates/alt-odb/src/head.rs
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/bound.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/follow.rs
+touched: crates/alt-odb/src/odb/lost.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/repair.rs
+touched: crates/alt-odb/src/unsynced.rs
+touched: crates/alt-odb/tests/it/lost_dropped.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/moved.rs
+touched: crates/alt-store/src/reclog/removal.rs
+touched: crates/alt-store/src/reclog/tests.rs
+touched: docs/recovery.md
