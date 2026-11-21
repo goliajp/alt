@@ -51,6 +51,7 @@ fn blob_lost(named: bool, run: Run) {
         let file = fs::OpenOptions::new().write(true).open(alt_dir.join(name));
         file.unwrap().set_len(len).unwrap();
     }
+    super::super::power_cut::another_boot(&alt_dir);
     tear(&dir.join(INDEX), Torn::Empty);
     let status = ok(run(dir, &["status"]));
     assert!(!status.contains("new file"), "named {named}: {status}");
@@ -71,7 +72,6 @@ fn a_daemon_takes_no_index_that_names_a_blob_the_power_cut_took_for_a_torn_one()
 }
 
 #[test]
-#[ignore = "fails: the record of map.alt that names the lost blob is not cut, and the add is taken for staged"]
 fn an_index_is_not_taken_for_a_torn_one_where_only_the_name_of_its_blob_outlived_the_cut() {
     blob_lost(true, alt);
     blob_lost(true, served);

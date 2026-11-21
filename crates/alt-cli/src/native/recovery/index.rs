@@ -10,6 +10,12 @@
 //! back to, what it was before, and a record says so, which closes the
 //! intent as a completion does. The next command that writes in the
 //! workspace does this before anything else.
+//!
+//! An add that is not synced puts its index in place before its records
+//! are on disk, so a power cut can leave an index that a later change
+//! wrote beside a log that ends in an earlier, open intent. The index is
+//! then neither of the two the intent recorded, and nothing of the intent
+//! is left to complete: it is abandoned with the index kept as it is.
 
 use super::*;
 
@@ -31,39 +37,72 @@ impl NativeRepo<'_> {
         Ok(None)
     }
 
+    /// Why the index `intent` prepared cannot be put in place: its
+    /// snapshot does not read, or it names a blob that is not stored.
+    fn uncompletable(&self, intent: &IndexIntent) -> Res<Option<String>> {
+        // a snapshot that is missing or does not read is one a power cut took
+        let Ok(after) = self.read_snapshot(&intent.after) else {
+            return Ok(Some("the index it prepared was not kept".to_owned()));
+        };
+        Ok(self.unstored_entry(&after)?.map(|(path, blob)| {
+            format!(
+                "index entry {path} of the index it prepared names blob {blob}, which is not \
+                 stored"
+            )
+        }))
+    }
+
     /// Abandons the prepared index change `operation` where the index it
-    /// prepared names a blob that is not stored, and says so on stderr;
-    /// whether it did. The index must be the one from before the change
-    /// or the prepared one, and the one from before must name only what
-    /// is stored: any other state is left for `operation recover` to
-    /// report.
+    /// prepared cannot be put in place, and says so on stderr; whether it
+    /// did. The index is the one from before the change or the prepared
+    /// one: the prepared one is put back to the one from before, where
+    /// that was kept. What either names that is not stored is told like
+    /// any other staged file whose blob is lost.
     fn abandon_unstorable(&mut self, operation: OpId, intent: &IndexIntent) -> Res<bool> {
-        let after = self.read_snapshot(&intent.after)?;
-        let Some((path, blob)) = self.unstored_entry(&after)? else {
+        let Some(why) = self.uncompletable(intent)? else {
             return Ok(false);
         };
         let current = hash(&canonical_index(self.index()?, self.store.algo()?));
-        if current == intent.after {
-            let before = self.read_snapshot(&intent.before)?;
-            if self.unstored_entry(&before)?.is_some() {
-                return Ok(false);
-            }
+        if current == intent.after
+            && let Ok(before) = self.read_snapshot(&intent.before)
+        {
             durable_write(&self.index_path, &before)?;
-        } else if current != intent.before {
-            return Ok(false);
         }
+        self.record_abandoned(operation)?;
+        let said = format!(
+            "warning: abandoned operation {operation}: it was interrupted, and {why}: add the \
+             file again\n"
+        );
+        Ok(crate::diagnostics::emit(said.as_bytes()).map(|()| true)?)
+    }
+
+    fn record_abandoned(&mut self, operation: OpId) -> Res<()> {
         let closed = Completion {
             version: 1,
             prepared: operation.to_string(),
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
         };
         let actor = self.id.actor("recover");
-        self.store
-            .refs
-            .record_op(&actor, now_ms(), &encode(ABANDON, &closed)?)?;
+        let payload = encode(ABANDON, &closed)?;
+        self.store.refs.record_op(&actor, now_ms(), &payload)?;
+        Ok(())
+    }
+
+    /// Abandons the prepared index change `operation` where the index is
+    /// neither the one from before it nor the one it prepared, and says
+    /// so on stderr; whether it did. A later change put that index in
+    /// place and its record is not in the log: the index stays.
+    fn abandon_superseded(&mut self, operation: OpId, intent: &IndexIntent) -> Res<bool> {
+        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
+        if current == intent.before || current == intent.after {
+            return Ok(false);
+        }
+        self.record_abandoned(operation)?;
         let said = format!(
-            "warning: abandoned operation {operation}: it was interrupted, and index entry {path} \
-             of the index it prepared names blob {blob}, which is not stored: add the file again\n"
+            "warning: abandoned operation {operation}: it was interrupted, and the index was \
+             changed after it by a command the operation log has no record of (a power cut \
+             leaves it so when the last `alt add` was not synced). What the index stages now \
+             is kept: see `alt status`\n"
         );
         Ok(crate::diagnostics::emit(said.as_bytes()).map(|()| true)?)
     }
@@ -108,6 +147,7 @@ impl NativeRepo<'_> {
             (!ops.is_empty(), pending_index(&ops, &identity)?)
         };
         if let Some((id, intent)) = pending
+            && !self.abandon_superseded(id, &intent)?
             && !self.abandon_unstorable(id, &intent)?
         {
             return Err(crate::machine::Failure::pending(
@@ -147,30 +187,13 @@ impl NativeRepo<'_> {
         intent: IndexIntent,
     ) -> Res<()> {
         self.ensure_recoverable(&intent)?;
-        let before = self.read_snapshot(&intent.before)?;
-        let after = self.read_snapshot(&intent.after)?;
-        Index::parse(&before, self.store.algo()?)?;
-        Index::parse(&after, self.store.algo()?)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
-        if current != intent.before && current != intent.after {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: index matches neither recorded state",
-            )
-            .into());
-        }
-        if self.abandon_unstorable(operation, &intent)? {
+        if self.abandon_superseded(operation, &intent)?
+            || self.abandon_unstorable(operation, &intent)?
+        {
             return Ok(());
         }
-        if let Some((path, blob)) = self.unstored_entry(&after)? {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!(
-                    "recovery refused: index entry {path} names blob {blob}, which is not stored"
-                ),
-            )
-            .into());
-        }
+        let after = self.read_snapshot(&intent.after)?;
+        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
         if current != intent.after {
             durable_write(&self.index_path, &after)?;
         }

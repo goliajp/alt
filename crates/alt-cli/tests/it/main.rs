@@ -76,6 +76,7 @@ mod past_damage;
 mod path_gate;
 mod pathspec_git;
 mod patterns;
+mod power_cut;
 mod precommit;
 mod push;
 mod push_policy;

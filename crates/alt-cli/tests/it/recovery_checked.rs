@@ -38,6 +38,24 @@ fn refused_as_open(root: &Path, case: &str) {
     );
 }
 
+/// The add left open is found where the index is one a later add put in
+/// place, whose record the cut took: it is abandoned with the index
+/// kept, and the command goes on.
+fn abandoned_as_superseded(root: &Path, case: &str) {
+    fs::write(root.join("late"), "late").unwrap();
+    let add = alt(root, &["add", "late"]);
+    let told = stderr(&add);
+    assert!(
+        told.contains("warning: abandoned operation "),
+        "{case}: {told}"
+    );
+    assert!(
+        told.contains("What the index stages now is kept"),
+        "{case}: {told}"
+    );
+    ok(add);
+}
+
 #[test]
 fn an_add_left_open_is_found_wherever_the_last_check_stopped() {
     // frames cut off the end of the log: the completion of the last add;
@@ -51,7 +69,13 @@ fn an_add_left_open_is_found_wherever_the_last_check_stopped() {
         for _ in 0..cut {
             remove_final_log_frame(root);
         }
-        refused_as_open(root, &format!("{cut} frames cut"));
+        let case = format!("{cut} frames cut");
+        if cut == 3 {
+            // the index is the one the last add left
+            abandoned_as_superseded(root, &case);
+            continue;
+        }
+        refused_as_open(root, &case);
         // a refusal keeps nothing new
         assert_eq!(fs::read(root.join(CHECKED)).unwrap(), kept);
     }
@@ -80,7 +104,8 @@ fn a_log_that_grew_differently_after_a_cut_is_read_from_its_start() {
     // another workspace's add puts other ops where the cut ones were
     fs::write(peer.join("p"), "p").unwrap();
     ok(alt(&peer, &["add", "p"]));
-    refused_as_open(&root, "regrown");
+    // the index is the one the add of `e` left
+    abandoned_as_superseded(&root, "regrown");
 }
 
 #[test]

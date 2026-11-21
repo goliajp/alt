@@ -45,6 +45,7 @@ pub(super) fn power_cut(dir: &Path) {
         cut(name, len);
     }
     cut("oplog/log", log_synced(&alt_dir));
+    super::power_cut::another_boot(&alt_dir);
 }
 
 #[test]
