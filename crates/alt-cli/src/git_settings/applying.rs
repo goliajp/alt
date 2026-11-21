@@ -124,11 +124,25 @@ mod tests {
     #[test]
     fn the_files_are_read_once_until_they_are_to_be_forgotten() {
         let tmp = alt_os::temp::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::write(dir.join("config"), "[core]\n\tfsync = one\n").unwrap();
-        assert_eq!(value(dir, None).as_deref(), Some("one"));
-        std::fs::write(dir.join("config"), "[core]\n\tfsync = two\n").unwrap();
-        assert_eq!(value(dir, Some("main")).as_deref(), Some("one"));
+        // other tests of this binary have every thread forget meanwhile:
+        // two reads tell of one round only where none of them did between
+        let mut attempt = 0;
+        let dir = loop {
+            attempt += 1;
+            let dir = tmp.path().join(attempt.to_string());
+            std::fs::create_dir(&dir).unwrap();
+            let round = ROUND.load(Ordering::Relaxed);
+            std::fs::write(dir.join("config"), "[core]\n\tfsync = one\n").unwrap();
+            let first = value(&dir, None);
+            std::fs::write(dir.join("config"), "[core]\n\tfsync = two\n").unwrap();
+            let second = value(&dir, Some("main"));
+            if ROUND.load(Ordering::Relaxed) == round {
+                assert_eq!(first.as_deref(), Some("one"));
+                assert_eq!(second.as_deref(), Some("one"));
+                break dir;
+            }
+        };
+        let dir = &dir;
         forget();
         assert_eq!(value(dir, None).as_deref(), Some("two"));
         // another caller's files are not this one's
