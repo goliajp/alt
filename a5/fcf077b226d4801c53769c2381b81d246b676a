@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: hold complete and prompt to the checks every command that only reads passes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/ahead_behind.rs
+touched: crates/alt-cli/tests/it/complete/reading.rs
+touched: crates/alt-cli/tests/it/readers/commands.rs
