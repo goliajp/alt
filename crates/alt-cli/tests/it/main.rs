@@ -115,6 +115,7 @@ mod step_crash;
 mod step_refused;
 #[cfg(debug_assertions)]
 mod step_stuck;
+mod step_synced;
 mod step_undo;
 mod stopped_trees;
 mod store_refresh;

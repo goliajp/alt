@@ -243,16 +243,15 @@ impl NativeRepo<'_> {
         Ok(decode::<StepRecord>(&op.payload, STEP)?.workspace)
     }
 
-    /// Closes the mark of a step with the record of what it did. The
-    /// record is not synced: one lost to a power cut is written again
-    /// from the log.
+    /// Closes the mark of a step with the record of what it did, synced
+    /// as every last record of a command is: the log is then recorded
+    /// as synced to its end, and a command that reads has nothing past
+    /// that to look through.
     fn record_step(&mut self, verb: &str, step: &StepRecord) -> Res<()> {
         let actor = self.id.actor(verb);
         let payload = encode(STEP, step)?;
         crash_point!("step-record:before");
-        self.store
-            .refs
-            .record_op_unsynced(&actor, now_ms(), &payload)?;
+        self.store.refs.record_op(&actor, now_ms(), &payload)?;
         crash_point!("step-record:after");
         Ok(())
     }
