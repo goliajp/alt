@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: ask a daemon about a torn index whose blob is lost, and pin the state where only the blob's name is left
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/torn_index.rs
+touched: crates/alt-cli/tests/it/torn_index/states.rs
