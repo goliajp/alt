@@ -13,6 +13,7 @@ mod alt_server_push;
 mod altd_server;
 mod altd_server_no_new_objects;
 mod altd_server_refused_objects;
+mod altd_server_signed_commits;
 mod amend;
 mod argument_bindings;
 mod bisect;

@@ -8,31 +8,23 @@
 //! The server offers no way to hold a request at a chosen step, so the
 //! refused push is repeated by two clients for as long as the other
 //! pushes are sent, and what the server accepted is read back at the end.
+//!
+//! Nor may the rollback take what another process wrote to the served
+//! repository while the push was under way.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_wire::CommandStatus;
 
-use crate::altd_server::{Server, spawn_server};
+use crate::altd_server::{Server, alt, ok, spawn_server};
 use crate::altd_server_no_new_objects::{creation, push, seeded, tip};
+use crate::altd_server_signed_commits::{commit_object, pack_of};
 
 /// A commit on top of `parent` the server has not seen, and the pack of it.
 fn new_commit(parent: &str, round: usize) -> (String, Vec<u8>) {
-    let tree = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tree, b"");
-    let who = "tester <t@e> 1700000000 +0000";
-    let commit =
-        format!("tree {tree}\nparent {parent}\nauthor {who}\ncommitter {who}\n\nround {round}\n");
-    let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Commit, commit.as_bytes());
-    let scratch = alt_os::temp::tempdir().unwrap();
-    let mut writer = alt_git_pack::PackWriter::create(scratch.path(), HashAlgo::Sha1, 2).unwrap();
-    writer.add(tree, ObjectKind::Tree, b"").unwrap();
-    writer
-        .add(oid, ObjectKind::Commit, commit.as_bytes())
-        .unwrap();
-    let written = writer.finish().unwrap();
-    (oid.to_string(), std::fs::read(&written.pack_path).unwrap())
+    let (oid, commit) = commit_object(parent, 1_700_000_000, "", &format!("round {round}"));
+    (oid.to_string(), pack_of(&[(oid, commit)]))
 }
 
 /// Reads the server's log to its end, so that the server never waits on a
@@ -79,7 +71,7 @@ fn assert_served(origin: &std::path::Path, created: &[(String, String)]) {
     for (name, commit) in created {
         assert_eq!(&tip(origin, name), commit, "{name}");
     }
-    let branches = crate::altd_server::ok(crate::altd_server::alt(origin, &["branch"]));
+    let branches = ok(alt(origin, &["branch"]));
     assert!(!branches.contains("refused"), "{branches}");
     assert!(!branches.contains("absent"), "{branches}");
 }
@@ -90,16 +82,14 @@ fn a_ref_created_without_objects_is_never_at_an_object_of_a_refused_push() {
     let mut server = spawn_server(origin.path());
     discard_log(&mut server);
     let url = format!("http://{}/", server.addr);
-    let mut created = Vec::new();
     for round in 0..4 {
         let (commit, pack) = new_commit(&seed, round);
         let stop = Arc::new(AtomicBool::new(false));
         let refused = refused_pushes(&url, &commit, &pack, &stop);
         for n in 0..100 {
             let name = format!("refs/heads/bare-{round}-{n}");
-            if accepted(&push(&url, &[creation(&name, &commit)], &[])) {
-                created.push((name, commit.clone()));
-            }
+            let report = push(&url, &[creation(&name, &commit)], &[]);
+            assert!(!accepted(&report), "{name}: {report:?}");
         }
         stop.store(true, Ordering::Relaxed);
         for client in refused {
@@ -107,7 +97,7 @@ fn a_ref_created_without_objects_is_never_at_an_object_of_a_refused_push() {
         }
     }
     drop(server);
-    assert_served(origin.path(), &created);
+    assert_served(origin.path(), &[]);
 }
 
 #[test]
@@ -134,4 +124,63 @@ fn a_refused_push_leaves_the_objects_an_accepted_push_brought_too() {
     }
     drop(server);
     assert_served(origin.path(), &created);
+}
+
+/// Bytes that do not compress, `seed` telling one run of them from another.
+fn noise(seed: u64, len: usize) -> Vec<u8> {
+    let mut word = (seed + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+    let mut out = Vec::with_capacity(len + 8);
+    while out.len() < len {
+        word ^= word << 13;
+        word ^= word >> 7;
+        word ^= word << 17;
+        out.extend_from_slice(&word.to_le_bytes());
+    }
+    out
+}
+
+/// A refused push with a pack that takes the server a while to index and
+/// to write, during which commits are made in the served repository
+/// itself. Every one of them is still there afterwards.
+#[test]
+fn a_refused_push_leaves_what_another_process_wrote_meanwhile() {
+    use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+    let (origin, _) = seeded();
+    let root = origin.path();
+    let mut server = spawn_server(root);
+    discard_log(&mut server);
+    let url = format!("http://{}/", server.addr);
+    let scratch = alt_os::temp::tempdir().unwrap();
+    let mut writer = alt_git_pack::PackWriter::create(scratch.path(), HashAlgo::Sha1, 256).unwrap();
+    for n in 0..256 {
+        let blob = noise(n, 128 * 1024);
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &blob);
+        writer.add(oid, ObjectKind::Blob, &blob).unwrap();
+    }
+    let pack = std::fs::read(writer.finish().unwrap().pack_path).unwrap();
+
+    let mut commits = Vec::new();
+    for round in 0..3 {
+        let (url, pack) = (url.clone(), pack.clone());
+        let refused = std::thread::spawn(move || {
+            let absent = creation("refs/heads/absent", &"1".repeat(40));
+            let report = push(&url, &[absent], &pack);
+            assert!(!accepted(&report), "{report:?}");
+        });
+        let mut n = 0;
+        while !refused.is_finished() {
+            std::fs::write(root.join("seed.txt"), format!("{round} {n}\n")).unwrap();
+            ok(alt(root, &["add", "seed.txt"]));
+            ok(alt(root, &["commit", "-m", "meanwhile"]));
+            commits.push(tip(root, "refs/heads/main"));
+            n += 1;
+        }
+        refused.join().unwrap();
+    }
+    drop(server);
+    assert!(commits.len() > 3, "{commits:?}");
+    for commit in &commits {
+        ok(alt(root, &["cat-file", "-p", commit]));
+    }
+    ok(alt(root, &["fsck"]));
 }

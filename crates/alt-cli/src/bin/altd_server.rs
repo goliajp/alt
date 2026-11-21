@@ -40,7 +40,8 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 #[path = "altd_server/pack_ingest.rs"]
 mod pack_ingest;
-use pack_ingest::{land, prepare_pack_for_ingest};
+#[path = "altd_server/signed_commits.rs"]
+mod signed_commits;
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
@@ -1199,22 +1200,14 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    // a pack that fails to index is told to `land` as packed but not
-    // prepared, which reports it as the unpack error
-    let prepared = if sig_block.is_some() || pack_bytes_streamed == 0 {
-        None
-    } else {
-        prepare_pack_for_ingest(&pack_tmp_path).ok()
-    };
-    let (unpack_result, moved) = land(
-        writer,
-        prepared.as_ref(),
-        pack_bytes_streamed != 0,
+    let push = pack_ingest::Push {
+        pack: (pack_bytes_streamed != 0).then_some(pack_tmp_path.as_path()),
         sig_block,
-        &head.updates,
-        &effective_principal,
+        updates: &head.updates,
+        principal: &effective_principal,
         sig_label,
-    )?;
+    };
+    let (unpack_result, moved) = pack_ingest::land(writer, push)?;
     // wait for the group-commit leader's fsync to cover us, outside the
     // store lock: this is the only place we touch disk durability on the
     // receive-pack path. Other concurrent pushes coalesce into the same
@@ -1385,51 +1378,6 @@ fn pick_principal(outcome: &SigOutcome, auth_user: Option<&str>) -> (Principal, 
 fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
     let guard = store.lock().unwrap();
     guard.capabilities_for(principal).require_signed
-}
-
-/// walk the newly-pushed commits and verify each carries a
-/// valid `alt-sig` header from a trusted principal. Returns `Some(reason)`
-/// for the first commit that fails the check (the caller turns it into
-/// per-command `ng` so the entire push is rejected atomically). Returns
-/// `Ok(None)` when either the policy doesn't require commit signatures
-/// or every new commit passes.
-fn require_signed_commits_block(
-    store: &Store,
-    principal: &Principal,
-    new_commits: &[ObjectId],
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    if !store.capabilities_for(principal).require_signed_commits {
-        return Ok(None);
-    }
-    let trust = store.trust_keys()?;
-    for oid in new_commits {
-        let Some(raw) = store.odb_get(oid)? else {
-            return Ok(Some(format!("commit {oid} missing from odb after ingest")));
-        };
-        let bytes = raw.data;
-        match alt_cli::commit_sign::extract_alt_sig(&bytes)? {
-            None => {
-                return Ok(Some(format!(
-                    "commit {oid} missing alt-sig (require-signed-commits)"
-                )));
-            }
-            Some(parsed) => {
-                let Some((_, pubkey)) = trust.iter().find(|(id, _)| id == &parsed.principal) else {
-                    return Ok(Some(format!(
-                        "commit {oid} signed by '{}' not in trust store",
-                        parsed.principal
-                    )));
-                };
-                if pubkey.verify(&parsed.canonical, &parsed.sig).is_err() {
-                    return Ok(Some(format!(
-                        "commit {oid} alt-sig did not verify against trust['{}']",
-                        parsed.principal
-                    )));
-                }
-            }
-        }
-    }
-    Ok(None)
 }
 
 /// Commit the ref tx under the store mutex the caller holds, then assign a
