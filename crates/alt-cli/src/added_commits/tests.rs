@@ -6,19 +6,19 @@ use alt_git_codec::HashAlgo;
 use super::*;
 
 #[derive(Default)]
-struct Held {
+pub(super) struct Held {
     objects: HashMap<ObjectId, RawObject>,
     /// what only the pack of the push holds
     packed: HashSet<ObjectId>,
-    reads: Cell<usize>,
+    pub(super) reads: Cell<usize>,
 }
 
-fn id(kind: ObjectKind, data: &[u8]) -> ObjectId {
+pub(super) fn id(kind: ObjectKind, data: &[u8]) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, kind, data)
 }
 
 impl Held {
-    fn put(&mut self, kind: ObjectKind, data: &[u8]) -> ObjectId {
+    pub(super) fn put(&mut self, kind: ObjectKind, data: &[u8]) -> ObjectId {
         let oid = id(kind, data);
         let data = data.to_vec();
         self.objects.insert(oid, RawObject { kind, data });
@@ -26,7 +26,7 @@ impl Held {
     }
 
     /// A tree of `entries`: name, whether a directory, object.
-    fn tree(&mut self, entries: &[(&str, bool, ObjectId)]) -> ObjectId {
+    pub(super) fn tree(&mut self, entries: &[(&str, bool, ObjectId)]) -> ObjectId {
         let mut data = Vec::new();
         for (name, dir, oid) in entries {
             let mode = if *dir { "40000" } else { "100644" };
@@ -36,7 +36,12 @@ impl Held {
         self.put(ObjectKind::Tree, &data)
     }
 
-    fn commit_of(&mut self, tree: ObjectId, parents: &[ObjectId], date: u64) -> ObjectId {
+    pub(super) fn commit_of(
+        &mut self,
+        tree: ObjectId,
+        parents: &[ObjectId],
+        date: u64,
+    ) -> ObjectId {
         let mut text = format!("tree {tree}\n");
         for parent in parents {
             text.push_str(&format!("parent {parent}\n"));
@@ -47,7 +52,7 @@ impl Held {
     }
 
     /// A commit of the empty tree.
-    fn commit(&mut self, parents: &[ObjectId], date: u64, message: &str) -> ObjectId {
+    pub(super) fn commit(&mut self, parents: &[ObjectId], date: u64, message: &str) -> ObjectId {
         let tree = self.put(ObjectKind::Tree, b"");
         let mut text = format!("tree {tree}\n");
         for parent in parents {
@@ -66,7 +71,7 @@ impl Held {
 
     /// What the push adds where every commit but those of `passing`
     /// fails the policy.
-    fn added(
+    pub(super) fn added(
         &self,
         passing: &[ObjectId],
         served: &[ObjectId],
@@ -99,7 +104,7 @@ impl Held {
         super::added(&source, served, new).unwrap()
     }
 
-    fn refusal(
+    pub(super) fn refusal(
         &self,
         passing: &[ObjectId],
         served: &[ObjectId],

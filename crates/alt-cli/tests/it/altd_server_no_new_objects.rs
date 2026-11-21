@@ -27,7 +27,7 @@ pub(crate) fn tip(root: &Path, rev: &str) -> String {
         .to_owned()
 }
 
-fn git(dir: &Path, args: &[&str]) {
+pub(crate) fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
         .current_dir(dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")

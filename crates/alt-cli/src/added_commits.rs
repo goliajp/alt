@@ -43,6 +43,8 @@ mod walk;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
 
 use std::collections::HashSet;
 
