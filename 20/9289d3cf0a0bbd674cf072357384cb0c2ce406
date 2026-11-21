@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: feat
+summary: declare what kind of value every argument takes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/cli/platform.rs
+touched: crates/alt-cli/src/cli/task.rs
+touched: crates/alt-cli/src/cli/task_remote.rs
+touched: crates/alt-cli/src/cli/vcs.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/worktree_args.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/value_hints.rs
