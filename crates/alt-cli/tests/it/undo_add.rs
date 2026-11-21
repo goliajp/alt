@@ -185,7 +185,7 @@ fn recovery_refuses_modified_worktree_and_index_without_partial_changes() {
     let mut conflict = Index::parse(&before, HashAlgo::Sha1).unwrap();
     conflict.entries[0].flags |= 1 << 12;
     let bytes = conflict.serialize(HashAlgo::Sha1);
-    std::fs::write(root.join(".alt/index"), &bytes).unwrap();
+    crate::replace_file(&root.join(".alt/index"), &bytes);
     assert!(!alt(root, &["undo"]).status.success());
     assert_eq!(index_bytes(root), bytes);
 }
@@ -317,7 +317,7 @@ fn recovery_add_preserves_unrelated_conflict_stages_and_undo_restores_them() {
     ok(alt(root, &["add", "conflict"]));
     let mut index = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
     index.entries[0].flags |= 1 << 12;
-    std::fs::write(root.join(".alt/index"), index.serialize(HashAlgo::Sha1)).unwrap();
+    crate::replace_file(&root.join(".alt/index"), index.serialize(HashAlgo::Sha1));
     std::fs::write(root.join("other"), "other").unwrap();
     ok(alt(root, &["add", "other"]));
     let staged = Index::parse(&index_bytes(root), HashAlgo::Sha1).unwrap();
@@ -352,7 +352,7 @@ fn recovery_ref_intent_precedes_files_and_survives_missing_completion() {
         if restore_old_file {
             // The switch committed its intent, but materialization never began.
             std::fs::write(root.join("f"), "committed data").unwrap();
-            std::fs::write(root.join(".alt/index"), before_index).unwrap();
+            crate::replace_file(&root.join(".alt/index"), before_index);
         }
         let before = index_bytes(root);
         let log = std::fs::read(root.join(".alt/oplog/log")).unwrap();
@@ -376,7 +376,7 @@ fn recovery_prepared_index_without_replacement_is_not_reported_as_success() {
     std::fs::write(root.join("f"), "new").unwrap();
     ok(alt(root, &["add", "f"]));
     remove_final_log_frame(root);
-    std::fs::write(root.join(".alt/index"), &initial).unwrap();
+    crate::replace_file(&root.join(".alt/index"), &initial);
     let refused = alt(root, &["undo"]);
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("outcome unknown"));
@@ -477,7 +477,7 @@ fn recovery_resumes_each_file_and_index_boundary_without_touching_untracked_data
             std::fs::write(root.join("b"), "new").unwrap();
         }
         if boundary <= 2 {
-            std::fs::write(root.join(".alt/index"), index_before).unwrap();
+            crate::replace_file(&root.join(".alt/index"), index_before);
         }
         recover_pending(root);
         for path in ["a", "b"] {

@@ -252,7 +252,7 @@ impl NativeRepo<'_> {
         self.ensure_no_pending_recovery()?;
         index_file::ensure_sound(&after)?;
         let unchanged = self.unchanged_since(&before)?;
-        let before = before.canonical(self.store.algo()?);
+        let (before, read) = before.canonical(self.store.algo()?);
         let after = canonical_index(after, self.store.algo()?);
         if !unchanged {
             return Err(crate::machine::Failure::refusal(
@@ -265,18 +265,19 @@ impl NativeRepo<'_> {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            before: self.snapshot(&before)?,
-            after: self.snapshot(&after)?,
+            before: self.snapshot_as(&before, read)?,
+            after: hash(&after),
             worktree: touched
                 .iter()
                 .map(|p| self.path_guard(p))
                 .collect::<Res<_>>()?,
             inverse_of,
         };
-        self.apply_index_intent(intent, &after)
+        let fresh = self.keep_snapshot_as(&intent.after, &after)?;
+        self.apply_index_intent(intent, &after, fresh)
     }
 
-    fn apply_index_intent(&mut self, intent: IndexIntent, after: &[u8]) -> Res<OpId> {
+    fn apply_index_intent(&mut self, intent: IndexIntent, after: &[u8], fresh: bool) -> Res<OpId> {
         self.store.odb.flush()?;
         let actor = self.id.actor(if intent.inverse_of.is_some() {
             "undo"
@@ -291,7 +292,7 @@ impl NativeRepo<'_> {
         // even when the daemon normally defers synchronization.
         self.store.sync_held()?;
         self.check_guards(&intent.worktree)?;
-        durable_write(&self.index_path, after)?;
+        self.put_index(&intent.after, after, fresh)?;
         let done = Completion {
             version: 1,
             prepared: prepared.to_string(),

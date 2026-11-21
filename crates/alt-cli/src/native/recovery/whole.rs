@@ -68,6 +68,9 @@ fn stopped_at(index_path: &Path) -> Option<Stopped> {
     (stopped.version == 1).then_some(stopped)
 }
 
+/// An index, the bytes of its file, and the device and inode of that file.
+pub(super) type FileRead = (Index, Option<Vec<u8>>, Option<(u64, u64)>);
+
 fn said(restored: &Restored, written: bool) -> String {
     let state = match &restored.from {
         Source::Operation(id) => format!("the index operation {id} left"),
@@ -95,19 +98,31 @@ impl NativeRepo<'_> {
     /// is not a whole index: the index that takes its place, with the
     /// bytes it is written as.
     pub(in crate::native) fn read_index(&self) -> Res<(Index, Option<Vec<u8>>)> {
-        let bytes = match std::fs::read(&self.index_path) {
-            Ok(bytes) => bytes,
+        let (index, bytes, _) = self.read_index_file()?;
+        Ok((index, bytes))
+    }
+
+    /// [`Self::read_index`], and the device and inode of the file the
+    /// bytes are those of: none for an index that stands in for the file.
+    pub(super) fn read_index_file(&self) -> Res<FileRead> {
+        use std::io::Read;
+        use std::os::unix::fs::MetadataExt;
+        let mut file = match std::fs::File::open(&self.index_path) {
+            Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok((index_file::empty_index(), None));
+                return Ok((index_file::empty_index(), None, None));
             }
             Err(e) => return Err(e.into()),
         };
+        let meta = file.metadata()?;
+        let mut bytes = Vec::with_capacity(meta.len() as usize + 1);
+        file.read_to_end(&mut bytes)?;
         let algo = self.store.algo()?;
         match Index::parse(&bytes, algo) {
-            Ok(index) => Ok((index, Some(bytes))),
+            Ok(index) => Ok((index, Some(bytes), Some((meta.dev(), meta.ino())))),
             Err(alt_git_index::IndexError::Torn(_)) => {
                 let bytes = self.in_place_of_torn()?;
-                Ok((Index::parse(&bytes, algo)?, Some(bytes)))
+                Ok((Index::parse(&bytes, algo)?, Some(bytes), None))
             }
             Err(e) => Err(e.into()),
         }

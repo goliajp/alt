@@ -86,7 +86,7 @@ fn an_add_that_was_not_synced_and_is_lost_to_a_power_cut_leaves_the_commit_befor
     add(dir, "b.txt");
     // nothing the add wrote reached the disk
     power_cut(dir);
-    fs::write(dir.join(".alt/index"), &index).unwrap();
+    crate::replace_file(&dir.join(".alt/index"), &index);
     assert_eq!(ok(alt(dir, &["rev-parse", "HEAD"])), head);
     let status = ok(alt(dir, &["status"]));
     assert!(status.contains("b.txt"), "{status}");

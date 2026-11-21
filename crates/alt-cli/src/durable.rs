@@ -82,6 +82,39 @@ pub fn write_state(path: &Path, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Puts the file at `from` at `path` as well, in one step: one file under
+/// two names, for state that is kept twice with the same bytes. `from` is
+/// synced first unless `synced` says its content was already, then the
+/// directories [`write_state`] syncs. Where the file system makes no such
+/// link nothing is done and `false` is returned.
+///
+/// The link is first made as `<path>.next`: the caller holds the lock
+/// that keeps every other writer of `path` out.
+pub fn link_state(from: &Path, path: &Path, synced: bool) -> io::Result<bool> {
+    let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
+    let next = path.with_extension("next");
+    match fs::hard_link(from, &next) {
+        Ok(()) => {}
+        // left by a writer that was cut short
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            fs::remove_file(&next)?;
+            fs::hard_link(from, &next)?;
+        }
+        Err(_) => return Ok(false),
+    }
+    if !synced {
+        sync_at(from)?;
+    }
+    fs::rename(&next, path)?;
+    if alt_os::durability::unsynced() {
+        return Ok(true);
+    }
+    for directory in fs::canonicalize(parent)?.ancestors().take(3) {
+        File::open(directory)?.sync_all()?;
+    }
+    Ok(true)
+}
+
 /// Puts `bytes` at `path` in one step and syncs the file and its entry in
 /// the directory it is in, and no directory above that one: for a
 /// directory whose own entry the caller has synced.

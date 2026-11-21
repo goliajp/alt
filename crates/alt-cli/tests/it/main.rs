@@ -55,6 +55,7 @@ mod identity;
 mod ignore_sources;
 mod import_materialize;
 mod index_blobs;
+mod index_link;
 mod json_outputs;
 mod lfs;
 mod lock_order;
@@ -135,6 +136,15 @@ mod funcname_long;
 mod git_settings;
 mod recovery_kinds;
 mod stack_overflow;
+
+/// Puts `bytes` at `path` as a writer of state does: in a new file, renamed
+/// into place. The file that was there may be kept under another name, as
+/// an index is by its recovery snapshot, and is not written through.
+pub fn replace_file(path: &std::path::Path, bytes: impl AsRef<[u8]>) {
+    let new = path.with_extension("put");
+    std::fs::write(&new, bytes).unwrap();
+    std::fs::rename(new, path).unwrap();
+}
 
 /// The `alt` binary under test, kept from the git configuration of the
 /// machine the tests run on, as the git they compare it with is. A test

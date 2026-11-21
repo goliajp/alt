@@ -44,7 +44,7 @@ pub(super) fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
     }
     drop_last_op(dir);
     if !replaced {
-        fs::write(dir.join(".alt/index"), &index).unwrap();
+        crate::replace_file(&dir.join(".alt/index"), &index);
     }
     index
 }
@@ -158,7 +158,7 @@ fn an_index_in_a_third_state_is_left_and_the_add_stays_pending() {
     fs::write(other.path().join("z.txt"), "elsewhere\n").unwrap();
     ok(alt(other.path(), &["add", "z.txt"]));
     let third = fs::read(other.path().join(".alt/index")).unwrap();
-    fs::write(dir.join(".alt/index"), &third).unwrap();
+    crate::replace_file(&dir.join(".alt/index"), &third);
     fs::write(dir.join("other.txt"), "other\n").unwrap();
     let add = alt(dir, &["add", "other.txt"]);
     assert!(!add.status.success());

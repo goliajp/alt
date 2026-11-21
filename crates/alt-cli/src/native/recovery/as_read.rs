@@ -13,6 +13,8 @@ use super::*;
 pub(in crate::native) struct AsRead {
     index: Index,
     bytes: Option<Vec<u8>>,
+    /// the device and inode of the file the bytes were read from
+    file: Option<(u64, u64)>,
 }
 
 impl std::ops::Deref for AsRead {
@@ -26,13 +28,15 @@ impl std::ops::Deref for AsRead {
 impl AsRead {
     /// [`canonical_index`] of the index: the bytes it was read from where
     /// they are that form already, whose trailer was checked when they
-    /// were parsed.
-    pub(super) fn canonical(self, algo: HashAlgo) -> Vec<u8> {
+    /// were parsed, and then the file they were read from.
+    pub(super) fn canonical(self, algo: HashAlgo) -> (Vec<u8>, Option<(u64, u64)>) {
         let content = canonical(self.index).content(algo);
         let whole = content.len() + algo.raw_len();
         match self.bytes {
-            Some(bytes) if bytes.len() == whole && bytes.starts_with(&content) => bytes,
-            _ => Index::sealed(content, algo),
+            Some(bytes) if bytes.len() == whole && bytes.starts_with(&content) => {
+                (bytes, self.file)
+            }
+            _ => (Index::sealed(content, algo), None),
         }
     }
 }
@@ -41,8 +45,8 @@ impl NativeRepo<'_> {
     /// The workspace's index, an empty one where there is no index file,
     /// with the bytes it was read from.
     pub(in crate::native) fn index_as_read(&self) -> Res<AsRead> {
-        let (index, bytes) = self.read_index()?;
-        Ok(AsRead { index, bytes })
+        let (index, bytes, file) = self.read_index_file()?;
+        Ok(AsRead { index, bytes, file })
     }
 
     /// Whether the index file holds the index `read` was read as: the
@@ -98,7 +102,8 @@ mod tests {
             Some(bytes) => Index::parse(bytes, HashAlgo::Sha1).unwrap(),
             None => index_file::empty_index(),
         };
-        AsRead { index, bytes }
+        let file = None;
+        AsRead { index, bytes, file }
     }
 
     #[test]
@@ -107,18 +112,21 @@ mod tests {
         let canonical = canonical_index(index(7), algo);
         // written with its stat fields, in the canonical form, and not at all
         assert_eq!(
-            as_read(Some(index(7).serialize(algo))).canonical(algo),
+            as_read(Some(index(7).serialize(algo))).canonical(algo).0,
             canonical
         );
-        assert_eq!(as_read(Some(canonical.clone())).canonical(algo), canonical);
         assert_eq!(
-            as_read(None).canonical(algo),
+            as_read(Some(canonical.clone())).canonical(algo).0,
+            canonical
+        );
+        assert_eq!(
+            as_read(None).canonical(algo).0,
             canonical_index(index_file::empty_index(), algo)
         );
         // read from a file in that form, it is that file's bytes: no other were made
         let read = as_read(Some(canonical));
         let held = read.bytes.as_ref().unwrap().as_ptr();
-        let same = read.canonical(algo);
+        let same = read.canonical(algo).0;
         assert_eq!(same.as_ptr(), held);
     }
 }

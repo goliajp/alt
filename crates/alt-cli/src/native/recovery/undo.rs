@@ -70,7 +70,7 @@ impl NativeRepo<'_> {
                     before: intent.after, after: intent.before,
                     inverse_of: Some(prepared.id.to_string()), request_id: self.request_id.map(|id| crate::machine::hex(&id)), ..intent
                 };
-                self.apply_index_intent(inverse, &bytes)?;
+                self.apply_index_intent(inverse, &bytes, false)?;
             }
             Some(&checkout_recovery::PREPARE_CHECKOUT) => {
                 let intent: checkout_recovery::CheckoutIntent = decode(

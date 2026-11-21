@@ -106,7 +106,8 @@ fn conflicted_paths_are_marked_by_the_stages_they_have() {
     std::fs::remove_file(with_git.join("info")).unwrap();
     write(&with_git, "staged", "staged\n");
     assert!(git(&with_git, &["add", "staged"]).status.success());
-    std::fs::copy(with_git.join(".git/index"), alt.join(".alt/index")).unwrap();
+    let index = std::fs::read(with_git.join(".git/index")).unwrap();
+    crate::replace_file(&alt.join(".alt/index"), index);
     for tree in [&alt, &with_git] {
         write(tree, "staged", "staged\n");
         write(tree, "kept", "changed\n");
