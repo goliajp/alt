@@ -13,8 +13,8 @@
 //! ## Supported syntax
 //!
 //! - Blank lines and lines starting with `#` are skipped.
-//! - Trailing whitespace is stripped (a literal trailing space must be
-//!   escaped as `\ `).
+//! - Spaces at the end of a line are stripped (a literal trailing space
+//!   must be escaped as `\ `); a tab there is part of the pattern.
 //! - A leading `!` negates the rule (the path is *unignored* if it would
 //!   otherwise be ignored).
 //! - A leading `/` anchors the pattern at the directory holding the

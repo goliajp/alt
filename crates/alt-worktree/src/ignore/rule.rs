@@ -1,4 +1,9 @@
 //! One line of an ignore file, and how a path is matched against it.
+//!
+//! A pattern is held against the bytes of a path as they are.
+//! `core.ignorecase` is not read: where git has it set, as it sets it
+//! itself on a file system that folds case, git matches a rule whatever
+//! the case of its letters, and a rule here does not.
 
 use crate::glob::glob_match;
 
@@ -43,7 +48,7 @@ pub(crate) enum Against {
 impl Rule {
     /// The rule one line of an ignore file states, when it states one.
     pub(super) fn parse(line: &[u8]) -> Option<Rule> {
-        let line = strip_trailing_ws(strip_cr(line));
+        let line = strip_trailing_spaces(strip_cr(line));
         if line.is_empty() || line[0] == b'#' {
             return None;
         }
@@ -117,17 +122,53 @@ fn strip_cr(line: &[u8]) -> &[u8] {
     }
 }
 
-fn strip_trailing_ws(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
-    while end > 0 && (line[end - 1] == b' ' || line[end - 1] == b'\t') {
-        end -= 1;
+/// `line` without the spaces it ends in, as git takes them off: a space
+/// after a backslash stays, with what is before it, and so does a tab.
+fn strip_trailing_spaces(line: &[u8]) -> &[u8] {
+    let (mut at, mut spaces) = (0, None);
+    while at < line.len() {
+        match line[at] {
+            b' ' => spaces = spaces.or(Some(at)),
+            // what follows it is taken as it is; nothing follows the last
+            b'\\' if at + 1 == line.len() => return line,
+            b'\\' => (at, spaces) = (at + 1, None),
+            _ => spaces = None,
+        }
+        at += 1;
     }
-    &line[..end]
+    &line[..spaces.unwrap_or(line.len())]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spaces_at_the_end_of_a_line_go_unless_a_backslash_keeps_one_and_a_tab_stays() {
+        let kept = |line: &str| {
+            let kept = strip_trailing_spaces(line.as_bytes());
+            String::from_utf8(kept.to_vec()).unwrap()
+        };
+        for (line, left) in [
+            ("a.txt  ", "a.txt"),
+            ("a b  ", "a b"),
+            ("a\\ ", "a\\ "),
+            ("a\\   ", "a\\ "),
+            ("a\t", "a\t"),
+            ("a \t", "a \t"),
+            ("a\t ", "a\t"),
+            ("a \\", "a \\"),
+            ("   ", ""),
+        ] {
+            assert_eq!(kept(line), left, "{line:?}");
+        }
+        let rule = Rule::parse(b"kept\\ ").unwrap();
+        assert!(rule.matches(b"kept ", Against::Name));
+        assert!(!rule.matches(b"kept", Against::Name));
+        let rule = Rule::parse(b"tab.txt\t").unwrap();
+        assert!(rule.matches(b"tab.txt\t", Against::Name));
+        assert!(!rule.matches(b"tab.txt", Against::Name));
+    }
 
     #[test]
     fn a_rule_matches_as_its_pattern_does_whatever_form_it_was_told_to_have() {

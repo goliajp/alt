@@ -234,3 +234,37 @@ fn a_rule_without_a_slash_goes_by_the_name_of_a_path_as_for_git() {
     assert!(st.contains("working tree clean"), "{st}");
     assert_eq!(ok(git(g, &["status", "--porcelain"])), "");
 }
+
+/// Rules that end in a tab, in spaces and in a space after a backslash,
+/// beside files whose names end the same ways and ones that do not.
+fn rules_that_end_in_blanks(root: &Path, run: &dyn Fn(&[&str]) -> Output) {
+    let rules = "tab.txt\t\nspace.txt  \nkept\\ \nboth\\   \n";
+    std::fs::write(root.join(".gitignore"), rules).unwrap();
+    let names = ["tab.txt", "tab.txt\t", "space.txt", "kept", "kept ", "both"];
+    for name in names.into_iter().chain(["both "]) {
+        std::fs::write(root.join(name), "x\n").unwrap();
+    }
+    ok(run(&["add", "."]));
+    ok(run(&["commit", "-m", "base"]));
+}
+
+#[test]
+fn a_rule_ends_as_for_git_in_a_tab_in_spaces_and_in_an_escaped_space() {
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (a, g) = (a.path(), g.path());
+    ok(alt(a, &["init", "."]));
+    ok(git(g, &["init", "-q", "-b", "main"]));
+    rules_that_end_in_blanks(a, &|args| alt(a, args));
+    rules_that_end_in_blanks(g, &|args| git(g, args));
+    let tree = |cat: String| cat.lines().next().unwrap().to_owned();
+    assert_eq!(
+        tree(ok(alt(a, &["cat-file", "-p", "main"]))),
+        tree(ok(git(g, &["cat-file", "-p", "HEAD"])))
+    );
+    // a tab is part of the rule, spaces are not, an escaped space is
+    let listed = ok(git(g, &["ls-files", "-z"]));
+    assert_eq!(listed, ".gitignore\0both\0kept\0tab.txt\0");
+}
