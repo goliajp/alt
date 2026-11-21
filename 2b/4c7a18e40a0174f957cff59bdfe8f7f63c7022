@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say how an operation under way is ended or given up
+author-type: human
+author: doracawl
+touched: docs/shell.md
