@@ -43,8 +43,8 @@ impl NativeRepo<'_> {
         self.store.odb.flush()?;
 
         if resolved.iter().any(|r| r.conflicted) {
-            self.write_conflicted(&resolved)?;
             self.start_cherry_pick(target_oid, head_oid)?;
+            self.write_conflicted(&resolved)?;
             let conflicts: Vec<BString> = resolved
                 .iter()
                 .filter(|r| r.conflicted)

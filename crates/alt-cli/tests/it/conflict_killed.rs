@@ -1,6 +1,6 @@
 //! A merge killed while it writes the conflict it stops at: the write is in
 //! the log as a checkout is, with all it needs stored, and is finished
-//! from there.
+//! from there, as a merge that waits for its commit.
 
 use std::path::Path;
 use std::process::Output;
@@ -76,6 +76,9 @@ fn a_conflict_killed_while_it_is_written_is_finished_from_the_log() {
     assert_eq!(killed.status.code(), None);
     let status = ok(repo, &["status", "--json"]);
     assert!(!status.contains(r#""unmerged":["f.txt"]"#), "{status}");
+    // the file that says a merge is under way is there before the first
+    // file of the conflict
+    assert!(repo.join(".alt/MERGE_HEAD").exists());
 
     let pending = ok(repo, &["operation", "pending"]);
     let intent = pending.lines().last().expect("an operation to finish");
@@ -93,6 +96,10 @@ fn a_conflict_killed_while_it_is_written_is_finished_from_the_log() {
     assert_eq!(
         (read("t.txt"), read("new.txt")),
         ("side\n".into(), "new\n".into())
+    );
+    assert!(
+        status.contains(r#""operation":{"kind":"merge"}"#),
+        "{status}"
     );
     ok(repo, &["fsck"]);
     assert_eq!(

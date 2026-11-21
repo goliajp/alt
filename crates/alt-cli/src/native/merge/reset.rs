@@ -7,6 +7,18 @@ impl NativeRepo<'_> {
     /// Makes the index and working tree match `commit`, clearing whatever a
     /// stopped step left behind, conflicted paths included.
     pub(in crate::native) fn reset_worktree_to(&mut self, commit: ObjectId) -> Res<()> {
+        self.reset_with(commit, "reset", &[])
+    }
+
+    /// [`reset_worktree_to`](Self::reset_worktree_to) together with the ref
+    /// changes `moved`, where there are any, in one ref transaction as
+    /// `verb`.
+    pub(in crate::native) fn reset_with(
+        &mut self,
+        commit: ObjectId,
+        verb: &str,
+        moved: &[RefChange],
+    ) -> Res<()> {
         let target = self.commit_entries(commit)?;
         let wanted: std::collections::HashMap<&BString, &WorkEntry> =
             target.iter().map(|t| (&t.path, t)).collect();
@@ -30,15 +42,25 @@ impl NativeRepo<'_> {
                 _ => known.push(entry),
             }
         }
-        self.checkout(&known, &target)
+        if moved.is_empty() {
+            return self.checkout(&known, &target);
+        }
+        self.commit_refs_checkout(verb, moved, &known, &target)?;
+        Ok(())
     }
 
     /// git's `reset --merge` to `commit`, which a merge or a pick that is
     /// given up ends with: [`reset_worktree_to`](Self::reset_worktree_to),
     /// refused before anything is written where it would write over a
     /// change that is not staged. A file the index has as `commit` has it
-    /// is left alone, changed or not.
-    pub(in crate::native) fn reset_merge(&mut self, commit: ObjectId, verb: &str) -> Res<()> {
+    /// is left alone, changed or not. The ref changes `moved` are made with
+    /// it, in one ref transaction.
+    pub(in crate::native) fn reset_merge(
+        &mut self,
+        commit: ObjectId,
+        verb: &str,
+        moved: &[RefChange],
+    ) -> Res<()> {
         let target = self.commit_entries(commit)?;
         let wanted: std::collections::HashMap<&BString, &WorkEntry> =
             target.iter().map(|t| (&t.path, t)).collect();
@@ -63,6 +85,7 @@ impl NativeRepo<'_> {
             }
         }
         drop(state);
-        self.reset_worktree_to(commit)
+        let verb = verb.split(' ').next().unwrap_or(verb);
+        self.reset_with(commit, verb, moved)
     }
 }

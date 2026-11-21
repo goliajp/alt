@@ -4,7 +4,7 @@
 use super::{new_bin, ok, old_bin, run, same_reads};
 
 /// `main` and `feature/side` both rewrite `f.txt`.
-fn diverged(repo: &std::path::Path) {
+pub(super) fn diverged(repo: &std::path::Path) {
     let new = new_bin();
     let write = |text: &str, message: &str| {
         std::fs::write(repo.join("f.txt"), text).unwrap();

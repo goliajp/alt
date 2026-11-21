@@ -23,15 +23,16 @@ impl NativeRepo<'_> {
         }
     }
 
-    /// Records `theirs` as the second parent the resolving commit will get.
+    /// Records `theirs` as the second parent the resolving commit will
+    /// get, with the conflict the merge is about to write.
     pub(in crate::native) fn start_merge(&self, theirs: ObjectId) -> Res<()> {
-        crate::durable::write(self.merge_head_path(), format!("{theirs}\n"))?;
-        Ok(())
+        self.plan_state("MERGE_HEAD", Some(format!("{theirs}\n")))
     }
 
-    /// Forgets the unfinished merge once its commit is recorded.
+    /// Forgets the unfinished merge with the commit that concludes it or
+    /// the reset that gives it up.
     pub(in crate::native) fn finish_merge(&self) -> Res<()> {
-        self.remove_state_file("MERGE_HEAD")
+        self.plan_state("MERGE_HEAD", None)
     }
 
     /// Refuses `verb` while a merge, bisect, rebase or revert waits to be
@@ -71,8 +72,9 @@ impl NativeRepo<'_> {
             .refs
             .resolve(&self.head_ref)?
             .ok_or("merge --abort: the branch has no commits yet")?;
-        self.reset_merge(head, "merge --abort")?;
         self.finish_merge()?;
+        self.reset_merge(head, "merge --abort", &[])?;
+        self.settle_state()?;
         writeln!(out, "Merge aborted.")?;
         Ok(())
     }

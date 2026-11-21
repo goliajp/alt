@@ -1,25 +1,35 @@
-//! Taking a step back: the state files first, so that an undo cut short
-//! leaves an operation that says it is under way, and then the refs, the
-//! index and the files.
+//! Taking a step back, as a step in turn.
 
-use super::super::super::checkout_recovery::{CheckoutIntent, PREPARE_CHECKOUT};
-use super::super::super::recovery::{decode, durable_write, encode};
+use super::super::super::checkout_recovery::CheckoutIntent;
+use super::super::super::recovery::decode;
 use super::super::super::*;
-use super::{STATE_FILES, STEP, StateFile, StepRecord, net_refs, read};
+use super::{STATE_FILES, STEP, StepRecord, Tracked, read};
 
 fn refusal(why: &str) -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("precondition_failed", why).into()
 }
 
 impl NativeRepo<'_> {
-    /// The step `op` records, the ref changes that take it back and the
+    /// The mark of the step `op` is the record of, where the step was cut
+    /// short before it changed anything.
+    pub(in crate::native) fn step_without_change(&self, op: &alt_oplog::Op) -> Res<Option<String>> {
+        if op.payload.first() != Some(&STEP) {
+            return Ok(None);
+        }
+        let step: StepRecord = decode(&op.payload, STEP)?;
+        let same = |file: &super::StateFile| file.before == file.after;
+        let changed = !step.refs.is_empty() || step.checkout.is_some();
+        let none = !changed && !step.abandoned && step.state.iter().all(same);
+        Ok(step.begin.filter(|_| none))
+    }
+
+    /// The step a record tells of, the ref changes that take it back and the
     /// checkout that does: refused where the workspace is no longer as the
     /// step left it.
     fn step_to_undo(
         &self,
-        op: &alt_oplog::Op,
+        step: StepRecord,
     ) -> Res<(StepRecord, Vec<RefChange>, Option<CheckoutIntent>)> {
-        let step: StepRecord = decode(&op.payload, STEP)?;
         if step.version != 1 {
             let why = "unsupported step record";
             return Err(crate::machine::Failure::refusal("unsupported_record", why).into());
@@ -29,13 +39,13 @@ impl NativeRepo<'_> {
                 "last operation belongs to a different workspace instance; select its workspace",
             ));
         }
-        // each of the four as the step left it, or put back by an undo that
-        // was cut short: one the step does not tell of is not there
+        // each of the four as the step left it: one the step does not tell
+        // of is not there
         for name in STATE_FILES {
             let told = step.state.iter().find(|file| file.name == name);
             let now = self.state_file(name)?;
             let as_left = match told {
-                Some(file) => now == file.after || now == file.before,
+                Some(file) => now == file.after,
                 None => now.is_none(),
             };
             if !as_left {
@@ -80,13 +90,6 @@ impl NativeRepo<'_> {
         Ok((step, back, checkout))
     }
 
-    fn set_state_file(&self, name: &str, text: &Option<String>) -> Res<()> {
-        match text {
-            Some(text) => durable_write(&self.state_path(name), text.as_bytes()),
-            None => self.drop_state_file(name),
-        }
-    }
-
     /// Moves the refs back, or where there are none records the checkout
     /// to come: the one point an undo is done or not done at.
     fn begin_undo(
@@ -99,13 +102,7 @@ impl NativeRepo<'_> {
             let Some(checkout) = checkout else {
                 return Ok(None);
             };
-            let actor = self.id.actor("undo");
-            let payload = encode(PREPARE_CHECKOUT, checkout)?;
-            return Ok(Some(self.store.refs.record_op(
-                &actor,
-                now_ms(),
-                &payload,
-            )?));
+            return Ok(Some(self.record_checkout("undo", checkout)?));
         }
         self.inverse_of = Some(op.id.to_string());
         self.checkout_intent = checkout.cloned();
@@ -118,47 +115,39 @@ impl NativeRepo<'_> {
         Ok(Some(moved?))
     }
 
-    /// Takes back the command `op` is the record of, and records that as
-    /// a step in turn.
+    /// Takes back the command `op` is the record of, as a step in turn.
+    /// Each state file is planned to be what it was before the command,
+    /// and holds with the refs moved back or the checkout to come: an
+    /// undo cut short is brought to its end, or has changed nothing.
     pub(in crate::native) fn undo_step(&mut self, op: &alt_oplog::Op) -> Res<()> {
-        let (step, back, checkout) = self.step_to_undo(op)?;
-        // a state file that comes back is written before the refs and the
-        // files, one that goes is removed after them: cut short anywhere,
-        // the undo leaves an operation that says it is under way
-        let (comes, goes): (Vec<&StateFile>, Vec<&StateFile>) =
-            step.state.iter().partition(|file| file.before.is_some());
-        for file in &comes {
-            self.set_state_file(&file.name, &file.before)?;
+        let step: StepRecord = decode(&op.payload, STEP)?;
+        if step.abandoned {
+            let why = "nothing to undo: the last operation was interrupted and left as it was";
+            return Err(refusal(why));
         }
-        let begun = match self.begin_undo(op, &back, checkout.as_ref()) {
-            Ok(begun) => begun,
-            Err(refused) => {
-                // nothing was moved: the files are again as the step left them
-                for file in &comes {
-                    self.set_state_file(&file.name, &file.after)?;
-                }
-                return Err(refused);
-            }
-        };
-        if let (Some(operation), Some(checkout)) = (begun, &checkout) {
+        let (step, back, checkout) = self.step_to_undo(step)?;
+        let tracked = Tracked::undoing(self.state_files()?, op.id.to_string());
+        *self.step.borrow_mut() = Some(tracked);
+        let undone = self.put_back(op, &step, &back, checkout.as_ref());
+        let ended = self.end_step();
+        undone?;
+        ended
+    }
+
+    fn put_back(
+        &mut self,
+        op: &alt_oplog::Op,
+        step: &StepRecord,
+        back: &[RefChange],
+        checkout: Option<&CheckoutIntent>,
+    ) -> Res<()> {
+        for file in &step.state {
+            self.plan_state(&file.name, file.before.clone())?;
+        }
+        if let (Some(operation), Some(checkout)) = (self.begin_undo(op, back, checkout)?, checkout)
+        {
             self.apply_prepared_checkout(operation, checkout)?;
         }
-        for file in &goes {
-            self.drop_state_file(&file.name)?;
-        }
-        let turned = |file: StateFile| StateFile {
-            name: file.name,
-            before: file.after,
-            after: file.before,
-        };
-        self.record_step(&StepRecord {
-            version: 1,
-            workspace: step.workspace,
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            inverse_of: Some(op.id.to_string()),
-            refs: net_refs(&back),
-            checkout,
-            state: step.state.into_iter().map(turned).collect(),
-        })
+        self.settle_state()
     }
 }

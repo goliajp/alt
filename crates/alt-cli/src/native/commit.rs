@@ -71,7 +71,7 @@ impl NativeRepo<'_> {
             tz: "+0000",
         };
         let msg = with_newline(message);
-        let picked = self.picked_author()?;
+        let picked = self.concluding()?;
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
@@ -86,7 +86,7 @@ impl NativeRepo<'_> {
             "commit",
             &opts.meta(None),
         )?;
-        self.sequence_committed()?;
+        self.settle_state()?;
         report_commit(&branch, commit, tree, json, out)
     }
 

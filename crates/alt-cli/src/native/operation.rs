@@ -57,11 +57,15 @@ impl NativeRepo<'_> {
         Ok(false)
     }
 
-    fn operation_info(&self, op: &alt_oplog::Op) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
+    pub(super) fn operation_info(
+        &self,
+        op: &alt_oplog::Op,
+    ) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
         match op.payload.first() {
             Some(&task::TASK_OPERATION) => Ok((Some(task_workspace(op)?), true, false)),
             // the record of a whole step is written when the step is done
             Some(&in_progress::STEP) => Ok((Some(self.step_workspace(op)?), true, false)),
+            Some(&in_progress::STEP_MARK) => self.step_mark_info(op),
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
                 let closed = self.operation_complete(op.id, COMPLETE)?
@@ -234,7 +238,7 @@ impl NativeRepo<'_> {
             .into());
         }
         let op = self.operation_by_id(id)?;
-        let (workspace, completed, recoverable) = self.operation_info(&op)?;
+        let (workspace, _, recoverable) = self.operation_info(&op)?;
         if workspace.as_ref() != Some(&self.workspace_identity()?) {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -248,39 +252,45 @@ impl NativeRepo<'_> {
                     .into(),
             );
         }
-        if !completed {
-            match op.payload.first() {
-                Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?)?,
-                Some(&PREPARE_CHECKOUT) => {
-                    self.finish_interrupted_checkout(op.id, decode(&op.payload, PREPARE_CHECKOUT)?)?
-                }
-                Some(&alt_refs::PAYLOAD_REF_TX) => {
-                    let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
-                    for change in &tx.changes {
-                        if self.store.refs.get(&change.name) != change.new.as_ref() {
-                            return Err(crate::machine::Failure::refusal(
-                                "precondition_failed",
-                                "recovery precondition failed: refs changed",
-                            )
-                            .into());
-                        }
-                    }
-                    let context: RefContext =
-                        alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
-                    self.finish_interrupted_checkout(
-                        op.id,
-                        context.checkout.ok_or("missing checkout intent")?,
-                    )?;
-                }
-                _ => {
-                    return Err(crate::machine::Failure::refusal(
-                        "unsupported_record",
-                        "unsupported recovery operation",
-                    )
-                    .into());
-                }
-            }
+        // a step that was cut short is brought to an end as a whole
+        self.recover_open_step()?;
+        if !self.operation_info(&op)?.1 {
+            self.finish_prepared(&op)?;
         }
         self.operation_status(id, json, out)
+    }
+
+    /// Finishes the index change or the checkout that `op` prepared and
+    /// no record completes.
+    pub(super) fn finish_prepared(&mut self, op: &alt_oplog::Op) -> Res<()> {
+        match op.payload.first() {
+            Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?),
+            Some(&PREPARE_CHECKOUT) => {
+                self.finish_interrupted_checkout(op.id, decode(&op.payload, PREPARE_CHECKOUT)?)
+            }
+            Some(&alt_refs::PAYLOAD_REF_TX) => {
+                let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
+                for change in &tx.changes {
+                    if self.store.refs.get(&change.name) != change.new.as_ref() {
+                        return Err(crate::machine::Failure::refusal(
+                            "precondition_failed",
+                            "recovery precondition failed: refs changed",
+                        )
+                        .into());
+                    }
+                }
+                let context: RefContext =
+                    alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
+                self.finish_interrupted_checkout(
+                    op.id,
+                    context.checkout.ok_or("missing checkout intent")?,
+                )
+            }
+            _ => Err(crate::machine::Failure::refusal(
+                "unsupported_record",
+                "unsupported recovery operation",
+            )
+            .into()),
+        }
     }
 }

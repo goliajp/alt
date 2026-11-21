@@ -113,26 +113,6 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// A multi-step operation has already materialized this delta. Its ref
-    /// transaction still needs an explicit completion; interrupted recovery
-    /// can validate the recorded poststate and finish the same operation.
-    pub(super) fn complete_checkout_record(&mut self, operation: OpId) -> Res<()> {
-        self.store.sink()?.fsync_all()?;
-        self.store.refs.record_op(
-            &self.id.actor("checkout"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: operation.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
-        Ok(())
-    }
-
     pub(super) fn finish_interrupted_checkout(
         &mut self,
         operation: OpId,
@@ -231,11 +211,13 @@ impl NativeRepo<'_> {
 
     /// Writes the intent of a checkout to the log.
     pub(super) fn record_checkout(&mut self, verb: &str, intent: &CheckoutIntent) -> Res<OpId> {
+        self.step_effect()?;
         let payload = encode(PREPARE_CHECKOUT, intent)?;
         crash_point!("checkout-intent:before");
         let actor = self.id.actor(verb);
         let prepared = self.store.refs.record_op(&actor, now_ms(), &payload)?;
         crash_point!("checkout-intent:after");
+        self.step_effected();
         Ok(prepared)
     }
 
@@ -267,6 +249,8 @@ impl NativeRepo<'_> {
         }
         self.ensure_directories_replaceable(intent)?;
         self.step_checkout(intent);
+        // a state file that holds with this checkout is there before its files
+        self.apply_state(false)?;
         self.apply_changes(intent.files.iter())?;
         let index = self.read_snapshot(&intent.index_after)?;
         crash_point!("checkout-index:before");

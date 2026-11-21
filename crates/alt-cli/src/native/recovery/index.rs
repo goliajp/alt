@@ -101,9 +101,11 @@ impl NativeRepo<'_> {
     }
 
     /// Fails where an operation of this workspace was interrupted and is
-    /// to be recovered first. An index change that cannot be completed is
-    /// abandoned here and is in no command's way.
+    /// to be recovered first. A step that was cut short is brought to an
+    /// end here, and an index change that cannot be completed is
+    /// abandoned: neither is in a command's way.
     pub(in crate::native) fn ensure_no_pending_recovery(&mut self) -> Res<()> {
+        self.recover_open_step()?;
         self.ensure_no_pending_checkout()?;
         if let Some((id, intent)) = self.pending_index(&self.workspace_identity()?)?
             && !self.abandon_unstorable(id, &intent)?

@@ -8,6 +8,9 @@
 mod abandoned_add;
 mod abort;
 mod cherry_pick;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod step_mark;
 
 use std::fs;
 use std::path::{Path, PathBuf};

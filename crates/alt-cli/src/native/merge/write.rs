@@ -77,7 +77,10 @@ impl NativeRepo<'_> {
             }
         }
         let intent = self.merged_checkout(resolved, &was, &changed)?;
-        self.record_and_checkout(intent)
+        self.record_and_checkout(intent)?;
+        // the state file planned for the stop holds with what was written,
+        // or by itself where the merge left everything as it was
+        self.settle_state()
     }
 
     /// What writing a merge that stopped changes, as the intent of a

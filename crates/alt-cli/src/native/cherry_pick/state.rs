@@ -21,11 +21,13 @@ impl NativeRepo<'_> {
         self.index_path.with_file_name("CHERRY_PICK_HEAD")
     }
 
-    /// Records that picking `picked` onto `head` stopped.
+    /// Records that picking `picked` onto `head` stopped, with the
+    /// conflict the pick is about to write.
     pub(in crate::native) fn start_cherry_pick(&self, picked: ObjectId, head: ObjectId) -> Res<()> {
-        let text = format!("picked {picked}\nhead {head}\n");
-        crate::durable::write(self.cherry_pick_path(), text)?;
-        Ok(())
+        self.plan_state(
+            "CHERRY_PICK_HEAD",
+            Some(format!("picked {picked}\nhead {head}\n")),
+        )
     }
 
     /// The commit being picked and the commit HEAD was at when a
@@ -62,7 +64,7 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn clear_cherry_pick(&self) -> Res<()> {
-        self.remove_state_file("CHERRY_PICK_HEAD")
+        self.plan_state("CHERRY_PICK_HEAD", None)
     }
 
     /// Refuses a merge while a cherry-pick waits for its commit, as git does.
@@ -87,12 +89,15 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// After `alt commit`: what a commit concludes of a sequence that
-    /// stopped for it.
-    pub(in crate::native) fn sequence_committed(&self) -> Res<()> {
+    /// Before `alt commit` records its commit: what the commit concludes
+    /// of a sequence that stopped for it, to hold with the commit, and the
+    /// author of the commit being picked, whom it keeps.
+    pub(in crate::native) fn concluding(&self) -> Res<Option<Sig<'static>>> {
+        let picked = self.picked_author()?;
         self.finish_merge()?;
         self.revert_committed()?;
         self.rebase_committed()?;
-        self.clear_cherry_pick()
+        self.clear_cherry_pick()?;
+        Ok(picked)
     }
 }

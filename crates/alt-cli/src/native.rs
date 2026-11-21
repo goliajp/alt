@@ -52,6 +52,7 @@ pub mod notes;
 mod object_format;
 use merge::Resolved;
 mod reading;
+mod ref_checkout;
 pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
@@ -892,25 +893,6 @@ impl<'a> NativeRepo<'a> {
         self.commit_refs_with(verb, changes, None, recovery::RefEffects::RefsOnly)
     }
 
-    fn commit_refs_checkout(
-        &mut self,
-        verb: &str,
-        changes: &[RefChange],
-        old: &[WorkEntry],
-        target: &[WorkEntry],
-    ) -> Res<OpId> {
-        self.lock_workspace()?;
-        self.ensure_no_pending_recovery()?;
-        self.preflight_checkout(old, target)?;
-        let intent = self.prepare_checkout(old, target)?;
-        self.checkout_intent = Some(intent.clone());
-        let result = self.commit_refs(verb, changes);
-        self.checkout_intent = None;
-        let operation = result?;
-        self.apply_prepared_checkout(operation, &intent)?;
-        Ok(operation)
-    }
-
     fn commit_refs_with(
         &mut self,
         verb: &str,
@@ -945,18 +927,9 @@ impl<'a> NativeRepo<'a> {
             state_check: Some(&one_workspace_per_branch),
         };
         let actor = self.id.actor(verb);
-        let context = alt_json::to_vec(&recovery::RefContext {
-            version: 2,
-            effects: if self.checkout_intent.is_some() {
-                recovery::RefEffects::Checkout
-            } else {
-                effects
-            },
-            workspace: self.workspace_identity()?,
-            inverse_of: self.inverse_of.clone(),
-            checkout: self.checkout_intent.clone(),
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-        })?;
+        let context = self.ref_context(effects)?;
+        self.step_effect()?;
+        crash_point!("ref-transaction:before");
         let id = self.store.refs.commit_scoped(
             &actor,
             now_ms(),
@@ -965,6 +938,7 @@ impl<'a> NativeRepo<'a> {
             Some(&policy),
             Some(&context),
         )?;
+        crash_point!("ref-transaction:after");
         self.step_refs(changes);
         // opt-in op-level signing. Best-effort — a missing sec key
         // logs nothing and is not fatal (signing is a per-repo capability,
@@ -1757,8 +1731,8 @@ impl<'a> NativeRepo<'a> {
                 Ok(false)
             }
             MergeOutcome::Conflicted(resolved) => {
-                self.write_conflicted(&resolved)?;
                 self.start_merge(theirs)?;
+                self.write_conflicted(&resolved)?;
                 let conflicts: Vec<BString> = resolved
                     .iter()
                     .filter(|r| r.conflicted)
@@ -3203,28 +3177,6 @@ impl<'a> NativeRepo<'a> {
             }
         }
         Ok(out)
-    }
-
-    /// Advances `branch` from `old` to `new` in one ref transaction.
-    fn advance_branch_checkout(
-        &mut self,
-        branch: &str,
-        old: ObjectId,
-        new: ObjectId,
-        before: &[WorkEntry],
-        after: &[WorkEntry],
-    ) -> Res<()> {
-        self.commit_refs_checkout(
-            "merge",
-            &[RefChange {
-                name: branch.to_owned(),
-                old: Some(RefTarget::Oid(old)),
-                new: Some(RefTarget::Oid(new)),
-            }],
-            before,
-            after,
-        )?;
-        Ok(())
     }
 }
 

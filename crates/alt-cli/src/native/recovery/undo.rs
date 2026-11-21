@@ -4,19 +4,20 @@
 use super::*;
 
 impl NativeRepo<'_> {
-    /// The last operation of the log, or the checkout its completion
-    /// closes.
+    /// The last operation of the log that changed anything, or the
+    /// checkout its completion closes. A step is its record: by the time
+    /// an undo looks, no step of this workspace is without one, so no
+    /// record of a step is taken back by itself. A step that was cut
+    /// short before it changed anything is passed over, mark and record.
     fn last_undoable(&self) -> Res<alt_oplog::Op> {
-        let mut last = self
-            .store
-            .refs
-            .oplog()
-            .ops()?
-            .last()
-            .ok_or_else(|| {
-                crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
-            })?
-            .clone();
+        let mut ops = self.store.refs.oplog().ops()?;
+        while let Some(begin) = ops.last().map(|op| self.step_without_change(op)) {
+            let Some(begin) = begin? else { break };
+            let at = ops.iter().rposition(|op| op.id.to_string() == begin);
+            ops = &ops[..at.ok_or("missing step mark")?];
+        }
+        let nothing = || crate::machine::Failure::refusal("precondition_failed", "nothing to undo");
+        let mut last = ops.last().ok_or_else(nothing)?.clone();
         if last.payload.first() == Some(&checkout_recovery::COMPLETE_CHECKOUT) {
             let done: checkout_recovery::CheckoutDone =
                 decode(&last.payload, checkout_recovery::COMPLETE_CHECKOUT)?;

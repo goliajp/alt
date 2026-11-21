@@ -109,6 +109,9 @@ mod status_json;
 mod status_labels;
 mod status_replaced;
 mod status_untracked;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod step_crash;
 mod step_refused;
 mod step_undo;
 mod stopped_trees;

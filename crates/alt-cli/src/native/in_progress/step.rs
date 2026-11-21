@@ -3,15 +3,19 @@
 //!
 //! Such a command changes more than one record tells: several ref
 //! transactions and checkouts, and the file that says the operation is
-//! under way. Where that file changed,
-//! the command ends with one more record of what it did in all: the refs,
-//! the index and the files from before its first change to after its
-//! last, and the state files as they were and as they are. `alt undo`
-//! takes that record back and nothing less, so that a merge given up comes
-//! back as a merge, and a commit that went on with a pick as the pick.
+//! under way. It is a step: a mark in the log before the first of its
+//! records, and after the last of them one record of what it did in all,
+//! the refs, the index and the files from before its first change to
+//! after its last, and the state files as they were and as they are.
+//! `alt undo` takes that record back and nothing less, so that a merge
+//! given up comes back as a merge, and a commit that went on with a pick
+//! as the pick.
 //!
-//! The record is written before a state file is removed. An older alt
-//! passes it over, and refuses to undo it.
+//! A state file changes only after the log says what it becomes, and the
+//! log says with which record of the step that holds. A step cut short is
+//! therefore brought to an end from the log alone by the next command
+//! that writes: see `recover`. An older alt passes the mark and the record
+//! over, and refuses to undo either.
 
 use std::collections::BTreeMap;
 
@@ -19,7 +23,12 @@ use super::super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::super::recovery::{WorkspaceIdentity, decode, encode};
 use super::super::*;
 
+mod mark;
+mod recover;
 mod undo;
+
+pub(in crate::native) use mark::STEP_MARK;
+use mark::StateText;
 
 pub(in crate::native) const STEP: u8 = 0x36;
 
@@ -57,6 +66,13 @@ struct StepRecord {
     #[json(default)]
     request_id: Option<String>,
     inverse_of: Option<String>,
+    /// the mark the step began with
+    #[json(default)]
+    begin: Option<String>,
+    /// the step was cut short and another program wrote after it: the
+    /// record closes the mark and tells nothing
+    #[json(default)]
+    abandoned: bool,
     refs: Vec<RefMove>,
     checkout: Option<CheckoutIntent>,
     state: Vec<StateFile>,
@@ -67,10 +83,41 @@ struct StepRecord {
 pub(in crate::native) struct Tracked {
     /// each of the state files when the command began
     before: Vec<Option<String>>,
+    /// begun in the log before its first record, whatever it plans
+    eager: bool,
+    inverse_of: Option<String>,
+    /// the mark it began with, once that is in the log
+    begin: Option<OpId>,
     refs: Vec<RefChange>,
     checkouts: Vec<CheckoutIntent>,
-    /// state files to remove once the record is written
-    removed: Vec<&'static str>,
+    /// what state files become with the next record
+    planned: Vec<StateText>,
+    /// the same, said in the log, until that record is there
+    said: Vec<StateText>,
+    /// what state files have become
+    now: BTreeMap<String, Option<String>>,
+    /// those of them whose file is not yet so
+    unapplied: Vec<String>,
+}
+
+/// Each state file that was there `before` or is there now, as it was
+/// and as it is.
+fn state_changes(
+    before: &[Option<String>],
+    now: &BTreeMap<String, Option<String>>,
+) -> Vec<StateFile> {
+    let mut state = Vec::new();
+    for (name, before) in STATE_FILES.iter().zip(before) {
+        let after = now.get(*name).unwrap_or(before);
+        if before.is_some() || after.is_some() {
+            state.push(StateFile {
+                name: (*name).to_owned(),
+                before: before.clone(),
+                after: after.clone(),
+            });
+        }
+    }
+    state
 }
 
 fn written(target: &Option<RefTarget>) -> Option<String> {
@@ -146,33 +193,25 @@ impl NativeRepo<'_> {
         }
     }
 
-    fn drop_state_file(&self, name: &str) -> Res<()> {
-        match crate::durable::remove_file(self.state_path(name)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
-            _ => Ok(()),
-        }
+    fn state_files(&self) -> Res<Vec<Option<String>>> {
+        STATE_FILES
+            .iter()
+            .map(|name| self.state_file(name))
+            .collect()
     }
 
     /// From here to [`end_step`](Self::end_step), what the command does is
-    /// kept track of.
-    pub fn begin_step(&mut self) -> Res<()> {
-        let before = STATE_FILES.iter().map(|name| self.state_file(name));
+    /// kept track of. An `eager` one is a step from its first record on;
+    /// so is one that finds an operation under way; any other becomes one
+    /// when it plans a state file.
+    pub fn begin_step(&mut self, eager: bool) -> Res<()> {
+        let before = self.state_files()?;
         let tracked = Tracked {
-            before: before.collect::<Res<_>>()?,
+            eager: eager || before.iter().any(Option::is_some),
+            before,
             ..Default::default()
         };
         *self.step.borrow_mut() = Some(tracked);
-        Ok(())
-    }
-
-    /// Removes a state file: at once, or at the end of a command that is
-    /// kept track of, after its record is written. Until then the file is
-    /// still there to read.
-    pub(in crate::native) fn remove_state_file(&self, name: &'static str) -> Res<()> {
-        match self.step.borrow_mut().as_mut() {
-            Some(tracked) => tracked.removed.push(name),
-            None => self.drop_state_file(name)?,
-        }
         Ok(())
     }
 
@@ -180,6 +219,7 @@ impl NativeRepo<'_> {
         if let Some(tracked) = self.step.borrow_mut().as_mut() {
             tracked.refs.extend_from_slice(changes);
         }
+        self.step_effected();
     }
 
     pub(in crate::native) fn step_checkout(&self, checkout: &CheckoutIntent) {
@@ -193,52 +233,46 @@ impl NativeRepo<'_> {
         Ok(decode::<StepRecord>(&op.payload, STEP)?.workspace)
     }
 
-    fn record_step(&mut self, step: &StepRecord) -> Res<()> {
-        let actor = self.id.actor("step");
+    /// Closes the mark of a step with the record of what it did. The
+    /// record is not synced: one lost to a power cut is written again
+    /// from the log.
+    fn record_step(&mut self, verb: &str, step: &StepRecord) -> Res<()> {
+        let actor = self.id.actor(verb);
         let payload = encode(STEP, step)?;
-        self.store.refs.record_op(&actor, now_ms(), &payload)?;
-        // durable before a state file it tells of is removed
-        self.store.sink()?.fsync_all()?;
+        crash_point!("step-record:before");
+        self.store
+            .refs
+            .record_op_unsynced(&actor, now_ms(), &payload)?;
+        crash_point!("step-record:after");
         Ok(())
     }
 
-    /// The end of a command that is kept track of: where it changed a state
-    /// file, the record of all it did, and then the removals it left for
-    /// the end.
+    /// The end of a command that is kept track of: where it became a
+    /// step, the state files as the log says they are, and the record of
+    /// all it did.
     pub fn end_step(&mut self) -> Res<()> {
-        let Some(tracked) = self.step.take() else {
+        let begun = |tracked: &Tracked| tracked.begin.is_some();
+        if !self.step.borrow().as_ref().is_some_and(begun) {
+            self.step.take();
             return Ok(());
-        };
-        let mut state = Vec::new();
-        for (name, before) in STATE_FILES.iter().zip(tracked.before) {
-            let after = match tracked.removed.contains(name) {
-                true => None,
-                false => self.state_file(name)?,
-            };
-            if before != after {
-                let name = (*name).to_owned();
-                state.push(StateFile {
-                    name,
-                    before,
-                    after,
-                });
-            }
         }
-        if !state.is_empty() {
-            self.record_step(&StepRecord {
+        let applied = self.apply_state(true);
+        let tracked = self.step.take().expect("a step was begun");
+        applied?;
+        self.record_step(
+            "step",
+            &StepRecord {
                 version: 1,
                 workspace: self.workspace_identity()?,
                 request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                inverse_of: None,
+                inverse_of: tracked.inverse_of,
+                begin: tracked.begin.map(|id| id.to_string()),
+                abandoned: false,
                 refs: net_refs(&tracked.refs),
                 checkout: net_checkout(tracked.checkouts),
-                state,
-            })?;
-        }
-        for name in tracked.removed {
-            self.drop_state_file(name)?;
-        }
-        Ok(())
+                state: state_changes(&tracked.before, &tracked.now),
+            },
+        )
     }
 }
 

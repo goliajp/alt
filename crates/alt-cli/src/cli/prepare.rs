@@ -5,6 +5,16 @@ use crate::native::NativeRepo;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
+/// Whether `cmd` is a step from its first record on, whatever it comes
+/// to: it makes several commits, or hands HEAD to a scratch ref.
+fn several_records(cmd: &Command) -> bool {
+    match cmd {
+        Command::Revert { revs, .. } => revs.len() > 1,
+        Command::Rebase { upstream, .. } => upstream.is_some(),
+        _ => false,
+    }
+}
+
 /// What comes before any command: git sets up its ignore rules for some
 /// and ends there where one of the files they are in cannot be one.
 pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
@@ -52,7 +62,7 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<()> {
             Merge { .. } | CherryPick { .. } | Revert { .. } | Rebase { .. } | Commit { .. }
         ) && !validate
         {
-            repo.begin_step()?;
+            repo.begin_step(several_records(cmd))?;
         }
     }
     Ok(())

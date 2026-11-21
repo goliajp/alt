@@ -27,30 +27,30 @@ exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --continue: no cherry-pick in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:0>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick feat~1 --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:1>","<id64:2>","<id64:3>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:3>","outcome":"partial","request_id":"<id32:4>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:1>","<id64:2>","<id64:3>","<id64:4>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:4>","outcome":"partial","request_id":"<id32:5>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick --continue --json
 exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:5>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:6>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick --abort --json
 exit 0
-out| {"command_output":{"encoding":"utf-8","text":"Cherry-pick aborted.\n","truncated":false},"operation_ids":["<id64:6>","<id64:7>","<id64:8>"],"request_id":"<id32:9>","schema_version":1}
+out| {"command_output":{"encoding":"utf-8","text":"Cherry-pick aborted.\n","truncated":false},"operation_ids":["<id64:7>","<id64:8>","<id64:9>","<id64:10>"],"request_id":"<id32:11>","schema_version":1}
 $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"operation":null,"clean":true}
 $ [repo] alt cherry-pick --abort --json
 exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --abort: no cherry-pick in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --abort: no cherry-pick in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:12>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick feat~1 --json
 exit 1
-err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:11>","<id64:12>","<id64:13>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:13>","outcome":"partial","request_id":"<id32:14>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:13>","<id64:14>","<id64:15>","<id64:16>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:16>","outcome":"partial","request_id":"<id32:17>","retryable":false},"schema_version":1}
 $ [repo] alt add .
 exit 0
 $ [repo] alt cherry-pick --continue --json
 exit 0
-out| {"commit":"<id40:15>","operation_ids":["<id64:16>","<id64:17>"],"request_id":"<id32:18>","result":"applied","schema_version":1,"source":"<id40:19>"}
+out| {"commit":"<id40:18>","operation_ids":["<id64:19>","<id64:20>","<id64:21>"],"request_id":"<id32:22>","result":"applied","schema_version":1,"source":"<id40:23>"}
 $ [repo] alt show --json
 exit 0
-out| {"schema_version":1,"commits":[{"oid":"<id40:15>","tree":"<id40:20>","parents":["<id40:21>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: change line two\n\n(cherry picked from commit <id40:19>)\n","note_message":null}]}
+out| {"schema_version":1,"commits":[{"oid":"<id40:18>","tree":"<id40:24>","parents":["<id40:25>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: change line two\n\n(cherry picked from commit <id40:23>)\n","note_message":null}]}
 $ [repo] alt op-log -n 4 --json
 exit 0
-out| {"schema_version":1,"ops":[{"id":"<id64:17>","request_id":"<id32:18>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:16>","request_id":"<id32:18>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"cherry-pick","ref_changes":[{"name":"refs/heads/main","old":"<id40:21>","new":"<id40:15>"},{"name":"refs/notes/alt/meta","old":"<id40:22>","new":"<id40:23>"}],"workspace":{"name":"default","instance":"<id64:24>"},"inverse_of":null},{"id":"<id64:25>","request_id":"<id32:26>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:27>"}},{"id":"<id64:27>","request_id":"<id32:26>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"prepared","before":"<id64:28>","after":"<id64:29>","workspace":{"name":"default","instance":"<id64:24>"}}}]}
+out| {"schema_version":1,"ops":[{"id":"<id64:21>","request_id":"<id32:22>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:20>","request_id":"<id32:22>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"cherry-pick","ref_changes":[{"name":"refs/heads/main","old":"<id40:25>","new":"<id40:18>"},{"name":"refs/notes/alt/meta","old":"<id40:26>","new":"<id40:27>"}],"workspace":{"name":"default","instance":"<id64:28>"},"inverse_of":null},{"id":"<id64:19>","request_id":"<id32:22>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"step","ref_changes":null},{"id":"<id64:29>","request_id":"<id32:30>","timestamp_ms":<digits>,"principal":{"kind":"human","id":"json-test","session":null},"verb":"add","ref_changes":null,"recovery":{"phase":"completed","prepared":"<id64:31>"}}]}

@@ -5,26 +5,8 @@
 use super::commit::NewCommit;
 use super::*;
 
-/// A state file line by line, before `orig` is known to be present.
-struct RevertStateParts {
-    current: Option<ObjectId>,
-    todo: Vec<ObjectId>,
-    mainline: Option<usize>,
-    orig: Option<ObjectId>,
-}
-
-/// What a stopped revert sequence remembers.
-pub(super) struct RevertState {
-    /// The commit whose revert stopped on a conflict; `None` once that revert
-    /// has been committed (by `alt commit`) and only the rest is left.
-    pub(super) current: Option<ObjectId>,
-    /// Commits still to revert, in order.
-    pub(super) todo: Vec<ObjectId>,
-    /// The parent to revert against, for merge commits (1-based, as `-m`).
-    mainline: Option<usize>,
-    /// Where the branch stood before the sequence, for `--abort`.
-    pub(super) orig: ObjectId,
-}
+mod state;
+pub(super) use state::RevertState;
 
 enum Reverted {
     Committed(ObjectId),
@@ -73,6 +55,13 @@ impl NativeRepo<'_> {
             let head_tree = self.commit_tree(head)?;
             let tree = self.staged_tree(Some(head_tree))?;
             let msg = self.revert_message(current, state.mainline)?;
+            // the rest of the sequence waits from this commit on
+            let rest = RevertState {
+                current: None,
+                todo: state.todo.clone(),
+                ..state
+            };
+            self.save_revert_rest(&rest)?;
             let commit = self.commit_revert(head, tree, &msg)?;
             self.report_revert(commit, &msg, json, out)?;
         }
@@ -87,18 +76,20 @@ impl NativeRepo<'_> {
             .ok_or("revert --abort: no revert in progress")?;
         let branch = self.head_branch()?;
         let head = self.branch_tip("revert --abort")?;
-        self.reset_merge(state.orig, "revert --abort")?;
-        if head != state.orig {
-            self.commit_refs(
-                "revert",
-                &[RefChange {
-                    name: branch,
-                    old: Some(RefTarget::Oid(head)),
-                    new: Some(RefTarget::Oid(state.orig)),
-                }],
-            )?;
-        }
+        // the branch moves back with the reset, in one ref transaction
+        let back = RefChange {
+            name: branch,
+            old: Some(RefTarget::Oid(head)),
+            new: Some(RefTarget::Oid(state.orig)),
+        };
+        let moved = if head != state.orig {
+            vec![back]
+        } else {
+            Vec::new()
+        };
         self.clear_revert_state()?;
+        self.reset_merge(state.orig, "revert --abort", &moved)?;
+        self.settle_state()?;
         writeln!(out, "Revert aborted.")?;
         Ok(())
     }
@@ -112,18 +103,19 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<bool> {
         for (i, &target) in todo.iter().enumerate() {
-            match self.revert_one(target, mainline)? {
+            // what waits once this one is committed, or stopped at
+            let rest = RevertState {
+                current: None,
+                todo: todo[i + 1..].to_vec(),
+                mainline,
+                orig,
+            };
+            match self.revert_one(target, rest)? {
                 Reverted::Committed(commit) => {
                     let msg = self.revert_message(target, mainline)?;
                     self.report_revert(commit, &msg, json, out)?;
                 }
                 Reverted::Conflicted(conflicts) => {
-                    self.save_revert_state(&RevertState {
-                        current: Some(target),
-                        todo: todo[i + 1..].to_vec(),
-                        mainline,
-                        orig,
-                    })?;
                     if json {
                         self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
                     } else {
@@ -140,12 +132,16 @@ impl NativeRepo<'_> {
             }
         }
         self.clear_revert_state()?;
+        self.settle_state()?;
         Ok(false)
     }
 
     /// Reverts one commit onto the branch tip: a three-way merge whose base is
-    /// the commit and whose other side is its (mainline) parent.
-    fn revert_one(&mut self, target: ObjectId, mainline: Option<usize>) -> Res<Reverted> {
+    /// the commit and whose other side is its (mainline) parent. `rest` is
+    /// what the sequence remembers after it, which holds with its commit;
+    /// where it stops, that it stopped at this one holds with the conflict.
+    fn revert_one(&mut self, target: ObjectId, rest: RevertState) -> Res<Reverted> {
+        let mainline = rest.mainline;
         let head = self.branch_tip("revert")?;
         let parent = self.revert_parent(target, mainline)?;
         let base = self.commit_entries(target)?;
@@ -158,6 +154,8 @@ impl NativeRepo<'_> {
         let resolved = self.merge_trees(&base, &ours, &theirs, &label)?;
         self.store.odb.flush()?;
         if resolved.iter().any(|r| r.conflicted) {
+            let current = Some(target);
+            self.save_revert_state(&RevertState { current, ..rest })?;
             self.write_conflicted(&resolved)?;
             let conflicts = resolved
                 .iter()
@@ -172,6 +170,7 @@ impl NativeRepo<'_> {
         self.preflight_checkout(&old, &entries)?;
         let intent = self.prepare_checkout(&old, &entries)?;
         let msg = self.revert_message(target, mainline)?;
+        self.save_revert_rest(&rest)?;
         self.checkout_intent = Some(intent);
         let result = self.commit_revert(head, tree, &msg);
         self.checkout_intent = None;
@@ -323,70 +322,5 @@ impl NativeRepo<'_> {
             .get(&commit)?
             .ok_or("commit missing from store")?;
         Ok(alt_git_codec::Commit::parse(&obj.data)?.parents().collect())
-    }
-
-    fn revert_state_path(&self) -> PathBuf {
-        self.index_path.with_file_name("REVERT_STATE")
-    }
-
-    /// The stopped sequence, if one is waiting.
-    pub(super) fn revert_state(&self) -> Res<Option<RevertState>> {
-        let text = match std::fs::read_to_string(self.revert_state_path()) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        let corrupt = || "corrupt REVERT_STATE";
-        let mut state = RevertStateParts {
-            current: None,
-            todo: Vec::new(),
-            mainline: None,
-            orig: None,
-        };
-        for line in text.lines() {
-            let (key, value) = line.split_once(' ').ok_or_else(corrupt)?;
-            match key {
-                "current" => state.current = Some(value.parse().map_err(|_| corrupt())?),
-                "todo" => state.todo.push(value.parse().map_err(|_| corrupt())?),
-                "mainline" => state.mainline = Some(value.parse().map_err(|_| corrupt())?),
-                "orig" => state.orig = Some(value.parse().map_err(|_| corrupt())?),
-                _ => return Err(corrupt().into()),
-            }
-        }
-        Ok(Some(RevertState {
-            current: state.current,
-            todo: state.todo,
-            mainline: state.mainline,
-            orig: state.orig.ok_or_else(corrupt)?,
-        }))
-    }
-
-    fn save_revert_state(&self, s: &RevertState) -> Res<()> {
-        let mut text = format!("orig {}\n", s.orig);
-        if let Some(c) = s.current {
-            text.push_str(&format!("current {c}\n"));
-        }
-        if let Some(m) = s.mainline {
-            text.push_str(&format!("mainline {m}\n"));
-        }
-        for t in &s.todo {
-            text.push_str(&format!("todo {t}\n"));
-        }
-        crate::durable::write(self.revert_state_path(), text)?;
-        Ok(())
-    }
-
-    fn clear_revert_state(&self) -> Res<()> {
-        self.remove_state_file("REVERT_STATE")
-    }
-
-    /// An `alt commit` in the middle of a stopped revert concludes that one
-    /// revert; the rest of the sequence waits for `alt revert --continue`.
-    pub(super) fn revert_committed(&self) -> Res<()> {
-        if let Some(mut state) = self.revert_state()? {
-            state.current = None;
-            self.save_revert_state(&state)?;
-        }
-        Ok(())
     }
 }

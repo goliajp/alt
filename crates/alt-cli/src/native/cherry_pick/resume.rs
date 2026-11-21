@@ -42,6 +42,7 @@ impl NativeRepo<'_> {
             when: (now_ms() / 1000) as i64,
             tz: "+0000",
         };
+        self.clear_cherry_pick()?;
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
@@ -56,7 +57,6 @@ impl NativeRepo<'_> {
             "cherry-pick",
             &Default::default(),
         )?;
-        self.clear_cherry_pick()?;
         report_picked(&source, picked, commit, json, out)
     }
 
@@ -84,8 +84,9 @@ impl NativeRepo<'_> {
         let (_, head) = self
             .stopped_cherry_pick()?
             .ok_or("cherry-pick --abort: no cherry-pick in progress")?;
-        self.reset_merge(head, "cherry-pick --abort")?;
         self.clear_cherry_pick()?;
+        self.reset_merge(head, "cherry-pick --abort", &[])?;
+        self.settle_state()?;
         writeln!(out, "Cherry-pick aborted.")?;
         Ok(())
     }
