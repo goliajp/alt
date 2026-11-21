@@ -47,8 +47,10 @@ impl NativeRepo<'_> {
     /// the intent changing nothing. A checkout that gives a step up may
     /// have nothing to change either, and is no guard.
     pub(in crate::native) fn is_guard(&self, intent: &CheckoutIntent) -> Res<bool> {
-        let kept = hash(&guard_index(self.store.algo()?));
-        Ok(intent.files.is_empty() && intent.index_before == kept && intent.index_after == kept)
+        if !intent.files.is_empty() || intent.index_before != intent.index_after {
+            return Ok(false);
+        }
+        Ok(intent.index_before == hash(&guard_index(self.store.algo()?)))
     }
 
     /// Writes the guard of the step this command begins. Not synced: it

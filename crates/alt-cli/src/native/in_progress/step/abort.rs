@@ -29,6 +29,11 @@ impl NativeRepo<'_> {
         let Some((begun, mark, false)) = self.last_step_mark()? else {
             return Err(stuck);
         };
+        // an undo that was cut short is no command of the operation, though
+        // it puts the state file of one back
+        if mark.inverse_of.is_some() {
+            return Err(stuck);
+        }
         let told = self.told_after(&begun, &mark)?;
         let found = |name: &str| {
             mark.before
