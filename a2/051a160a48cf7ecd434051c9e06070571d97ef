@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: have the next add abandon an add left open once a removal of lost records took out a blob its index names
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions/held.rs
