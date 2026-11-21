@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: fix
+summary: keep an older alt from writing in a workspace while a step is open, and leave a step as it is only where another program wrote more than an add
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/guard.rs
+touched: crates/alt-cli/src/native/in_progress/step/mark.rs
+touched: crates/alt-cli/src/native/in_progress/step/recover.rs
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/src/native/recovery/index.rs
+touched: crates/alt-cli/tests/fixtures/cli/cherry-pick-resume.txt
+touched: crates/alt-cli/tests/fixtures/cli/merge-abort.txt
+touched: crates/alt-cli/tests/fixtures/cli/merge-conflict.txt
+touched: crates/alt-cli/tests/fixtures/cli/rebase.txt
+touched: crates/alt-cli/tests/fixtures/cli/request-receipts.txt
+touched: crates/alt-cli/tests/fixtures/cli/revert-cherry-pick.txt
+touched: crates/alt-cli/tests/fixtures/cli/state-rebase-stopped.txt
+touched: crates/alt-cli/tests/fixtures/cli/state-revert-stopped.txt
+touched: crates/alt-cli/tests/it/mixed_versions/step_mark.rs
+touched: docs/recovery.md
