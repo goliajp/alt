@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: list every ref in the json of a push the server already has
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/push_report.rs
+touched: crates/alt-cli/tests/fixtures/cli/remotes-push-fetch-clone.txt
+touched: crates/alt-cli/tests/it/alt_server_push.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_no_new_objects.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/push_no_new_objects.rs
+touched: crates/alt-cli/tests/it/task_remote.rs
