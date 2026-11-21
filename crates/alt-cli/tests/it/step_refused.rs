@@ -62,6 +62,7 @@ fn a_rebase_the_policy_forbids_is_not_begun_and_one_begun_is_given_up() {
         ok(alt(repo, &["add", "a.txt"]));
         ok(alt(repo, &["commit", "-m", message]));
     };
+    ok(alt(repo, &["switch", "-c", "feature/behind"]));
     ok(alt(repo, &["switch", "-c", "feature/side"]));
     commit("side\n", "side");
     ok(alt(repo, &["switch", "main"]));
@@ -69,6 +70,19 @@ fn a_rebase_the_policy_forbids_is_not_begun_and_one_begun_is_given_up() {
     ok(alt(repo, &["switch", "feature/side"]));
     write_policy(repo, "agent:* -> forbid-force\n");
     let before = seen(repo);
+
+    // a rebase that moves the branch off no commit is no force: the
+    // branch is on the base already, or behind it and goes forward to it
+    let said = ok(alt_as(repo, &["rebase", "feature/side"], "bot"));
+    assert!(said.contains("is up to date"), "{said}");
+    assert_eq!(seen(repo), before);
+    ok(alt(repo, &["switch", "feature/behind"]));
+    ok(alt_as(repo, &["rebase", "main"], "bot"));
+    let forward = ok(alt(repo, &["rev-parse", "HEAD"]));
+    assert_eq!(forward, ok(alt(repo, &["rev-parse", "main"])));
+    assert_eq!(seen(repo).0, [None, None, None, None]);
+    ok(alt(repo, &["switch", "feature/side"]));
+    assert_eq!(seen(repo), before);
 
     // it would end by moving the branch off its commits, which the policy
     // forbids: refused before HEAD is handed to a scratch ref
