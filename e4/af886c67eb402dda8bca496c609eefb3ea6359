@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: take the notes of a step out on top of the notes ref where another workspace wrote to it since, in an undo and in giving the step up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/crash.rs
+touched: crates/alt-cli/src/meta.rs
+touched: crates/alt-cli/src/meta/back.rs
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/src/native/in_progress/step/abandon.rs
+touched: crates/alt-cli/src/native/in_progress/step/notes.rs
+touched: crates/alt-cli/src/native/in_progress/step/undo.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/step_notes.rs
