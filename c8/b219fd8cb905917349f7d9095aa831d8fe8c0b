@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: move the merge marker and the reset of a stopped step into modules of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/merge/reset.rs
+touched: crates/alt-cli/src/native/merge/state.rs
+touched: crates/alt-cli/src/native/rebase.rs
