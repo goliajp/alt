@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: finish a checkout its ref transaction carries after another workspace moved the notes ref
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/recover_shared_refs.rs
