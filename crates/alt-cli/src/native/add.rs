@@ -93,7 +93,7 @@ impl NativeRepo<'_> {
         self.ensure_writable("add")?;
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
-        let before = self.index()?;
+        let before = self.index_as_read()?;
         let parse = |given: &String| Spec::parse(&self.root, &self.prefix, given);
         let specs: Vec<Spec> = paths.iter().map(parse).collect::<Res<_>>()?;
         self.ensure_reachable(&specs, &before)?;
@@ -113,7 +113,7 @@ impl NativeRepo<'_> {
         self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged
         let none = index_of(Vec::new());
-        let staged_now = if mode.renormalize { &none } else { &before };
+        let staged_now = if mode.renormalize { &none } else { &*before };
         let mut entries = plan.entries;
         let store::Stored { stats, blocked } =
             self.stage_files(&plan.taken, &delta, staged_now, &mut entries, found.attrs)?;
@@ -214,7 +214,7 @@ impl NativeRepo<'_> {
     /// staged file had before it was read.
     fn put_staged(
         &mut self,
-        before: Index,
+        before: recovery::AsRead,
         after: Index,
         touched: &[BString],
         snapshot: &Snapshot,

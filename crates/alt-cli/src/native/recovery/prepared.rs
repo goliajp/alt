@@ -23,6 +23,25 @@ pub(super) fn read_snapshot_at(alt_dir: &Path, id: &str) -> Res<Vec<u8>> {
     Ok(bytes)
 }
 
+impl NativeRepo<'_> {
+    pub(in crate::native) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
+        let id = hash(bytes);
+        let path = self.store.alt_dir.join("recovery/objects").join(&id);
+        if !path.exists() {
+            durable_write(&path, bytes)?;
+        }
+        // byte for byte: what was there before, or what was just written
+        if std::fs::read(path)? != bytes {
+            return Err("corrupt recovery snapshot".into());
+        }
+        Ok(id)
+    }
+
+    pub(in crate::native) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
+        read_snapshot_at(&self.store.alt_dir, id)
+    }
+}
+
 /// The blobs of the index that `op` prepares, where it is the intent of
 /// an index change.
 fn blobs(alt_dir: &Path, op: &alt_oplog::Op) -> Res<Vec<ObjectId>> {

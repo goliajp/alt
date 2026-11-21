@@ -3,9 +3,11 @@
 
 use super::*;
 
+mod as_read;
 mod index;
 mod prepared;
 mod undo;
+pub(super) use as_read::AsRead;
 pub(super) use index::ABANDON;
 pub use prepared::{export_git, prepared_blobs};
 
@@ -94,7 +96,12 @@ pub(super) fn decode<T: alt_json::FromJson>(bytes: &[u8], kind: u8) -> Res<T> {
 
 /// Cache/stat fields are not state. Conflict stages, flags, paths, oid and
 /// modes are state and must survive a restore exactly.
-pub(super) fn canonical_index(mut index: Index, algo: HashAlgo) -> Vec<u8> {
+pub(super) fn canonical_index(index: Index, algo: HashAlgo) -> Vec<u8> {
+    canonical(index).serialize(algo)
+}
+
+/// The index with what is not state taken out.
+fn canonical(mut index: Index) -> Index {
     for e in &mut index.entries {
         e.ctime = (0, 0);
         e.mtime = (0, 0);
@@ -104,7 +111,7 @@ pub(super) fn canonical_index(mut index: Index, algo: HashAlgo) -> Vec<u8> {
         e.gid = 0;
         e.size = 0;
     }
-    index.serialize(algo)
+    index
 }
 
 pub(super) fn hash(bytes: &[u8]) -> String {
@@ -193,22 +200,6 @@ impl NativeRepo<'_> {
         workspace_identity_at(&self.index_path, &self.workspace)
     }
 
-    pub(super) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
-        let id = hash(bytes);
-        let path = self.store.alt_dir.join("recovery/objects").join(&id);
-        if !path.exists() {
-            durable_write(&path, bytes)?;
-        }
-        if hash(&std::fs::read(path)?) != id {
-            return Err("corrupt recovery snapshot".into());
-        }
-        Ok(id)
-    }
-
-    pub(super) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
-        prepared::read_snapshot_at(&self.store.alt_dir, id)
-    }
-
     /// The working-tree state at `path`, as an index change records it. A
     /// path beneath a file or a symlink holds nothing; an index change
     /// writes nothing to the working tree, so nothing can pass through
@@ -265,7 +256,7 @@ impl NativeRepo<'_> {
 
     pub(super) fn write_index_transaction(
         &mut self,
-        before: Index,
+        before: AsRead,
         after: Index,
         touched: &[BString],
         inverse_of: Option<String>,
@@ -273,9 +264,10 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         index_file::ensure_sound(&after)?;
-        let before = canonical_index(before, self.store.algo()?);
+        let unchanged = self.unchanged_since(&before)?;
+        let before = before.canonical(self.store.algo()?);
         let after = canonical_index(after, self.store.algo()?);
-        if canonical_index(self.index()?, self.store.algo()?) != before {
+        if !unchanged {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "index changed while preparing operation",
