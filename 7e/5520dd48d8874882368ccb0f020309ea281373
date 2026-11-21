@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: test
+summary: give up a step that has nothing to put back, abort another operation over one, hold giving up to the policy, and undo after a checkout finished late
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: crates/alt-cli/tests/it/mixed_versions/completed_late.rs
+touched: crates/alt-cli/tests/it/mixed_versions/given_up.rs
+touched: crates/alt-cli/tests/it/mixed_versions/step_mark.rs
+touched: crates/alt-cli/tests/it/step_given_up.rs
+touched: crates/alt-cli/tests/it/step_refused.rs
