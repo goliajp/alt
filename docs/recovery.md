@@ -101,7 +101,10 @@ alt fsck --json
 
 It decodes and hashes every stored chunk, reassembles every large blob, hashes
 every object to its Git id, compares each index with the file it indexes,
-verifies the whole operation log and replays it against the refs. It changes
+verifies the whole operation log and replays it against the refs. Then it
+walks from every ref through tags, commits and trees, and names each object
+they lead to that is not stored (Objects that commits name and the store does
+not hold, below); `alt fsck --no-connectivity` leaves that walk out. It changes
 nothing: no file under `.alt` is written, repaired, rebuilt or created. It
 exits 0 after printing how many records of each kind it verified, and non-zero
 at the first record that fails, saying what failed. Indexes and the ref
@@ -452,6 +455,37 @@ and where the interruption left a record half written they fail with `taking
 lost records out of the object store was interrupted` until a command that
 writes, or `alt fsck --drop-lost`, has finished the removal.
 
+### Objects that commits name and the store does not hold
+
+Records that all read do not make a history that is whole: a commit can name
+a blob, a tree or a parent that no record holds, after `--committed` above
+or in a copy of `.alt` that lacks part of the store. `alt fsck` therefore
+walks from every ref, and from what each ref was before operations that are
+about to be discarded, through tags, commits and trees. Each object that is
+not stored is named once, with the first commit and path found that name it,
+and the check fails:
+
+```
+fatal: fsck: missing blob 39b06ed55e6f8670685412ead3dd38b50b038047: commit 8d2f0c41e1a9c0f4b7a54d3e7f6f2f7c1f0e9a55, reached from refs/heads/main, names it at b.txt
+```
+
+A tree that is missing is named at its directory (`names it at sub/`), a
+commit as the parent of the commit that has it (`has it as a parent`).
+Nothing below a missing tree or commit is known, so nothing below it is
+listed. A commit of another repository recorded at a path (a submodule) is
+not an object of this store and is not looked for. For an object listed in
+`.alt/objects.lost` the line goes on to say that its records were taken out
+with `alt fsck --drop-lost --yes --committed`; the check reports it like any
+other and leaves the list as it is.
+
+To store a missing blob again, put the file with that content in the working
+tree and `alt add` it. A missing tree or commit comes back only from another
+copy of the repository. `git fsck` reports the same state as `missing blob
+ID` and `broken link from tree ID to blob ID`, without the commit and path.
+
+The walk reads every commit and tree that a ref leads to once.
+`alt fsck --no-connectivity` checks the records and the refs only.
+
 ### An unconfirmed tail
 
 Nothing past the synced point of a file was ever confirmed to the command
@@ -562,6 +596,7 @@ the tables above and on these. None of them changes a file.
 | --- | --- | --- |
 | `FILE reads up to byte N, and a whole record begins past that, at byte M` | nothing records how far `FILE` was synced, and the bytes commands pass over at its end hold a record that reads: the record at byte N is damaged, not unfinished. Past a synced point that holds, this is an unconfirmed tail instead (above) | restore `FILE`, or read past the damage |
 | `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
+| `missing KIND ID: commit C, reached from REF, names it at PATH` (or `has it as a parent`; `tag T, reached from REF, names it`) | every record reads, and a commit or a tag that a ref leads to names an object no record holds | see Objects that commits name and the store does not hold, below |
 | `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
 | `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
 | `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content, or take the record out (Records of lost content among synced ones, below) |

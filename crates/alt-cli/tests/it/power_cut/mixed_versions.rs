@@ -200,6 +200,13 @@ fn records_naming_a_lost_blob_that_a_commit_names_are_taken_out_only_when_that_i
     for bin in [&old, &new] {
         ok(run(bin, dir, &["status"]));
     }
+    // every record reads, and the tagged commit names a blob none holds
+    let checked = run(&new, dir, &["fsck"]);
+    let said = text(&checked.stderr);
+    assert!(!checked.status.success(), "{said}");
+    assert!(said.contains("fsck: missing blob "), "{said}");
+    let by = "reached from refs/tags/side, names it at b.txt; its records were taken out";
+    assert!(said.contains(by), "{said}");
     // the file is still in the working tree: added again, its blob is
     // the one the commit names
     ok(run(&new, dir, &["add", "b.txt"]));

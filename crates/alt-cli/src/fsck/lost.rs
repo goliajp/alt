@@ -63,9 +63,9 @@ pub(super) fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> 
     for line in &staged {
         writeln!(out, "{line}")?;
     }
-    let committed = store.reaching(&gone)?;
-    for line in &committed {
-        writeln!(out, "{line}")?;
+    let committed = store.reaching(0, &|oid| Ok(gone.contains(oid)))?;
+    for named in &committed {
+        writeln!(out, "{} {}: {}", named.kind, named.oid, named.by)?;
     }
     let records = lost.records.len();
     if !args.yes {

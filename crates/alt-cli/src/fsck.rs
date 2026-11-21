@@ -15,6 +15,7 @@
 //! stored ([`lost`]).
 
 mod lost;
+mod reach;
 mod tails;
 
 use std::io::Write;
@@ -99,6 +100,10 @@ pub struct FsckArgs {
     /// that a ref reaches names an object that goes with them
     #[arg(long, requires = "yes")]
     committed: bool,
+    /// Leave out the walk from every ref through commits and trees, which
+    /// finds the objects they name that are not stored
+    #[arg(long, conflicts_with_all = ["drop_lost"])]
+    no_connectivity: bool,
 }
 
 pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> Res<u8> {
@@ -120,7 +125,7 @@ pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> Res<u8>
     let refs = store.refs_mut().check().map_err(with_cause)?;
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
-    let dangling = store.dangling_refs(named)?;
+    let dangling = reach::missing(store, named, args.no_connectivity)?;
     let (unstored, torn) = index_findings(store)?;
     let found = Found {
         ends: &ends,
@@ -209,7 +214,9 @@ struct Found<'a> {
     odb: &'a alt_odb::OdbChecked,
     /// operations that were never synced and name objects not stored
     unconfirmed: usize,
-    dangling: &'a [(String, alt_git_codec::ObjectId)],
+    /// refs that point at what is not stored, objects below the refs
+    /// that are not stored
+    dangling: &'a [String],
     /// whether a command that writes settles the object store whatever
     /// it writes ([`tails::cutter`])
     settles: bool,
@@ -263,9 +270,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
             found.unconfirmed
         ));
     }
-    for (name, oid) in found.dangling {
-        damage.push(format!("ref {name} points at {oid}, which is not stored"));
-    }
+    damage.extend(found.dangling.iter().cloned());
     (notes, damage, tails)
 }
 
