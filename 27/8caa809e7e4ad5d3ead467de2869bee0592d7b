@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave an undo that was cut short to be brought to an end where the abort of the operation it puts back is asked for
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/abort.rs
+touched: crates/alt-cli/src/native/in_progress/step/guard.rs
+touched: crates/alt-cli/tests/it/step_given_up.rs
