@@ -23,6 +23,7 @@ impl Odb {
         noted: Option<BootRuns>,
     ) -> Result<(), OdbError> {
         if !alt_store::relaxed_durability() {
+            self.blobs.chunks_mut().drop_boot_run()?;
             self.blobs.map_log()?.drop_boot_run()?;
             self.tier1_mut()?.log_mut().drop_boot_run()?;
             self.map.log_mut().drop_boot_run()?;
@@ -44,10 +45,11 @@ impl Odb {
     /// The log range of the boot run this handle holds of each log, as
     /// the lock file notes them.
     fn boot_runs(&mut self) -> Result<[(u64, u64); 4], OdbError> {
+        let chunks = self.blobs.chunk_store().boot_run();
         let blobmap = self.blobs.map_log()?.boot_run();
         let tier1 = self.tier1_mut()?.log_mut().boot_run();
         let map = self.map.log_mut().boot_run();
-        Ok([None, blobmap, tier1, map].map(Option::unwrap_or_default))
+        Ok([chunks, blobmap, tier1, map].map(Option::unwrap_or_default))
     }
 
     /// For a writer that leaves its appends unsynced, as its batch ends
@@ -64,6 +66,10 @@ impl Odb {
         }
         let dir = boot_runs::dir(left.boot, generation);
         let before = self.boot_runs()?;
+        match self.blobs.chunks_mut().index_boot_run(&dir) {
+            Ok(_) | Err(StoreError::IndexWrite(_)) => {}
+            Err(damage) => return Err(damage.into()),
+        }
         let logs = [
             self.blobs.map_log()?,
             self.tier1.get_mut().expect("opened just above").log_mut(),

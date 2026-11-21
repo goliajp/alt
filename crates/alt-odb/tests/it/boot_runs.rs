@@ -49,11 +49,12 @@ fn put_unsynced(dir: &Path, objects: impl Iterator<Item = u32>) {
     odb.flush().unwrap();
 }
 
-/// The boot run files of the record logs.
+/// The boot run files of the chunk index and of the record logs.
 fn boot_runs(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    for log in &FILES[1..] {
-        let Ok(listing) = fs::read_dir(dir.join(format!("{log}.idx"))) else {
+    let logs = FILES[1..].iter().map(|log| format!("{log}.idx"));
+    for idx in logs.chain(["store/chunks.idx".to_owned()]) {
+        let Ok(listing) = fs::read_dir(dir.join(idx)) else {
             continue;
         };
         for entry in listing.map(Result::unwrap) {
@@ -118,9 +119,9 @@ fn a_batch_left_unsynced_is_looked_up_in_boot_runs_and_read_by_the_writer_that_s
     let dir = tmp.path();
     let synced = store(dir);
     let ends = lens(dir);
-    // one for the Tier 1 map and one for map.alt, and no run of a chain
-    // past what was synced
-    assert_eq!(boot_runs(dir).len(), 2, "{:?}", boot_runs(dir));
+    // one for the Tier 1 map, one for map.alt and one for the chunk
+    // index, and no run of a chain past what was synced
+    assert_eq!(boot_runs(dir).len(), 3, "{:?}", boot_runs(dir));
     assert!(chain_ends(dir).iter().all(|end| *end <= synced[3]));
     all_read(&reading(dir));
     // a page of map.alt the batch appended is lost in the boot it was
@@ -153,7 +154,7 @@ fn a_batch_left_unsynced_is_looked_up_in_boot_runs_and_read_by_the_writer_that_s
     assert!(refused.contains("map.alt record corrupt"), "{refused}");
     drop(writer);
     assert_eq!(lens(dir), before);
-    assert_eq!(boot_runs(dir).len(), 2);
+    assert_eq!(boot_runs(dir).len(), 3);
     // with the page as it was written the batch is synced, indexed by
     // the chain, and the boot runs are gone
     map.write_all_at(&page, at).unwrap();
@@ -178,7 +179,7 @@ fn boot_runs_are_not_looked_in_after_another_boot_and_the_next_writer_takes_them
     all_read(&reading(dir));
     left_unsynced(dir, synced, false);
     let runs = spoil(dir);
-    assert_eq!(runs.len(), 2);
+    assert_eq!(runs.len(), 3);
     let reader = reading(dir);
     all_read(&reader);
     drop(reader);
@@ -209,7 +210,7 @@ fn boot_runs_are_not_looked_in_once_records_were_taken_out_of_the_store() {
         odb.rewind(before).unwrap();
     }
     let runs = spoil(dir);
-    assert_eq!(runs.len(), 2);
+    assert_eq!(runs.len(), 3);
     let reader = reading(dir);
     all_read(&reader);
     assert!(!reader.contains(&object(1500).0).unwrap());
@@ -229,7 +230,7 @@ fn a_removal_of_lost_records_takes_the_boot_runs_away() {
     let whole = lens(dir);
     // the content of the last objects of the batch is lost
     put_unsynced(dir, 1500..1560);
-    assert_eq!(boot_runs(dir).len(), 2);
+    assert_eq!(boot_runs(dir).len(), 3);
     cut(dir, 0, whole[0]);
     let mut odb = open(dir);
     let lost = odb.lost().unwrap();
@@ -263,10 +264,10 @@ fn boot_runs_over_records_that_were_cut_off_are_taken_away_by_the_next_writer() 
             odb.put(oid, ObjectKind::Blob, &data).unwrap();
         }
         odb.flush().unwrap();
-        assert_eq!(boot_runs(dir).len(), 2);
+        assert_eq!(boot_runs(dir).len(), 3);
         odb.rewind(before).unwrap();
     }
-    assert_eq!(boot_runs(dir).len(), 2, "nobody has written since");
+    assert_eq!(boot_runs(dir).len(), 3, "nobody has written since");
     let reader = reading(dir);
     for n in 0..30 {
         reads(&reader, n);
@@ -279,4 +280,64 @@ fn boot_runs_over_records_that_were_cut_off_are_taken_away_by_the_next_writer() 
     let reader = reading(dir);
     reads(&reader, 1500);
     assert!(!batch().any(|n| reader.contains(&object(n).0).unwrap()));
+}
+
+/// The boot run file of the chunk index.
+fn chunk_boot_run(dir: &Path) -> Option<PathBuf> {
+    let of_chunks = |run: &PathBuf| run.starts_with(dir.join("store/chunks.idx"));
+    boot_runs(dir).into_iter().find(of_chunks)
+}
+
+#[test]
+fn a_page_of_the_pack_lost_under_its_boot_run_is_found_by_the_writer_that_syncs() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let synced = store(dir);
+    let ends = lens(dir);
+    assert!(chunk_boot_run(dir).is_some());
+    let at = (synced[0] + ends[0]) / 2;
+    let at = at - at % 4096;
+    let pack = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(FILES[0]));
+    let (pack, mut page) = (pack.unwrap(), vec![0u8; 4096]);
+    pack.read_exact_at(&mut page, at).unwrap();
+    pack.write_all_at(&[0u8; 4096], at).unwrap();
+    // nobody walks the pack on the way in: what lies outside the page
+    // reads, and what lies in it is told when it is looked up
+    let reader = reading(dir);
+    for n in 0..30 {
+        reads(&reader, n);
+    }
+    let found = |odb: &NativeOdb| {
+        let read = batch().filter(|n| matches!(odb.get(&object(*n).0), Ok(Some(_))));
+        read.count()
+    };
+    let before = found(&reader);
+    assert!(before > 500 && before < batch().count(), "{before} found");
+    drop(reader);
+    // the writer that syncs walks the pack and hashes what it is about
+    // to record as synced: the pack ends for it at the first record that
+    // does not hold what it names, as after a power cut, and the records
+    // from there on are cut off every file
+    let mut writer = open(dir);
+    put(&mut writer, 1503..1504);
+    drop(writer);
+    let after = lens(dir);
+    assert!(after[0] > at && after[0] < at + 4096 + 400, "{after:?}");
+    assert!(after[2] < ends[2] && after[3] < ends[3], "{after:?}");
+    assert_eq!(boot_runs(dir), Vec::<PathBuf>::new());
+    let reader = reading(dir);
+    for n in (0..30).chain([1503]) {
+        reads(&reader, n);
+    }
+    let kept = found(&reader);
+    assert!(kept > 100 && kept < before, "{kept} of {before} kept");
+    for n in batch() {
+        if reader.contains(&object(n).0).unwrap() {
+            reads(&reader, n);
+        }
+    }
+    open(dir).check().unwrap();
 }

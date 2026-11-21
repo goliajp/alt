@@ -11,6 +11,9 @@ use alt_hash::IdMap;
 use crate::runs::{Guard, Key, Runs};
 use crate::{ChunkId, StoreError};
 
+mod boot;
+pub(crate) use boot::{Named, named};
+
 /// Tail length, in records, from which a flush folds the tail into the runs.
 pub(crate) const INDEX_AT: usize = 256;
 /// Kept locations before the table is emptied and filled again.
@@ -69,7 +72,7 @@ impl ChunkIndex {
     pub fn open(
         store_dir: &Path,
         base: Location,
-        named: Option<&[(u64, u64)]>,
+        (named, boot): Named<'_>,
         guard_at: impl Fn(Location) -> Option<Guard>,
     ) -> Result<Self, StoreError> {
         let dir = store_dir.join("chunks.idx");
@@ -79,6 +82,7 @@ impl ChunkIndex {
             Some(named) => Runs::open_named(&dir, base, named, guard)?,
             None => Runs::open(&dir, base, guard)?,
         };
+        let runs = runs.with_boot_run(boot, guard)?;
         let end = runs.covered();
         Ok(Self {
             dir,

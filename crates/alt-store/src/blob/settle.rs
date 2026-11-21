@@ -76,6 +76,11 @@ impl BlobStore {
         self.chunks.look_again()
     }
 
+    /// The chunk store, for what a writer does about its boot run.
+    pub fn chunks_mut(&mut self) -> &mut crate::ChunkStore {
+        &mut self.chunks
+    }
+
     /// Visits the blob map's records from byte `from` on: where each
     /// begins, the blob and its manifest root.
     pub fn map_records_from(

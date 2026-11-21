@@ -1,5 +1,5 @@
-//! The boot runs of the record logs: index runs over appends that were
-//! left unsynced (see [`alt_store::runs::BootRun`]).
+//! The boot runs of the packs and the record logs: index runs over
+//! appends that were left unsynced (see [`alt_store::runs::BootRun`]).
 //!
 //! Every open reads the records past the index runs of a log, and a
 //! writer that leaves its appends unsynced builds no index run over
@@ -14,9 +14,11 @@
 //! [checksum 8]                                                at byte 1312
 //! ```
 //!
-//! A range of zeros says the log has none; none is written for the chunk
-//! index. The files lie in `<log>.idx/<boot>-<generation>/` and neither
-//! they nor the note are fsynced. An opener looks in them only while all
+//! A range of zeros says the log has none; the range of the chunk index
+//! is one of positions in the packs, a pack and an offset in one number.
+//! The files lie in `<log>.idx/<boot>-<generation>/`, those of the chunk
+//! index in `store/chunks.idx/<boot>-<generation>/`, and neither they
+//! nor the note are fsynced. An opener looks in them only while all
 //! of this holds ([`held`]): the note of unsynced appends is of the
 //! running boot, the marker says appends were left unsynced, and its
 //! generation is the one noted here. After another boot the files may
@@ -86,7 +88,7 @@ impl BootRuns {
     /// The boot run of `log` an opener in `boot` is handed.
     pub fn of(&self, log: Log, boot: [u8; 16]) -> Option<BootRun> {
         let (start, end) = match log {
-            Log::Pack => return None,
+            Log::Pack => self.runs[0],
             Log::Blobmap => self.runs[1],
             Log::Tier1 => self.runs[2],
             Log::Map => self.runs[3],
@@ -109,9 +111,15 @@ pub(crate) fn note(lock: &File, runs: &BootRuns) {
 /// The caller holds the write lock.
 pub(crate) fn forget(alt_dir: &Path, lock: &File) -> std::io::Result<()> {
     lock.write_all_at(&[0u8; LEN], AT as u64)?;
-    for log in LOGS {
+    let logs = LOGS.map(|log| {
         let mut idx = alt_dir.join(log).into_os_string();
         idx.push(".idx");
+        idx
+    });
+    for idx in logs
+        .into_iter()
+        .chain([alt_dir.join("store/chunks.idx").into()])
+    {
         alt_store::runs::remove_boot_runs(Path::new(&idx), None).map_err(std::io::Error::other)?;
     }
     Ok(())

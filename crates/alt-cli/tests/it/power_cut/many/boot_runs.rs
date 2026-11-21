@@ -169,3 +169,77 @@ fn boot_runs_go_with_the_records_a_commit_cuts_off_in_the_boot_they_were_written
     assert!(lens(&alt_dir)[3] < base.ends[3], "the records were cut off");
     goes_on("after the cut", &base, &dir, true);
 }
+
+/// Makes the boot run of the chunk index one that holds no entry.
+fn spoil_chunk_run(alt_dir: &Path) -> PathBuf {
+    let run = boot_runs(alt_dir, 0).pop().unwrap();
+    let mut bytes = fs::read(&run).unwrap();
+    let entries = entries(&bytes);
+    bytes[entries].fill(0);
+    fs::write(&run, bytes).unwrap();
+    run
+}
+
+#[test]
+fn the_boot_run_of_the_chunk_index_is_not_looked_in_after_another_boot() {
+    let base = Many::build();
+    let dir = base.tmp.path().join("base");
+    let alt_dir = dir.join(".alt");
+    // one run, up to the end of the pack
+    let runs = boot_runs(&alt_dir, 0);
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    let ends = run_ends(runs[0].parent().unwrap());
+    assert_eq!(ends, [base.ends[0]]);
+    let status = ok(alt(&dir, &["status"]));
+    staged_read("in the boot of the add", &dir);
+    let what = "after another boot";
+    let left = base.left("another-boot-chunks", &[]);
+    let alt_dir = left.join(".alt");
+    let run = spoil_chunk_run(&alt_dir);
+    assert_eq!(ok(alt(&left, &["status"])), status);
+    staged_read(what, &left);
+    assert!(spoiled(&run), "a reader took it away");
+    fs::write(left.join("one-more.txt"), "one more\n").unwrap();
+    ok(alt(&left, &["add", "one-more.txt"]));
+    assert!(!spoiled(&run));
+    staged_read(what, &left);
+    goes_on(what, &base, &left, true);
+}
+
+#[test]
+fn a_page_of_the_pack_lost_under_its_boot_run_in_its_boot_is_found_by_the_command_that_syncs() {
+    let base = Many::build();
+    let dir = base.tmp.path().join("same-boot-pack");
+    copy_tree(&base.tmp.path().join("base"), &dir);
+    let alt_dir = dir.join(".alt");
+    let middle = (base.synced[0] + base.ends[0]) / 2;
+    let at = middle - middle % PAGE;
+    let pack = fs::OpenOptions::new()
+        .write(true)
+        .open(alt_dir.join(FILES[0]));
+    pack.unwrap()
+        .write_all_at(&[0u8; PAGE as usize], at)
+        .unwrap();
+    // a command that only reads does not walk the pack
+    ok(alt(&dir, &["status"]));
+    // the one that syncs walks it and hashes what it is about to record
+    // as synced: the pack ends for it at the first record that does not
+    // hold what it names, as after a power cut
+    let refused = alt(&dir, &["commit", "-m", "second"]);
+    let said = stderr(&refused);
+    assert!(!refused.status.success(), "{said}");
+    assert!(said.contains("add the file again"), "{said}");
+    // from the record the page lies in on
+    let cut = said.split("discarded ").nth(1).and_then(|rest| {
+        let (bytes, of) = rest.split_once(" byte(s) at the end of ")?;
+        let bytes = bytes.parse::<u64>().ok()?;
+        of.starts_with(FILES[0]).then(|| base.ends[0] - bytes)
+    });
+    assert!(
+        cut.is_some_and(|cut| cut > base.synced[0] && cut <= at),
+        "{said}"
+    );
+    assert_eq!(boot_runs(&alt_dir, 0), Vec::<PathBuf>::new());
+    assert_eq!(all_boot_runs(&alt_dir), Vec::<PathBuf>::new());
+    goes_on("after the page", &base, &dir, true);
+}

@@ -56,6 +56,7 @@ impl ChunkStore {
     /// records there for what was written.
     pub fn look_again(&mut self) -> Result<(), StoreError> {
         self.tail.forget_synced();
+        self.tail = self.tail.clone().with_boot_run(None);
         self.reload()
     }
 

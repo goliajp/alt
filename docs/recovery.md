@@ -771,13 +771,15 @@ An add that leaves 256 records or more of a file unsynced indexes them, so
 that the commands after it look a record up instead of reading every one of
 them each time they open the store. These indexes lie in a directory of their
 own under the file's index directory, `map.alt.idx/<boot>-<generation>/` for
-`map.alt`, are noted in `odb.lock`, and are never synced. A command looks in
+`map.alt` and `store/chunks.idx/<boot>-<generation>/` for the packs, are
+noted in `odb.lock`, and are never synced. A command looks in
 them only in the boot they were written in, and only while the generation the
 synced marker records is the one they were written under: every cut of
 records moves it. After another boot, or once records were taken out of the
 store, no command opens them, and the first one that writes removes them. A
 command that syncs reads the records they cover before it records them as
-synced, removes these indexes, and indexes the records with all the others.
+synced, those of a pack with what they hold hashed against its name, removes
+these indexes, and indexes the records with all the others.
 An older alt does not look in these directories and leaves them where they
 are.
 
