@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: write a daemon frame again when the write was interrupted
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon.rs
