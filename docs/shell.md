@@ -168,8 +168,8 @@ not change.
 
 `alt complete --shell zsh --current <N> -- <word>...` is what the completion
 function asks: the words of the command line, the program first, and which of
-them the cursor is in, counted from 0. It always exits with 0 and never
-writes to stderr; outside a repository it answers what the command line
+them the cursor is in, counted from 0. Asked this way it exits with 0 and
+never writes to stderr; outside a repository it answers what the command line
 itself says. The answer is lines of fields separated by tabs:
 
 ```
@@ -183,5 +183,4 @@ prefix<TAB>text             what follows stands behind this text in the word
 In a field a tab is written `\t`, a line break `\n` and a backslash `\\`. A
 candidate spelled `group`, `files`, `nospace` or `prefix` has a backslash
 behind its first letter; a backslash before any other character stands for
-that character. Kinds of line may be added in later versions, and a reader
-skips the ones it does not know.
+that character.
