@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave refs the server already has out of a push request
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/push_report.rs
+touched: crates/alt-cli/tests/it/push_no_new_objects.rs
