@@ -94,7 +94,14 @@ fn a_blob_of_an_older_commit_that_is_not_stored_is_named_with_the_commit_and_the
     let dir = tmp.path();
     repo(dir);
     let blob = oid_of(ObjectKind::Blob, b"b.txt\n");
-    let entry = [b"100644 b.txt\0", blob.as_bytes()].concat();
+    // at two paths: an object is named once, at the first found
+    let entry = [
+        &b"100644 b.txt\0"[..],
+        blob.as_bytes(),
+        b"100644 c.txt\0",
+        blob.as_bytes(),
+    ]
+    .concat();
     let older = an_older_commit_names(dir, &entry, &[]);
     let said = missing(dir);
     let line = format!("missing blob {blob}: commit {older}, reached from refs/heads/");
@@ -146,7 +153,8 @@ fn a_commit_that_is_not_stored_is_named_with_the_commit_it_is_a_parent_of() {
     repo(dir);
     let parent = oid_of(ObjectKind::Commit, b"never stored\n");
     // a commit of another repository at a path is not one of this store
-    let link = [b"160000 linked\0", parent.as_bytes()].concat();
+    let elsewhere = oid_of(ObjectKind::Commit, b"of another repository\n");
+    let link = [b"160000 linked\0", elsewhere.as_bytes()].concat();
     let older = an_older_commit_names(dir, &link, &[parent]);
     let said = missing(dir);
     let line = format!("missing commit {parent}: commit {older}, reached from refs/heads/");
