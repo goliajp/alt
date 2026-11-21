@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: take the spaces off the end of an ignore rule as git does, keeping a tab and a space after a backslash
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/add_ignore.rs
+touched: crates/alt-worktree/src/ignore.rs
+touched: crates/alt-worktree/src/ignore/rule.rs
