@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold the step mark to the field that says a step is given up, in what is refused as in what is read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/fixtures/json-read/state-step-StepMark.txt
