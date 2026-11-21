@@ -24,6 +24,7 @@ use super::super::recovery::{WorkspaceIdentity, decode, encode};
 use super::super::*;
 
 mod abandon;
+mod abort;
 mod guard;
 mod left;
 mod mark;

@@ -253,17 +253,4 @@ impl NativeRepo<'_> {
         }
         Ok(())
     }
-
-    /// Before an `--abort`: a step that was cut short is brought to an
-    /// end, or given up where it cannot be. Whether it was given up and
-    /// had made the state file `state`, so that the operation the abort
-    /// is of is given up with it.
-    pub fn begin_abort(&mut self, state: &str) -> Res<bool> {
-        self.ensure_may_recover()?;
-        if self.recover_open_step(false).is_ok() {
-            return Ok(false);
-        }
-        let (made, _) = self.abandon_open_step(false)?;
-        Ok(made.iter().any(|name| name == state))
-    }
 }
