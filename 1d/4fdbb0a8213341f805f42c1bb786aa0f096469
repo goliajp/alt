@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: count the reads of a chain of commits on a merge of many parents
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits/tree_tests.rs
