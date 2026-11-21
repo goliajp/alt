@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: build index runs over what a marker of an older build records as synced, as before
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/open.rs
