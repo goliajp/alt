@@ -1,6 +1,6 @@
 //! Reading every object of the database in one pass.
 
-use alt_store::BlobId;
+use alt_store::{BlobId, CompactReport};
 
 use super::Odb;
 use crate::OdbError;
@@ -50,5 +50,15 @@ impl Odb {
             }
         }
         Ok(())
+    }
+}
+
+impl Odb {
+    /// Compacts the underlying chunk store, reclaiming the dead weight left
+    /// by lineage delta re-encoding. Object identities and the map are
+    /// untouched — only physical storage is rewritten.
+    pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
+        self.acquire()?;
+        Ok(self.blobs.compact()?)
     }
 }

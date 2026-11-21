@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use super::{Access, Odb};
+use crate::synced::Marker;
 use crate::{NativeOdb, OdbError};
 
 impl Odb {
@@ -17,6 +18,29 @@ impl Odb {
         Ok(tier1
             || self.map.file_len()? != self.map.appended_len()
             || self.blobs.changed_on_disk()?)
+    }
+
+    /// Read-path catch-up for a long-lived odb (the daemon between requests):
+    /// brings the in-memory state up to date with on-disk writes by concurrent
+    /// processes, then releases — reusing the proven write-path catch-up so a
+    /// torn tail is handled correctly. Must not be called mid-batch (it is a
+    /// request-boundary operation; a batch always reaches `flush` first).
+    pub fn refresh(&mut self) -> Result<(), OdbError> {
+        // a handle that is refreshed is one that lives across requests
+        self.map.keep_reads();
+        self.blobs.keep_reads();
+        self.acquire()?;
+        // the handle now holds what other writers appended and takes it
+        // for stored: a sink syncs that as it does the handle's own
+        let held = (self.defer && !alt_store::relaxed_durability()).then(|| {
+            let generation = Marker::read(&self.durable_path).generation();
+            self.appended_whole().map(|whole| (whole, generation))
+        });
+        self.release();
+        if let Some(held) = held.transpose()? {
+            *self.deferred.lock().unwrap() = Some(held);
+        }
+        Ok(())
     }
 }
 

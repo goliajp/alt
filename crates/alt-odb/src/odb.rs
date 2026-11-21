@@ -22,7 +22,7 @@ use std::sync::OnceLock;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
-use alt_store::{BlobStore, CompactReport, StoreError, Tail};
+use alt_store::{BlobStore, StoreError, Tail};
 
 use crate::head::Head;
 use crate::map::{MapEntry, ObjectMap};
@@ -104,20 +104,6 @@ impl Odb {
     /// stored.
     pub fn register_prism(&mut self, prism: Box<dyn alt_prism::Prism + Send + Sync>) {
         self.registry.register(prism);
-    }
-
-    /// Read-path catch-up for a long-lived odb (the daemon between requests):
-    /// brings the in-memory state up to date with on-disk writes by concurrent
-    /// processes, then releases — reusing the proven write-path catch-up so a
-    /// torn tail is handled correctly. Must not be called mid-batch (it is a
-    /// request-boundary operation; a batch always reaches `flush` first).
-    pub fn refresh(&mut self) -> Result<(), OdbError> {
-        // a handle that is refreshed is one that lives across requests
-        self.map.keep_reads();
-        self.blobs.keep_reads();
-        self.acquire()?;
-        self.release();
-        Ok(())
     }
 
     /// Stores one git object's canonical payload and records its identity
@@ -294,14 +280,6 @@ impl Odb {
         };
         let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
         Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
-    }
-
-    /// Compacts the underlying chunk store, reclaiming the dead weight left
-    /// by lineage delta re-encoding. Object identities and the map are
-    /// untouched — only physical storage is rewritten.
-    pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
-        self.acquire()?;
-        Ok(self.blobs.compact()?)
     }
 
     /// Number of mapped git objects.
