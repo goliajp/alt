@@ -15,6 +15,7 @@ use super::unconfirmed::{alt, ok, stderr};
 
 mod base;
 mod mixed_versions;
+mod refs_first;
 
 use base::{ADDED, Base, CUT};
 
