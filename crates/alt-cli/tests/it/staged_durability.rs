@@ -252,6 +252,24 @@ mod files {
     }
 
     #[test]
+    fn the_receipts_of_a_request_are_synced_with_their_directory_and_those_above_it_once() {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let (id, synced) = added_under_an_id_of_the_callers(tmp.path());
+        // the request's directory is synced into the two above it when it
+        // is made; the intent, the response and the completion are each
+        // synced with the directory they are put in, and nothing above it
+        let request = format!(".alt/requests/{id}");
+        assert_eq!(count(&synced, ".alt/requests"), 1, "{synced:?}");
+        assert_eq!(count(&synced, &request), 3, "{synced:?}");
+        let within = |path: &&String| path.starts_with(&format!("{request}/"));
+        assert_eq!(synced.iter().filter(within).count(), 3, "{synced:?}");
+        // the record that the request was submitted, with its directory
+        let submitted = |path: &&String| path.starts_with(".alt/submissions/");
+        assert_eq!(synced.iter().filter(submitted).count(), 1, "{synced:?}");
+        assert_eq!(count(&synced, ".alt/submissions"), 1, "{synced:?}");
+    }
+
+    #[test]
     fn the_link_to_lfs_content_is_synced_by_the_add_that_stores_it() {
         let tmp = alt_os::temp::tempdir().unwrap();
         let dir = &tmp.path().join("repo");
