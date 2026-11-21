@@ -3,12 +3,10 @@
 //! the refs move, whatever stands under them, and with nothing written
 //! for a push that is refused.
 
-use std::fs::File;
 use std::path::Path;
-use std::time::Duration;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use alt_os::sys::{LOCK_EX, flock};
+use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefStore, RefTarget};
 use alt_wire::CommandStatus;
 
@@ -51,25 +49,39 @@ fn all_accepted(report: &alt_wire::ReportStatus) -> bool {
     !report.commands.is_empty() && report.commands.iter().all(ok)
 }
 
+/// Such refs are from before pushes were looked at whole; here they are
+/// put there by hand.
 #[test]
 fn refs_at_objects_that_do_not_read_do_not_stand_in_the_way_of_a_signed_push() {
     let (origin, seed) = seeded();
+    let alt_dir = origin.path().join(".alt");
+    let (tag, _) = pack_of_one(ObjectKind::Tag, b"not a tag");
+    let (commit, _) = pack_of_one(ObjectKind::Commit, b"not a commit");
+    let mut odb = NativeOdb::open(&alt_dir).unwrap();
+    odb.put(tag, ObjectKind::Tag, b"not a tag").unwrap();
+    odb.put(commit, ObjectKind::Commit, b"not a commit")
+        .unwrap();
+    odb.flush().unwrap();
+    drop(odb);
+    let at = |name: &str, oid: ObjectId| RefChange {
+        name: name.into(),
+        old: None,
+        new: Some(RefTarget::Oid(oid)),
+    };
+    let bad = [at("refs/tags/bad", tag), at("refs/heads/bad", commit)];
+    let mut refs = RefStore::open(&alt_dir).unwrap();
+    refs.commit("by hand", 0, &bad).unwrap();
+    drop(refs);
     let server = spawn_server(origin.path());
     let url = format!("http://{}/", server.addr);
-    let (tag, tag_pack) = pack_of_one(ObjectKind::Tag, b"not a tag");
-    let (commit, commit_pack) = pack_of_one(ObjectKind::Commit, b"not a commit");
+    // a push of such an object is refused
+    let (worse, pack) = pack_of_one(ObjectKind::Commit, b"no commit either");
     let report = push(
         &url,
-        &[creation("refs/tags/bad", &tag.to_string())],
-        &tag_pack,
+        &[creation("refs/heads/worse", &worse.to_string())],
+        &pack,
     );
-    assert!(accepted(&report), "{report:?}");
-    let report = push(
-        &url,
-        &[creation("refs/heads/bad", &commit.to_string())],
-        &commit_pack,
-    );
-    assert!(accepted(&report), "{report:?}");
+    assert!(refused_over(&report, "unreadable"), "{report:?}");
 
     // read anew by the server with the next request
     require_signed_commits(origin.path());
@@ -121,8 +133,8 @@ fn an_unsigned_commit_of_the_pack_that_refs_reach_already_does_not_refuse_the_pu
     );
     assert!(accepted(&report), "{report:?}");
 
-    // one that no new value reaches comes in with the pack, and is held
-    // to the policy once a ref is to reach it
+    // one that no new value reaches comes in with the pack and is not
+    // kept: nothing looked at it
     let stray = commit_object(&seed, 1_700_000_000, "", "stray");
     let stray_name = stray.0.to_string();
     let last = signed(&secret, &name, "last");
@@ -134,54 +146,18 @@ fn an_unsigned_commit_of_the_pack_that_refs_reach_already_does_not_refuse_the_pu
     );
     assert!(accepted(&report), "{report:?}");
     let report = push(&url, &[creation("refs/heads/stray", &stray_name)], &[]);
-    assert!(refused_over(&report, "missing alt-sig"), "{report:?}");
+    assert!(
+        refused_over(&report, "missing necessary objects"),
+        "{report:?}"
+    );
     drop(server);
     assert_eq!(tip(origin.path(), "refs/heads/next"), name);
     assert_eq!(tip(origin.path(), "refs/heads/last"), last_name);
 }
 
-/// The only ref that reaches an unsigned commit is deleted by another
-/// process after the server has read the refs for a push that points a
-/// ref at the commit. The server is held at `odb.lock`, which it takes
-/// after reading the refs, for as long as that takes.
-#[test]
-fn a_commit_whose_last_ref_another_process_deleted_meanwhile_is_added() {
-    let (origin, seed) = seeded();
-    let alt_dir = origin.path().join(".alt");
-    let server = spawn_server(origin.path());
-    let url = format!("http://{}/", server.addr);
-    let unsigned = commit_object(&seed, 1_700_000_000, "", "unsigned");
-    let (oid, name) = (unsigned.0, unsigned.0.to_string());
-    let report = push(
-        &url,
-        &[creation("refs/heads/only", &name)],
-        &pack_of(&[unsigned]),
-    );
-    assert!(accepted(&report), "{report:?}");
-    require_signed_commits(origin.path());
-
-    let objects = File::open(alt_dir.join("odb.lock")).unwrap();
-    flock(&objects, LOCK_EX).unwrap();
-    let pushing =
-        std::thread::spawn(move || push(&url, &[creation("refs/heads/again", &name)], &[]));
-    // long enough for the server to get to the lock
-    std::thread::sleep(Duration::from_millis(500));
-    let gone = RefChange {
-        name: "refs/heads/only".into(),
-        old: Some(RefTarget::Oid(oid)),
-        new: None,
-    };
-    let mut refs = RefStore::open(&alt_dir).unwrap();
-    refs.commit("another process", 0, &[gone]).unwrap();
-    drop(refs);
-    drop(objects);
-    let report = pushing.join().unwrap();
-    assert!(refused_over(&report, "missing alt-sig"), "{report:?}");
-}
-
 /// The lengths of the odb's append files, and its marker: a rollback
 /// moves the marker's generation.
-fn odb_state(alt_dir: &Path) -> (Vec<Option<u64>>, Option<Vec<u8>>) {
+pub(crate) fn odb_state(alt_dir: &Path) -> (Vec<Option<u64>>, Option<Vec<u8>>) {
     let files = [
         "store/pack-00000001.altpack",
         "store/manifests/blobmap",

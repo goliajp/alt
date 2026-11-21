@@ -12,6 +12,8 @@ mod add_unmerged;
 mod alt_server_push;
 mod altd_server;
 mod altd_server_added_commits;
+mod altd_server_connected;
+mod altd_server_landing;
 mod altd_server_no_new_objects;
 mod altd_server_refused_objects;
 mod altd_server_signed_commits;

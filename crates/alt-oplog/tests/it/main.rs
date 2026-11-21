@@ -5,6 +5,7 @@ mod marker;
 mod marker_states;
 mod note;
 mod oplog_lifecycle;
+mod panic;
 mod synced_marker;
 mod synced_writers;
 mod unconfirmed;

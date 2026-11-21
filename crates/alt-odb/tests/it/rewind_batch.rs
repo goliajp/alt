@@ -3,12 +3,13 @@
 //! began stays, and the other handle appends nothing while the batch is
 //! open, nor takes an object of the batch for stored.
 
-use std::sync::mpsc;
+use std::fs::File;
+use std::io::ErrorKind;
 use std::thread;
-use std::time::Duration;
 
 use alt_git_codec::ObjectKind;
 use alt_odb::{NativeOdb, OdbCheckpoint};
+use alt_os::sys::{LOCK_NB, LOCK_SH, flock};
 
 use super::rewind_interrupted::{object, open, put, reads};
 
@@ -44,22 +45,19 @@ fn a_batch_rolled_back_leaves_what_another_handle_wrote_before_it_began() {
 
 /// Another handle puts the objects of an open batch. It would find them
 /// stored and write nothing, were it let in before the batch is rolled
-/// back.
+/// back: the lock it has to wait for, to open the store and to put, is
+/// held for as long as the batch is open.
 #[test]
 fn a_handle_that_puts_the_objects_of_an_open_batch_stores_them_after_its_rollback() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let mut odb = open(tmp.path());
     put(&mut odb, 0..9);
     let begun = batch(&mut odb, 9..18);
+    let lock = File::open(tmp.path().join("odb.lock")).unwrap();
+    let shared = flock(&lock, LOCK_SH | LOCK_NB);
+    assert_eq!(shared.unwrap_err().kind(), ErrorKind::WouldBlock);
     let dir = tmp.path().to_owned();
-    let (started, starts) = mpsc::channel();
-    let other = thread::spawn(move || {
-        started.send(()).unwrap();
-        put(&mut open(&dir), 9..18);
-    });
-    starts.recv().unwrap();
-    // long enough for the other handle to get to the lock
-    thread::sleep(Duration::from_millis(300));
+    let other = thread::spawn(move || put(&mut open(&dir), 9..18));
     odb.rewind(begun).unwrap();
     odb.flush_pending().unwrap();
     other.join().unwrap();

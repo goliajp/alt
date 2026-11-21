@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::lock::{lock_exclusive, unlock};
+use crate::lock::unlock;
 use crate::read::{read_at, read_log, scan};
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN};
 use crate::synced::{self, Marker};
@@ -237,10 +237,8 @@ impl OpLog {
         &mut self,
         held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        lock_exclusive(&self.file).map_err(OpLogError::from)?;
-        let settled = self.settle_locked(held);
-        let _ = unlock(&self.file);
-        settled
+        self.locked(|log| log.settle_locked(held))
+            .map_err(OpLogError::from)?
     }
 
     fn settle_locked<E: From<OpLogError>>(

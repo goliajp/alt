@@ -27,22 +27,17 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use alt_cli::held::Held;
 use alt_cli::native::{Principal, PrincipalKind, Store};
+use alt_cli::receive;
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_repo::Repository;
 use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::CommandStatus;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
-
-#[path = "altd_server/pack_ingest.rs"]
-mod pack_ingest;
-#[path = "altd_server/ref_tx.rs"]
-mod ref_tx;
-#[path = "altd_server/signed_commits.rs"]
-mod signed_commits;
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 
@@ -400,12 +395,14 @@ enum ServeMode {
     },
     Multi {
         root: PathBuf,
-        cache: Mutex<HashMap<String, RepoHandle>>,
+        cache: Held<HashMap<String, RepoHandle>>,
     },
 }
 
-/// three-piece write coordinator for one repo. `store` is
-/// the existing serialised write port (Mutex held only across append).
+/// three-piece write coordinator for one repo. `store` is what a push
+/// has in hand from its look at the refs to its ref transaction; a
+/// request that panics with it in hand ends the process (see
+/// [`alt_cli::held`]).
 /// `sink` is an independent fsync handle (own fds) that the leader
 /// committer calls outside the store lock — overlap is what makes
 /// group commit pay off. `group` hands out tickets + makes followers
@@ -413,7 +410,7 @@ enum ServeMode {
 /// share ~1 fsync instead of paying N fsyncs each. Shared across
 /// requests via `Arc`.
 struct WriteCoordinator {
-    store: Mutex<Store>,
+    store: Held<Store>,
     sink: alt_cli::native::StoreSink,
     group: alt_cli::group_commit::GroupCommit,
     /// single-use nonces issued during receive-pack info/refs
@@ -431,7 +428,7 @@ struct WriteCoordinator {
 /// before they POST receive-pack gets refused, but the bound makes
 /// the table O(1) memory regardless of traffic.
 struct NonceTable {
-    inner: Mutex<NonceInner>,
+    inner: Held<NonceInner>,
 }
 
 struct NonceInner {
@@ -442,7 +439,7 @@ struct NonceInner {
 impl NonceTable {
     fn new() -> Self {
         NonceTable {
-            inner: Mutex::new(NonceInner {
+            inner: Held::new(NonceInner {
                 queue: std::collections::VecDeque::with_capacity(1024),
                 set: std::collections::HashSet::with_capacity(1024),
             }),
@@ -475,7 +472,7 @@ impl NonceTable {
             }
             hex
         };
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.take();
         if g.queue.len() >= 1024
             && let Some(old) = g.queue.pop_front()
         {
@@ -489,7 +486,7 @@ impl NonceTable {
     /// Atomically check + consume a nonce. Returns true iff it was in
     /// the table at the time of call; subsequent calls return false.
     fn consume(&self, nonce: &str) -> bool {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.take();
         if g.set.remove(nonce) {
             // also drop it from the queue so the LRU bookkeeping stays
             // accurate; we accept the O(N) here because consumes are
@@ -531,7 +528,7 @@ fn open_write_coordinator(
     store.set_defer_durability(true);
     let sink = store.sink()?;
     Ok(Arc::new(WriteCoordinator {
-        store: Mutex::new(store),
+        store: Held::new(store),
         sink,
         group: alt_cli::group_commit::GroupCommit::new(),
         nonces: NonceTable::new(),
@@ -585,7 +582,7 @@ impl ServeMode {
         }
         ServeMode::Multi {
             root,
-            cache: Mutex::new(HashMap::new()),
+            cache: Held::new(HashMap::new()),
         }
     }
 
@@ -625,7 +622,7 @@ fn resolve_repo(
             if name.is_empty() || name.contains("..") || name.contains('\\') {
                 return Err("invalid repo name in URL".into());
             }
-            let mut cache_g = cache.lock().unwrap();
+            let mut cache_g = cache.take();
             if let Some(h) = cache_g.get(name) {
                 return Ok((
                     RepoHandle {
@@ -662,10 +659,6 @@ fn resolve_repo(
         }
     }
 }
-
-// silence the unused import — `Path` is reserved for future path-trim
-// helpers; pulling it in alongside `PathBuf` matches the codebase style
-const _: fn(&Path) = |_| {};
 
 fn dispatch(
     mode: &ServeMode,
@@ -1177,7 +1170,7 @@ fn handle_receive_pack(
     // entry the daemon uses to catch up its read view. Must
     // happen *before* the sig_block decision below so the next
     // signing policy is seen on this request, not a request later.
-    if let Err(e) = store.lock().unwrap().settle_told() {
+    if let Err(e) = store.take().settle_told() {
         eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
     }
 
@@ -1186,8 +1179,8 @@ fn handle_receive_pack(
     // updates + algo); pack bytes don't participate, so we can decide
     // sig_block before reading them.
     let sig_outcome = verify_push_signature(writer, &head)?;
-    let (effective_principal, sig_label) = pick_principal(&sig_outcome, auth_user);
-    let require_signed = require_signed_for(store, &effective_principal);
+    let principal = pick_principal(&sig_outcome, auth_user);
+    let require_signed = require_signed_for(store, &principal.0);
     let sig_block: Option<String> = match (&sig_outcome, require_signed) {
         (SigOutcome::Verified { .. }, _) => None,
         (other, true) => Some(format!("signature required: {}", describe_sig(other))),
@@ -1201,14 +1194,15 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    let push = pack_ingest::Push {
-        pack: (pack_bytes_streamed != 0).then_some(pack_tmp_path.as_path()),
-        sig_block,
-        updates: &head.updates,
-        principal: &effective_principal,
-        sig_label,
+    let pack = (pack_bytes_streamed != 0).then_some(pack_tmp_path.as_path());
+    // the ticket is handed out with the store still in hand, once the
+    // batch of objects has ended: a sink syncs the odb under the shared
+    // `odb.lock`, and so never between a push's objects and its refs
+    let assign = || writer.group.assign();
+    let (unpack_result, moved) = match sig_block {
+        Some(reason) => (Ok(()), Err(reason)),
+        None => receive::take_in(store, pack, &head.updates, &principal, assign)?,
     };
-    let (unpack_result, moved) = pack_ingest::land(writer, push)?;
     // wait for the group-commit leader's fsync to cover us, outside the
     // store lock: this is the only place we touch disk durability on the
     // receive-pack path. Other concurrent pushes coalesce into the same
@@ -1259,13 +1253,6 @@ fn handle_receive_pack(
     Ok(())
 }
 
-/// Apply the client's ref updates as a single ref transaction so the
-/// server records the push as one op-log entry — same atomicity story
-/// as a local `alt commit`. The authenticated user (when
-/// present) becomes the Principal looked up against the repo's
-/// Policy; the resulting Capabilities feed a RefPolicy gate inside
-/// `commit_idempotent`, so a server-side ref-write rule is enforced
-/// before any state changes (a denied push leaves no op-log entry).
 /// result of verifying the `alt-principal=<id>` +
 /// `alt-sig=<ed25519>` capabilities the client may have attached to a
 /// push. `NoSignature` is the empty-attribution baseline; the rest are
@@ -1307,7 +1294,7 @@ fn verify_push_signature(
         _ => return Ok(SigOutcome::NoSignature),
     };
     let trust = {
-        let guard = writer.store.lock().unwrap();
+        let guard = writer.store.take();
         guard.trust_keys()?
     };
     let Some((_, pubkey)) = trust.iter().find(|(id, _)| id == &principal_id) else {
@@ -1376,16 +1363,9 @@ fn pick_principal(outcome: &SigOutcome, auth_user: Option<&str>) -> (Principal, 
 /// Does this principal's policy require a verified signature on every
 /// push? If so, an unverified push is short-circuited with `ng
 /// signature required` before any objects land.
-fn require_signed_for(store: &Mutex<Store>, principal: &Principal) -> bool {
-    let guard = store.lock().unwrap();
+fn require_signed_for(store: &Held<Store>, principal: &Principal) -> bool {
+    let guard = store.take();
     guard.capabilities_for(principal).require_signed
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
 }
 
 /// Read the repo's refs into the ls-refs `RefRecord` shape the wire
@@ -1431,11 +1411,6 @@ fn die(msg: &str) -> ! {
     eprintln!("altd-server: {msg}");
     std::process::exit(2);
 }
-
-// Suppress an unused-import warning so this file remains tidy while
-// the POST handler that reads request bodies lands later.
-#[allow(dead_code)]
-fn _phantom_keep_imports(_c: Cursor<Vec<u8>>) {}
 
 /// What `check_auth` decided about a request. `Reject` carries the
 /// short string the body gets so a human running curl sees something

@@ -112,7 +112,10 @@ impl RefPolicy<'_> {
         }
     }
 
-    pub(crate) fn check(&self, refs: &Refs, changes: &[RefChange]) -> Result<(), RefError> {
+    /// The part of the gate that looks at no ref: whether the principal
+    /// may write the refs `changes` names at all. A caller that has work
+    /// to do before its transaction asks this first.
+    pub fn check_names(&self, changes: &[RefChange]) -> Result<(), RefError> {
         if self.read_only && !changes.is_empty() {
             return Err(RefError::CapabilityDenied(
                 "<read-only>: principal cannot write any ref".into(),
@@ -128,6 +131,11 @@ impl RefPolicy<'_> {
                 }
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, refs: &Refs, changes: &[RefChange]) -> Result<(), RefError> {
+        self.check_names(changes)?;
         if let Some(f) = self.state_check {
             f(&refs.to_map(), changes).map_err(RefError::Rejected)?;
         }
