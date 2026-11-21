@@ -43,6 +43,11 @@ impl AsRead {
 }
 
 impl AsRead {
+    /// The file the index was read from, where it was read from one.
+    pub(in crate::native) fn file(&self) -> Option<&FromFile> {
+        self.file.as_ref()
+    }
+
     /// Whether the index was read from a file that ends in `checksum`.
     pub(in crate::native) fn ends_in(&self, checksum: &[u8]) -> bool {
         let ends = |bytes: &Vec<u8>| !checksum.is_empty() && bytes.ends_with(checksum);

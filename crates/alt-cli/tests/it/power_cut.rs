@@ -22,9 +22,9 @@ use base::{ADDED, Base, CUT};
 const BOOT_NOTED_AT: u64 = 1224;
 const VERIFIED: &str = "every record verified\n";
 
-/// Makes the notes of `odb.lock` and of `oplog/sync.lock` those of
-/// another boot: what was left unsynced is then no longer taken to be as
-/// it was written.
+/// Makes the notes of `odb.lock`, of `oplog/sync.lock` and of
+/// `index.seen` those of another boot: what was left unsynced is then no
+/// longer taken to be as it was written.
 pub(super) fn another_boot(alt_dir: &Path) {
     // the file, where its note is, how long the note and its checksum are
     let notes = [
@@ -43,6 +43,17 @@ pub(super) fn another_boot(alt_dir: &Path) {
         let hash = alt_hash::blake3::hash(&note[..body]);
         note[body..].copy_from_slice(&hash.as_bytes()[..sum]);
         lock.write_all_at(&note, at).unwrap();
+    }
+    // the note beside the index names the boot it was written in as well
+    let seen = alt_dir.join("index.seen");
+    if let Ok(mut note) = fs::read(&seen)
+        && note.len() > 24
+    {
+        let body = note.len() - 8;
+        note[8] ^= 1;
+        let hash = alt_hash::blake3::hash(&note[..body]);
+        note[body..].copy_from_slice(&hash.as_bytes()[..8]);
+        fs::write(seen, note).unwrap();
     }
 }
 

@@ -29,7 +29,7 @@ mod left_by;
 mod seen;
 mod stopped;
 use left_by::{Left, left_by};
-pub(in crate::native) use seen::FromFile;
+pub(in crate::native) use seen::{FromFile, note_stored};
 use stopped::stopped_at;
 
 /// Where the index that stands in for a torn file comes from.
@@ -135,7 +135,7 @@ impl NativeRepo<'_> {
                 if noted.is_none() && self.write_lock.is_some() {
                     self.note_whole(&meta, None);
                 }
-                let from = FromFile::of(&meta, noted.flatten());
+                let from = FromFile::of(&meta, noted);
                 Ok((index, Some(bytes), Some(from)))
             }
             Err(alt_git_index::IndexError::Torn(_)) => {

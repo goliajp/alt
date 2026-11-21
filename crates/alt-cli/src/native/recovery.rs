@@ -10,7 +10,8 @@ mod prepared;
 mod undo;
 mod whole;
 pub use prepared::{export_git, prepared_blobs};
-pub(super) use {as_read::AsRead, index::ABANDON, left::sync_left, whole::TornIndex};
+pub(super) use whole::{FromFile, TornIndex, note_stored};
+pub(super) use {as_read::AsRead, index::ABANDON, left::sync_left};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;

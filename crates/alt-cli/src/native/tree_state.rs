@@ -208,7 +208,7 @@ impl NativeRepo<'_> {
     }
 
     /// The tree of the commit HEAD names; `None` when there is no commit yet.
-    fn head_tree(&self) -> Res<Option<ObjectId>> {
+    pub(super) fn head_tree(&self) -> Res<Option<ObjectId>> {
         let Some(commit) = self.store.refs.resolve(&self.head_branch()?)? else {
             return Ok(None);
         };
@@ -237,39 +237,6 @@ impl NativeRepo<'_> {
             staged,
             delta,
         })
-    }
-
-    /// The files staged over what HEAD has that `named` names and whose
-    /// blob the store does not hold: staged before records that were
-    /// never synced were cut. What HEAD has as the index has it is stored.
-    pub(super) fn staged_unstored(
-        &self,
-        snapshot: &mut Snapshot,
-        index: &Index,
-        named: &dyn Fn(&[u8]) -> bool,
-    ) -> Res<Vec<BString>> {
-        // asking the store about a few entries is less than walking HEAD,
-        // which reads a tree for every directory with something staged
-        const FEW: usize = 32;
-        let files = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
-        let few: Vec<&IndexEntry> = index.entries.iter().filter(files).take(FEW + 1).collect();
-        let mut lost = Vec::new();
-        if few.len() <= FEW {
-            for entry in few {
-                if !self.store.odb.contains(&entry.oid)? {
-                    lost.push(entry.path.clone());
-                }
-            }
-            return Ok(lost);
-        }
-        snapshot.fill_trees();
-        let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
-        for new in staged.into_iter().filter_map(|s| s.new) {
-            if new.mode != 0o160000 && named(&new.path) && !self.store.odb.contains(&new.oid)? {
-                lost.push(new.path);
-            }
-        }
-        Ok(lost)
     }
 
     /// HEAD to index alone.

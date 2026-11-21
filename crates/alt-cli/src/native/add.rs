@@ -5,6 +5,7 @@ use alt_worktree::{Delta, FileStat, Snapshot, Untracked};
 use super::*;
 
 mod embedded;
+mod lost;
 mod named;
 mod plan;
 mod store;
@@ -105,8 +106,8 @@ impl NativeRepo<'_> {
 
         // a staged file whose blob went with records that were never
         // synced is stored again, though its stat is the one it was staged with
-        let lost = self.staged_unstored(&mut snapshot, &before, &named)?;
-        let plan = plan(&before, &delta, &lost, mode.renormalize, &named);
+        let unstored = self.staged_unstored(&mut snapshot, &before, &named)?;
+        let plan = plan(&before, &delta, &unstored.lost, mode.renormalize, &named);
         self.ensure_paths_allowed(&before, &plan, &delta, &named)?;
         // stored anew, a file is cleaned without regard to what is staged
         let none = index_of(Vec::new());
@@ -123,7 +124,12 @@ impl NativeRepo<'_> {
         let staged = plan.staged;
         let touched = plan.touched;
         let restaged = self.lost_stop_restored().then(|| after.clone());
-        self.put_staged(before, after, &touched, snapshot, stats, &found.clock)?;
+        // the file the index was read from, to be noted where it stays
+        let read = before.file().filter(|_| unstored.none).cloned();
+        let replaced = self.put_staged(before, after, &touched, snapshot, stats, &found.clock)?;
+        if unstored.none {
+            self.note_stored(read.as_ref(), replaced);
+        }
         self.keep_restaged(restaged)?;
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
@@ -211,7 +217,7 @@ impl NativeRepo<'_> {
     /// Puts the index `after` in place of `before` where they differ, and
     /// keeps the snapshot of what is then in place, with the stat each
     /// staged file had before it was read. `snapshot` is the one the scan
-    /// went by.
+    /// went by. Returns whether the index was replaced.
     fn put_staged(
         &mut self,
         before: recovery::AsRead,
@@ -220,10 +226,10 @@ impl NativeRepo<'_> {
         mut snapshot: Snapshot,
         stats: Vec<(BString, FileStat)>,
         clock: &alt_worktree::Clock,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         if after.entries == before.entries {
             self.keep_snapshot(&mut snapshot);
-            return Ok(());
+            return Ok(false);
         }
         let algo = self.store.algo()?;
         // a snapshot of the index that is replaced becomes the one of the
@@ -253,7 +259,7 @@ impl NativeRepo<'_> {
         }
         next.fill_trees();
         self.keep_snapshot(&mut next);
-        Ok(())
+        Ok(true)
     }
 }
 

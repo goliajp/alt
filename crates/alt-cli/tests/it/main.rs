@@ -101,6 +101,7 @@ mod scan_daemon_watches;
 mod scan_records;
 mod show;
 mod staged_durability;
+mod staged_stored;
 mod status_json;
 mod status_labels;
 mod status_replaced;
