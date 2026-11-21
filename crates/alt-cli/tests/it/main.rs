@@ -58,6 +58,7 @@ mod fsck;
 mod fsck_tails;
 mod gitlink;
 mod gitlink_said;
+mod help_texts;
 mod identity;
 mod ignore_sources;
 mod import_materialize;
