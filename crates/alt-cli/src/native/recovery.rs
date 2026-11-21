@@ -4,6 +4,7 @@
 use super::*;
 
 mod as_read;
+mod held;
 mod index;
 mod left;
 mod prepared;
@@ -158,26 +159,7 @@ impl NativeRepo<'_> {
     /// workspaces continue independently; shared refs still use their CAS lock.
     pub(super) fn lock_workspace(&mut self) -> Res<()> {
         if self.write_lock.is_none() {
-            let path = self.index_path.with_file_name("write.lock");
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(path)?;
-            #[cfg(unix)]
-            {
-                loop {
-                    match alt_os::sys::flock(&file, alt_os::sys::LOCK_EX) {
-                        Ok(()) => break,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            return Err("workspace mutations require a supported Unix filesystem".into());
-            self.write_lock = Some(file);
+            self.write_lock = Some(held::locked(&self.index_path)?);
             self.store.refresh()?;
             self.caps = self.store.capabilities_for(&self.id.principal);
         }

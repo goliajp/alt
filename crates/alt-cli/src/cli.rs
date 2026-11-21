@@ -1136,7 +1136,7 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Diff { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
-            | Command::Fsck(_)
+            | Command::Fsck(crate::fsck::FsckArgs { yes: false, .. })
             | Command::Commit { validate: true, .. }
             | Command::Branch {
                 name: None,
@@ -1509,7 +1509,7 @@ pub fn run_on_store<W: Write>(
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
-        Command::Fsck(args) => crate::fsck::run(store, args, out),
+        Command::Fsck(args) => crate::fsck::run(store, args, (cli, cwd, id), out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here

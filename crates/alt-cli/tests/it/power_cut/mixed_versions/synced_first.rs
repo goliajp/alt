@@ -44,6 +44,12 @@ fn a_removal_syncs_the_files_before_it_moves_records_an_add_left_unsynced() {
     let (pack, map) = (first(FILES[0]), first("map.alt"));
     assert!(pack < map && map < Some(kept), "{files:?}");
     assert!(pack.is_some(), "{files:?}");
+    // the command holds a store it only reads, and the removal is made
+    // beside it: the log the add left unsynced is not synced through it
+    assert!(
+        !files.iter().any(|file| file.contains("oplog")),
+        "{files:?}"
+    );
     // the record of d.txt lies where the lost one was, and reads
     ok(run(&new, dir, &["add", "b.txt"]));
     ok(run(&new, dir, &["commit", "-m", "second"]));

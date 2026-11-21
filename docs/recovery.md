@@ -428,7 +428,11 @@ nothing was changed: `alt fsck --drop-lost --yes` takes these 1 record(s) out
 
 `alt fsck --drop-lost --yes` takes the listed records out and keeps every
 other record: the last records of the file are written over the ones that
-go, and the file ends that many records earlier. A daemon that serves the
+go, and the file ends that many records earlier. It is a command that
+writes: it waits for the lock of the workspace it is run in and for the write
+lock of the object store, and under a `--request-id` it runs once. Unlike
+other commands that write it is not held up by an operation of the workspace
+that was left open, which stays open. A daemon that serves the
 repository is stopped first. Afterwards commands that write work again, an
 older alt reads the repository as before, and the files whose blobs went are
 added again with `alt add`; `alt commit` refuses a tree that names a blob

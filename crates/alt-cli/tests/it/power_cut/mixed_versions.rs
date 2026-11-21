@@ -12,6 +12,8 @@ use super::another_boot;
 
 mod head_lost;
 #[cfg(target_os = "linux")]
+mod held;
+#[cfg(target_os = "linux")]
 mod synced_first;
 
 fn ok(out: std::process::Output) -> String {

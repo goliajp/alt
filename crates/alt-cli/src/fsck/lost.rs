@@ -15,7 +15,7 @@ use std::io::Write;
 
 use alt_odb::NativeOdb;
 
-use super::{FsckArgs, Res, with_cause};
+use super::{By, FsckArgs, Res, with_cause};
 use crate::native::Store;
 
 fn kind(kind: alt_git_codec::ObjectKind) -> &'static str {
@@ -27,8 +27,18 @@ fn kind(kind: alt_git_codec::ObjectKind) -> &'static str {
     }
 }
 
-pub(super) fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> Res<u8> {
+pub(super) fn run<W: Write>(
+    store: &mut Store,
+    args: &FsckArgs,
+    (cli, cwd, id): By<'_>,
+    out: &mut W,
+) -> Res<u8> {
     let alt_dir = store.alt_dir().to_owned();
+    // held from before the records are listed until they are out
+    let _workspace = match args.yes {
+        true => Some(store.hold_workspace(cwd, cli.workspace.as_deref(), id)?),
+        false => None,
+    };
     // before anything of the store is opened: a removal that was
     // interrupted can have left a record that does not read
     if NativeOdb::finish_removal(&alt_dir).map_err(with_cause)? {

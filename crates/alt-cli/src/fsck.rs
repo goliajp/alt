@@ -25,6 +25,9 @@ use crate::json::{self, Json};
 use crate::native::Store;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+/// The command line a check was asked for with, the directory it was
+/// run in and the caller.
+pub type By<'a> = (&'a crate::cli::Cli, &'a Path, &'a crate::native::Identity);
 
 /// The append files below the object store's three maps, as
 /// [`alt_odb::OdbChecked::unconfirmed`] counts them.
@@ -95,7 +98,7 @@ pub struct FsckArgs {
     drop_lost: bool,
     /// With --drop-lost: take the records out
     #[arg(long, requires = "drop_lost")]
-    yes: bool,
+    pub(crate) yes: bool,
     /// With --drop-lost --yes: take the records out also where a commit
     /// that a ref reaches names an object that goes with them
     #[arg(long, requires = "yes")]
@@ -106,9 +109,9 @@ pub struct FsckArgs {
     no_connectivity: bool,
 }
 
-pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> Res<u8> {
+pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, by: By<'_>, out: &mut W) -> Res<u8> {
     if args.drop_lost {
-        return lost::run(store, args, out);
+        return lost::run(store, args, by, out);
     }
     let json = args.json;
     // looked for before the store is opened, which may replace them

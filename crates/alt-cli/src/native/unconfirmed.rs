@@ -141,8 +141,10 @@ impl Store {
     /// store holds of them: what it read and what it wrote. A command that
     /// synced each of its writes as it made them has nothing left to sync,
     /// and one that leaves what it writes unsynced syncs nothing here.
+    /// Nor does a store that is only read, which appended nothing: a
+    /// removal of lost records is made beside it and syncs each step.
     pub fn sync_held(&self) -> Res<()> {
-        if alt_os::durability::unsynced() {
+        if alt_os::durability::unsynced() || self.odb.is_read_only() {
             return Ok(());
         }
         if self.refs.confirmed() && self.odb.held_confirmed()? {
