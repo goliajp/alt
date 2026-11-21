@@ -87,7 +87,7 @@ impl NativeRepo<'_> {
             .ok_or("revert --abort: no revert in progress")?;
         let branch = self.head_branch()?;
         let head = self.branch_tip("revert --abort")?;
-        self.reset_worktree_to(state.orig)?;
+        self.reset_merge(state.orig, "revert --abort")?;
         if head != state.orig {
             self.commit_refs(
                 "revert",
