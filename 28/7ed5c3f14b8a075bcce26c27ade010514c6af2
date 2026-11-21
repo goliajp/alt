@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a revert --abort that would write over a change that is not staged
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/tests/it/conflict_reset.rs
