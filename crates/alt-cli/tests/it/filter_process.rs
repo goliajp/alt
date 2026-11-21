@@ -456,14 +456,20 @@ fn a_process_that_does_not_start_is_reported_for_each_file_and_leaves_them_as_th
     // git 2.47 reads the greeting of the process in a way that ends the
     // command when the process is gone, after it reported the process
     // for a file or before; git 2.56 reports it and goes on
+    let ended = "fatal: the remote end hung up unexpectedly";
     let theirs = pair.git(&["add", "."]);
     let message = String::from_utf8_lossy(&theirs.stderr).into_owned();
     if theirs.status.success() {
         assert_eq!(message.matches(said).count(), 2, "{message}");
-        ok(pair.git(&["commit", "-qm", "unfiltered"]));
-        assert_eq!(pair.tree("alt"), pair.tree("git"));
+        // its commit asks the process again for a file added in the tick
+        // the index was written in, and can end the same way
+        let committed = pair.git(&["commit", "-qm", "unfiltered"]);
+        let message = String::from_utf8_lossy(&committed.stderr).into_owned();
+        match committed.status.success() {
+            true => assert_eq!(pair.tree("alt"), pair.tree("git")),
+            false => assert!(message.contains(ended), "{message}"),
+        }
     } else {
-        let ended = "fatal: the remote end hung up unexpectedly";
         assert!(message.contains(ended), "{message}");
     }
     assert_eq!(ok(pair.alt(&["show", "HEAD:a.r"])), "One\n");
