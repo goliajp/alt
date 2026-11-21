@@ -37,23 +37,11 @@ impl AsRead {
     }
 }
 
-fn read(path: &Path) -> Res<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
 impl NativeRepo<'_> {
     /// The workspace's index, an empty one where there is no index file,
     /// with the bytes it was read from.
     pub(in crate::native) fn index_as_read(&self) -> Res<AsRead> {
-        let bytes = read(&self.index_path)?;
-        let index = match &bytes {
-            Some(bytes) => Index::parse(bytes, self.store.algo()?)?,
-            None => index_file::empty_index(),
-        };
+        let (index, bytes) = self.read_index()?;
         Ok(AsRead { index, bytes })
     }
 

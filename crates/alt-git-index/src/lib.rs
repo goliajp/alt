@@ -71,13 +71,8 @@ impl Index {
         const ERR: fn(&'static str) -> IndexError = IndexError::Format;
         let raw = algo.raw_len();
         if data.len() < 12 + raw || &data[..4] != b"DIRC" {
-            return Err(ERR("not an index file (bad magic)"));
+            return Err(IndexError::Torn("not an index file (bad magic)"));
         }
-        let version = u32::from_be_bytes(data[4..8].try_into().unwrap());
-        if !(2..=4).contains(&version) {
-            return Err(ERR("unsupported index version"));
-        }
-        let count = u32::from_be_bytes(data[8..12].try_into().unwrap()) as usize;
 
         // trailer: hash of everything before it
         let content_end = data.len() - raw;
@@ -87,8 +82,13 @@ impl Index {
             HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end]).to_vec(),
         };
         if checksum != computed {
-            return Err(ERR("index checksum mismatch"));
+            return Err(IndexError::Torn("index checksum mismatch"));
         }
+        let version = u32::from_be_bytes(data[4..8].try_into().unwrap());
+        if !(2..=4).contains(&version) {
+            return Err(ERR("unsupported index version"));
+        }
+        let count = u32::from_be_bytes(data[8..12].try_into().unwrap()) as usize;
 
         let mut pos = 12;
         // `count` is an untrusted header field; never pre-allocate it
@@ -250,19 +250,53 @@ mod tests {
         buf.extend_from_slice(&u32::MAX.to_be_bytes());
         assert!(Index::parse(&with_trailer(buf), HashAlgo::Sha1).is_err());
     }
+
+    #[test]
+    fn bytes_that_are_not_a_file_written_whole_are_told_from_an_index_that_does_not_read() {
+        let mut header = b"DIRC".to_vec();
+        header.extend_from_slice(&2u32.to_be_bytes());
+        header.extend_from_slice(&0u32.to_be_bytes());
+        let whole = with_trailer(header.clone());
+        assert!(Index::parse(&whole, HashAlgo::Sha1).is_ok());
+        let torn = |bytes: &[u8]| {
+            matches!(
+                Index::parse(bytes, HashAlgo::Sha1),
+                Err(IndexError::Torn(_))
+            )
+        };
+        // empty, cut anywhere, zeroed, and with one bit of the checksum off
+        for cut in 0..whole.len() {
+            assert!(torn(&whole[..cut]), "cut at {cut}");
+        }
+        assert!(torn(&vec![0; whole.len()]));
+        let mut flipped = whole.clone();
+        *flipped.last_mut().unwrap() ^= 1;
+        assert!(torn(&flipped));
+        // a version this does not read, under a checksum that holds, is no tear
+        header[7] = 9;
+        assert!(matches!(
+            Index::parse(&with_trailer(header), HashAlgo::Sha1),
+            Err(IndexError::Format(_))
+        ));
+    }
 }
 
 #[derive(Debug)]
 pub enum IndexError {
     Io(std::io::Error),
+    /// what its own checksum covers does not read as an index
     Format(&'static str),
+    /// the bytes are not a file that was written whole: they are too
+    /// short, do not begin as an index does, or do not end in the
+    /// checksum of what comes before
+    Torn(&'static str),
 }
 
 impl std::fmt::Display for IndexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(_) => f.write_str("io"),
-            Self::Format(v) => write!(f, "index format: {v}"),
+            Self::Format(v) | Self::Torn(v) => write!(f, "index format: {v}"),
         }
     }
 }

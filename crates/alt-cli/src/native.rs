@@ -617,6 +617,9 @@ pub struct NativeRepo<'a> {
     /// the head of the log when this workspace was last found to have
     /// nothing left open
     recovery_checked: Option<OpId>,
+    /// what stands in for an index file that is not whole, once worked out
+    restored: std::cell::RefCell<Option<recovery::Restored>>,
+    told_restored: std::cell::Cell<u8>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -645,6 +648,8 @@ impl<'a> NativeRepo<'a> {
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
             recovery_checked: None,
+            restored: std::cell::RefCell::default(),
+            told_restored: std::cell::Cell::default(),
         }
     }
 
@@ -1106,16 +1111,6 @@ impl<'a> NativeRepo<'a> {
             }
         }
         Ok(false)
-    }
-
-    fn index(&self) -> Res<Index> {
-        match Index::open(&self.index_path, self.store.algo()?) {
-            Ok(i) => Ok(i),
-            Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(empty_index())
-            }
-            Err(e) => Err(e.into()),
-        }
     }
 
     fn read_for(&self, w: &WorkEntry) -> Res<Vec<u8>> {

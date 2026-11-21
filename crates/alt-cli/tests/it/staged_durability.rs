@@ -10,7 +10,7 @@ use super::sync_order::{FILES, lens, log_len, log_synced, objects_synced};
 use super::unconfirmed::{alt, ok, stderr};
 
 /// One commit, made by commands that sync.
-fn repo(dir: &Path) {
+pub(super) fn repo(dir: &Path) {
     ok(alt(dir, &["init"]));
     ok(alt(dir, &["config", "core.fsync", "added"]));
     fs::write(dir.join("a.txt"), "one\n").unwrap();
@@ -19,7 +19,7 @@ fn repo(dir: &Path) {
     ok(alt(dir, &["config", "--unset", "core.fsync"]));
 }
 
-fn add(dir: &Path, name: &str) {
+pub(super) fn add(dir: &Path, name: &str) {
     fs::write(dir.join(name), format!("{name}\n")).unwrap();
     ok(alt(dir, &["add", name]));
 }
@@ -35,7 +35,7 @@ fn synced_to_the_ends(dir: &Path) -> bool {
 
 /// What a power cut leaves of the files the markers describe: each ends
 /// where its marker says it was synced.
-fn power_cut(dir: &Path) {
+pub(super) fn power_cut(dir: &Path) {
     let alt_dir = dir.join(".alt");
     let cut = |name: &str, len: u64| {
         let file = fs::OpenOptions::new().write(true).open(alt_dir.join(name));

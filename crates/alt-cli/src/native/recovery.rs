@@ -8,10 +8,9 @@ mod index;
 mod left;
 mod prepared;
 mod undo;
-pub(super) use as_read::AsRead;
-pub(super) use index::ABANDON;
-pub(super) use left::sync_left;
+mod whole;
 pub use prepared::{export_git, prepared_blobs};
+pub(super) use {as_read::AsRead, index::ABANDON, left::sync_left, whole::Restored};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;

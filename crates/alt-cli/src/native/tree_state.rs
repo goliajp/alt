@@ -61,14 +61,9 @@ impl NativeRepo<'_> {
         {
             return Ok(prior.expect("just matched"));
         }
-        let bytes = match std::fs::read(&self.index_path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Snapshot::of_index(&empty_index(), &[], algo, None));
-            }
-            Err(e) => return Err(e.into()),
+        let (index, Some(bytes)) = self.read_index()? else {
+            return Ok(Snapshot::of_index(&empty_index(), &[], algo, None));
         };
-        let index = Index::parse(&bytes, algo)?;
         let id = &bytes[bytes.len() - algo.raw_len()..];
         Ok(Snapshot::of_index(&index, id, algo, prior.as_ref()))
     }
@@ -288,7 +283,7 @@ impl NativeRepo<'_> {
 }
 
 /// The checksum the index file at `path` ends in; `None` when there is no
-/// index file.
+/// index file, or one too short to end in a checksum.
 pub(super) fn index_checksum(path: &Path, len: usize) -> Res<Option<Vec<u8>>> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
@@ -297,9 +292,9 @@ pub(super) fn index_checksum(path: &Path, len: usize) -> Res<Option<Vec<u8>>> {
     };
     let size = file.metadata()?.len();
     let mut id = vec![0; len];
-    let at = size
-        .checked_sub(len as u64)
-        .ok_or("index file is truncated")?;
+    let Some(at) = size.checked_sub(len as u64) else {
+        return Ok(None);
+    };
     file.read_exact_at(&mut id, at)?;
     Ok(Some(id))
 }

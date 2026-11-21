@@ -110,6 +110,7 @@ mod task_delivery;
 mod task_evidence;
 mod task_remote;
 mod task_runner;
+mod torn_index;
 mod torn_pack;
 mod unconfirmed;
 mod unconfirmed_tails;

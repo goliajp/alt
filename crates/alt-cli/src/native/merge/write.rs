@@ -94,14 +94,12 @@ impl NativeRepo<'_> {
                 entries.push(self.make_entry(e)?);
             }
         }
-        save_index(
-            &self.index_path,
-            &Index {
-                version: 2,
-                entries,
-                extensions: Vec::new(),
-            },
-            self.store.algo()?,
-        )
+        let index = Index {
+            version: 2,
+            entries,
+            extensions: Vec::new(),
+        };
+        save_index(&self.index_path, &index, self.store.algo()?)?;
+        self.keep_stopped(index)
     }
 }

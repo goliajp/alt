@@ -56,10 +56,11 @@ fn ends(store: &mut Store) -> Res<Vec<End>> {
 /// The entries of every workspace's index that name a blob which is not
 /// stored, or one that goes with the records a writer cuts off: an index
 /// is written with its own fsync and can be ahead of the object store.
-fn unstored_index_entries(store: &Store) -> Res<Vec<String>> {
+/// Beside them, a line for each index file that is not a whole index.
+fn index_findings(store: &Store) -> Res<(Vec<String>, Vec<String>)> {
     let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
     Ok(store
-        .unstored_index_entries(&gone)
+        .index_findings(&gone)
         .map_err(|error| format!("fsck: {error}"))?)
 }
 
@@ -94,7 +95,7 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
     let dangling = store.dangling_refs(named)?;
-    let unstored = unstored_index_entries(store)?;
+    let (unstored, torn) = index_findings(store)?;
     let found = Found {
         ends: &ends,
         odb: &odb,
@@ -103,6 +104,8 @@ pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
         settles: store.refs_mut().unsettled(),
     };
     let (mut notes, mut damage, tails) = findings(store.alt_dir(), &found);
+    // nothing is lost with a torn index that a command which syncs left
+    notes.extend(torn);
     // an index ahead of the store is what a power cut leaves beside
     // records that are about to be cut; on its own it is reported
     match tails && damage.is_empty() {

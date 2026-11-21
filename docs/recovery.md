@@ -370,8 +370,7 @@ again. To keep what is about to go, copy the whole `.alt` directory
 somewhere else before you run another command; `alt fsck` has cut nothing,
 however often it runs.
 
-The index is written with a sync of its own and can be ahead of the object
-store: after such a power cut it may still name the blobs of files that were
+The index can be ahead of the object store: after such a power cut it may still name the blobs of files that were
 added and whose content went. The command that cuts says which entries those
 are, in the last lines of its warning (above): one `index entry PATH names
 blob ID, which is not stored: add the file again` for each. Add those paths
@@ -536,11 +535,40 @@ writes, an index entry whose blob is not stored is reported with
 
 The index file is put in place by a rename without a sync, as git's is. On a
 file system that does not write a file out before it records the rename, a
-power cut can leave the index empty or cut short. Every command then fails
-with `index file is truncated` or `index format: ...`. Remove `.alt/index`
-(for a named workspace, `.alt/workspaces/<name>/index`) and add the files
-again: without the file the index is empty, and the commits, the working
-tree and the object store are as they were.
+power cut can leave the index file empty, cut short or filled with zeros. alt
+tells such a file from an index by its length, its first bytes and the
+checksum it ends in, and puts the last index the operation log vouches for in
+its place:
+
+- the index that the latest operation of the workspace left (an add, an undo
+  of one, a checkout, a merge that stopped on conflicts), where the recovery
+  snapshot of that index reads and every blob it names is stored. An add whose
+  snapshot or blobs went with the power cut is passed over for the one before
+  it, back to the last operation that moved a ref of the workspace: the index
+  is never put back to a state from before the last commit or switch;
+- otherwise the tree of HEAD, with nothing staged.
+
+The first command that writes in the workspace restores the file and says
+what it restored:
+
+```
+warning: the index file of this workspace is not a whole index (a power cut leaves it so when the last `alt add` was not synced); it was restored to the index operation 5c0e4a3d… left. What was staged after that is not staged any more: add the files again
+```
+
+Files of the working tree are not touched. Run `alt status` to see what is
+not staged, and add it again. A command that only reads (`alt status`,
+`alt diff`) changes no file: it answers from the same index and says
+`this shows the workspace with …` in place of `it was restored to …`.
+`alt fsck` names each workspace whose index file is not whole and still
+exits 0 when every record verifies. Each workspace has its own index and is
+restored by the first command that writes in it.
+
+The index a merge leaves when it stops on conflicts is recorded by no
+operation. alt keeps a snapshot of it and notes it in `index.stopped` beside
+the index, so that a torn index is restored to the conflicts and not to the
+state before the merge. An older alt ignores that file; it cannot restore a
+torn index and fails with `index format: ...` until a current alt has run a
+command that writes.
 
 To have `alt add` sync before it answers:
 

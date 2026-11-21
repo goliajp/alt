@@ -11,13 +11,13 @@ use std::process::{Command, Output};
 
 /// The older binary. These tests have nothing to say without one, so a
 /// run that names none fails.
-fn old_bin() -> PathBuf {
+pub(super) fn old_bin() -> PathBuf {
     let named = std::env::var_os("ALT_OLD_BIN")
         .expect("ALT_OLD_BIN names an alt built from the base branch");
     PathBuf::from(named)
 }
 
-fn run(bin: &Path, repo: &Path, args: &[&str]) -> Output {
+pub(super) fn run(bin: &Path, repo: &Path, args: &[&str]) -> Output {
     Command::new(bin)
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -38,7 +38,7 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn new_bin() -> PathBuf {
+pub(super) fn new_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alt"))
 }
 
@@ -56,7 +56,7 @@ fn commit_files(bin: &Path, repo: &Path, tag: &str, count: usize) {
 }
 
 /// Both programs must give the same answer to every read.
-fn same_reads(old: &Path, repo: &Path) {
+pub(super) fn same_reads(old: &Path, repo: &Path) {
     let new = new_bin();
     for args in [
         &["log"][..],
