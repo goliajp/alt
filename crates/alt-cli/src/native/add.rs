@@ -90,10 +90,7 @@ impl NativeRepo<'_> {
     }
 
     fn stage(&mut self, paths: &[String], mode: Mode, json: bool, out: &mut impl Write) -> Res<()> {
-        self.ensure_writable("add")?;
-        self.lock_workspace()?;
-        self.ensure_no_pending_recovery()?;
-        let before = self.index_as_read()?;
+        let before = self.begin_add(paths, mode.update)?;
         let parse = |given: &String| Spec::parse(&self.root, &self.prefix, given);
         let specs: Vec<Spec> = paths.iter().map(parse).collect::<Res<_>>()?;
         self.ensure_reachable(&specs, &before)?;
@@ -125,7 +122,9 @@ impl NativeRepo<'_> {
         let after = index_of(entries);
         let staged = plan.staged;
         let touched = plan.touched;
+        let restaged = self.lost_stop_restored().then(|| after.clone());
         self.put_staged(before, after, &touched, snapshot, stats, &found.clock)?;
+        self.keep_restaged(restaged)?;
         if json {
             crate::json::emit(out, vec![("staged", crate::json::Json::Num(staged as i64))])?;
         } else {

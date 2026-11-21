@@ -15,6 +15,11 @@
 //!
 //! A command that writes puts it in place under the workspace lock and
 //! says so; one that only reads answers from it and changes no file.
+//!
+//! Where a merge, a revert or a rebase had stopped on conflicts and the
+//! index it left is not what can be put back, what can is from before
+//! the stop and holds nothing the stop staged ([`stopped`]): a command
+//! that writes is refused, but for an add of the whole working tree.
 
 use std::collections::{HashMap, HashSet};
 
@@ -37,9 +42,33 @@ enum Source {
 
 /// The index that stands in for a torn file.
 #[derive(Clone)]
-pub(in crate::native) struct Restored {
+struct Restored {
     bytes: Vec<u8>,
     from: Source,
+    /// what had stopped on conflicts, where the index it left is lost
+    /// and this one is from before it
+    lost_stop: Option<&'static str>,
+}
+
+impl Restored {
+    fn of(bytes: Vec<u8>, from: Source) -> Self {
+        Self {
+            bytes,
+            from,
+            lost_stop: None,
+        }
+    }
+}
+
+/// What a command made of an index file that is not whole.
+#[derive(Default)]
+pub(in crate::native) struct TornIndex {
+    /// what stands in for the file, once worked out
+    restored: std::cell::RefCell<Option<Restored>>,
+    /// told once that it is passed over, and once that it was restored
+    told: std::cell::Cell<u8>,
+    /// the command needs nothing of the index a stop left
+    pub(in crate::native) lost_stop_ok: std::cell::Cell<bool>,
 }
 
 fn said(restored: &Restored, written: bool) -> String {
@@ -50,15 +79,21 @@ fn said(restored: &Restored, written: bool) -> String {
     };
     let found = "the index file of this workspace is not a whole index (a power cut leaves it so \
                  when the last `alt add` was not synced)";
+    let lost = restored.lost_stop.map_or(String::new(), |stop| {
+        format!(
+            " The index the {stop} that stopped on conflicts left is lost: this one is from \
+             before the {stop} stopped, without what it staged"
+        )
+    });
     match written {
         true => format!(
-            "warning: {found}; it was restored to {state}. What was staged after that is not \
-             staged any more: add the files again\n"
+            "warning: {found}; it was restored to {state}.{lost} What was staged after that is \
+             not staged any more: add the files again\n"
         ),
         false => format!(
-            "warning: {found}; this shows the workspace with {state}. The next command that \
-             writes in the workspace restores the file, and what was staged after that has to \
-             be added again\n"
+            "warning: {found}; this shows the workspace with {state}.{lost} The next command \
+             that writes in the workspace restores the file, and what was staged after that \
+             has to be added again\n"
         ),
     }
 }
@@ -130,24 +165,29 @@ impl NativeRepo<'_> {
     /// the workspace lock they are written; a command that holds no lock,
     /// or only reads, goes by them and leaves the file.
     fn in_place_of_torn(&self) -> Res<Vec<u8>> {
-        let held = self.restored.borrow().clone();
+        let held = self.torn.restored.borrow().clone();
         let restored = match held {
             Some(restored) => restored,
             None => {
-                let found = self.last_whole()?;
-                *self.restored.borrow_mut() = Some(found.clone());
+                let mut found = self.last_whole()?;
+                found.lost_stop = self.lost_stop(&found.from)?;
+                *self.torn.restored.borrow_mut() = Some(found.clone());
                 found
             }
         };
         let writes = self.write_lock.is_some();
         if writes {
+            if let Some(stop) = restored.lost_stop
+                && !self.torn.lost_stop_ok.get()
+            {
+                return Err(stopped::refusal(stop));
+            }
             durable_write(&self.index_path, &restored.bytes)?;
         }
-        // told once that it is passed over, and once that it was restored
-        let told = self.told_restored.get();
+        let told = self.torn.told.get();
         let telling = 1 << u8::from(writes);
         if told & telling == 0 {
-            self.told_restored.set(told | telling);
+            self.torn.told.set(told | telling);
             crate::diagnostics::emit(said(&restored, writes).as_bytes())?;
         }
         Ok(restored.bytes)
@@ -163,10 +203,8 @@ impl NativeRepo<'_> {
             entries: entries.iter().map(|w| stage_entry(w, 0)).collect(),
             extensions: Vec::new(),
         };
-        Ok(Restored {
-            bytes: canonical_index(index, self.store.algo()?),
-            from: Source::Head,
-        })
+        let bytes = canonical_index(index, self.store.algo()?);
+        Ok(Restored::of(bytes, Source::Head))
     }
 
     /// The snapshot `id` where it reads as an index that names only
@@ -218,7 +256,7 @@ impl NativeRepo<'_> {
             {
                 if let Some(bytes) = self.whole_snapshot(&stopped.index, &gone)? {
                     let from = Source::StoppedMerge;
-                    return Ok(Some(Restored { bytes, from }));
+                    return Ok(Some(Restored::of(bytes, from)));
                 }
                 if passed {
                     return Ok(None);
@@ -234,7 +272,7 @@ impl NativeRepo<'_> {
                     };
                     if let Some(bytes) = whole {
                         let from = Source::Operation(op.id);
-                        return Ok(Some(Restored { bytes, from }));
+                        return Ok(Some(Restored::of(bytes, from)));
                     }
                     if passed || moved {
                         return Ok(None);

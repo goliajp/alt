@@ -620,9 +620,8 @@ pub struct NativeRepo<'a> {
     /// the head of the log when this workspace was last found to have
     /// nothing left open
     recovery_checked: Option<OpId>,
-    /// what stands in for an index file that is not whole, once worked out
-    restored: std::cell::RefCell<Option<recovery::Restored>>,
-    told_restored: std::cell::Cell<u8>,
+    /// what this command made of an index file that is not whole
+    torn: recovery::TornIndex,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -651,8 +650,7 @@ impl<'a> NativeRepo<'a> {
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
             recovery_checked: None,
-            restored: std::cell::RefCell::default(),
-            told_restored: std::cell::Cell::default(),
+            torn: recovery::TornIndex::default(),
         }
     }
 

@@ -209,3 +209,56 @@ fn an_add_cut_short_whose_index_is_torn_as_well_is_abandoned_over_the_restored_i
     ok(alt(dir, &["commit", "-m", "second"]));
     assert!(ok(alt(dir, &["fsck"])).ends_with(VERIFIED));
 }
+
+#[test]
+fn a_revert_whose_stopped_index_is_lost_goes_on_or_is_given_up_once_the_tree_is_staged_again() {
+    for give_up in [true, false] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        repo(dir);
+        fs::write(dir.join("a.txt"), "two\n").unwrap();
+        fs::write(dir.join("r.txt"), "two\n").unwrap();
+        ok(alt(dir, &["add", "a.txt", "r.txt"]));
+        ok(alt(dir, &["commit", "-m", "second"]));
+        let second = ok(alt(dir, &["rev-parse", "HEAD"]));
+        fs::write(dir.join("a.txt"), "three\n").unwrap();
+        ok(alt(dir, &["add", "a.txt"]));
+        ok(alt(dir, &["commit", "-m", "third"]));
+        let third = ok(alt(dir, &["rev-parse", "HEAD"]));
+        // a.txt conflicts, and r.txt is staged as removed
+        assert!(!alt(dir, &["revert", second.trim()]).status.success());
+        assert!(dir.join(".alt/index.stopped").exists());
+        fs::write(dir.join("a.txt"), "one and three\n").unwrap();
+        ok(alt(dir, &["add", "a.txt"]));
+        power_cut(dir);
+        fs::remove_file(dir.join(".alt/index.stopped")).unwrap();
+        tear(&dir.join(INDEX), Torn::Empty);
+
+        let told = stderr(&alt(dir, &["status"]));
+        assert!(
+            told.contains("the revert that stopped on conflicts left is lost"),
+            "{told}"
+        );
+        for refused in [&["revert", "--continue"][..], &["commit", "-m", "x"]] {
+            let out = alt(dir, refused);
+            let told = stderr(&out);
+            assert!(!out.status.success(), "{refused:?}");
+            assert!(told.contains("alt revert --abort"), "{told}");
+        }
+        assert_eq!(ok(alt(dir, &["rev-parse", "HEAD"])), third);
+        // the way out: the working tree staged again as a whole
+        assert!(!alt(dir, &["revert", "--abort"]).status.success());
+        ok(alt(dir, &["add", "-A"]));
+        if give_up {
+            ok(alt(dir, &["revert", "--abort"]));
+            assert_eq!(fs::read(dir.join("a.txt")).unwrap(), b"three\n");
+            assert!(dir.join("r.txt").exists());
+        } else {
+            ok(alt(dir, &["revert", "--continue"]));
+            let tree = tree(dir);
+            assert!(tree.contains("a.txt") && !tree.contains("r.txt"), "{tree}");
+        }
+        assert!(ok(alt(dir, &["status"])).contains("nothing to commit"));
+        assert!(ok(alt(dir, &["fsck"])).ends_with(VERIFIED));
+    }
+}
