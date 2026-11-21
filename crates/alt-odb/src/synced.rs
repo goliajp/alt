@@ -263,7 +263,6 @@ impl Marker {
     /// does not read: boundaries were then lost, not never written.
     pub fn basis(&self, log: Log, seq: u32, len: u64, bounded: impl Fn() -> bool) -> Basis {
         match self {
-            Marker::Recorded(state) if state.flags & UNTRUSTED != 0 => Basis::LastOnly,
             Marker::Recorded(state) => state
                 .whole
                 .of(log, seq)

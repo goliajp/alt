@@ -24,6 +24,7 @@
 //! op *means* (ref updates, imports, …) is the caller's encoding.
 
 mod bound;
+mod left;
 mod lock;
 mod note;
 mod op;

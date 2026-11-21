@@ -52,4 +52,19 @@ pub fn distrust(dir: &Path) {
     let sum = alt_hash::blake3::hash(&data[at..at + 28]);
     data[at + 28..at + 36].copy_from_slice(&sum.as_bytes()[..8]);
     fs::write(&path, data).unwrap();
+    left_unsynced(dir, true);
+}
+
+/// Notes in `sync.lock` that the appends were left unsynced in the
+/// running boot, or in another one.
+pub fn left_unsynced(dir: &Path, running: bool) {
+    use std::os::unix::fs::FileExt;
+    let mut boot = alt_os::boot::id().expect("this kernel tells its boot");
+    boot[0] ^= u8::from(!running);
+    let mut note = boot.to_vec();
+    note.extend_from_slice(&alt_hash::blake3::hash(&boot).as_bytes()[..8]);
+    let mut lock = fs::OpenOptions::new();
+    let lock = lock.create(true).truncate(false).write(true);
+    let lock = lock.open(dir.join("sync.lock")).unwrap();
+    lock.write_all_at(&note, 8).unwrap();
 }

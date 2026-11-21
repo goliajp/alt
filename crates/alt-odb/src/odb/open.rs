@@ -2,7 +2,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use alt_store::{Basis, BlobOptions, BlobStore, StoreError, Tail};
 
@@ -12,6 +12,7 @@ use crate::lock::{lock_shared, release_exclusive, try_hold_exclusive, unlock};
 use crate::map::ObjectMap;
 use crate::synced::{self, Deferred, Lens, Log, Marker, State};
 use crate::tier1::Tier1Map;
+use crate::unsynced::{self, Left, Noted};
 use crate::{OdbError, default_registry};
 
 /// How an [`Odb`] is opened.
@@ -79,13 +80,15 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
 /// What `log` not reading to its end means, from what the marker says of
 /// how far it was synced; a cut of it brings the marker down first. A pack
 /// no longer than `synced` says is not looked up in the marker.
-fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<Lens>) -> Tail {
-    let (read, lowered) = (durable.to_owned(), durable.to_owned());
+fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<Lens>, left: &Noted) -> Tail {
+    let (read, lowered, left) = (durable.to_owned(), durable.to_owned(), left.clone());
     let tail = Tail::judged_by(move |seq, len| {
         let bounded = || {
             File::open(read.with_file_name("odb.lock")).is_ok_and(|lock| Head::read(&lock).bounded)
         };
-        Marker::read(&read).basis(log, seq, len, bounded)
+        let marker = Marker::read(&read);
+        let cached = unsynced::cached(&marker, *left.lock().unwrap());
+        unsynced::basis(&marker, cached, (log, seq, len), bounded)
     })
     .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at))
     // what a dead writer left unfinished is cut by `Odb::settle`
@@ -107,13 +110,14 @@ fn open_files(
     head: &Head,
     late: bool,
     tail: impl Fn(Log) -> Tail,
-    confirmed: Option<Lens>,
+    confirmed: Option<(Lens, Option<Left>)>,
 ) -> Result<Files, OdbError> {
     let tails = [tail(Log::Pack), tail(Log::Blobmap)];
     let mut blobs =
         BlobStore::open_deferred(alt_dir.join("store"), opts, Some(&head.store), tails)?;
-    if let Some(noted) = confirmed {
-        super::confirmed::confirm_blob_map(&mut blobs, noted, &alt_dir.join("odb.durable"));
+    if let Some((noted, left)) = confirmed {
+        let durable = alt_dir.join("odb.durable");
+        super::confirmed::confirm_blob_map(&mut blobs, noted, &durable, left);
     }
     let tier1 = if late {
         OnceLock::new()
@@ -146,9 +150,10 @@ fn index_synced(
     }
     let indexed = read().and_then(|mut files| {
         let marker = Marker::read(durable);
-        // a marker that is gone or does not read bounds nothing
+        // a marker that is gone, does not read or has unsynced appends
+        // past its boundaries bounds nothing
         let synced = |log, seq, len| match marker.basis(log, seq, len, || true) {
-            Basis::Boundary(upto) => Some(upto),
+            Basis::Boundary(upto) if marker.trusted() => Some(upto),
             _ => None,
         };
         let upto = |log| synced(log, 0, 0).unwrap_or(0);
@@ -190,24 +195,27 @@ impl Odb {
         // exclusive append: a record that does not read is then one no
         // writer is still writing.
         lock_shared(&lock)?;
-        let (head, synced) = Head::read_with_synced(&lock);
+        let (head, synced, left) = Head::read_with_synced(&lock);
         // an alt that keeps no record boundaries may have cut the files
         // back since, and does not take the note back
         let synced = synced.filter(|_| head.bounded);
-        let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced);
+        let noted: Noted = Arc::new(left.into());
+        let tail = |log: Log| tail(&durable_path, mode.read_only, log, synced, &noted);
         // without a note every file is longer than what is known synced
         let confirmed = mode.index.then(|| synced.unwrap_or(Lens::NONE));
-        let opened = open_files(&alt_dir, opts, &head, mode.late, tail, confirmed);
+        let passing = confirmed.map(|noted| (noted, left));
+        let opened = open_files(&alt_dir, opts, &head, mode.late, tail, passing);
         let _ = unlock(&lock);
         let mut files = opened?;
         if mode.index && (files.0.index_pending() || files.2.index_pending()) {
-            let read = || open_files(&alt_dir, opts, &head, mode.late, tail, confirmed);
+            let read = || open_files(&alt_dir, opts, &head, mode.late, tail, passing);
             if let Some(indexed) = index_synced(&lock, &durable_path, read)? {
                 files = indexed;
             }
         }
         let tier1_tail = tail(Log::Tier1);
         let mut this = Self::holding(alt_dir, lock, head, files, tier1_tail, mode.deferred)?;
+        this.left = noted;
         this.confirmed = confirmed;
         this.confirm()?;
         Ok(this)
@@ -249,6 +257,7 @@ impl Odb {
             discarded: Vec::new(),
             deferred,
             confirmed: None,
+            left: Noted::default(),
             alt_dir,
         })
     }

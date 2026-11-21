@@ -165,10 +165,16 @@ impl OpLog {
     }
 
     /// From which byte on the records of the log are not known to have
-    /// been synced, where the marker records a boundary that holds. Reads
-    /// the marker and takes no lock.
+    /// been synced, where the marker records a boundary that holds, or
+    /// one that appends were left unsynced past in another boot
+    /// ([`crate::left`]). Reads the marker and takes no lock.
     pub fn unsynced_from(&self) -> Option<u64> {
-        Marker::read(&self.durable_path).unsynced_from()
+        let marker = Marker::read(&self.durable_path);
+        let left = || {
+            let state = marker.recorded()?;
+            (!crate::left::cached(&self.durable_path)).then_some(state.whole)
+        };
+        marker.unsynced_from().or_else(left)
     }
 
     /// What this handle cut off the end of the log since the last call,

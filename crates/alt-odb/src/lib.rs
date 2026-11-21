@@ -27,6 +27,7 @@ mod registry;
 mod storage_view;
 mod synced;
 mod tier1;
+mod unsynced;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

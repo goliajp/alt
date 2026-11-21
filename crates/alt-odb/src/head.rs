@@ -34,6 +34,9 @@
 //! the marker; an opener that finds a file reaching past it reads the
 //! marker. It must never be ahead: whoever cuts a file back clears it and
 //! fsyncs that first.
+//!
+//! After it comes the note of appends that were left unsynced
+//! ([`crate::unsynced`]).
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -42,6 +45,7 @@ use alt_store::Known;
 
 use crate::odb::Odb;
 use crate::synced::Lens;
+use crate::unsynced::{self, Left};
 
 const MAGIC: [u8; 4] = *b"ALTH";
 const VERSION: u8 = 1;
@@ -51,6 +55,8 @@ const MAX_RUNS: usize = 12;
 const MAX_LEN: usize = FIXED + 4 * MAX_PACKS + 4 * 16 * MAX_RUNS + 8;
 const SYNCED_AT: usize = MAX_LEN;
 const SYNCED_LEN: usize = 48;
+/// Where the note of unsynced appends is ([`crate::unsynced`]).
+pub(crate) const UNSYNCED_AT: usize = SYNCED_AT + SYNCED_LEN;
 const SYNCED_BODY: usize = SYNCED_LEN - 8;
 
 type Chain = Option<Vec<(u64, u64)>>;
@@ -65,7 +71,7 @@ pub(crate) struct Head {
     pub bounded: bool,
 }
 
-fn check(body: &[u8]) -> [u8; 8] {
+pub(crate) fn check(body: &[u8]) -> [u8; 8] {
     alt_hash::blake3::hash(body).as_bytes()[..8]
         .try_into()
         .unwrap()
@@ -77,14 +83,15 @@ impl Head {
         Self::read_with_synced(lock).0
     }
 
-    /// The same, and how far the append files are known synced whole, when
-    /// the file says.
-    pub fn read_with_synced(lock: &File) -> (Self, Option<Lens>) {
-        let mut buf = [0u8; SYNCED_AT + SYNCED_LEN];
+    /// The same, how far the append files are known synced whole, when
+    /// the file says, and its note of unsynced appends.
+    pub fn read_with_synced(lock: &File) -> (Self, Option<Lens>, Option<Left>) {
+        let mut buf = [0u8; UNSYNCED_AT + unsynced::LEN];
         let have = lock.read_at(&mut buf, 0).unwrap_or(0);
         let head = Self::parse(&buf[..have.min(MAX_LEN)]).unwrap_or_default();
         let synced = buf[..have].get(SYNCED_AT..).and_then(parse_synced);
-        (head, synced)
+        let left = buf[..have].get(UNSYNCED_AT..).and_then(Left::parse);
+        (head, synced, left)
     }
 
     fn parse(data: &[u8]) -> Option<Self> {

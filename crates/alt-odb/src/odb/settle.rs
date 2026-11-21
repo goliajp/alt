@@ -31,11 +31,13 @@ const NAMING: [&str; 3] = ["the blob map", "the tier1 map", "map.alt"];
 
 /// From which byte on the records of each naming log are not known to have
 /// been synced, by what the marker says; `u64::MAX` for a log it says
-/// nothing of. `None` when it tells of no log.
+/// nothing of. `None` when it tells of no log. Appends that were left
+/// unsynced lie past the boundaries like any other that was not synced.
 pub(super) fn unsynced_from(marker: &Marker) -> Option<[u64; 3]> {
     match marker {
-        Marker::Recorded(state) if marker.trusted() => {
-            Some([state.whole.blobmap, state.whole.tier1, state.whole.map])
+        Marker::Recorded(state) => {
+            let whole = [state.whole.blobmap, state.whole.tier1, state.whole.map];
+            Some(whole.map(|synced| synced.max(HEADER)))
         }
         // file lengths at the last fsync of an older alt, which records
         // none for the Tier 1 map
@@ -123,8 +125,14 @@ impl Odb {
     /// off what never finished, and with it the records past the synced
     /// boundaries that name content the store does not hold. Fails, with
     /// every file as it was, when a record that was synced names such
-    /// content, or when records that were synced are gone.
-    pub(super) fn settle(&mut self, marker: &Marker) -> Result<(), OdbError> {
+    /// content, or when records that were synced are gone. The records
+    /// looked at are those past the boundaries of `by`, which are those
+    /// of `marker` or before them. Without `by` the records past the
+    /// boundaries were left unsynced in the running boot and are as
+    /// written: they are looked at only where a file ends in an append
+    /// that never finished, and one of them that names nothing is damage
+    /// like any other.
+    pub(super) fn settle(&mut self, marker: &Marker, by: Option<&Marker>) -> Result<(), OdbError> {
         let (pack_torn, blobmap_torn) = self.blobs.unfinished()?;
         let torn = [
             blobmap_torn,
@@ -140,14 +148,15 @@ impl Odb {
         let from = if pack_torn || torn[0] || torn[1] || cut_before {
             Some([HEADER; 3])
         } else {
-            bounds.map(|bounds| self.unchecked_from(bounds, marker.generation()))
+            let looked = by.and_then(unsynced_from);
+            looked.map(|looked| self.unchecked_from(looked, marker.generation()))
         };
         let cuts = match from.map(|from| [0, 1, 2].map(|log| from[log].min(ends[log]))) {
             Some(from) if from != ends => self.dangling(from, ends)?,
             _ => ends,
         };
         for log in 0..3 {
-            let unsynced = bounds.is_some_and(|bounds| cuts[log] >= bounds[log]);
+            let unsynced = by.is_some() && bounds.is_some_and(|bounds| cuts[log] >= bounds[log]);
             if cuts[log] < ends[log] && !unsynced {
                 return Err(OdbError::Dangling {
                     file: NAMING[log],
@@ -235,6 +244,14 @@ impl Odb {
         Ok(true)
     }
 
+    /// From which byte on the records of each naming log a handle that
+    /// does not hold the write lock has to look at them: those not known
+    /// synced, unless they were left unsynced in the running boot.
+    pub(super) fn unlooked_from(&self) -> Option<[u64; 3]> {
+        let (marker, cached) = self.marker();
+        unsynced_from(&marker).filter(|_| !cached)
+    }
+
     /// For a reader, which changes nothing: from which byte on the blob
     /// map, the Tier 1 map and `map.alt` hold records that were never
     /// synced and name content which is not stored, the records a writer
@@ -242,7 +259,7 @@ impl Odb {
     pub(crate) fn unconfirmed(&self) -> Result<[u64; 3], OdbError> {
         let holds = self.holds()?;
         let ends = [holds.blobmap, holds.tier1, holds.map];
-        let Some(bounds) = unsynced_from(&Marker::read(&self.durable_path)) else {
+        let Some(bounds) = self.unlooked_from() else {
             return Ok(ends);
         };
         // a log the marker has no word of is not looked at

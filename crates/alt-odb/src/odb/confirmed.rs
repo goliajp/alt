@@ -23,13 +23,25 @@ use super::Odb;
 use super::settle::unsynced_from;
 use crate::synced::{Lens, Marker};
 use crate::tier1::Tier1Map;
+use crate::unsynced::{self, Left};
 use crate::{BlobId, OdbError};
 
 /// The blob map of `blobs` is held as [`BlobStore::pass_over_unsynced_map`]
 /// says, by the marker at `durable`.
-pub(super) fn confirm_blob_map(blobs: &mut BlobStore, noted: Lens, durable: &Path) {
+pub(super) fn confirm_blob_map(
+    blobs: &mut BlobStore,
+    noted: Lens,
+    durable: &Path,
+    left: Option<Left>,
+) {
     let durable = durable.to_owned();
-    let unsynced = move || unsynced_from(&Marker::read(&durable)).map(|from| from[0]);
+    let unsynced = move || {
+        let marker = Marker::read(&durable);
+        let cached = unsynced::cached(&marker, left);
+        unsynced_from(&marker)
+            .filter(|_| !cached)
+            .map(|from| from[0])
+    };
     blobs.pass_over_unsynced_map(noted.blobmap, Arc::new(unsynced));
 }
 
@@ -37,7 +49,7 @@ impl Odb {
     /// Where the records of naming log `log` that are not known synced
     /// begin, when that is before `end`.
     fn unsynced_before(&self, log: usize, end: u64) -> Option<u64> {
-        let from = unsynced_from(&Marker::read(&self.durable_path))?[log];
+        let from = self.unlooked_from()?[log];
         (from < end).then_some(from)
     }
 

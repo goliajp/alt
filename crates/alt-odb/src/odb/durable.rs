@@ -64,35 +64,6 @@ impl Odb {
         self.sync_to(target, generation)
     }
 
-    /// With the write lock held and every file this handle has open read
-    /// to its end: a store whose marker does not record boundaries that
-    /// hold — an older alt wrote it, the marker was removed, or appends
-    /// were left unsynced — gets them before anything is appended. Where
-    /// fsyncs are skipped the marker is made to say so instead.
-    pub(super) fn bound(&mut self) -> Result<(), OdbError> {
-        let marker = Marker::read(&self.durable_path);
-        // a pack noted as synced is not, once the marker stops saying so
-        if !marker.trusted() && self.blobs.distrust_synced()? {
-            head::forget_synced(&self.lock)?;
-        }
-        self.settle(&marker)?;
-        if alt_store::relaxed_durability() {
-            let said = |state: &State| state.flags & synced::UNTRUSTED != 0;
-            if !marker.recorded().is_some_and(said) {
-                synced::distrust(&self.durable_path)?;
-            }
-        } else if !marker.trusted() {
-            self.blobs.fsync()?;
-            self.tier1_mut()?.sync()?;
-            self.map.fsync()?;
-            let whole = self.appended_whole()?;
-            synced::establish(&self.durable_path, whole)?;
-            head::note_synced(&self.lock, whole);
-        }
-        self.head.bounded = true;
-        Ok(())
-    }
-
     /// The record boundaries this handle's appends reached. A file it has
     /// not opened it has not appended to: zero, short of any length.
     fn appended(&self) -> Result<Lens, OdbError> {
@@ -107,7 +78,7 @@ impl Odb {
     }
 
     /// The same with every file opened: boundaries in all four.
-    fn appended_whole(&self) -> Result<Lens, OdbError> {
+    pub(super) fn appended_whole(&self) -> Result<Lens, OdbError> {
         let tier1 = self.tier1()?.appended_len();
         Ok(Lens {
             tier1,

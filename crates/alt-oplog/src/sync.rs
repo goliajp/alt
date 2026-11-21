@@ -1,7 +1,8 @@
 //! Making what a handle appended durable, and recording how far.
 
+use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
-use crate::synced::{self, Marker, OpLogSink, SyncNamed, open_sync_lock};
+use crate::synced::{self, Marker, OpLogSink, SyncNamed};
 use crate::{OpLog, OpLogError, relaxed_durability};
 
 impl OpLog {

@@ -1,6 +1,7 @@
 //! The opened object database: the append files, the write lock over them
 //! and the prism pipeline. [`crate::NativeOdb`] opens one on first use.
 
+mod bound;
 mod bulk;
 mod confirmed;
 mod cut;
@@ -24,10 +25,10 @@ use alt_prism::Registry;
 use alt_store::{BlobStore, CompactReport, StoreError, Tail};
 
 use crate::head::Head;
-use crate::lock::{hold_exclusive, release_exclusive};
 use crate::map::{MapEntry, ObjectMap};
 use crate::synced::{Deferred, Lens};
 use crate::tier1::{self, Tier1Map};
+use crate::unsynced::Noted;
 use crate::{BlobId, OdbError};
 
 /// The native object database: blob store + git-identity map.
@@ -90,6 +91,10 @@ pub(crate) struct Odb {
     /// and name content which is not stored: how far the lock file noted
     /// each file as synced when the handle was opened.
     pub(crate) confirmed: Option<Lens>,
+    /// The lock file's note of unsynced appends as this handle last read
+    /// it ([`crate::unsynced`]), shared with what judges a record of the
+    /// files that does not read.
+    pub(crate) left: Noted,
 }
 
 impl Odb {
@@ -99,35 +104,6 @@ impl Odb {
     /// stored.
     pub fn register_prism(&mut self, prism: Box<dyn alt_prism::Prism + Send + Sync>) {
         self.registry.register(prism);
-    }
-
-    /// Acquires the write lock for this batch (if not already held) and brings
-    /// the in-memory state up to date with concurrent writers.
-    fn acquire(&mut self) -> Result<(), OdbError> {
-        if self.held {
-            return Ok(());
-        }
-        hold_exclusive(&self.lock)?;
-        self.held = true;
-        let ready = self.catch_up().and_then(|()| self.bound());
-        if ready.is_err() {
-            // nothing was appended; the next call looks at the store again
-            release_exclusive(&self.lock);
-            self.held = false;
-            self.blobs.end_batch();
-        }
-        ready
-    }
-
-    /// Releases the write lock (best-effort; the fd closing also releases it).
-    fn release(&mut self) {
-        if self.held {
-            self.note_checked();
-            self.save_head();
-            release_exclusive(&self.lock);
-            self.held = false;
-            self.blobs.end_batch();
-        }
     }
 
     /// Read-path catch-up for a long-lived odb (the daemon between requests):

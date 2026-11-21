@@ -60,7 +60,13 @@ impl OpLog {
         synced::lost(marker, self.len_bytes)?;
         self.generation = marker.generation();
         if relaxed_durability() {
-            if marker.recorded().is_none() || marker.trusted() {
+            // read to its end under the lock, the log holds what the
+            // disk does: what follows is left unsynced in this boot
+            let said = marker.recorded().is_some() && !marker.trusted();
+            if !said || !crate::left::cached(&self.durable_path) {
+                crate::left::note(&self.durable_path)?;
+            }
+            if !said {
                 synced::distrust(&self.durable_path)?;
             }
         } else if !marker.trusted() {

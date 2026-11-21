@@ -42,12 +42,13 @@
 //! bit 0 that the log has had a marker in this format: when the marker is
 //! then missing or does not read, a boundary was lost, not never written.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::OpLogError;
+use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
 
 /// Every log starts with a five-byte header.
@@ -173,12 +174,14 @@ impl Marker {
     /// finished rather than damage; `last`: no whole record can follow it.
     /// Past a boundary that holds it never finished, and before it is
     /// damage. The file length an older alt recorded is such a boundary.
-    /// Where nothing is recorded, or unsynced appends followed, only the
-    /// last record is taken for unfinished. A marker that is gone or does
-    /// not read, in a log that has had one, makes every such record damage.
+    /// Where nothing is recorded, or unsynced appends followed in this boot
+    /// ([`crate::left`]), only the last record is taken for unfinished. A
+    /// marker that is gone or does not read, in a log that has had one,
+    /// makes every such record damage.
     pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
         match Self::read(path) {
             Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
+            Marker::Recorded(state) if !crate::left::cached(path) => at >= state.whole,
             // a length short of the header is not one an older alt
             // recorded: the marker is being replaced as it is read
             Marker::Legacy(eof) if eof >= HEADER => at >= eof,
@@ -354,14 +357,6 @@ pub(crate) fn cut_records(durable: &Path, file: &File, at: u64) -> std::io::Resu
     })();
     let _ = unlock(&sync_lock);
     cut
-}
-
-pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
 }
 
 /// An fsync handle for the log that works without the [`crate::OpLog`] it

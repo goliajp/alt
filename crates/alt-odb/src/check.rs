@@ -6,7 +6,7 @@ use alt_git_codec::ObjectId;
 use alt_store::Basis;
 
 use crate::odb::Odb;
-use crate::synced::{HEADER, Log, Marker};
+use crate::synced::{HEADER, Log};
 use crate::{NativeOdb, OdbError, lock};
 
 /// How many records a full check read and verified.
@@ -92,7 +92,7 @@ impl NativeOdb {
     /// under the write lock before it appends.
     pub fn check_synced(&self) -> Result<(), OdbError> {
         let odb = self.odb()?;
-        crate::odb::lost(&Marker::read(&odb.durable_path), &odb.holds()?)
+        crate::odb::lost(&odb.marker().0, &odb.holds()?)
     }
 }
 
@@ -156,16 +156,17 @@ impl NativeOdb {
     /// confirmed; without a boundary nothing tells it from damage.
     pub fn unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
         let odb = self.odb()?;
-        let marker = Marker::read(&odb.durable_path);
+        let (marker, cached) = odb.marker();
         let (seq, _, _) = odb.blobs.checkpoint()?.lens();
         let (pack_len, _) = odb.blobs.file_lens()?;
         let logs = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map];
-        Ok(
-            logs.map(|log| match marker.basis(log, seq, pack_len, || true) {
+        Ok(logs.map(|log| {
+            let file = (log, seq, pack_len);
+            match crate::unsynced::basis(&marker, cached, file, || true) {
                 Basis::Boundary(at) => Some(at),
                 Basis::LastOnly | Basis::Unknown => None,
-            }),
-        )
+            }
+        }))
     }
 }
 

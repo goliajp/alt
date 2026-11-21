@@ -24,7 +24,7 @@ use super::rewind_interrupted::{
 pub(super) const CASES: [(usize, u32); 5] = [(0, 0), (0, 1), (0, 2), (1, 1), (2, 2)];
 
 /// The marker's flag for appends that were not synced.
-const UNSYNCED_APPENDS: u32 = 1;
+pub(super) const UNSYNCED_APPENDS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Fault {
@@ -95,7 +95,7 @@ pub(super) fn snapshot(dir: &Path) -> Vec<(u64, SystemTime)> {
 }
 
 /// A put through a fresh handle: the first thing that takes the write lock.
-fn try_put(dir: &Path, n: u32) -> Result<NativeOdb, OdbError> {
+pub(super) fn try_put(dir: &Path, n: u32) -> Result<NativeOdb, OdbError> {
     let mut odb = open(dir);
     let (oid, data) = object(n);
     odb.put(oid, ObjectKind::Blob, &data)?;
@@ -105,7 +105,7 @@ fn try_put(dir: &Path, n: u32) -> Result<NativeOdb, OdbError> {
 
 /// A handle that only reads finds the synced objects, never other bytes
 /// for the one whose content is lost, and changes no file.
-fn reader_is_sound(dir: &Path, victim: u32, case: &str) {
+pub(super) fn reader_is_sound(dir: &Path, victim: u32, case: &str) {
     let before = snapshot(dir);
     let odb = open(dir);
     for n in 0..KEPT {
@@ -121,7 +121,7 @@ fn reader_is_sound(dir: &Path, victim: u32, case: &str) {
 
 /// The store holds the synced objects and not the lost one, takes it
 /// again, and passes the full check after a reopen.
-fn recovered(dir: &Path, victim: u32, case: &str) {
+pub(super) fn recovered(dir: &Path, victim: u32, case: &str) {
     let mut odb = try_put(dir, victim + 3).unwrap_or_else(|e| panic!("{case}: {e:?}"));
     assert!(!odb.contains(&object(victim).0).unwrap(), "{case}");
     put(&mut odb, victim..victim + 1);
@@ -175,28 +175,6 @@ fn a_synced_record_naming_content_that_is_cut_is_damage_and_no_file_changes() {
 }
 
 #[test]
-fn with_no_boundaries_a_cut_that_would_leave_a_record_naming_nothing_is_refused() {
-    for (file, class) in CASES {
-        for fault in [Fault::Torn, Fault::Zeroed] {
-            let case = format!("{} {fault:?} class {class}", FILES[file]);
-            let tmp = alt_os::temp::tempdir().unwrap();
-            let (victim, kept, _) = store(tmp.path(), class);
-            // a writer that skips its fsyncs wrote the batch
-            synced_to(tmp.path(), kept, UNSYNCED_APPENDS);
-            damage(tmp.path(), file, fault, kept);
-            reader_is_sound(tmp.path(), victim, &case);
-            let before = snapshot(tmp.path());
-            let refused = try_put(tmp.path(), victim + 3).err();
-            assert!(
-                matches!(refused, Some(OdbError::Dangling { .. })),
-                "{case}: {refused:?}"
-            );
-            assert_eq!(snapshot(tmp.path()), before, "{case}");
-        }
-    }
-}
-
-#[test]
 fn with_no_boundaries_an_unfinished_end_nothing_names_is_cut_as_before() {
     for (file, class) in CASES {
         for fault in [Fault::Torn, Fault::Zeroed] {
@@ -205,6 +183,7 @@ fn with_no_boundaries_an_unfinished_end_nothing_names_is_cut_as_before() {
             let (victim, kept, _) = store(tmp.path(), class);
             // a writer that skips its fsyncs wrote the batch
             synced_to(tmp.path(), kept, UNSYNCED_APPENDS);
+            super::left_unsynced::left_unsynced(tmp.path(), kept, true);
             // the records that name the content never arrived either
             for (above, len) in kept.iter().enumerate().skip(file + 1) {
                 cut(tmp.path(), above, *len);

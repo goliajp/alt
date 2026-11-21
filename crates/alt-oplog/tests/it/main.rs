@@ -1,5 +1,6 @@
 //! Single integration-test binary for alt-oplog.
 
+mod left_unsynced;
 mod lost;
 mod marker;
 mod marker_states;
