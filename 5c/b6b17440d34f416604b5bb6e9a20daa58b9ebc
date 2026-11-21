@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: take the lock of the workspace for a removal of lost records and run it once under a request id, with operations left open and the log left as they are
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli.rs
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/fsck/lost.rs
+touched: crates/alt-cli/src/native/recovery.rs
+touched: crates/alt-cli/src/native/recovery/held.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions.rs
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions/held.rs
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions/synced_first.rs
+touched: docs/recovery.md
