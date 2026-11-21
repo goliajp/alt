@@ -438,7 +438,10 @@ of the repository if there is one. `alt fsck --drop-lost --yes --committed`
 takes the records out all the same; the commits stay as they are and name
 objects that are not stored, which `alt fsck` reports until the objects are
 stored again. A lost blob whose file is still in the working tree comes back
-with `alt add` of that file.
+with `alt add` of that file, or of the tree it is in: the ids of the objects
+taken out this way are kept in `.alt/objects.lost` until all of them are
+stored again, so that `alt add` stores such a blob again although the index
+holds the file as the commit does.
 
 The records that are moved are first kept in `.alt/odb.repair` and synced. A
 run that is interrupted leaves that file; commands that write then fail with

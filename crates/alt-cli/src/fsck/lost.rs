@@ -86,6 +86,9 @@ pub(super) fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> 
         )
         .into());
     }
+    if !committed.is_empty() {
+        store.keep_committed_lost(&gone)?;
+    }
     if !crate::daemon_meta::stop(&alt_dir) {
         return Err(
             "fsck: a daemon serves this repository and did not stop: stop it, then \
@@ -100,7 +103,6 @@ pub(super) fn run<W: Write>(store: &mut Store, args: &FsckArgs, out: &mut W) -> 
                 .into(),
         );
     }
-    store.forget_staged_seen();
     writeln!(
         out,
         "took {records} record(s) out of the object store; every other record is kept"

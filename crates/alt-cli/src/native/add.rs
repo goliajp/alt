@@ -126,10 +126,10 @@ impl NativeRepo<'_> {
         let touched = plan.touched;
         let restaged = self.lost_stop_restored().then(|| after.clone());
         // the file the index was read from, to be noted where it stays
-        let read = before.file().filter(|_| unstored.none).cloned();
+        let read = before.file().filter(|_| unstored.none.is_some()).cloned();
         let replaced = self.put_staged(before, after, &touched, snapshot, stats, &found.clock)?;
-        if unstored.none {
-            self.note_stored(read.as_ref(), replaced);
+        if let Some(at) = unstored.none {
+            self.note_stored(read.as_ref(), replaced, at);
         }
         self.keep_restaged(restaged)?;
         if json {

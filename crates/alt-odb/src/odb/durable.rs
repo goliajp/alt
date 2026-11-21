@@ -175,7 +175,7 @@ impl Odb {
                     ..*state
                 },
                 None => State {
-                    generation: 1,
+                    generation: super::generation_kept(marker),
                     flags: 0,
                     eof: after,
                     whole: after,

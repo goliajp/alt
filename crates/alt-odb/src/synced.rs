@@ -359,12 +359,12 @@ pub(crate) fn lower_eof(path: &Path, log: Log, seq: u32, at: u64) -> std::io::Re
 }
 
 /// Makes `lens` the boundaries of a store whose marker recorded none that
-/// hold: the caller holds the write lock, has read every file to its end
-/// and has fsynced them.
+/// hold: the caller holds the write lock and has read and fsynced every
+/// file. A marker that records no generation gets one it never held.
 pub(crate) fn establish(path: &Path, lens: Lens) -> std::io::Result<()> {
     update(path, |marker| {
         Some(State {
-            generation: marker.generation(),
+            generation: crate::odb::generation_kept(marker),
             flags: 0,
             eof: lens,
             whole: lens,

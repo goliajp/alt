@@ -26,10 +26,13 @@ fn write_many(dir: &Path, text: &str) {
     }
 }
 
-/// Whether the note beside the index says that what it stages is stored.
+mod taken_out;
+
+/// Whether the note beside the index says that what it stages is stored,
+/// at some generation of the store.
 fn noted_stored(dir: &Path) -> bool {
     let note = fs::read(dir.join(".alt/index.seen")).unwrap_or_default();
-    note.len() == 128 && note[112..120] == 1u64.to_le_bytes()
+    note.len() == 128 && note[112..120] != [0; 8]
 }
 
 fn refused_for(dir: &Path, path: &str) {

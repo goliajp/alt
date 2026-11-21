@@ -11,11 +11,13 @@
 //! say nothing.
 //!
 //! The note also says whether every blob the index stages was found in
-//! the store in this boot. What a boot wrote into the store stays there
-//! until the machine goes down, so an add that starts from such an index
-//! does not look for staged blobs the store lost, and the index it leaves
-//! is such an index again: it stages what the one before staged and what
-//! the add has just stored.
+//! the store in this boot, and at which generation of the store. What a
+//! boot wrote into the store stays there until the machine goes down or
+//! records are taken out of the store, which moves its generation. So an
+//! add that starts from such an index, with the store at the generation
+//! noted, does not look for staged blobs the store lost, and the index
+//! it leaves is such an index again: it stages what the one before staged
+//! and what the add has just stored.
 //!
 //! The note is a cache: one that is missing or torn, or was written by
 //! another boot, only costs the checksum. It trusts the times of the
@@ -27,10 +29,11 @@ use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-const MAGIC: [u8; 8] = *b"ALTISEE\x02";
+const MAGIC: [u8; 8] = *b"ALTISEE\x03";
 const SUM: usize = 8;
-/// magic, the boot, seven numbers of the file, the snapshot, whether
-/// what it stages is stored, the sum
+/// magic, the boot, seven numbers of the file, the snapshot, one past
+/// the generation of the store what it stages was found stored at or
+/// zero, the sum
 const LEN: usize = 8 + 16 + 7 * 8 + 32 + 8 + SUM;
 /// where the note says whether what the index stages is stored
 const STORED: usize = 112;
@@ -40,8 +43,9 @@ const STORED: usize = 112;
 pub(super) struct Seen {
     /// the recovery snapshot that holds its bytes
     pub(super) snapshot: Option<[u8; 32]>,
-    /// every blob it stages was in the store in this boot
-    pub(super) stored: bool,
+    /// every blob it stages was in the store in this boot, at this
+    /// generation of the store
+    pub(super) stored: Option<u64>,
 }
 
 /// The file an index was read from: its device and inode, what it is
@@ -52,8 +56,9 @@ pub(in crate::native) struct FromFile {
     pub(in crate::native) file: (u64, u64),
     state: [u8; 56],
     pub(in crate::native) snapshot: Option<String>,
-    /// every blob the index stages was in the store in this boot
-    pub(in crate::native) stored: bool,
+    /// every blob the index stages was in the store in this boot, at
+    /// this generation of the store
+    pub(in crate::native) stored: Option<u64>,
 }
 
 impl FromFile {
@@ -63,16 +68,17 @@ impl FromFile {
             file: (meta.dev(), meta.ino()),
             state: file(meta),
             snapshot: seen.and_then(|seen| seen.snapshot).map(hex),
-            stored: seen.is_some_and(|seen| seen.stored),
+            stored: seen.and_then(|seen| seen.stored),
         }
     }
 
     /// The note that the file, as it was read, is whole and stages only
-    /// what is stored; `None` where the kernel tells no boot.
-    fn note_stored(&self) -> Option<Vec<u8>> {
+    /// what the store holds at generation `at`; `None` where the kernel
+    /// tells no boot.
+    fn note_stored(&self, at: u64) -> Option<Vec<u8>> {
         let seen = Seen {
             snapshot: self.snapshot.as_deref().and_then(unhex),
-            stored: true,
+            stored: Some(at),
         };
         Some(encode(alt_os::boot::id()?, self.state, seen))
     }
@@ -124,7 +130,8 @@ fn encode(boot: [u8; 16], file: [u8; 56], seen: Seen) -> Vec<u8> {
     bytes.extend_from_slice(&boot);
     bytes.extend_from_slice(&file);
     bytes.extend_from_slice(&seen.snapshot.unwrap_or_default());
-    bytes.extend_from_slice(&u64::from(seen.stored).to_le_bytes());
+    let stored = seen.stored.map_or(0, |at| at.wrapping_add(1));
+    bytes.extend_from_slice(&stored.to_le_bytes());
     seal(&mut bytes);
     bytes
 }
@@ -135,27 +142,28 @@ fn seal(body: &mut Vec<u8>) {
 }
 
 /// Has `note`, which this process made, say as well that what its index
-/// stages is stored.
-fn say_stored(note: &mut Vec<u8>) {
+/// stages is stored at generation `at` of the store.
+fn say_stored(note: &mut Vec<u8>, at: u64) {
     note.truncate(LEN - SUM);
-    note[STORED..].copy_from_slice(&1u64.to_le_bytes());
+    note[STORED..].copy_from_slice(&at.wrapping_add(1).to_le_bytes());
     seal(note);
 }
 
 /// Has `noted`, the note a command leaves once it has succeeded, say
-/// that the index at `index_path` stages only what is stored: the index
-/// the command put there and noted, or with `read` the file it read and
-/// left.
+/// that the index at `index_path` stages only what the store holds at
+/// generation `at`: the index the command put there and noted, or with
+/// `read` the file it read and left.
 pub(in crate::native) fn note_stored(
     noted: &mut Option<(PathBuf, Vec<u8>)>,
     index_path: &Path,
     read: Option<&FromFile>,
+    at: u64,
 ) {
     match read {
-        Some(read) => *noted = read.note_stored().map(|note| (place(index_path), note)),
+        Some(read) => *noted = read.note_stored(at).map(|note| (place(index_path), note)),
         None => {
             if let Some((_, note)) = noted {
-                say_stored(note);
+                say_stored(note, at);
             }
         }
     }
@@ -172,7 +180,7 @@ fn decode(note: &[u8], boot: [u8; 16], meta: &Metadata) -> Option<Seen> {
     let snapshot: [u8; 32] = body[80..STORED].try_into().unwrap();
     seen.then_some(Seen {
         snapshot: (snapshot != [0; 32]).then_some(snapshot),
-        stored: body[STORED..] == 1u64.to_le_bytes(),
+        stored: u64::from_le_bytes(body[STORED..].try_into().unwrap()).checked_sub(1),
     })
 }
 
@@ -189,7 +197,7 @@ pub(super) fn seen(index_path: &Path, meta: &Metadata) -> Option<Seen> {
 /// command has succeeded: a reader that meets half of it finds a sum
 /// that does not match.
 pub(super) fn note(meta: &Metadata, snapshot: Option<[u8; 32]>) -> Option<Vec<u8>> {
-    let stored = false;
+    let stored = None;
     Some(encode(
         alt_os::boot::id()?,
         file(meta),
@@ -209,21 +217,21 @@ mod tests {
         let meta = std::fs::metadata(&index).unwrap();
         let (boot, snapshot) = ([7; 16], [9; 32]);
         let seen = |snapshot, stored| Seen { snapshot, stored };
-        let mut note = encode(boot, file(&meta), seen(Some(snapshot), false));
+        let mut note = encode(boot, file(&meta), seen(Some(snapshot), None));
         assert_eq!(note.len(), LEN);
-        assert_eq!(
-            decode(&note, boot, &meta),
-            Some(seen(Some(snapshot), false))
-        );
-        let bare = encode(boot, file(&meta), seen(None, false));
-        assert_eq!(decode(&bare, boot, &meta), Some(seen(None, false)));
-        // what it stages is stored only where the note was made to say so
-        say_stored(&mut note);
-        assert_eq!(note.len(), LEN);
-        assert_eq!(decode(&note, boot, &meta), Some(seen(Some(snapshot), true)));
-        let read = FromFile::of(&meta, decode(&note, boot, &meta));
-        assert!(read.stored);
-        assert!(!FromFile::of(&meta, None).stored);
+        assert_eq!(decode(&note, boot, &meta), Some(seen(Some(snapshot), None)));
+        let bare = encode(boot, file(&meta), seen(None, None));
+        assert_eq!(decode(&bare, boot, &meta), Some(seen(None, None)));
+        // what it stages is stored only where the note was made to say
+        // so, and at the generation of the store it names: the first too
+        for at in [0, 7, u64::MAX - 1] {
+            say_stored(&mut note, at);
+            assert_eq!(note.len(), LEN);
+            let noted = decode(&note, boot, &meta);
+            assert_eq!(noted, Some(seen(Some(snapshot), Some(at))));
+            assert_eq!(FromFile::of(&meta, noted).stored, Some(at));
+        }
+        assert_eq!(FromFile::of(&meta, None).stored, None);
         // another boot
         assert_eq!(decode(&note, [8; 16], &meta), None);
         // another file with the same bytes
@@ -257,13 +265,13 @@ mod tests {
         assert_eq!(seen(&index, &meta), None);
         std::fs::write(place(&index), note(&meta, Some([3; 32])).unwrap()).unwrap();
         let noted = seen(&index, &meta).unwrap();
-        assert_eq!((noted.snapshot, noted.stored), (Some([3; 32]), false));
+        assert_eq!((noted.snapshot, noted.stored), (Some([3; 32]), None));
         let read = FromFile::of(&meta, Some(noted));
         // the note the file as read makes says the same of it, and that
         // what it stages is stored
-        std::fs::write(place(&index), read.note_stored().unwrap()).unwrap();
+        std::fs::write(place(&index), read.note_stored(4).unwrap()).unwrap();
         let noted = seen(&index, &meta).unwrap();
-        assert_eq!((noted.snapshot, noted.stored), (Some([3; 32]), true));
+        assert_eq!((noted.snapshot, noted.stored), (Some([3; 32]), Some(4)));
         assert!(read.is(&std::fs::metadata(&index).unwrap()));
         // replaced by a rename, as the index is
         let next = dir.path().join("next");

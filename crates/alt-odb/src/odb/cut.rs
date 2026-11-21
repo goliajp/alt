@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use super::Odb;
-use crate::synced::{self, Lens, State};
+use crate::synced::{self, Lens, Marker, State};
 use crate::{NativeOdb, OdbError, head};
 
 /// Bytes a writer cut off the end of an append file: an append that never
@@ -67,7 +67,30 @@ impl Odb {
     }
 }
 
+/// The generation `marker` records, or one for a marker that records
+/// none. An older alt keeps none and replaces the marker, and may have
+/// taken records out since any generation this store was at: the one it
+/// gets now is one no marker of it has held.
+pub(crate) fn generation_kept(marker: &Marker) -> u64 {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    let anew = || now.map_or(1, |since| since.as_nanos() as u64).max(1);
+    marker
+        .recorded()
+        .map_or_else(anew, |state| state.generation)
+}
+
 impl NativeOdb {
+    /// A number that is another once records were taken out of the
+    /// store: by a rewind, by a cut of records that were never synced,
+    /// by a removal of records that name lost content, or by an older
+    /// alt, after which the marker records none until a writer of this
+    /// format gives it one anew. `None` where it records none. While the
+    /// number is the same, an object the store held it still holds.
+    pub fn generation(&self) -> Option<u64> {
+        let marker = Marker::read(&self.alt_dir.join("odb.durable"));
+        marker.recorded().map(|state| state.generation)
+    }
+
     /// What this handle cut off the ends of the append files since the
     /// last call, in the order it was cut.
     pub fn take_discarded(&mut self) -> Vec<Discarded> {

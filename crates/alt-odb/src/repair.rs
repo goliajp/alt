@@ -271,8 +271,11 @@ mod tests {
 
     /// The store holds every object but the lost ones, takes those
     /// again, and passes the full check.
-    fn sound(dir: &Path, names: &[&str]) {
+    fn sound(dir: &Path, names: &[&str], was: Option<u64>) {
         assert!(!NativeOdb::removal_interrupted(dir));
+        // what was found stored before the removal is to be looked for again
+        let generation = NativeOdb::deferred(dir).generation();
+        assert!(was.is_some() && generation.is_some() && generation != was);
         let mut odb = NativeOdb::open(dir).unwrap();
         assert!(odb.lost().unwrap().is_empty());
         assert!(!odb.contains(&object("lost", 3).0).unwrap());
@@ -294,15 +297,17 @@ mod tests {
         // before anything was written to a log
         let tmp = alt_os::temp::tempdir().unwrap();
         let lost = store(tmp.path());
+        let was = NativeOdb::deferred(tmp.path()).generation();
         assert!(!NativeOdb::finish_removal(tmp.path()).unwrap());
         save(tmp.path(), &lost.removals).unwrap();
         assert!(NativeOdb::removal_interrupted(tmp.path()));
         assert!(NativeOdb::finish_removal(tmp.path()).unwrap());
-        sound(tmp.path(), &["kept", "after"]);
+        sound(tmp.path(), &["kept", "after"], was);
 
         // a record half written over another: nothing reads there
         let tmp = alt_os::temp::tempdir().unwrap();
         let lost = store(tmp.path());
+        let was = NativeOdb::deferred(tmp.path()).generation();
         save(tmp.path(), &lost.removals).unwrap();
         let (at, record) = &lost.removals[2].moves[0];
         let map = OpenOptions::new()
@@ -317,28 +322,30 @@ mod tests {
             "{refused:?}"
         );
         assert!(NativeOdb::finish_removal(tmp.path()).unwrap());
-        sound(tmp.path(), &["kept", "after"]);
+        sound(tmp.path(), &["kept", "after"], was);
 
         // every record written, no log cut
         let tmp = alt_os::temp::tempdir().unwrap();
         let lost = store(tmp.path());
+        let was = NativeOdb::deferred(tmp.path()).generation();
         save(tmp.path(), &lost.removals).unwrap();
         for (removal, log) in lost.removals.iter().zip(LOGS) {
             removal.fill(&tmp.path().join(log)).unwrap();
         }
         assert!(NativeOdb::finish_removal(tmp.path()).unwrap());
-        sound(tmp.path(), &["kept", "after"]);
+        sound(tmp.path(), &["kept", "after"], was);
 
         // all of it made and not yet forgotten, and the store written
         // to since: nothing of that is cut
         let tmp = alt_os::temp::tempdir().unwrap();
         let lost = store(tmp.path());
+        let was = NativeOdb::deferred(tmp.path()).generation();
         save(tmp.path(), &lost.removals).unwrap();
         carry_out(tmp.path(), &lock(tmp.path()).unwrap(), &lost.removals).unwrap();
         put(tmp.path(), "later");
         let len = fs::metadata(tmp.path().join("map.alt")).unwrap().len();
         assert!(NativeOdb::finish_removal(tmp.path()).unwrap());
         assert_eq!(fs::metadata(tmp.path().join("map.alt")).unwrap().len(), len);
-        sound(tmp.path(), &["kept", "after", "later"]);
+        sound(tmp.path(), &["kept", "after", "later"], was);
     }
 }

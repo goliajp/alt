@@ -10,6 +10,8 @@ use super::super::staged_durability::{add, repo};
 use super::super::sync_order::{FILES, lens, objects_synced};
 use super::another_boot;
 
+mod head_lost;
+
 fn ok(out: std::process::Output) -> String {
     let said = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{said}");
@@ -39,7 +41,7 @@ fn an_older_build_first_after_a_power_cut_goes_on_where_the_files_are_whole() {
 /// `b.txt` staged by this build, its blob lost to a power cut and the
 /// record that names it left; then `c.txt` staged by the older build,
 /// which records all it finds as synced.
-fn an_older_build_wrote_past_a_lost_blob(old: &Path, dir: &Path) {
+pub(super) fn an_older_build_wrote_past_a_lost_blob(old: &Path, dir: &Path) {
     add(dir, "b.txt");
     let alt_dir = dir.join(".alt");
     for (name, len) in FILES.iter().zip(objects_synced(&alt_dir)).take(3) {

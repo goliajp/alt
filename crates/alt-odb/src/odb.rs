@@ -14,6 +14,7 @@ mod settle;
 mod sink;
 
 pub use cut::Discarded;
+pub(crate) use cut::generation_kept;
 pub use lost::Lost;
 pub(crate) use open::Access;
 pub(crate) use settle::lost;
