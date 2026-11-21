@@ -4,11 +4,11 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use alt_store::{Basis, BlobOptions, BlobStore, StoreError, Tail};
+use alt_store::{BlobOptions, BlobStore, Tail};
 
-use super::Odb;
+use super::{Odb, runs};
 use crate::head::Head;
-use crate::lock::{lock_shared, release_exclusive, try_hold_exclusive, unlock};
+use crate::lock::{lock_shared, unlock};
 use crate::map::ObjectMap;
 use crate::synced::{self, Deferred, Lens, Log, Marker, State};
 use crate::tier1::Tier1Map;
@@ -102,7 +102,7 @@ fn tail(durable: &Path, read_only: bool, log: Log, synced: Option<Lens>, left: &
 
 /// The append files as opened: the last value says whether `map.alt` was
 /// created.
-type Files = (BlobStore, OnceLock<Tier1Map>, ObjectMap, bool);
+pub(super) type Files = (BlobStore, OnceLock<Tier1Map>, ObjectMap, bool);
 
 fn open_files(
     alt_dir: &Path,
@@ -130,51 +130,6 @@ fn open_files(
     let (map, created) =
         ObjectMap::open_with_runs(&alt_dir.join("map.alt"), head.map.as_deref(), tail)?;
     Ok((blobs, tier1, map, created))
-}
-
-/// A store whose logs have outgrown their index runs — an older alt wrote
-/// it, the runs were removed, or a writer could not write them — gets runs
-/// from whoever opens it next, unless a writer is at work: over the records
-/// the marker says were synced and no others, so that no run is ever over
-/// records a writer may cut. The opener takes the write lock for it, reads
-/// the files again under it (`read`) and gives those back; `None` when a
-/// writer has the lock. That is all the lock is taken for: nothing is cut,
-/// and neither the marker nor the lock file is written.
-fn index_synced(
-    lock: &File,
-    durable: &Path,
-    read: impl FnOnce() -> Result<Files, OdbError>,
-) -> Result<Option<Files>, OdbError> {
-    if !try_hold_exclusive(lock)? {
-        return Ok(None);
-    }
-    let indexed = read().and_then(|mut files| {
-        let marker = Marker::read(durable);
-        // a marker that is gone, does not read or has unsynced appends
-        // past its boundaries bounds nothing
-        let unsynced = marker.recorded().is_some() && !marker.trusted();
-        let synced = |log, seq, len| match marker.basis(log, seq, len, || true) {
-            Basis::Boundary(upto) if !unsynced => Some(upto),
-            _ => None,
-        };
-        let upto = |log| synced(log, 0, 0).unwrap_or(0);
-        let (blobs, tier1, map, _) = &mut files;
-        let stores = blobs.index_synced(|seq, len| synced(Log::Pack, seq, len), upto(Log::Blobmap));
-        let stores = stores.and_then(|()| match tier1.get_mut() {
-            Some(tier1) => tier1.index_tail(upto(Log::Tier1)),
-            None => Ok(()),
-        });
-        let indexed = stores
-            .map_err(OdbError::from)
-            .and_then(|()| map.index_tail(upto(Log::Map)));
-        match indexed {
-            // the runs are a cache: where they cannot be written, reads go on
-            Ok(()) | Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(files),
-            Err(damage) => Err(damage),
-        }
-    });
-    release_exclusive(lock);
-    indexed.map(Some)
 }
 
 impl Odb {
@@ -208,9 +163,9 @@ impl Odb {
         let opened = open_files(&alt_dir, opts, &head, mode.late, tail, passing);
         let _ = unlock(&lock);
         let mut files = opened?;
-        if mode.index && (files.0.index_pending() || files.2.index_pending()) {
+        if mode.index && runs::wanted(&files, &durable_path) {
             let read = || open_files(&alt_dir, opts, &head, mode.late, tail, passing);
-            if let Some(indexed) = index_synced(&lock, &durable_path, read)? {
+            if let Some(indexed) = runs::index_synced(&lock, &durable_path, read)? {
                 files = indexed;
             }
         }

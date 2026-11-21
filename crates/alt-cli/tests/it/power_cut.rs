@@ -14,6 +14,7 @@ use super::torn_index::{served, tree};
 use super::unconfirmed::{alt, ok, stderr};
 
 mod base;
+mod many;
 mod mixed_versions;
 mod refs_first;
 

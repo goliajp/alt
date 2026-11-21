@@ -59,6 +59,13 @@ impl BlobStore {
         }
     }
 
+    /// Whether [`Self::index_synced`] would build a run, told the same.
+    pub fn synced_pending(&self, pack: impl FnOnce(u32, u64) -> Option<u64>, map: u64) -> bool {
+        let (seq, len) = self.chunks.checkpoint().pack();
+        pack(seq, len).is_some_and(|upto| self.chunks.synced_pending(upto))
+            || self.map.get().is_some_and(|held| held.index_pending(map))
+    }
+
     /// See [`crate::ChunkStore::distrust_synced`].
     pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
         self.chunks.distrust_synced()

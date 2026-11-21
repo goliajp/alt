@@ -9,7 +9,6 @@ use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::synced::{self, Lens, Marker, State};
 use crate::tier1::Tier1Map;
 use crate::{OdbCheckpoint, OdbError};
-use alt_store::StoreError;
 
 impl Odb {
     /// Finish an unfinished object batch, including after a command error.
@@ -84,43 +83,6 @@ impl Odb {
             tier1,
             ..self.appended()?
         })
-    }
-
-    /// Folds long enough log tails into the index runs. A run is fsynced
-    /// as it is written, so the records it covers are fsynced first: no
-    /// crash leaves a run over records that were lost. The runs are a
-    /// cache: failing to write one is not an error, anything else is.
-    pub(super) fn index_tails(&mut self) -> Result<(), OdbError> {
-        let pending = self.blobs.index_pending()
-            || self.tier1.get().is_some_and(|tier1| tier1.index_pending())
-            || self.map.index_pending();
-        if !self.held || !pending {
-            return Ok(());
-        }
-        // indexing the blob store opens its map: opened here, it is
-        // fsynced with the rest before a run is built over it
-        self.blobs.open_map()?;
-        if !alt_store::relaxed_durability() {
-            self.blobs.fsync()?;
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.sync()?;
-            }
-            self.map.fsync()?;
-        }
-        let indexed = (|| -> Result<(), StoreError> {
-            self.blobs.index_tail()?;
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.index_tail(u64::MAX)?;
-            }
-            Ok(())
-        })();
-        match indexed
-            .map_err(OdbError::from)
-            .and_then(|()| self.map.index_tail(u64::MAX))
-        {
-            Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(()),
-            other => other,
-        }
     }
 
     /// Snapshots the write cursor across all three append files (chunks pack,

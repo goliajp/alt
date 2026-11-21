@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use crate::packs::{self, Known, load};
-use crate::{
-    ChunkId, ChunkStore, Counters, DeltaCache, Options, StoreError, Tail, relaxed_durability,
-};
+use crate::{ChunkId, ChunkStore, Counters, DeltaCache, Options, StoreError, Tail};
 
 impl ChunkStore {
     /// Opens the store in `dir`; `known` names its packs and index runs
@@ -112,6 +110,13 @@ impl ChunkStore {
         self.index_from_tail(upto.position()).map(drop)
     }
 
+    /// Whether [`Self::index_synced`] would build a run, told the same.
+    pub fn synced_pending(&self, upto: u64) -> bool {
+        let (seq, _) = self.checkpoint().pack();
+        let upto = Location { seq, offset: upto };
+        self.index.pending(upto.position()).is_some()
+    }
+
     fn index_from_tail(&mut self, upto: u64) -> Result<bool, StoreError> {
         let Some(end) = self.index.pending(upto) else {
             return Ok(true);
@@ -127,7 +132,7 @@ impl ChunkStore {
             end,
             guard,
             |loc| packs::guard_at(dir, loc),
-            !relaxed_durability(),
+            crate::runs::written_synced(),
         )
     }
 

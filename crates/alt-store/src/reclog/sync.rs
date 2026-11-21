@@ -73,9 +73,16 @@ impl RecLog {
         self.runs.chain()
     }
 
-    /// Whether the tail is long enough for [`Self::index_tail`] to act.
-    pub fn index_pending(&self) -> bool {
-        self.tail.len() / self.layout.rec_len >= INDEX_AT
+    /// Whether the tail holds enough records before byte `upto` for
+    /// [`Self::index_tail`] to act.
+    pub fn index_pending(&self, upto: u64) -> bool {
+        self.indexable(upto) >= INDEX_AT
+    }
+
+    /// How many records of the tail lie before byte `upto`.
+    fn indexable(&self, upto: u64) -> usize {
+        let from = self.len - self.tail.len() as u64;
+        (upto.min(self.len).saturating_sub(from) / self.layout.rec_len as u64) as usize
     }
 
     /// Moves a long enough tail into the index runs: the records before
@@ -85,7 +92,7 @@ impl RecLog {
     /// `durable` fsyncs the new run before it replaces the old ones.
     pub fn index_tail(&mut self, upto: u64, durable: bool) -> Result<(), StoreError> {
         let rec_len = self.layout.rec_len;
-        if !self.index_pending() {
+        if !self.index_pending(upto) {
             return Ok(());
         }
         // the runs on disk may have moved since this handle read them; the
@@ -93,7 +100,7 @@ impl RecLog {
         // never claims a record it has no entry for
         self.reload(self.len, End::Whole)?;
         let from = self.len - self.tail.len() as u64;
-        let take = (upto.min(self.len).saturating_sub(from) / rec_len as u64) as usize;
+        let take = self.indexable(upto);
         if take < INDEX_AT {
             return Ok(());
         }

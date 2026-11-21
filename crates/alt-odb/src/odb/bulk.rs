@@ -1,5 +1,7 @@
-//! Reading every object of the database in one pass.
+//! Reading every object of the database in one pass, and changing how
+//! objects are stored.
 
+use alt_git_codec::ObjectId;
 use alt_store::{BlobId, CompactReport};
 
 use super::Odb;
@@ -60,5 +62,20 @@ impl Odb {
     pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
         self.acquire()?;
         Ok(self.blobs.compact()?)
+    }
+}
+
+impl Odb {
+    /// Re-encodes `old`'s content as a lineage delta against `new`'s
+    /// (same-path predecessor → successor). Identity is untouched; only
+    /// the storage form changes. Returns whether a re-encoding happened.
+    pub fn lineage_delta(&mut self, old: &ObjectId, new: &ObjectId) -> Result<bool, OdbError> {
+        self.acquire()?;
+        let (Some(old_entry), Some(new_entry)) = (self.map.by_git(old)?, self.map.by_git(new)?)
+        else {
+            return Ok(false);
+        };
+        let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
+        Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
     }
 }

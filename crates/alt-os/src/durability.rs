@@ -15,7 +15,13 @@ thread_local! {
 
 /// Whether writes made on this thread are left unsynced.
 pub fn unsynced() -> bool {
-    LEFT.get() || std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
+    LEFT.get() || never_synced()
+}
+
+/// Whether the process leaves every command's writes unsynced: nothing
+/// it writes is promised to outlive a power cut.
+pub fn never_synced() -> bool {
+    std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
 }
 
 /// Puts back what the thread said before [`leave_unsynced`] when dropped.

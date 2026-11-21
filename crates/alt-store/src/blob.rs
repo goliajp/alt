@@ -360,7 +360,8 @@ impl BlobStore {
     /// Whether [`Self::index_tail`] has anything to do. A blob map this
     /// handle has not opened is not looked at.
     pub fn index_pending(&self) -> bool {
-        self.chunks.index_pending() || self.map.get().is_some_and(BlobMap::index_pending)
+        let map = self.map.get();
+        self.chunks.index_pending() || map.is_some_and(|map| map.index_pending(u64::MAX))
     }
 
     /// Folds the records appended since the last index runs into new runs,

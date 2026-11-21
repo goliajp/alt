@@ -9,6 +9,7 @@ mod durable;
 mod follow;
 mod lost;
 mod open;
+mod runs;
 mod settle;
 mod sink;
 
@@ -269,19 +270,6 @@ impl Odb {
     /// and verification sweeps).
     pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
         self.map.entries()
-    }
-
-    /// Re-encodes `old`'s content as a lineage delta against `new`'s
-    /// (same-path predecessor → successor). Identity is untouched; only
-    /// the storage form changes. Returns whether a re-encoding happened.
-    pub fn lineage_delta(&mut self, old: &ObjectId, new: &ObjectId) -> Result<bool, OdbError> {
-        self.acquire()?;
-        let (Some(old_entry), Some(new_entry)) = (self.map.by_git(old)?, self.map.by_git(new)?)
-        else {
-            return Ok(false);
-        };
-        let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
-        Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
     }
 
     /// Number of mapped git objects.

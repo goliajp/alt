@@ -35,7 +35,7 @@ use crate::StoreError;
 use crate::run_write::write_run;
 
 mod named;
-pub use named::{remove_past, unusable};
+pub use named::{remove_past, unusable, written_synced};
 
 pub const KEY_LEN: usize = 32;
 /// How many log bytes before a run's end its guard holds, at most.

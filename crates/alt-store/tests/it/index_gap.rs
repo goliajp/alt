@@ -18,7 +18,7 @@ fn record_log_indexes_everything_after_its_index_dir_is_removed() {
         log.append(&record(n, n)).unwrap();
     }
     log.index_tail(u64::MAX, true).unwrap();
-    assert!(!log.index_pending(), "the first 300 are in a run");
+    assert!(!log.index_pending(u64::MAX), "the first 300 are in a run");
 
     fs::remove_dir_all(dir.path().join("log.idx")).unwrap();
     for n in 300..600 {

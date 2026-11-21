@@ -71,11 +71,12 @@ impl BlobMap {
     /// Indexes the records before byte `upto` that have no index run yet,
     /// once there are enough of them. Run under the odb write lock.
     pub fn index_tail(&mut self, upto: u64) -> Result<(), StoreError> {
-        self.log.index_tail(upto, !crate::relaxed_durability())
+        self.log.index_tail(upto, crate::runs::written_synced())
     }
 
-    pub fn index_pending(&self) -> bool {
-        self.log.index_pending()
+    /// Whether [`Self::index_tail`] has enough records before byte `upto`.
+    pub fn index_pending(&self, upto: u64) -> bool {
+        self.log.index_pending(upto)
     }
 
     pub fn run_chain(&self) -> Vec<(u64, u64)> {

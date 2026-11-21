@@ -89,6 +89,14 @@ impl Runs {
     }
 }
 
+/// Whether a run is fsynced before it takes the place of others. A run
+/// is over records that were synced, and a search that misses in it is
+/// taken at its word: one that a power cut left in part would hide
+/// records that are there.
+pub fn written_synced() -> bool {
+    !alt_os::durability::never_synced()
+}
+
 /// The run files in `dir` by the log range each is named for; one that
 /// was never finished is listed past every range.
 pub(super) fn listed(dir: &Path) -> Result<Vec<(u64, u64, PathBuf)>, StoreError> {

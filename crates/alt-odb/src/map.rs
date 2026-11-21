@@ -163,12 +163,12 @@ impl ObjectMap {
     /// once there are enough of them. Run under the odb write lock.
     pub fn index_tail(&mut self, upto: u64) -> Result<(), OdbError> {
         self.log
-            .index_tail(upto, !alt_store::relaxed_durability())
+            .index_tail(upto, alt_store::runs::written_synced())
             .map_err(lift)
     }
 
-    pub fn index_pending(&self) -> bool {
-        self.log.index_pending()
+    pub fn index_pending(&self, upto: u64) -> bool {
+        self.log.index_pending(upto)
     }
 
     pub fn by_git(&self, oid: &ObjectId) -> Result<Option<MapEntry>, OdbError> {
