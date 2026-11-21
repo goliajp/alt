@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: check an undo of a step before it changes anything, and never leave a conflict without its state file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/undo.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mixed_versions/abort.rs
+touched: crates/alt-cli/tests/it/step_refused.rs
