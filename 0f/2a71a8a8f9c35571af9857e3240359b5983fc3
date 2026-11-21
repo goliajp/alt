@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: make a branch or a tag first after a power cut, then add and commit
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut.rs
+touched: crates/alt-cli/tests/it/power_cut/refs_first.rs
