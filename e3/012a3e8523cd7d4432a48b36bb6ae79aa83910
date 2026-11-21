@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: test
+summary: walk the crash points through a power cut and through the daemon, and hold the step record and mark to what real logs hold
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/tests/fixtures/args/bindings.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-step-StepMark.txt
+touched: crates/alt-cli/tests/fixtures/json-read/state-step-StepRecord.txt
+touched: crates/alt-cli/tests/it/argument_bindings.rs
+touched: crates/alt-cli/tests/it/step_crash.rs
+touched: crates/alt-cli/tests/it/step_crash/bench.rs
+touched: crates/alt-cli/tests/it/step_crash/kill.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
