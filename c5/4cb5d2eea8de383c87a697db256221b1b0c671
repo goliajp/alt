@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a merge that stops in conflict over an untracked file, and leave one where both sides deleted a file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge/write.rs
+touched: crates/alt-cli/tests/it/conflict_untracked.rs
+touched: crates/alt-cli/tests/it/main.rs
