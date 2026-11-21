@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use alt_oplog::OpLogError;
+use alt_oplog::{OpId, OpLogError};
 
 use crate::state::Refs;
 use crate::{RefChange, RefTarget};
@@ -24,6 +24,12 @@ pub enum RefError {
     /// The caller's [`RefPolicy::state_check`] refused the transaction
     /// against the current ref state.
     Rejected(String),
+    /// The transaction is in the log as `op`; `cause` is what failed after
+    /// it was appended. Every other error left the log as it was.
+    Recorded {
+        op: OpId,
+        cause: Box<RefError>,
+    },
 }
 
 impl std::fmt::Display for RefError {
@@ -39,6 +45,7 @@ impl std::fmt::Display for RefError {
             }
             Self::CapabilityDenied(what) => write!(f, "capability denied: {what}"),
             Self::Rejected(reason) => write!(f, "{reason}"),
+            Self::Recorded { op, .. } => write!(f, "after the transaction was recorded as {op}"),
         }
     }
 }
@@ -48,6 +55,7 @@ impl std::error::Error for RefError {
         match self {
             Self::Io(e) => Some(e),
             Self::OpLog(e) => Some(e),
+            Self::Recorded { cause, .. } => Some(cause),
             Self::Format(_)
             | Self::Conflict { .. }
             | Self::SymrefDepth(_)

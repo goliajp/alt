@@ -8,7 +8,7 @@ use std::fs::File;
 use std::path::Path;
 
 use alt_cli::native::{Principal, PrincipalKind, Store};
-use alt_cli::receive::{self, ATTEMPTS, Landed, PreparedPack, Push};
+use alt_cli::receive::{self, ATTEMPTS, Landed, PreparedPack, Push, Step};
 use alt_git_codec::ObjectId;
 use alt_odb::NativeOdb;
 use alt_os::sys::{LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, flock};
@@ -19,7 +19,7 @@ use crate::altd_server_added_commits::odb_state;
 use crate::altd_server_no_new_objects::{creation, seeded, tip};
 use crate::altd_server_signed_commits::{commit_object, pack_of, require_signed_commits};
 
-fn pusher(id: &str) -> Principal {
+pub(crate) fn pusher(id: &str) -> Principal {
     Principal {
         kind: PrincipalKind::Human,
         id: id.to_owned(),
@@ -34,7 +34,7 @@ fn served(origin: &Path) -> RefCell<Store> {
     RefCell::new(store)
 }
 
-fn prepared(pack: &[u8]) -> (alt_os::temp::TempDir, PreparedPack) {
+pub(crate) fn prepared(pack: &[u8]) -> (alt_os::temp::TempDir, PreparedPack) {
     let dir = alt_os::temp::tempdir().unwrap();
     let path = dir.path().join("incoming.pack");
     std::fs::write(&path, pack).unwrap();
@@ -53,7 +53,7 @@ fn land(
     land_as(store, &pusher("anonymous"), updates, pack, written)
 }
 
-fn land_as(
+pub(crate) fn land_as(
     store: &RefCell<Store>,
     principal: &Principal,
     updates: &[alt_wire::RefUpdate],
@@ -73,7 +73,10 @@ fn land_as(
         principal,
         sig_label: "none",
     };
-    receive::land_observed(&mut store, &push, written).unwrap()
+    let written = |step| {
+        (step == Step::Written).then(written);
+    };
+    receive::land_observed(&mut store, &push, &written).unwrap()
 }
 
 /// As another process: points `name` from `old` to `new`.
@@ -88,7 +91,7 @@ fn moved(alt_dir: &Path, name: &str, old: Option<ObjectId>, new: Option<ObjectId
 }
 
 /// Whether nobody holds a lock on `file` of the served repository.
-fn free(alt_dir: &Path, file: &str) -> bool {
+pub(crate) fn free(alt_dir: &Path, file: &str) -> bool {
     let lock = File::open(alt_dir.join(file)).unwrap();
     let taken = flock(&lock, LOCK_EX | LOCK_NB).is_ok();
     if taken {
@@ -97,7 +100,7 @@ fn free(alt_dir: &Path, file: &str) -> bool {
     taken
 }
 
-fn holds(alt_dir: &Path, oid: &ObjectId) -> bool {
+pub(crate) fn holds(alt_dir: &Path, oid: &ObjectId) -> bool {
     NativeOdb::open(alt_dir).unwrap().contains(oid).unwrap()
 }
 
@@ -255,36 +258,6 @@ fn a_push_whose_ref_transaction_fails_has_its_objects_taken_out_again() {
     assert_eq!(landed, Landed::Moved);
     drop(store);
     assert_eq!(tip(origin.path(), "refs/heads/new"), name);
-    ok(alt(origin.path(), &["fsck"]));
-}
-
-/// A panic with the objects of a push written: they are taken out again
-/// and `odb.lock` is let go of, though the store lives on.
-#[test]
-fn a_panic_between_the_objects_and_the_refs_lets_go_of_the_locks() {
-    let (origin, seed) = seeded();
-    let alt_dir = origin.path().join(".alt");
-    let new = commit_object(&seed, 1_700_000_000, "", "new");
-    let oid = new.0;
-    let (_dir, pack) = prepared(&pack_of(&[new]));
-    let updates = [creation("refs/heads/new", &oid.to_string())];
-    let principal = pusher("anonymous");
-    let push = Push {
-        pack: Some(&pack),
-        checked: None,
-        updates: &updates,
-        principal: &principal,
-        sig_label: "none",
-    };
-    let mut store = Store::open(alt_dir.clone()).unwrap();
-    let landing = std::panic::AssertUnwindSafe(|| {
-        let _ = receive::land_observed(&mut store, &push, &|| panic!("with the objects written"));
-    });
-    assert!(std::panic::catch_unwind(landing).is_err());
-    assert!(free(&alt_dir, "odb.lock"));
-    assert!(free(&alt_dir, "oplog/log"));
-    assert!(!holds(&alt_dir, &oid));
-    drop(store);
     ok(alt(origin.path(), &["fsck"]));
 }
 

@@ -23,6 +23,9 @@
 //! is held for a comparison and an append, whatever the size of the push,
 //! and whoever reads the refs meanwhile waits for no more than that.
 //!
+//! Once the transaction is appended the refs moved for whoever reads the
+//! log: the objects stay then, whatever fails afterwards, a panic too.
+//!
 //! `odb.lock` is held from the first object written until the refs moved,
 //! or until the objects are taken out again: no other process appends in
 //! between, so the rollback takes this push's objects and no others, and
@@ -122,6 +125,15 @@ pub enum Landed {
     Refused(String),
 }
 
+/// Where a push is on its way in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// its objects are in the odb, once for each look at the push
+    Written,
+    /// its ref transaction is in the log
+    Recorded,
+}
+
 fn oid(target: &RefTarget) -> Option<&ObjectId> {
     match target {
         RefTarget::Oid(oid) => Some(oid),
@@ -162,7 +174,7 @@ fn attempt(
     store: &mut Store,
     push: &Push<'_>,
     tx: &ref_tx::Tx,
-    written: &dyn Fn(),
+    observe: &dyn Fn(Step),
 ) -> Res<Option<Landed>> {
     let (refs, odb) = store.refs_and_odb();
     // refs before objects: a writer stores its objects before the ref
@@ -186,7 +198,7 @@ fn attempt(
     {
         return Ok(Some(Landed::Unpack(format!("index-pack: {e}"))));
     }
-    written();
+    observe(Step::Written);
     let moved = Cell::new(false);
     let state = |now: &BTreeMap<String, RefTarget>, changes: &[RefChange]| {
         // the transaction refuses this as a conflict right after
@@ -200,33 +212,36 @@ fn attempt(
         moved.set(true);
         Err("a ref moved".to_owned())
     };
-    match tx.commit(refs, &state) {
-        // the refs moved: the objects are part of the history served,
-        // even if making them durable fails
-        Ok(()) => Ok(Some(match batch.keep() {
-            Ok(()) => Landed::Moved,
-            Err(e) => Landed::Refused(format!("durability: {e}")),
-        })),
-        Err(_) if moved.get() => Ok(None),
-        Err(e) => Ok(Some(Landed::Refused(format!("ref tx: {e}")))),
-    }
+    let op = match tx.append(refs, &state) {
+        Ok(op) => op,
+        Err(_) if moved.get() => return Ok(None),
+        Err(e) => return Ok(Some(Landed::Refused(format!("ref tx: {e}")))),
+    };
+    // in the log, whatever fails from here on: the objects stay
+    batch.keep();
+    observe(Step::Recorded);
+    let stored = batch.end().map_err(|e| e.to_string());
+    let finished = tx.finish(refs, op).map_err(|e| e.to_string());
+    Ok(Some(match stored.and(finished) {
+        Ok(()) => Landed::Moved,
+        Err(e) => Landed::Refused(format!("durability: {e}")),
+    }))
 }
 
 /// Brings what a push adds into the odb and moves its refs, or leaves
 /// both as they were (see the module's description).
 pub fn land(store: &mut Store, push: &Push<'_>) -> Res<Landed> {
-    land_observed(store, push, &|| ())
+    land_observed(store, push, &|_| ())
 }
 
-/// [`land`], with `written` called each time the objects of the push
-/// are in the odb and its ref transaction is still to come.
-pub fn land_observed(store: &mut Store, push: &Push<'_>, written: &dyn Fn()) -> Res<Landed> {
+/// [`land`], with `observe` called at each [`Step`] it comes to.
+pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step)) -> Res<Landed> {
     let tx = ref_tx::Tx::new(store.capabilities_for(push.principal), push);
     if let Err(denied) = tx.names_allowed() {
         return Ok(Landed::Refused(format!("ref tx: {denied}")));
     }
     for _ in 0..ATTEMPTS {
-        if let Some(landed) = attempt(store, push, &tx, written)? {
+        if let Some(landed) = attempt(store, push, &tx, observe)? {
             return Ok(landed);
         }
     }

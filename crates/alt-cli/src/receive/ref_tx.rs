@@ -1,6 +1,6 @@
 //! The ref transaction of a push.
 
-use alt_refs::{RefChange, RefError, RefPolicy, RefStore, RefTarget, StateCheck};
+use alt_refs::{OpId, RefChange, RefError, RefPolicy, RefStore, RefTarget, StateCheck};
 
 use super::Push;
 use crate::native::PrincipalKind;
@@ -68,18 +68,23 @@ impl Tx {
         self.with_policy(None, |policy| policy.check_names(&self.changes))
     }
 
-    /// Appends the transaction, `state` being its state check.
-    pub(super) fn commit(
+    /// Appends the transaction, `state` being its state check. An error
+    /// left the log as it was.
+    pub(super) fn append(
         &self,
         refs: &mut RefStore,
         state: &StateCheck<'_>,
-    ) -> Result<(), RefError> {
+    ) -> Result<OpId, RefError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
         self.with_policy(Some(state), |policy| {
-            refs.commit_idempotent(&self.actor, now, &self.changes, None, Some(policy))
-        })?;
-        Ok(())
+            refs.append_tx(&self.actor, now, &self.changes, None, Some(policy), None)
+        })
+    }
+
+    /// What is left of the transaction once it is appended as `op`.
+    pub(super) fn finish(&self, refs: &mut RefStore, op: OpId) -> Result<(), RefError> {
+        refs.finish_tx(op, &self.changes, None)
     }
 }

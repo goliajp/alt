@@ -14,6 +14,7 @@ pub(super) struct Batch<'a> {
     begun: OdbCheckpoint,
     wrote: bool,
     kept: bool,
+    ended: bool,
 }
 
 impl<'a> Batch<'a> {
@@ -26,6 +27,7 @@ impl<'a> Batch<'a> {
             begun,
             wrote: false,
             kept: false,
+            ended: false,
         })
     }
 
@@ -49,18 +51,25 @@ impl<'a> Batch<'a> {
         Ok(())
     }
 
-    pub(super) fn keep(mut self) -> Result<(), alt_odb::OdbError> {
+    /// The objects stay from here on, however the batch ends.
+    pub(super) fn keep(&mut self) {
         self.kept = true;
+    }
+
+    /// Ends a batch that is kept, making its objects durable.
+    pub(super) fn end(mut self) -> Result<(), alt_odb::OdbError> {
+        self.ended = true;
         self.odb.flush()
     }
 }
 
 impl Drop for Batch<'_> {
     fn drop(&mut self) {
-        if self.kept {
+        if self.ended {
             return;
         }
         if self.wrote
+            && !self.kept
             && let Err(e) = self.odb.rewind(self.begun)
         {
             eprintln!("objects of a push that failed left in place: {e}");
