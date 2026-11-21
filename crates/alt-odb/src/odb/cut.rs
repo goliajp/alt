@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::Odb;
 use crate::synced::{self, Lens, State};
-use crate::{NativeOdb, OdbError, head};
+use crate::{NativeOdb, OdbCheckpoint, OdbError, head};
 
 /// Bytes a writer cut off the end of an append file: an append that never
 /// finished, or records that were never synced and name content which is
@@ -67,7 +67,63 @@ impl Odb {
     }
 }
 
+impl Odb {
+    /// Takes the write lock for a batch before its first write. Returns
+    /// where the files end with what other writers appended read in: the
+    /// point a rollback of this batch cuts back to. The lock is held until
+    /// the batch is flushed.
+    pub fn begin_batch(&mut self) -> Result<OdbCheckpoint, OdbError> {
+        self.acquire()?;
+        let begun = self.cursor();
+        if begun.is_err() {
+            self.release();
+        }
+        begun
+    }
+
+    /// Rolls a flushed batch back to `begun`, unless another writer has
+    /// appended since it left the files ending at `ended`: cutting would
+    /// take that writer's records too, so nothing is cut. Returns whether
+    /// the batch was rolled back.
+    pub fn rewind_batch(
+        &mut self,
+        begun: OdbCheckpoint,
+        ended: OdbCheckpoint,
+    ) -> Result<bool, OdbError> {
+        let held = self.held;
+        self.acquire()?;
+        let rewound = match self.cursor() {
+            Ok(now) if now == ended => self.rewind_locked(begun).map(|()| true),
+            Ok(_) => Ok(false),
+            Err(e) => Err(e),
+        };
+        if !held {
+            self.release();
+        }
+        rewound
+    }
+}
+
 impl NativeOdb {
+    /// See [`Odb::begin_batch`].
+    pub fn begin_batch(&mut self) -> Result<OdbCheckpoint, OdbError> {
+        self.odb_mut()?.begin_batch()
+    }
+
+    /// See [`Odb::rewind_batch`]. A rollback that fails gives up the
+    /// opened store, as [`Self::rewind`] does.
+    pub fn rewind_batch(
+        &mut self,
+        begun: OdbCheckpoint,
+        ended: OdbCheckpoint,
+    ) -> Result<bool, OdbError> {
+        let rewound = self.odb_mut()?.rewind_batch(begun, ended);
+        if rewound.is_err() {
+            self.odb.take();
+        }
+        rewound
+    }
+
     /// What this handle cut off the ends of the append files since the
     /// last call, in the order it was cut.
     pub fn take_discarded(&mut self) -> Vec<Discarded> {

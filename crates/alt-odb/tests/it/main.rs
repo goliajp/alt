@@ -17,6 +17,7 @@ mod marker_unreadable;
 mod merge_readers;
 mod odb_index;
 mod odb_lifecycle;
+mod rewind_batch;
 mod rewind_interrupted;
 mod second_handle;
 mod synced_marker;

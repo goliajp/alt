@@ -202,7 +202,7 @@ impl Odb {
         rewound
     }
 
-    fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+    pub(super) fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
         self.blobs.check_rewind(ckpt.blobs)?;
         self.tier1()?.check_rewind(ckpt.tier1_len)?;
         self.map.check_rewind(ckpt.map_len)?;
