@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: give the log a boundary before the note of a stop names its last operation
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/recovery/whole/stopped.rs
+touched: crates/alt-cli/tests/it/torn_index.rs
+touched: crates/alt-cli/tests/it/torn_index/stops.rs
+touched: crates/alt-oplog/src/bound.rs
+touched: crates/alt-refs/src/settle.rs
