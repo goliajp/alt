@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: read each ignore file once for all the paths an add is given
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/add/named.rs
+touched: crates/alt-worktree/src/lib.rs
+touched: crates/alt-worktree/src/untracked.rs
