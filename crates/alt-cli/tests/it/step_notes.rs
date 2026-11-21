@@ -143,3 +143,128 @@ fn giving_a_revert_up_leaves_the_note_another_workspace_wrote_between_its_commit
     assert_eq!(ok(&main, &["operation", "pending"]), "");
     only_the_notes_of_the_revert_are_gone(&main, &other, &made);
 }
+
+/// Runs `args` in `main` and commits `file` in `other` while the command
+/// waits at the first ref transaction among the `points` it passes. The
+/// commit `other` made.
+fn committed_while_it_waits(
+    dir: &Path,
+    [main, other]: [&Path; 2],
+    args: &[&str],
+    points: &str,
+    file: &str,
+) -> String {
+    let at = points.lines().position(|p| p == "ref-transaction:before");
+    let waits = dir.join(format!("waits-{file}"));
+    let asked = format!("wait:{}:0:{}", at.unwrap() + 1, waits.display());
+    let mut waiting = command(main, args, Some(&asked));
+    let mut waiting = waiting.stderr(Stdio::piped()).spawn().unwrap();
+    while !waits.exists() {
+        assert_eq!(waiting.try_wait().unwrap(), None, "{args:?} did not wait");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    commit(other, file);
+    std::fs::remove_file(&waits).unwrap();
+    let ended = waiting.wait_with_output().unwrap();
+    let said = String::from_utf8_lossy(&ended.stderr);
+    assert!(ended.status.success(), "{args:?}: {said}");
+    let theirs = ok(other, &["log", "-n", "1"]);
+    theirs.split(' ').next().unwrap().to_owned()
+}
+
+/// The notes of the two commits of the revert are gone, and every other
+/// is there: of the commits before it, and of both commits of `other`.
+fn the_notes_of_the_others_stay(main: &Path, made: &[String; 2], theirs: [(&str, &str); 2]) {
+    for (commit, file) in theirs {
+        assert!(ok(main, &["meta", "show", commit]).contains(file), "{file}");
+    }
+    assert!(ok(main, &["meta", "show"]).contains("h.txt"));
+    for commit in made {
+        let shown = alt(main, &["meta", "show", commit], None);
+        let said = String::from_utf8_lossy(&shown.stderr);
+        assert!(said.contains("no metadata recorded"), "{commit}: {said}");
+    }
+    assert_eq!(ok(main, &["operation", "pending"]), "");
+    assert!(ok(main, &["status", "--json"]).contains(r#""clean":true"#));
+    ok(main, &["fsck"]);
+}
+
+#[test]
+fn an_undo_taken_back_has_its_notes_again_and_one_goes_through_while_another_workspace_commits() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (main, other, made) = reverted_around_a_commit(dir.path(), None);
+    let first = ok(&other, &["log", "-n", "1"]);
+    let first = first.split(' ').next().unwrap();
+    // each workspace is shown the note of its own head
+    assert!(ok(&other, &["meta", "show"]).contains("o.txt"));
+    assert!(ok(&main, &["meta", "show"]).contains("Revert"));
+
+    let list = dir.path().join("undo-points");
+    let listing = format!("list:{}", list.display());
+    assert!(alt(&main, &["undo"], Some(&listing)).status.success());
+    assert!(ok(&main, &["meta", "show"]).contains("h.txt"));
+    // the undo taken back: the commits of the revert have their notes again
+    ok(&main, &["undo"]);
+    assert_eq!(ok(&main, &["rev-parse", "HEAD"]).trim(), made[1]);
+    for commit in &made {
+        assert!(ok(&main, &["meta", "show", commit]).contains("Revert"));
+    }
+    assert!(ok(&main, &["meta", "show", first]).contains("o.txt"));
+
+    // and taken back once more while the other workspace writes a note
+    let points = std::fs::read_to_string(&list).unwrap();
+    let both = [main.as_path(), other.as_path()];
+    let second = committed_while_it_waits(dir.path(), both, &["undo"], &points, "p.txt");
+    the_notes_of_the_others_stay(&main, &made, [(first, "o.txt"), (&second, "p.txt")]);
+    // nothing but the undo is in the log of it: the next takes it back
+    ok(&main, &["undo"]);
+    assert_eq!(ok(&main, &["rev-parse", "HEAD"]).trim(), made[1]);
+    assert!(ok(&main, &["meta", "show", &second]).contains("p.txt"));
+}
+
+#[test]
+fn a_revert_is_given_up_while_another_workspace_commits() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let dies_at = Some("checkout-file:before");
+    let (main, other, made) = reverted_around_a_commit(dir.path(), dies_at);
+    let first = ok(&other, &["log", "-n", "1"]);
+    let first = first.split(' ').next().unwrap();
+    let pending = ok(&main, &["operation", "pending"]);
+    let id = pending.split(' ').next().unwrap();
+    let abandon = ["operation", "abandon", id];
+
+    let (list, kept) = (dir.path().join("abandon-points"), dir.path().join("kept"));
+    crate::step_crash::bench::copy(&main, &kept);
+    let listing = format!("list:{}", list.display());
+    assert!(alt(&main, &abandon, Some(&listing)).status.success());
+    crate::step_crash::bench::restore(&main, &kept);
+    let points = std::fs::read_to_string(&list).unwrap();
+    let both = [main.as_path(), other.as_path()];
+    let second = committed_while_it_waits(dir.path(), both, &abandon, &points, "p.txt");
+    the_notes_of_the_others_stay(&main, &made, [(first, "o.txt"), (&second, "p.txt")]);
+    assert!(main.join("g.txt").exists() && main.join("h.txt").exists());
+    // the mark that gave it up is the one the transaction came after
+    let marks = ok(&main, &["op-log"]).matches("recover").count();
+    crate::step_crash::bench::restore(&main, &kept);
+    ok(&main, &abandon);
+    assert_eq!(ok(&main, &["op-log"]).matches("recover").count(), marks);
+}
+
+#[test]
+fn the_daemon_takes_the_notes_of_a_revert_out_on_top_of_those_of_another_workspace() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (main, other, made) = reverted_around_a_commit(dir.path(), None);
+    let theirs = ok(&other, &["log", "-n", "1"]);
+    let theirs = theirs.split(' ').next().unwrap();
+    let undone = crate::scan_daemon::output(&main, &["undo"], true);
+    let _stop = crate::scan_daemon::Stop(crate::scan_daemon::daemon_pid(&main), false);
+    let said = String::from_utf8_lossy(&undone.stderr);
+    assert!(undone.status.success(), "{said}");
+    assert!(ok(&main, &["meta", "show", theirs]).contains("o.txt"));
+    assert!(ok(&main, &["meta", "show"]).contains("h.txt"));
+    for commit in &made {
+        let shown = alt(&main, &["meta", "show", commit], None);
+        let said = String::from_utf8_lossy(&shown.stderr);
+        assert!(said.contains("no metadata recorded"), "{commit}: {said}");
+    }
+}

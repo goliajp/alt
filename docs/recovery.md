@@ -587,7 +587,20 @@ the command leaves there:
   brought to an end around it, the file keeps what you wrote, and the
   operation is under way as after any stop: resolve the file and go on, or
   give the operation up with its `--abort`, which writes over a file in
-  conflict, changed or not, as in git.
+  conflict, changed or not, as in git. The command that brings it to an end
+  names each such file on stderr. The file is not written again, so it may
+  hold no conflict markers and nothing of the other side: that happens where
+  the command was interrupted before it wrote the file, and what you changed
+  was the file from before the operation. No command reads a conflict stage
+  of the index by path, so the warning names the blob the other side has
+  there, for `alt cat-file -p`:
+
+  ```
+  warning: 'f.txt' was changed after the operation was interrupted and is left as it is, in conflict: the operation has not written the two sides into it, and it may hold no conflict markers; what the other side has there is in the index, and `alt cat-file -p cd3b0e37e2c34d75ff2f18c53dbb455ae6a8b462` prints it
+  ```
+
+  `alt undo` does not take the command back over such a file: it is refused
+  and names the file, which is not as the command left it.
 - Any other file is in the way, because the command has content of its own
   to put there. Every command that writes is refused and names the file
   (`'t.txt' was changed after the operation was interrupted, and the
@@ -608,6 +621,11 @@ that was:
 51484a277655b755cc0117ae784e7e114b51c5ad2df5acdfd4795189da7f2e16 given up: the workspace is as it was before the command, but for what was changed since and is left as it is: t.txt
 ```
 
+A file is not kept where the command found a directory in its place and
+has a file of that directory to put back: `--keep-changes` is refused before
+anything is written, and names the file to move aside and the path it is in
+the way of.
+
 A kept file then shows in `alt status` as modified, or as untracked where
 the command had made it. The notes of commits the command had made are taken
 out of the notes ref; notes that other workspaces wrote meanwhile stay, as
@@ -618,7 +636,10 @@ leaves nothing for `alt undo` to take back.
 The `--abort` of the operation gives the command up the same way where the
 command cannot be brought to an end. The abort of another operation does
 not: `alt cherry-pick --abort` while an interrupted merge waits is refused
-and says that `alt merge --abort` gives the merge up.
+and says that `alt merge --abort` gives the merge up. Nor is an interrupted
+`alt undo` given up by an abort: one that takes back the command that ended
+a rebase puts the rebase back under way, and `alt rebase --abort` while it
+waits says what is in its way and changes nothing.
 
 Giving a command up moves a branch it had moved back to where it was, as
 `alt undo` of a commit does. A principal the policy forbids forced updates

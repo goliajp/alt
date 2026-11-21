@@ -116,6 +116,7 @@ mod step_changed;
 mod step_crash;
 #[cfg(debug_assertions)]
 mod step_given_up;
+mod step_left;
 #[cfg(debug_assertions)]
 mod step_notes;
 mod step_refused;

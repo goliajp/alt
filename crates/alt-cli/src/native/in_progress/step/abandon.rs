@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use super::super::super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
+use super::super::super::notes::notes_moved;
 use super::super::super::recovery::{canonical_index, encode, hash};
 use super::super::super::*;
 use super::mark::{StateText, StepMark};
@@ -31,6 +32,27 @@ fn changed(what: &str, begun: OpId) -> Box<dyn std::error::Error> {
         "{what} was changed after the operation was interrupted; `alt operation abandon {begun} \
          --keep-changes` gives the operation up and leaves it as it is"
     ))
+}
+
+/// Refuses where a file among `kept`, left as it is, is where the step
+/// found a directory, and one of `files` puts a file of that directory
+/// back: nothing is written yet.
+fn kept_out_of_the_way(files: &[FileChange], kept: &[String]) -> Res<()> {
+    for change in files.iter().filter(|change| change.after.is_some()) {
+        let within = |kept: &&String| {
+            let at = kept.len();
+            change.path.starts_with(kept.as_bytes()) && change.path.get(at) == Some(&b'/')
+        };
+        if let Some(kept) = kept.iter().find(within) {
+            let path = BString::from(change.path.clone());
+            return Err(refusal(format!(
+                "'{kept}' was changed after the operation was interrupted, and left as it is \
+                 it is in the way of '{path}', which the operation found there: move '{kept}' \
+                 aside and give the operation up again"
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl NativeRepo<'_> {
@@ -75,6 +97,7 @@ impl NativeRepo<'_> {
                 });
             }
         }
+        kept_out_of_the_way(&files, &kept)?;
         Ok((files, kept))
     }
 
@@ -96,7 +119,10 @@ impl NativeRepo<'_> {
         let index = canonical_index(self.index()?, self.store.algo()?);
         let now = hash(&index);
         let recorded = |c: &CheckoutIntent| c.index_before == now || c.index_after == now;
-        let index_after = match told.checkouts.iter().any(recorded) {
+        // a checkout that gave the step up before and was cut short is
+        // from the index it found, which the step need not have recorded
+        let own = &told.checkouts[..told.own.unwrap_or(told.checkouts.len())];
+        let index_after = match own.iter().any(recorded) {
             true => first.index_before.clone(),
             false if keep => {
                 kept.push("the index".to_owned());
@@ -151,9 +177,10 @@ impl NativeRepo<'_> {
         &mut self,
         begun: &alt_oplog::Op,
         mark: &StepMark,
-        refs: Vec<RefChange>,
+        told: &Told,
         checkout: Option<CheckoutIntent>,
     ) -> Res<()> {
+        let mut refs = self.refs_back(told)?;
         let said = StepMark {
             version: 1,
             workspace: mark.workspace.clone(),
@@ -176,7 +203,14 @@ impl NativeRepo<'_> {
         }
         self.checkout_intent = checkout;
         let effects = recovery::RefEffects::RefsOnly;
-        let moved = self.commit_refs_gated("recover", &refs, None, effects);
+        // another workspace that moved the notes ref meanwhile has its note
+        // on the tip: what the step wrote is taken out on top of that
+        let moved = loop {
+            match self.commit_refs_gated("recover", &refs, None, effects) {
+                Err(e) if notes_moved(&*e) => refs = self.refs_back(told)?,
+                moved => break moved,
+            }
+        };
         self.checkout_intent = None;
         moved?;
         Ok(())
@@ -205,7 +239,6 @@ impl NativeRepo<'_> {
             return Err(refusal(why));
         }
         let (checkout, kept) = self.checkout_back(&told, begun.id, keep)?;
-        let refs = self.refs_back(&told)?;
         let made = |file: &&StateText| {
             file.text.is_none() && told.state.get(&file.name).is_some_and(Option::is_some)
         };
@@ -215,7 +248,7 @@ impl NativeRepo<'_> {
             .filter(made)
             .map(|f| f.name.clone())
             .collect();
-        self.give_up(&begun, &mark, refs, checkout)?;
+        self.give_up(&begun, &mark, &told, checkout)?;
         self.recover_open_step(false)?;
         Ok((made, kept))
     }

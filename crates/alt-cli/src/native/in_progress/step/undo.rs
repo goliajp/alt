@@ -1,6 +1,7 @@
 //! Taking a step back, as a step in turn.
 
 use super::super::super::checkout_recovery::CheckoutIntent;
+use super::super::super::notes::notes_moved;
 use super::super::super::recovery::decode;
 use super::super::super::*;
 use super::{STATE_FILES, STEP, StepRecord, Tracked, read};
@@ -157,6 +158,7 @@ impl NativeRepo<'_> {
     fn begin_undo(
         &mut self,
         op: &alt_oplog::Op,
+        step: &StepRecord,
         back: &[RefChange],
         checkout: Option<&CheckoutIntent>,
     ) -> Res<Option<OpId>> {
@@ -168,9 +170,22 @@ impl NativeRepo<'_> {
         }
         self.inverse_of = Some(op.id.to_string());
         self.checkout_intent = checkout.cloned();
-        let moved = match checkout.is_some() {
-            true => self.commit_refs("undo", back),
-            false => self.commit_refs_only("undo", back),
+        let mut back = back.to_vec();
+        // another workspace that moved the notes ref meanwhile has its note
+        // on the tip: what the step wrote is taken out on top of that
+        let moved = loop {
+            let moved = match checkout.is_some() {
+                true => self.commit_refs("undo", &back),
+                false => self.commit_refs_only("undo", &back),
+            };
+            match moved {
+                Err(e) if notes_moved(&*e) => {
+                    let (_, notes) = self.refs_to_undo(op, step)?;
+                    back.retain(|change| change.name != crate::meta::NOTES_REF);
+                    back.extend(self.notes_back(&notes)?);
+                }
+                moved => break moved,
+            }
         };
         self.inverse_of = None;
         self.checkout_intent = None;
@@ -206,7 +221,8 @@ impl NativeRepo<'_> {
         for file in &step.state {
             self.plan_state(&file.name, file.before.clone())?;
         }
-        if let (Some(operation), Some(checkout)) = (self.begin_undo(op, back, checkout)?, checkout)
+        if let (Some(operation), Some(checkout)) =
+            (self.begin_undo(op, step, back, checkout)?, checkout)
         {
             self.apply_prepared_checkout(operation, checkout)?;
         }

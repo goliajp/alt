@@ -75,10 +75,9 @@ fn a_revert_killed_in_one_workspace_is_finished_after_a_commit_in_another() {
     assert!(!main.join("g.txt").exists());
     assert_eq!(ok(&main, &["operation", "pending"]), "");
     assert!(ok(&main, &["status", "--json"]).contains(r#""clean":true"#));
-    // both notes are there
-    for at in [&main, &other] {
-        ok(at, &["meta", "show"]);
-    }
+    // both notes are there, each shown in the workspace of its commit
+    assert!(ok(&main, &["meta", "show"]).contains("summary: Revert"));
+    assert!(ok(&other, &["meta", "show"]).contains("summary: h\n"));
     commit(&main, "i.txt", "i");
     ok(&main, &["fsck"]);
 }

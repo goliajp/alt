@@ -41,7 +41,7 @@ impl NativeRepo<'_> {
             if self.observed_among(&paths, change)? != change.after {
                 return Err(crate::machine::Failure::refusal(
                     "precondition_failed",
-                    "recovery precondition failed: working-tree path changed",
+                    format!("recovery precondition failed: working-tree path '{path}' changed"),
                 )
                 .into());
             }

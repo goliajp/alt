@@ -46,6 +46,8 @@ pub(super) struct Told {
     gives_up: bool,
     /// the step was given up: it ends as it began
     undone: bool,
+    /// how many of the checkouts are from before it was
+    pub(super) own: Option<usize>,
     /// what state files became
     pub(super) state: BTreeMap<String, Option<String>>,
     /// what they become if the next record is the one it holds with
@@ -78,6 +80,7 @@ impl Told {
         if std::mem::take(&mut self.gives_up) {
             self.given_up.append(&mut self.unfinished);
             self.undone = true;
+            self.own.get_or_insert(self.checkouts.len());
         }
     }
 }
