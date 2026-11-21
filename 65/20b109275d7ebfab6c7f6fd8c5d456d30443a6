@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: perf
+summary: have fsck walk what the refs lead to with each tree and commit looked up once, read without hashing and its entries not copied
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck/lost.rs
+touched: crates/alt-cli/src/fsck/reach.rs
+touched: crates/alt-cli/src/native/unconfirmed/lost.rs
+touched: crates/alt-cli/tests/it/fsck_reach.rs
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-odb/src/odb/bulk.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/unverified.rs
