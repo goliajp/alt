@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: count the syncs of a request's receipts and of the directories above them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/staged_durability.rs
