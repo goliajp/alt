@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the functions and the test file the request changes touched at their size
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/durable.rs
+touched: crates/alt-cli/src/execution.rs
+touched: crates/alt-cli/src/request.rs
+touched: crates/alt-cli/tests/it/machine_results.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/request_operations.rs
