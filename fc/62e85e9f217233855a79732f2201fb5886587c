@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: keep the tests of a push's trees in one file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits/tests.rs
+touched: crates/alt-cli/src/added_commits/tree_tests.rs
