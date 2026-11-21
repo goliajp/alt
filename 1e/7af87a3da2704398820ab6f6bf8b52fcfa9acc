@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a rebase the policy forbids only where it would move the branch off its commits
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/rebase.rs
+touched: crates/alt-cli/src/native/rebase/leave.rs
+touched: crates/alt-cli/src/native/rebase/state.rs
+touched: crates/alt-cli/tests/it/step_refused.rs
