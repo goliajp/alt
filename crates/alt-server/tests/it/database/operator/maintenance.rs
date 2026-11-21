@@ -4,9 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 #[test]
 #[ignore = "requires isolated PostgreSQL, age and matching PostgreSQL tools; real Cloud backup and fresh runtime binding"]
 fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
-    use golia_platform_contract::{
-        AccountAuthorization, Audience, Capability, Counter, Lease, Product,
-    };
+    use golia_platform_contract::{AccountAuthorization, Audience, Capability, Counter, Product};
     let source = OperatorDb::new();
     let configure = |db: &OperatorDb, generation: u64, key: &str| {
         let mut config = Config::read(&db.config).unwrap();
@@ -53,14 +51,7 @@ fn cloud_backup_restores_with_fresh_binding_and_rejects_old_credentials() {
     )
     .unwrap();
     let claims = AccountAuthorization {
-        lease: Lease {
-            version: 1,
-            audience: config.cloud.as_ref().unwrap().audience.clone(),
-            sequence: Counter(1),
-            revocation_generation: Counter(1),
-            issued_at_unix_ms: Counter(future() - 3_600_000),
-            expires_at_unix_ms: Counter(future() - 3_540_000),
-        },
+        lease: crate::database::cloud::lease(&config.cloud.as_ref().unwrap().audience, 1),
         account_id: "owner".to_string().try_into().unwrap(),
         session_id: "session".to_string().try_into().unwrap(),
         membership_id: "member".to_string().try_into().unwrap(),
