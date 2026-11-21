@@ -152,8 +152,9 @@ fn index_synced(
         let marker = Marker::read(durable);
         // a marker that is gone, does not read or has unsynced appends
         // past its boundaries bounds nothing
+        let unsynced = marker.recorded().is_some() && !marker.trusted();
         let synced = |log, seq, len| match marker.basis(log, seq, len, || true) {
-            Basis::Boundary(upto) if marker.trusted() => Some(upto),
+            Basis::Boundary(upto) if !unsynced => Some(upto),
             _ => None,
         };
         let upto = |log| synced(log, 0, 0).unwrap_or(0);
