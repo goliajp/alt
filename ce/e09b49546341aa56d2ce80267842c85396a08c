@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: have a writer that syncs look at what the running boot left unsynced before it records it as synced
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/unsynced_lost.rs
+touched: crates/alt-odb/src/odb/bound.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-odb/tests/it/left_unsynced.rs
