@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: cover short daemon frames, a variable that is not utf-8 and workers given work at once
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon.rs
+touched: crates/alt-cli/src/workers.rs
