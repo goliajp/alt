@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: have core.fsync included for a branch count on that branch, as git has it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/execution.rs
+touched: crates/alt-cli/src/hardening.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/coord.rs
+touched: crates/alt-cli/tests/it/fsync_by_branch.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/staged_durability.rs
