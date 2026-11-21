@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: sync the record that closes a step, so that no command reads the log through after it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/step_synced.rs
