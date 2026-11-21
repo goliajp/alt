@@ -62,10 +62,13 @@ pub fn hardens_index(value: &[u8]) -> (bool, Vec<&[u8]>) {
 }
 
 /// Whether the configuration that applies in the repository under
-/// `alt_dir`, as the caller `identity` reads it, has `alt add` sync.
-fn index_hardened(alt_dir: &Path, identity: &Identity) -> Res<bool> {
+/// `alt_dir`, as the caller `identity` reads it for a command it runs
+/// `at` a directory and workspace, has `alt add` sync. As for git, what
+/// is included for a branch counts on that branch.
+fn index_hardened(alt_dir: &Path, identity: &Identity, at: At<'_>) -> Res<bool> {
     let _caller = identity.outer_environment();
-    let read = crate::git_settings::applying(&alt_dir.join("git-import"), || None)?;
+    let branch = || crate::native::branch_at(at.0, at.1);
+    let read = crate::git_settings::applying(&alt_dir.join("git-import"), branch)?;
     let settings = &read.config;
     let Some(value) = settings.get_str("core", None, "fsync") else {
         return Ok(false);
@@ -78,6 +81,9 @@ fn index_hardened(alt_dir: &Path, identity: &Identity) -> Res<bool> {
     UNKNOWN.set(told.collect());
     Ok(index)
 }
+
+/// Where a command runs: its directory, and the workspace it names.
+pub type At<'a> = (&'a Path, Option<&'a str>);
 
 thread_local! {
     /// what the command this thread runs is to say of its `core.fsync`
@@ -93,11 +99,17 @@ pub fn take_warnings() -> String {
 /// Has the running thread leave what it writes unsynced where `command`
 /// does, until the value returned is dropped. `drawn`: the request id was
 /// drawn for this run and no caller chose it.
-pub fn enter(command: &Command, drawn: bool, alt_dir: &Path, identity: &Identity) -> Res<Unsynced> {
+pub fn enter(
+    command: &Command,
+    drawn: bool,
+    alt_dir: &Path,
+    identity: &Identity,
+    at: At<'_>,
+) -> Res<Unsynced> {
     // a thread that already leaves its writes unsynced has been through here
     let left = alt_os::durability::unsynced()
         || identity.relaxed()
-        || (drawn && stages_only(command) && !index_hardened(alt_dir, identity)?);
+        || (drawn && stages_only(command) && !index_hardened(alt_dir, identity, at)?);
     Ok(alt_os::durability::leave_unsynced(left))
 }
 

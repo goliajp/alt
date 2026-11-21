@@ -26,7 +26,7 @@ pub(super) fn add(dir: &Path, name: &str) {
 
 /// Whether the markers record every file as synced to its end, with no
 /// unsynced appends to follow.
-fn synced_to_the_ends(dir: &Path) -> bool {
+pub(super) fn synced_to_the_ends(dir: &Path) -> bool {
     let alt_dir = dir.join(".alt");
     (odb_flags(&alt_dir), oplog_flags(&alt_dir)) == (0, 0)
         && objects_synced(&alt_dir) == lens(&alt_dir)

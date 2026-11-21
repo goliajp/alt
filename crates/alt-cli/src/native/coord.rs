@@ -105,3 +105,17 @@ pub fn resolve_workspace(start: &Path, workspace: Option<&str>) -> Res<(PathBuf,
             .ok_or("not an alt repository (no .alt found)")?;
     }
 }
+
+/// The branch checked out in the workspace a command run in `cwd` works
+/// in, read from the refs as they are and without opening the store;
+/// `None` where that workspace is on no branch or cannot be read.
+pub fn branch_at(cwd: &Path, workspace: Option<&str>) -> Option<BString> {
+    let (alt_dir, coord) = resolve_workspace(cwd, workspace).ok()?;
+    let refs = RefStore::open_read_only(&alt_dir).ok()?;
+    let full = match refs.get(&coord.head_ref) {
+        Some(RefTarget::Symbolic(branch)) => branch.as_str(),
+        Some(RefTarget::Oid(_)) => return None,
+        None => "refs/heads/main",
+    };
+    Some(BString::from(full.strip_prefix("refs/heads/")?))
+}

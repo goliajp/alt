@@ -67,7 +67,8 @@ pub fn submit(
     let bound = binding(&parsed, cwd, identity)
         .and_then(|bound| {
             // this process runs the one command: what it says here stands
-            let left = hardening::enter(&parsed.cli.command, drawn, &bound.0, identity)?;
+            let at = (cwd, parsed.cli.workspace.as_deref());
+            let left = hardening::enter(&parsed.cli.command, drawn, &bound.0, identity, at)?;
             std::mem::forget(left);
             // an id drawn here for a command this process runs itself is
             // known to nobody until the request is claimed under it
@@ -140,7 +141,8 @@ impl Execution {
                     Some(bound) => bound,
                     None => binding(&parsed, &cwd, &identity)?,
                 };
-                let left = hardening::enter(&parsed.cli.command, drawn, &alt_dir, &identity)?;
+                let at = (cwd.as_path(), parsed.cli.workspace.as_deref());
+                let left = hardening::enter(&parsed.cli.command, drawn, &alt_dir, &identity, at)?;
                 // what was found to say of `core.fsync`, here or in `submit`
                 let left = (left, hardening::take_warnings());
                 match request::claim(&alt_dir, id, repository, workspace, &value)? {

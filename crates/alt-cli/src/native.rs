@@ -29,7 +29,7 @@ mod cherry_pick;
 pub mod commit;
 mod convert;
 mod coord;
-pub use coord::{Coord, resolve_workspace};
+pub use coord::{Coord, branch_at, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
