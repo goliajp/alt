@@ -226,6 +226,15 @@ fn an_index_change_of_the_older_program_after_a_mark_is_no_reason_to_leave_the_s
     same_reads(&old, repo);
 }
 
+/// What the file holds, what the log says of it, and what closing the
+/// operation by hand does.
+fn said_of_the_file(refused: &Output, side: &str) {
+    let refused = said(refused);
+    let how = format!("MERGE_HEAD holds {side:?}, and the log says it is not there");
+    assert!(refused.contains(&how), "{refused}");
+    assert!(refused.contains("changes no file"), "{refused}");
+}
+
 #[test]
 #[ignore = "run with ALT_OLD_BIN set to an alt built from the base branch"]
 fn a_state_file_that_is_not_as_the_log_says_keeps_the_step_open_until_it_is_closed_by_hand() {
@@ -253,10 +262,7 @@ fn a_state_file_that_is_not_as_the_log_says_keeps_the_step_open_until_it_is_clos
             said(&refused)
         );
     }
-    let refused = said(&run(&new, repo, &["add", "f.txt"]));
-    let how = format!("MERGE_HEAD holds {side:?}, and the log says it is not there");
-    assert!(refused.contains(&how), "{refused}");
-    assert!(refused.contains("changes no file"), "{refused}");
+    said_of_the_file(&run(&new, repo, &["add", "f.txt"]), &side);
     // the abort would give the step up, which cannot be done either
     let refused = run(&new, repo, &["merge", "--abort"]);
     assert!(!refused.status.success());

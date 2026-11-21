@@ -143,6 +143,45 @@ impl NativeRepo<'_> {
         Ok(back)
     }
 
+    /// Writes that the step `begun` began is given up, and with that the
+    /// `refs` moved back and the `checkout` that puts its files back. The
+    /// state files are as the step found them with the record that takes
+    /// the rest back, or at once where there is nothing else.
+    fn give_up(
+        &mut self,
+        begun: &alt_oplog::Op,
+        mark: &StepMark,
+        refs: Vec<RefChange>,
+        checkout: Option<CheckoutIntent>,
+    ) -> Res<()> {
+        let said = StepMark {
+            version: 1,
+            workspace: mark.workspace.clone(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+            begin: Some(begun.id.to_string()),
+            inverse_of: None,
+            before: Vec::new(),
+            state: mark.before.clone(),
+            with_effect: checkout.is_some() || !refs.is_empty(),
+            gives_up: true,
+        };
+        let actor = self.id.actor("recover");
+        let payload = encode(STEP_MARK, &said)?;
+        self.store.refs.record_op(&actor, now_ms(), &payload)?;
+        if refs.is_empty() {
+            if let Some(checkout) = &checkout {
+                self.record_checkout("recover", checkout)?;
+            }
+            return Ok(());
+        }
+        self.checkout_intent = checkout;
+        let effects = recovery::RefEffects::RefsOnly;
+        let moved = self.commit_refs_gated("recover", &refs, None, effects);
+        self.checkout_intent = None;
+        moved?;
+        Ok(())
+    }
+
     /// Gives up the step of this workspace that was cut short: the
     /// workspace is as before the command of that step. Refused, with
     /// nothing changed, where it is no longer as the step left it. The
@@ -176,33 +215,7 @@ impl NativeRepo<'_> {
             .filter(made)
             .map(|f| f.name.clone())
             .collect();
-        // the state files are as the step found them with the record that
-        // takes the rest back, or at once where there is nothing else
-        let said = StepMark {
-            version: 1,
-            workspace: mark.workspace.clone(),
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            begin: Some(begun.id.to_string()),
-            inverse_of: None,
-            before: Vec::new(),
-            state: mark.before.clone(),
-            with_effect: checkout.is_some() || !refs.is_empty(),
-            gives_up: true,
-        };
-        let actor = self.id.actor("recover");
-        let payload = encode(STEP_MARK, &said)?;
-        self.store.refs.record_op(&actor, now_ms(), &payload)?;
-        if refs.is_empty() {
-            if let Some(checkout) = &checkout {
-                self.record_checkout("recover", checkout)?;
-            }
-        } else {
-            self.checkout_intent = checkout;
-            let effects = recovery::RefEffects::RefsOnly;
-            let moved = self.commit_refs_gated("recover", &refs, None, effects);
-            self.checkout_intent = None;
-            moved?;
-        }
+        self.give_up(&begun, &mark, refs, checkout)?;
         self.recover_open_step(false)?;
         Ok((made, kept))
     }

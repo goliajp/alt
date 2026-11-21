@@ -94,6 +94,21 @@ fn stuck(begun: &alt_oplog::Op, why: &dyn std::error::Error) -> Box<dyn std::err
     crate::machine::Failure::pending(id, said).into()
 }
 
+/// The record that closes the step `begun` began, telling of no change yet.
+fn closing(begun: &alt_oplog::Op, mark: &StepMark) -> StepRecord {
+    StepRecord {
+        version: 1,
+        workspace: mark.workspace.clone(),
+        request_id: mark.request_id.clone(),
+        inverse_of: mark.inverse_of.clone(),
+        begin: Some(begun.id.to_string()),
+        abandoned: false,
+        refs: Vec::new(),
+        checkout: None,
+        state: Vec::new(),
+    }
+}
+
 fn unsupported() -> Box<dyn std::error::Error> {
     crate::machine::Failure::refusal("unsupported_record", "unsupported step mark").into()
 }
@@ -213,17 +228,7 @@ impl NativeRepo<'_> {
         let Some((begun, mark, false)) = self.last_step_mark()? else {
             return Ok(());
         };
-        let mut step = StepRecord {
-            version: 1,
-            workspace: mark.workspace.clone(),
-            request_id: mark.request_id.clone(),
-            inverse_of: mark.inverse_of.clone(),
-            begin: Some(begun.id.to_string()),
-            abandoned: false,
-            refs: Vec::new(),
-            checkout: None,
-            state: Vec::new(),
-        };
+        let mut step = closing(&begun, &mark);
         let told = self.told_after(&begun, &mark)?;
         let before: Vec<Option<String>> = mark.before.iter().map(|f| f.text.clone()).collect();
         if before.len() != STATE_FILES.len() {

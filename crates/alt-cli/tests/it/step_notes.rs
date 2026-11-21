@@ -53,8 +53,10 @@ fn reverted_around_a_commit(dir: &Path, dies_at: Option<&str>) -> (PathBuf, Path
         commit(&main, file);
     }
     ok(&main, &["branch", "feat"]);
-    let at = other.to_str().unwrap();
-    ok(&main, &["workspace", "add", "other", at, "feat"]);
+    ok(
+        &main,
+        &["workspace", "add", "other", other.to_str().unwrap(), "feat"],
+    );
 
     let list = dir.join("points");
     let listing = format!("list:{}", list.display());
