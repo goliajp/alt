@@ -64,6 +64,7 @@ mod log_patch;
 mod log_tails;
 mod machine_results;
 mod merge;
+mod merge_abort;
 mod merge_criss_cross;
 mod merge_modes;
 mod mixed_versions;

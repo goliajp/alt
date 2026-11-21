@@ -251,14 +251,7 @@ fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> 
                 0
             })
         }
-        Command::Merge { branch, json } => {
-            // git exits 1 when a merge stops in conflict
-            Ok(if repo.merge(branch, *json, out)? {
-                1
-            } else {
-                0
-            })
-        }
+        Command::Merge { args } => sequence::merge(repo, args, out),
         _ => Err("not a native command".into()),
     }
 }

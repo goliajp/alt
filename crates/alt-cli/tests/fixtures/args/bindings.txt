@@ -456,3 +456,5 @@ alt add -u
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["757064617465"],"json":["66616c7365"],"update":["74727565"]}},"name":"add"},"values":{}}
 alt add -A .
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["616c6c","7061746873"],"all":["74727565"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt merge --abort
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Merge":["61626f72745f6d65726765"],"abort_merge":["74727565"],"json":["66616c7365"]}},"name":"merge"},"values":{}}

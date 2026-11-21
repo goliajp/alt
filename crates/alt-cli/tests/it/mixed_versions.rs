@@ -6,6 +6,7 @@
 //! the branch this work started from).
 
 mod abandoned_add;
+mod abort;
 mod cherry_pick;
 
 use std::fs;

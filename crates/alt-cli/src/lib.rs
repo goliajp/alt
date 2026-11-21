@@ -37,6 +37,7 @@ pub mod prompt;
 pub mod quote;
 pub mod request;
 pub mod runner;
+pub mod sequence_args;
 pub mod shell;
 mod tree_changes;
 pub mod workers;

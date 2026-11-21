@@ -111,3 +111,18 @@ fn revert_and_cherry_pick() {
     s.json(&["log", "--json", "-n", "3"]);
     s.finish();
 }
+
+#[test]
+fn merge_given_up() {
+    let mut s = diverged("merge-abort");
+    s.json(&["merge", "--abort", "--json"]);
+    s.json(&["merge", "feat", "--json"]);
+    // a file the merge brought, changed since: the abort would write over it
+    s.write("only-feat.txt", "changed\n");
+    s.json(&["merge", "--abort", "--json"]);
+    s.write("only-feat.txt", "x\n");
+    s.json(&["merge", "--abort", "--json"]);
+    s.json(&["status", "--json"]);
+    s.json(&["op-log", "-n", "2", "--json"]);
+    s.finish();
+}

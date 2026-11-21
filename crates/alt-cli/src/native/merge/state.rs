@@ -1,8 +1,9 @@
-//! What a merge that stopped in conflict leaves behind.
+//! What a merge that stopped in conflict leaves behind, and giving the
+//! merge up.
 //!
 //! `MERGE_HEAD` lies next to the index of the workspace and names the
 //! commit being merged in. The commit that concludes the merge removes
-//! it.
+//! it, and so does `alt merge --abort`.
 
 use super::*;
 
@@ -43,7 +44,8 @@ impl NativeRepo<'_> {
         let hint = match self.operation_kind()? {
             None | Some(OperationKind::CherryPick) => return Ok(()),
             Some(OperationKind::Merge) => {
-                "a merge is in progress; resolve the conflicts and commit it first"
+                "a merge is in progress; resolve the conflicts and commit it first, \
+                 or give it up with `alt merge --abort`"
             }
             Some(OperationKind::Bisect) => {
                 "a bisect is in progress; end it with `alt bisect reset`"
@@ -58,5 +60,23 @@ impl NativeRepo<'_> {
             }
         };
         Err(format!("{verb}: {hint}").into())
+    }
+
+    /// `alt merge --abort`: the index and the files as they were before
+    /// the merge, as git's `merge --abort` leaves them. The branch never
+    /// moved.
+    pub fn merge_abort(&mut self, out: &mut impl Write) -> Res<()> {
+        if self.merge_head()?.is_none() {
+            return Err("merge --abort: no merge in progress".into());
+        }
+        let head = self
+            .store
+            .refs
+            .resolve(&self.head_ref)?
+            .ok_or("merge --abort: the branch has no commits yet")?;
+        self.reset_merge(head, "merge --abort")?;
+        self.finish_merge()?;
+        writeln!(out, "Merge aborted.")?;
+        Ok(())
     }
 }

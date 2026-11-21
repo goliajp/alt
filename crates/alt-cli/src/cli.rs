@@ -13,6 +13,7 @@ mod git;
 mod native;
 mod platform;
 mod prepare;
+mod sequence;
 mod task;
 mod task_remote;
 mod vcs;

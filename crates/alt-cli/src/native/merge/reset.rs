@@ -1,5 +1,5 @@
-//! Taking back what a stopped step left in the index and the working
-//! tree.
+//! Taking back what a stopped merge, pick or revert left in the index and
+//! the working tree.
 
 use super::*;
 
@@ -31,5 +31,38 @@ impl NativeRepo<'_> {
             }
         }
         self.checkout(&known, &target)
+    }
+
+    /// git's `reset --merge` to `commit`, which a merge or a pick that is
+    /// given up ends with: [`reset_worktree_to`](Self::reset_worktree_to),
+    /// refused before anything is written where it would write over a
+    /// change that is not staged. A file the index has as `commit` has it
+    /// is left alone, changed or not.
+    pub(in crate::native) fn reset_merge(&mut self, commit: ObjectId, verb: &str) -> Res<()> {
+        let target = self.commit_entries(commit)?;
+        let wanted: std::collections::HashMap<&BString, &WorkEntry> =
+            target.iter().map(|t| (&t.path, t)).collect();
+        let state = self.tree_state(alt_worktree::Untracked::No)?;
+        // what a submodule has checked out is nothing a checkout writes over
+        let changed = state.delta.changed.iter().filter(|w| w.mode != 0o160000);
+        let changed: std::collections::HashSet<&BString> = changed.map(|w| &w.path).collect();
+        for e in self.index()?.entries.iter().filter(|e| e.stage() == 0) {
+            let kept = wanted
+                .get(&e.path)
+                .is_some_and(|t| t.oid == e.oid && t.mode == e.mode);
+            if !kept && changed.contains(&e.path) {
+                return Err(crate::machine::Failure::refusal(
+                    "precondition_failed",
+                    format!(
+                        "{verb}: '{}' has changes that are not staged and would be \
+                         overwritten; stage them or take them back first",
+                        e.path
+                    ),
+                )
+                .into());
+            }
+        }
+        drop(state);
+        self.reset_worktree_to(commit)
     }
 }

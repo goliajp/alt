@@ -39,7 +39,7 @@ exit 1
 err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"unmerged paths remain: resolve the conflicts and `alt add` them first","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:4>","retryable":false},"schema_version":1}
 $ [repo] alt switch feat --json
 exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"switch: a merge is in progress; resolve the conflicts and commit it first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:5>","retryable":false},"schema_version":1}
+err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"switch: a merge is in progress; resolve the conflicts and commit it first, or give it up with `alt merge --abort`","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:5>","retryable":false},"schema_version":1}
 $ [repo] alt operation pending --json
 exit 0
 out| {"schema_version":1,"operations":[]}
