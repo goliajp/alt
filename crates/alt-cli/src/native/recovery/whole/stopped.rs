@@ -1,8 +1,8 @@
 //! The index a merge that stopped on conflicts left. No operation records
 //! it, so it is kept as a recovery snapshot and noted beside the index
-//! with the last operation of the log at that time: an index file that is
-//! torn later is put back to the conflicts, not to what was there before
-//! the merge.
+//! with the last operation of the log at that time, which is synced
+//! first: an index file that is torn later is put back to the conflicts,
+//! not to what was there before the merge.
 //!
 //! A build older than this note leaves none. The first add of this build
 //! that finds a stop without a note that holds keeps the index as it
@@ -155,7 +155,7 @@ impl NativeRepo<'_> {
     /// After an add put `index` in place of one from before a stop: the
     /// outcome of the stop as it is staged now is the index the stop
     /// left from here on.
-    pub(in crate::native) fn keep_restaged(&self, index: Option<Index>) -> Res<()> {
+    pub(in crate::native) fn keep_restaged(&mut self, index: Option<Index>) -> Res<()> {
         let Some(index) = index else {
             return Ok(());
         };
@@ -167,7 +167,7 @@ impl NativeRepo<'_> {
     /// conflicts and no note that holds tells of the index it left (an
     /// older build made the stop), `index` is kept as that index, synced
     /// whatever the add syncs.
-    fn keep_unnoted_stop(&self, index: &Index) -> Res<()> {
+    fn keep_unnoted_stop(&mut self, index: &Index) -> Res<()> {
         if self.lost_stop_restored() || self.marked_stopped()?.is_none() {
             return Ok(());
         }
@@ -205,7 +205,11 @@ impl NativeRepo<'_> {
     /// Keeps `index`, which a merge that stopped has just put in place,
     /// where it is found again should the index file be torn later: no
     /// operation records this index.
-    pub(in crate::native) fn keep_stopped(&self, index: Index) -> Res<()> {
+    pub(in crate::native) fn keep_stopped(&mut self, index: Index) -> Res<()> {
+        // the note names the last operation of the log: one an add left
+        // unsynced can go with a power cut, and the note would then name
+        // nothing
+        self.store.refs.bound()?;
         let Some(after) = self.store.refs.head_op() else {
             return Ok(());
         };

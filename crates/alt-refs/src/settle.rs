@@ -55,6 +55,14 @@ impl RefStore {
         self.oplog.appended_len() <= self.synced
     }
 
+    /// Has the log's marker record a boundary that holds over the log
+    /// as it is now, what its operations name synced first, and folds in
+    /// what other writers appended.
+    pub fn bound(&mut self) -> Result<(), RefError> {
+        self.oplog.bound_now()?;
+        self.refresh()
+    }
+
     /// Whether every op of the log is recorded as synced. Reads the
     /// marker, unless the snapshot's note already said so, and takes no
     /// lock.

@@ -6,6 +6,17 @@ use crate::synced::{self, Marker};
 use crate::{OpLog, OpLogError, relaxed_durability};
 
 impl OpLog {
+    /// Sees to it, as a writer does before it appends, that the marker
+    /// records a boundary that holds over the log as it is now: for one
+    /// about to note the last operation where a power cut must not take
+    /// that operation.
+    pub fn bound_now(&mut self) -> Result<(), OpLogError> {
+        lock_exclusive(&self.file)?;
+        let bounded = self.catch_up_bounded();
+        let _ = unlock(&self.file);
+        bounded
+    }
+
     /// With the lock held: reads the log to its end and sees to it that
     /// its marker records a boundary that holds ([`Self::bound`]). The
     /// lock is held when this returns.
