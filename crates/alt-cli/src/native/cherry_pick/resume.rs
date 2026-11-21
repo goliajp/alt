@@ -60,6 +60,18 @@ impl NativeRepo<'_> {
         report_picked(&source, picked, commit, json, out)
     }
 
+    /// The author of the commit being picked, whom the commit that
+    /// concludes the pick keeps, as git has it.
+    pub(in crate::native) fn picked_author(&self) -> Res<Option<Sig<'static>>> {
+        let Some((picked, _)) = self.stopped_cherry_pick()? else {
+            return Ok(None);
+        };
+        let source = self.store.odb.get(&picked)?;
+        let source = source.ok_or("commit missing from store")?;
+        let source = alt_git_codec::Commit::parse(&source.data)?;
+        Ok(Some(picked_identity(&source, picked)?.0))
+    }
+
     /// `alt cherry-pick --abort`: the index and the files as they were
     /// before the pick, as git's `cherry-pick --abort` leaves them. The
     /// branch never moved.

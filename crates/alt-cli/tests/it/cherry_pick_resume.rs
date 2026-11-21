@@ -9,7 +9,7 @@ use crate::stopped_trees::{
 };
 
 /// `cat-file -p` of `rev` in `tree`.
-fn shown(trees: &Trees, tree: &str, rev: &str) -> String {
+pub(crate) fn shown(trees: &Trees, tree: &str, rev: &str) -> String {
     let at = trees.at(tree);
     let said = match tree {
         "git" => git(&at, &["cat-file", "-p", rev]),
@@ -20,7 +20,7 @@ fn shown(trees: &Trees, tree: &str, rev: &str) -> String {
 }
 
 /// Who a header of a commit names and when, without the time zone.
-fn header(commit: &str, name: &str) -> (String, String) {
+pub(crate) fn header(commit: &str, name: &str) -> (String, String) {
     let line = commit.lines().find(|l| l.starts_with(name)).unwrap();
     let (who, rest) = line.split_once("> ").unwrap();
     (who.to_owned(), rest.split(' ').next().unwrap().to_owned())
@@ -41,7 +41,7 @@ fn message(commit: &str) -> String {
 
 /// The trees of [`diverged`], whose commit on `side` has another author
 /// than the one that picks it.
-fn by_another_author() -> Trees {
+pub(crate) fn by_another_author() -> Trees {
     let trees = diverged();
     assert_eq!(every(&trees, &["switch", "side"]), [Some(0); 3]);
     trees.write("f.txt", "1\nside by another\n3\n");
@@ -71,7 +71,7 @@ fn by_another_author() -> Trees {
 
 /// Stops a pick of the last commit of `side` in each tree. git is asked
 /// for the line naming the commit picked, which alt always writes.
-fn stop(trees: &Trees) {
+pub(crate) fn stop(trees: &Trees) {
     for (tree, daemon) in [("direct", false), ("served", true)] {
         let picked = output(&trees.at(tree), &["cherry-pick", "side"], daemon);
         assert_eq!(picked.status.code(), Some(1), "{tree}");

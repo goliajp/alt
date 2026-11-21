@@ -78,6 +78,7 @@ mod past_damage;
 mod path_gate;
 mod pathspec_git;
 mod patterns;
+mod pick_by_commit;
 mod precommit;
 mod prompt;
 mod push;

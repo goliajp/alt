@@ -71,12 +71,13 @@ impl NativeRepo<'_> {
             tz: "+0000",
         };
         let msg = with_newline(message);
+        let picked = self.picked_author()?;
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
-                author: &me,
+                author: picked.as_ref().unwrap_or(&me),
                 committer: &me,
                 message: &msg,
             },
