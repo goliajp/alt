@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: test
+summary: push trees with a gitlink, and the empty tree with and without its object
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits.rs
+touched: crates/alt-cli/src/added_commits/tests.rs
+touched: crates/alt-cli/src/added_commits/tree_tests.rs
+touched: crates/alt-cli/tests/it/altd_server_no_new_objects.rs
+touched: crates/alt-cli/tests/it/altd_server_trees.rs
+touched: crates/alt-cli/tests/it/main.rs
