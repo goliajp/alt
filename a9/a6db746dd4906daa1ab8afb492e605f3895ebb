@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: say what a state file holds and what the log says of it where the two differ, and what closing the operation by hand accepts
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/left.rs
