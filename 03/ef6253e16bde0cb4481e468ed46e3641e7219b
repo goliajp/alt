@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: have a commit store its tree, the commit and its note under one hold of the write lock of the object store
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/commit_batch.rs
+touched: crates/alt-cli/tests/it/main.rs
