@@ -16,6 +16,9 @@ fn marker_removed(alt_dir: &Path) {
     fs::remove_file(alt_dir.join("oplog/durable")).unwrap();
 }
 
+/// Makes the markers of a repository those of one state.
+type Made = fn(&Path);
+
 fn flip(path: &Path, at: u64) {
     let file = OpenOptions::new().read(true).write(true).open(path);
     let file = file.unwrap();
@@ -26,7 +29,7 @@ fn flip(path: &Path, at: u64) {
 
 #[test]
 fn an_add_first_over_a_log_without_a_boundary_records_what_the_log_held_as_synced() {
-    let states: [(&str, fn(&Path)); 3] = [
+    let states: [(&str, Made); 3] = [
         ("older", older_markers),
         ("none", no_markers),
         ("removed", marker_removed),
