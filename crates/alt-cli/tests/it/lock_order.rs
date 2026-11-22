@@ -6,8 +6,8 @@
 //!
 //! The second writer is the test: it takes the locks a settling writer
 //! takes, at the moment the first one reads the marker with the log
-//! locked. The marker is a named pipe until then, so that each read of it
-//! waits to be answered.
+//! locked. The marker is a named pipe until then, another one for each
+//! read, so that each read of it waits to be answered.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -79,6 +79,11 @@ fn lock_objects_at_the_boundary(dir: &Path, marker: &[u8]) -> File {
             let file = path.with_file_name("durable.file");
             fs::write(&file, marker).unwrap();
             fs::rename(&file, &path).unwrap();
+        } else {
+            // the next read gets a pipe of its own: this one's reader has
+            // it open until after it is answered, and a write end opened
+            // meanwhile would be this reader's, gone before the answer
+            make_the_marker_a_pipe(dir);
         }
         answer.write_all(marker).unwrap();
         drop(answer);
