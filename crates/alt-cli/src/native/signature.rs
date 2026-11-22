@@ -158,6 +158,13 @@ fn unknown(role: &str, name: bool, email: bool) -> Box<dyn std::error::Error> {
     })
 }
 
+/// `instant` with the zone the caller is in then, as git writes the
+/// moment a commit is made at: the seconds, and the zone as `±hhmm`.
+fn in_zone(said: &Said, instant: i64) -> (i64, String) {
+    let east = alt_os::zone::Zone::of(said.get("TZ")).offset_at(instant);
+    (instant, date::zone(i64::from(east) / 60))
+}
+
 fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signature> {
     let (word, variables, own) = role.names();
     let told = |what: &str| said.get(&format!("{variables}_{what}"));
@@ -182,7 +189,7 @@ fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signatur
             date::parse(date, now, &local)
                 .ok_or_else(|| crate::git_settings::fatal(format!("invalid date format: {date}")))?
         }
-        None => (now, "+0000".to_owned()),
+        None => in_zone(said, now),
     };
     Ok(Signature {
         name,
@@ -209,6 +216,13 @@ impl NativeRepo<'_> {
         self.author().and(self.committer()).map(drop)
     }
 
+    /// This moment in the caller's zone, as the end of an author's or a
+    /// committer's line.
+    pub(super) fn moment(&self) -> String {
+        let (seconds, zone) = in_zone(&self.id.said, (now_ms() / 1000) as i64);
+        format!("{seconds} {zone}")
+    }
+
     fn signature(&self, role: Role) -> Res<Signature> {
         let applying = self.applying()?;
         resolve(
@@ -224,11 +238,44 @@ impl NativeRepo<'_> {
 mod tests {
     use super::*;
 
+    /// What a caller in UTC says, where `pairs` name no other zone.
     fn said(pairs: &[(&str, &str)]) -> Said {
+        let pairs = [pairs, &[("TZ", "UTC")]].concat();
         Said::from_lookup(|key| {
             let pair = pairs.iter().find(|(name, _)| *name == key)?;
             Some(pair.1.to_owned())
         })
+    }
+
+    #[test]
+    fn a_moment_given_no_date_is_in_the_zone_of_the_caller_then() {
+        // 2005-01-07 and 2005-07-07, either side of summer time
+        for (tz, instant, written) in [
+            ("Asia/Tokyo", 1_105_135_993, "U <u@x> 1105135993 +0900"),
+            (
+                "America/New_York",
+                1_105_135_993,
+                "U <u@x> 1105135993 -0500",
+            ),
+            (
+                "America/New_York",
+                1_120_774_393,
+                "U <u@x> 1120774393 -0400",
+            ),
+            ("Asia/Kathmandu", 1_120_774_393, "U <u@x> 1120774393 +0545"),
+            (
+                "EST5EDT,M3.2.0,M11.1.0",
+                1_120_774_393,
+                "U <u@x> 1120774393 -0400",
+            ),
+            ("UTC", 1_120_774_393, "U <u@x> 1120774393 +0000"),
+            ("", 1_120_774_393, "U <u@x> 1120774393 +0000"),
+        ] {
+            for role in [Role::Author, Role::Committer] {
+                let signature = resolve(&said(&[("TZ", tz)]), role, &settings(USER), instant);
+                assert_eq!(signature.unwrap().line(), written, "{tz}");
+            }
+        }
     }
 
     fn settings(text: &str) -> Config {

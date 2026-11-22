@@ -104,3 +104,87 @@ fn a_date_that_is_none_is_refused_as_git_refuses_it() {
         }
     }
 }
+
+/// The zone, the last field, of each line of who made something.
+fn zones_of(lines: &[String]) -> Vec<&str> {
+    let zones = lines.iter().map(|line| line.rsplit(' ').next());
+    zones.map(Option::unwrap).collect()
+}
+
+fn git_in(root: &Path, tz: Option<&str>, args: &[&str]) -> Output {
+    let mut git = Command::new("git");
+    git.current_dir(root)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("HOME", root)
+        .envs(LATER[..4].iter().copied())
+        .env_remove("GIT_AUTHOR_DATE")
+        .env_remove("GIT_COMMITTER_DATE");
+    match tz {
+        Some(tz) => git.env("TZ", tz),
+        None => git.env_remove("TZ"),
+    };
+    git.args(args).output().unwrap()
+}
+
+/// What is given no date is made now, in the zone the caller is in now:
+/// the one its `TZ` names, the system's where it has none, and never the
+/// daemon's.
+#[test]
+fn a_commit_made_now_is_in_the_zone_of_the_caller_as_git_writes_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let theirs = dir.path().join("git");
+    std::fs::create_dir(&theirs).unwrap();
+    ok(git(&theirs, &[], &["init", "-q", "-b", "main", "."]));
+    let (direct, served) = (dir.path().join("direct"), dir.path().join("served"));
+    for root in [&direct, &served] {
+        std::fs::create_dir(root).unwrap();
+        init(root);
+    }
+    let idle = [("TZ", ELSEWHERE), ("ALT_DAEMON_IDLE_MS", "20000")];
+    ok(alt(&served, true, &idle, &["status"]));
+    let daemon = daemon_of(&served);
+    let _stop = crate::scan_daemon::Stop(daemon.parse().unwrap(), false);
+
+    for tz in [
+        Some("Asia/Tokyo"),
+        Some("America/New_York"),
+        Some("UTC"),
+        Some("Asia/Kathmandu"),
+        None,
+    ] {
+        let made = ["commit", "-q", "--allow-empty", "-m", "made"];
+        ok(git_in(&theirs, tz, &made));
+        let lines = git_lines(&theirs, "commit", "HEAD");
+        let expected = zones_of(&lines);
+        assert_eq!(expected.len(), 2, "{tz:?}");
+        let mut env = LATER[..4].to_vec();
+        env.extend(tz.map(|tz| ("TZ", tz)));
+        for (root, daemon) in [(&direct, false), (&served, true)] {
+            let told = format!("{tz:?}, daemon {daemon}");
+            ok(commit(root, daemon, &env));
+            assert_eq!(zones_of(&alt_lines(root, "HEAD")), expected, "{told}");
+            // the notes commit and a tag are the committer's
+            let notes = alt_lines(root, "refs/notes/alt/meta");
+            assert_eq!(zones_of(&notes), expected, "{told}");
+            let name = format!("at-{}-{daemon}", tz.unwrap_or("none").replace('/', "-"));
+            ok(alt(
+                root,
+                daemon,
+                &env,
+                &["tag", "-a", &name, "-m", "marked"],
+            ));
+            let tagger = alt_lines(root, &name);
+            assert_eq!(zones_of(&tagger), expected[1..], "{told}");
+            ok(alt(
+                root,
+                daemon,
+                &env,
+                &["commit", "--amend", "-m", "again"],
+            ));
+            let amended = alt_lines(root, "HEAD");
+            assert_eq!(zones_of(&amended)[1], expected[1], "{told}");
+        }
+    }
+    assert_eq!(daemon_of(&served), daemon, "another daemon served");
+}

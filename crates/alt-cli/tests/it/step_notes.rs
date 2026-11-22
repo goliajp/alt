@@ -24,13 +24,13 @@ fn command(at: &Path, args: &[&str], crash: Option<&str>) -> Command {
 }
 
 /// [`command`] by a caller neither the environment nor any configuration
-/// names.
+/// names, in a zone of its own.
 fn unnamed(at: &Path, args: &[&str], crash: Option<&str>) -> Command {
     let mut command = command(at, args, crash);
     for (name, _) in crate::TEST_SIGNING {
         command.env_remove(name);
     }
-    command.env_remove("EMAIL");
+    command.env_remove("EMAIL").env("TZ", "Asia/Kolkata");
     command
 }
 
@@ -40,7 +40,8 @@ const REVERTER: [(&str, &str); 2] = [
     ("GIT_COMMITTER_EMAIL", "reverter@test.invalid"),
 ];
 
-/// The notes commit at the tip is by the committer of the revert.
+/// The notes commit at the tip is by the committer of the revert, and
+/// was made in the zone of [`unnamed`].
 fn the_notes_are_taken_back_by_the_reverter(main: &Path) {
     let tip = ok(main, &["cat-file", "-p", "refs/notes/alt/meta"]);
     let by = |line: &&str| line.starts_with("author ") || line.starts_with("committer ");
@@ -52,6 +53,8 @@ fn the_notes_are_taken_back_by_the_reverter(main: &Path) {
             who.starts_with("Reverter <reverter@test.invalid> "),
             "{tip}"
         );
+        // the moment is in the zone of whoever took the notes back
+        assert!(who.ends_with(" +0530"), "{tip}");
     }
 }
 

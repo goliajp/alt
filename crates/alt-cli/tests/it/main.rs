@@ -213,12 +213,15 @@ pub fn replace_file(path: &std::path::Path, bytes: impl AsRef<[u8]>) {
     std::fs::rename(new, path).unwrap();
 }
 
-/// Whom the commits of a test are by where it names nobody else.
-pub const TEST_SIGNING: [(&str, &str); 4] = [
+/// Whom the commits of a test are by where it names nobody else, and
+/// the zone they are made in, which is not that of the machine the tests
+/// run on.
+pub const TEST_SIGNING: [(&str, &str); 5] = [
     ("GIT_AUTHOR_NAME", "Test Author"),
     ("GIT_AUTHOR_EMAIL", "author@test.invalid"),
     ("GIT_COMMITTER_NAME", "Test Committer"),
     ("GIT_COMMITTER_EMAIL", "committer@test.invalid"),
+    ("TZ", "UTC"),
 ];
 
 /// Somebody for the commits a test makes in its own process.

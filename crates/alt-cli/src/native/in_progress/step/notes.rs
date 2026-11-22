@@ -50,7 +50,8 @@ impl NativeRepo<'_> {
         Ok(notes)
     }
 
-    /// The committer of the notes commit `written`, at this moment: who
+    /// The committer of the notes commit `written`, at this moment in the
+    /// zone of whoever runs the command: who
     /// takes back what a step wrote to the notes is who wrote it, so that
     /// a step can be undone by a caller nothing names.
     fn writer_of(&self, written: ObjectId) -> Res<String> {
@@ -62,7 +63,7 @@ impl NativeRepo<'_> {
             .as_deref()
             .and_then(|line| Some(&line[..=line.rfind('>')?]));
         let who = who.ok_or("a notes commit of the step names no committer")?;
-        Ok(format!("{who} {} +0000", now_ms() / 1000))
+        Ok(format!("{who} {}", self.moment()))
     }
 
     /// The change of the notes ref that takes back those among `changes`

@@ -4,7 +4,8 @@
 //! or `PM`; a number is seconds since the epoch, a date, a time, a day, a
 //! year or a month by its shape and by what is already known; a sign
 //! before digits is a zone. Whatever is none of these is passed over. A
-//! date without a zone is in the caller's.
+//! date without a zone is in the caller's, as a moment that is given no
+//! date at all is written in the caller's zone.
 //!
 //! Three things git lets through are refused: a time or a zone that is
 //! written as one and cannot be one (`25:13:13`, `24:00:00`, `+2400`,
@@ -243,11 +244,15 @@ impl Read {
     }
 }
 
-fn written(seconds: i64, east: i64) -> (i64, String) {
+/// A zone `east` minutes east of UTC as `±hhmm`.
+pub(super) fn zone(east: i64) -> String {
     let sign = if east < 0 { '-' } else { '+' };
     let minutes = east.abs();
-    let zone = format!("{sign}{:02}{:02}", minutes / 60, minutes % 60);
-    (seconds, zone)
+    format!("{sign}{:02}{:02}", minutes / 60, minutes % 60)
+}
+
+fn written(seconds: i64, east: i64) -> (i64, String) {
+    (seconds, zone(east))
 }
 
 /// `@<seconds> <zone>` and nothing else, as a commit carries a date: the
