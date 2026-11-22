@@ -390,12 +390,11 @@ fatal: fsck: index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b0380
 tree that names a blob which is not there. After `alt add b.txt`, `alt fsck`
 exits 0.
 
-A command that only reads such a blob is told that it is not stored, and
-changes nothing: `alt cat-file -p ID` fails with `fatal: object ID not found`
-and `alt diff --cached` with `fatal: object missing from store`. That is so
-whichever file of the store the content went with, before a command that
-writes has cut the tail as after, and in the session the file was added in
-as after a power cut.
+Until a command that writes has cut the tail, a command that only reads such
+a blob is told that it is not stored, and changes nothing: `alt cat-file -p
+ID` fails with `fatal: object ID not found` and `alt diff --cached` with
+`fatal: object missing from store`, whichever file of the store the content
+went with.
 
 Only entries whose blob is really gone are listed. A file that was added and
 synced before the commit that was discarded still has its blob: neither the
