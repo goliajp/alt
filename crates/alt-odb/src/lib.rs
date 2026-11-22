@@ -198,7 +198,7 @@ impl NativeOdb {
     /// are re-hashed against the recorded blob id — the integrity boundary
     /// so a corrupt part or recipe surfaces, never wrong bytes.
     pub fn get(&self, oid: &ObjectId) -> Result<Option<RawObject>, OdbError> {
-        self.odb()?.get(oid)
+        self.odb()?.get_stored(oid)
     }
 
     /// Identity/kind/size lookup without materializing the payload

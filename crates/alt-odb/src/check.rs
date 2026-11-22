@@ -6,7 +6,7 @@ use alt_git_codec::ObjectId;
 use alt_store::Basis;
 
 use crate::odb::Odb;
-use crate::synced::{HEADER, Log};
+use crate::synced::Log;
 use crate::{NativeOdb, OdbError, lock};
 
 /// How many records a full check read and verified.
@@ -138,22 +138,7 @@ impl NativeOdb {
     /// name content which is not stored, and those after them: the ones
     /// no record before the cut names.
     pub fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
-        let odb = self.odb()?;
-        let upto = odb.unconfirmed()?[2];
-        let mut gone = HashSet::new();
-        odb.map.each_from(upto, |_, entry| {
-            gone.insert(entry.git);
-            Ok(())
-        })?;
-        if !gone.is_empty() {
-            odb.map.each_from(HEADER, |at, entry| {
-                if at < upto {
-                    gone.remove(&entry.git);
-                }
-                Ok(())
-            })?;
-        }
-        Ok(gone)
+        self.odb()?.unconfirmed_objects()
     }
 }
 

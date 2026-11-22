@@ -14,14 +14,17 @@
 //! boundary looked up, in the order they are written: the blob map when
 //! it is opened, then the Tier 1 map, then `map.alt`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+
+use alt_git_codec::{ObjectId, RawObject};
 
 use alt_store::{BlobStore, StoreError};
 
 use super::Odb;
 use super::settle::unsynced_from;
-use crate::synced::{Lens, Marker};
+use crate::synced::{HEADER, Lens, Marker};
 use crate::tier1::Tier1Map;
 use crate::unsynced::{self, Left};
 use crate::{BlobId, OdbError};
@@ -123,5 +126,41 @@ impl Odb {
             self.map.pass_over_from(at)?;
         }
         Ok(())
+    }
+
+    /// See [`crate::NativeOdb::unconfirmed_objects`].
+    pub(crate) fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
+        let upto = self.unconfirmed()?[2];
+        let mut gone = HashSet::new();
+        self.map.each_from(upto, |_, entry| {
+            gone.insert(entry.git);
+            Ok(())
+        })?;
+        if !gone.is_empty() {
+            self.map.each_from(HEADER, |at, entry| {
+                if at < upto {
+                    gone.remove(&entry.git);
+                }
+                Ok(())
+            })?;
+        }
+        Ok(gone)
+    }
+
+    /// [`Self::get`] for whoever asks what the store holds. The blob map
+    /// and the Tier 1 map may be opened after `map.alt` was held to what
+    /// is stored, and end in a record that does not read: an object
+    /// whose content is then not found, among those a writer's cut
+    /// takes, is not stored, as it is for a handle that opened them
+    /// first.
+    pub fn get_stored(&self, oid: &ObjectId) -> Result<Option<RawObject>, OdbError> {
+        match self.get(oid) {
+            Err(OdbError::Store(StoreError::BlobNotFound(_)))
+                if self.confirmed.is_some() && self.unconfirmed_objects()?.contains(oid) =>
+            {
+                Ok(None)
+            }
+            got => got,
+        }
     }
 }

@@ -9,6 +9,8 @@ use std::fs;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
+use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+
 use super::super::torn_index::tree;
 use super::super::unconfirmed::{alt, ok, stderr};
 use super::super::unconfirmed_tails::noise;
@@ -153,6 +155,41 @@ fn the_log_goes_on_in_its_boot(what: &str, base: &Base, dir: &Path, adds_first: 
     goes_on(what, base, dir, alt, adds_first);
 }
 
+/// A command that reads what the adds staged gets each file whole or is
+/// told that it is not stored, whichever file of the store the content
+/// went with, and changes nothing.
+fn reads_what_is_stored(what: &str, dir: &Path) {
+    let files = || {
+        CUT.iter()
+            .take(5)
+            .map(|name| fs::read(dir.join(".alt").join(name)).unwrap())
+    };
+    let before: Vec<_> = files().collect();
+    let mut whole = true;
+    for name in ADDED {
+        let content = fs::read(dir.join(name)).unwrap();
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &content);
+        let read = alt(dir, &["cat-file", "-p", &oid.to_string()]);
+        let said = stderr(&read);
+        match read.status.success() {
+            true => assert!(read.stdout == content, "{what}: {name}"),
+            false => assert!(
+                said.contains(&format!("object {oid} not found")),
+                "{what}: {said}"
+            ),
+        }
+        whole &= read.status.success();
+    }
+    let staged = alt(dir, &["diff", "--cached"]);
+    let said = stderr(&staged);
+    assert_eq!(staged.status.success(), whole, "{what}: {said}");
+    assert!(
+        whole || said.contains("object missing from store"),
+        "{what}: {said}"
+    );
+    assert!(files().eq(before), "{what}: a read changed a file");
+}
+
 /// What a command printed, on either stream.
 fn ok_or_said(out: &std::process::Output) -> String {
     format!("{}{}", String::from_utf8_lossy(&out.stdout), stderr(out))
@@ -189,6 +226,7 @@ fn stretches(in_boot: bool) {
                         false => base.left(&case, &[]),
                     };
                     spoil(&dir.join(".alt").join(name), (from, to), how);
+                    reads_what_is_stored(&what, &dir);
                     match (in_boot, file) {
                         (true, 4) => {
                             the_log_goes_on_in_its_boot(&what, &base, &dir, adds_first, step == 2)
