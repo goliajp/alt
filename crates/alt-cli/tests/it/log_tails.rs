@@ -9,6 +9,8 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::process::Output;
 
+mod went_since;
+
 fn alt(repo: &Path, relaxed: bool, args: &[&str]) -> Output {
     let mut command = crate::alt_command();
     command
