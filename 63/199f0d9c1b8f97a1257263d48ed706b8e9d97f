@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: read the time zone of a caller from the zone files and posix rules
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/src/zone.rs
+touched: crates/alt-os/src/zone/rule.rs
+touched: crates/alt-os/src/zone/tzif.rs
