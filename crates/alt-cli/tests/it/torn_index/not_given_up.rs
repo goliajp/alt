@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::Stdio;
 
 use alt_git_codec::ObjectId;
+use alt_oplog::OpLog;
 use alt_refs::{RefChange, RefStore, RefTarget};
 
 use super::steps::torn_after_an_add;
@@ -69,6 +70,13 @@ fn cut_short(bench: &Bench) -> String {
 /// for a torn one after that is the one the revert left, which is the
 /// tree of HEAD.
 fn ended_and_torn(bench: &Bench, when: &str) {
+    let index = ended(bench, when);
+    torn(bench, &index, when);
+}
+
+/// The first half of [`ended_and_torn`]: the index the revert left when
+/// it was brought to its end and a commit moved the branch.
+fn ended(bench: &Bench, when: &str) -> String {
     let repo = bench.repo();
     let next = alt(&repo, NEXT, None);
     assert!(said(&next).contains("not found"), "{when}: {}", said(&next));
@@ -80,8 +88,13 @@ fn ended_and_torn(bench: &Bench, when: &str) {
     let ended = bench.shape();
     assert_eq!(ended.index.lines().count(), 1, "{when}: {}", ended.index);
     assert!(ended.head.2.contains("both reverted"), "{when}");
+    ended.index
+}
 
-    torn_after_an_add(bench, &ended.index, when);
+/// The second half: `index` is the one put back for a torn one.
+fn torn(bench: &Bench, index: &str, when: &str) {
+    let repo = bench.repo();
+    torn_after_an_add(bench, index, when);
     run(&repo, &["commit", "-m", "x"], 0);
     let tree = tree(&repo);
     let names: Vec<&str> = tree.lines().filter_map(|l| l.split('\t').nth(1)).collect();
@@ -159,4 +172,56 @@ fn a_revert_whose_giving_up_failed_at_its_ref_transaction_left_the_index_it_was_
     move_main(&repo, &other, &head);
     assert_ne!(run(&repo, &["operation", "pending"], 0), "");
     ended_and_torn(&bench, "giving up failed at its ref transaction");
+}
+
+const REQUEST: &str = "000000000000000000000000000000ab";
+
+/// Moves `main` as a command of this workspace run under `request`
+/// would: with what the last ref transaction of the workspace says of
+/// itself, under that request.
+fn move_main_under(repo: &Path, request: &str, from: &str, to: &str) {
+    let log = OpLog::open_read_only(&repo.join(".alt/oplog"), None).unwrap();
+    let contexts = log.recent().iter().rev();
+    let last = contexts
+        .filter_map(|op| alt_refs::parse_tx(&op.payload).unwrap()?.context)
+        .next()
+        .unwrap();
+    let said: alt_json::Value = alt_json::from_slice(&last).unwrap();
+    let its = said["request_id"].as_str().unwrap();
+    assert_ne!(its, request);
+    let context = String::from_utf8(last.clone())
+        .unwrap()
+        .replace(its, request);
+    let oid = |hex: &str| RefTarget::Oid(ObjectId::from_hex(hex.trim().as_bytes()).unwrap());
+    let change = RefChange {
+        name: "refs/heads/main".to_owned(),
+        old: Some(oid(from)),
+        new: Some(oid(to)),
+    };
+    let mut refs = RefStore::open(repo.join(".alt")).unwrap();
+    let context = Some(context.as_bytes());
+    refs.commit_scoped("test", 1_700_000_000_000, &[change], None, None, context)
+        .unwrap();
+}
+
+/// The request that gave up is seen again in the log after the record
+/// that closes the revert, with a ref transaction: that is no record of
+/// the giving up either, which the mark waited for before that record.
+#[test]
+fn a_ref_transaction_of_the_request_that_gave_up_after_the_revert_was_ended_is_no_record_of_it() {
+    let bench = to_revert();
+    let repo = bench.repo();
+    let id = cut_short(&bench);
+    let before = records(&repo);
+    let abandon = ["--request-id", REQUEST, "operation", "abandon", &id];
+    let killed = alt(&repo, &abandon, Some("1"));
+    assert_eq!(killed.status.code(), None, "{}", said(&killed));
+    assert_eq!(records(&repo), before + 1);
+    let when = "the request that gave up moved the branch later";
+    let index = ended(&bench, when);
+    let head = run(&repo, &["rev-parse", "HEAD"], 0);
+    let other = run(&repo, &["rev-parse", "HEAD~1"], 0);
+    move_main(&repo, &head, &other);
+    move_main_under(&repo, REQUEST, &other, &head);
+    torn(&bench, &index, when);
 }
