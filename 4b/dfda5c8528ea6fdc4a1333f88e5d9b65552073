@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: take a ref transaction of the request that gave up, written after the revert was closed, for no record of the giving up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/torn_index/not_given_up.rs
