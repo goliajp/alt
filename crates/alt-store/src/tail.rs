@@ -20,6 +20,11 @@ pub enum Basis {
     /// records were synced whole up to this length: a record that does not
     /// read before it is damage, one at or past it never finished
     Boundary(u64),
+    /// the same, and what lies at or past this length was left unsynced
+    /// in the running boot, whose cache holds it as it was written: no
+    /// record there has to be looked into to be taken for whole. One
+    /// that does not read there never finished all the same, or was lost
+    Cached(u64),
     /// nothing is recorded, as in a store an older program wrote: only a
     /// record no whole record can follow is taken for an unfinished one
     LastOnly,
@@ -41,6 +46,8 @@ pub struct Tail {
     read_only: bool,
     locked: bool,
     deferred: bool,
+    /// the run over records left unsynced that the opener may look in
+    boot_run: Option<crate::runs::BootRun>,
 }
 
 /// A store nothing is known about and that no one else writes: its opener
@@ -54,6 +61,7 @@ impl Default for Tail {
             read_only: false,
             locked: true,
             deferred: false,
+            boot_run: None,
         }
     }
 }
@@ -71,6 +79,7 @@ impl Tail {
             read_only: false,
             locked: false,
             deferred: false,
+            boot_run: None,
         }
     }
 
@@ -115,6 +124,17 @@ impl Tail {
     pub fn deferring(mut self) -> Self {
         self.deferred = true;
         self
+    }
+
+    /// The same policy for an opener of a record log that may look
+    /// records up in the boot run `named` instead of reading them.
+    pub fn with_boot_run(mut self, named: Option<crate::runs::BootRun>) -> Self {
+        self.boot_run = named;
+        self
+    }
+
+    pub(crate) fn boot_run(&self) -> Option<&crate::runs::BootRun> {
+        self.boot_run.as_ref()
     }
 
     /// No longer takes the pack [`Self::synced_to`] named for synced; says
@@ -172,7 +192,7 @@ impl Tail {
     /// record can follow it.
     pub(crate) fn unfinished(&self, seq: u32, len: u64, at: u64, last: bool) -> bool {
         match self.basis(seq, len) {
-            Basis::Boundary(synced) => at >= synced,
+            Basis::Boundary(synced) | Basis::Cached(synced) => at >= synced,
             Basis::LastOnly => last,
             Basis::Unknown => false,
         }

@@ -3,7 +3,7 @@
 use super::*;
 
 mod step;
-pub(super) use step::{STEP, STEP_MARK, Tracked};
+pub(super) use step::{MarkSaid, STEP, STEP_MARK, Tracked, mark_said};
 
 /// What was begun in a workspace and waits to be finished.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -128,7 +128,7 @@ pub fn run_on_store<W: Write>(
 ) -> Res<u8> {
     match &cli.command {
         Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
-        Command::Fsck { json } => crate::fsck::run(store, *json, out),
+        Command::Fsck(args) => crate::fsck::run(store, args, (cli, cwd, id), out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;
             // Execution has already claimed the whole request. The id here

@@ -144,7 +144,7 @@ impl NativeRepo<'_> {
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             ..intent
         };
-        self.apply_index_intent(inverse, &bytes)?;
+        self.apply_index_intent(inverse, &bytes, false)?;
         Ok(())
     }
 

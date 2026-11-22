@@ -62,7 +62,7 @@ pub type RequestId = [u8; 16];
 
 /// A command to run: the alt argv (without the program name), the client's
 /// working directory, the forwarded env vars, and an optional idempotency id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Request {
     pub args: Vec<String>,
     pub cwd: PathBuf,
@@ -71,6 +71,9 @@ pub struct Request {
     /// for the direct CLI path, and for an old client whose frame carries no
     /// trailing id field (the daemon then degrades to at-most-once).
     pub id: Option<RequestId>,
+    /// The client drew `id` for this one run: no caller chose it, and
+    /// nobody sends it again once the run is over.
+    pub drawn: bool,
 }
 
 pub use alt_command_protocol::Response;
@@ -141,7 +144,7 @@ impl Request {
         // bytes; a new daemon reading an old (untrailed) frame sees no id.
         match self.id {
             Some(id) => {
-                out.push(1);
+                out.push(1 + u8::from(self.drawn));
                 out.extend_from_slice(&id);
             }
             None => out.push(0),
@@ -165,6 +168,7 @@ impl Request {
             env.push((k, v));
         }
         // trailing optional id (see `encode`): absent on an old client's frame
+        let drawn = buf.get(at) == Some(&2);
         let id = match buf.get(at) {
             None | Some(0) => None, // old client (no field) or explicit absent
             Some(_) => {
@@ -178,7 +182,13 @@ impl Request {
                 Some(id)
             }
         };
-        Ok(Request { args, cwd, env, id })
+        Ok(Request {
+            args,
+            cwd,
+            env,
+            id,
+            drawn,
+        })
     }
 }
 
@@ -258,6 +268,7 @@ mod tests {
                 ("ALT_RELAXED_DURABILITY".into(), "1".into()),
             ],
             id: Some([7u8; 16]),
+            drawn: true,
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
     }
@@ -314,6 +325,7 @@ mod tests {
             cwd: PathBuf::from("/x"),
             env: Vec::new(),
             id: None,
+            drawn: false,
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
     }
@@ -349,6 +361,7 @@ mod tests {
             cwd: PathBuf::from(""),
             env: Vec::new(),
             id: None,
+            drawn: false,
         };
         assert_eq!(Request::decode(&req.encode()).unwrap(), req);
         let resp = Response {
@@ -366,6 +379,7 @@ mod tests {
             cwd: PathBuf::from("/x"),
             env: Vec::new(),
             id: None,
+            drawn: false,
         }
         .encode();
         let mut buf = Vec::new();

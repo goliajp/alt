@@ -145,7 +145,7 @@ impl PathMatcher {
     }
 
     pub fn matches(&self, path: &[u8]) -> bool {
-        self.0.is_ignored(path, false)
+        self.0.matches_within(path)
     }
 }
 

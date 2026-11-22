@@ -14,31 +14,55 @@
 //! boundary looked up, in the order they are written: the blob map when
 //! it is opened, then the Tier 1 map, then `map.alt`.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+
+use alt_git_codec::{ObjectId, RawObject};
 
 use alt_store::{BlobStore, StoreError};
 
 use super::Odb;
 use super::settle::unsynced_from;
-use crate::synced::{Lens, Marker};
+use crate::synced::{HEADER, Lens, Marker};
 use crate::tier1::Tier1Map;
+use crate::unsynced::{self, Left};
 use crate::{BlobId, OdbError};
 
 /// The blob map of `blobs` is held as [`BlobStore::pass_over_unsynced_map`]
 /// says, by the marker at `durable`.
-pub(super) fn confirm_blob_map(blobs: &mut BlobStore, noted: Lens, durable: &Path) {
+pub(super) fn confirm_blob_map(
+    blobs: &mut BlobStore,
+    noted: Lens,
+    durable: &Path,
+    left: Option<Left>,
+) {
     let durable = durable.to_owned();
-    let unsynced = move || unsynced_from(&Marker::read(&durable)).map(|from| from[0]);
+    let unsynced = move |torn: bool| {
+        let marker = Marker::read(&durable);
+        let cached = unsynced::cached(&marker, left);
+        unsynced_from(&marker)
+            .filter(|_| torn || !cached)
+            .map(|from| from[0])
+    };
     blobs.pass_over_unsynced_map(noted.blobmap, Arc::new(unsynced));
 }
 
 impl Odb {
     /// Where the records of naming log `log` that are not known synced
-    /// begin, when that is before `end`.
+    /// and are to be looked at begin, when that is before `end`.
     fn unsynced_before(&self, log: usize, end: u64) -> Option<u64> {
-        let from = unsynced_from(&Marker::read(&self.durable_path))?[log];
+        let from = self.unlooked_from(self.torn_below(log))?[log];
         (from < end).then_some(from)
+    }
+
+    /// Whether a file whose content naming log `log` names ends, for
+    /// this handle, in a record that does not read: the pack, the blob
+    /// map and, below `map.alt`, the Tier 1 map, each where this handle
+    /// has opened it.
+    pub(super) fn torn_below(&self, log: usize) -> bool {
+        let tier1 = || self.tier1.get().is_some_and(Tier1Map::unfinished);
+        self.blobs.unfinished_as_opened() || (log == 2 && tier1())
     }
 
     /// Whether `id` is stored as a chunk or named by the blob map.
@@ -102,5 +126,50 @@ impl Odb {
             self.map.pass_over_from(at)?;
         }
         Ok(())
+    }
+
+    /// See [`crate::NativeOdb::unconfirmed_objects`].
+    pub(crate) fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
+        let upto = self.unconfirmed()?[2];
+        let mut gone = HashSet::new();
+        self.map.each_from(upto, |_, entry| {
+            gone.insert(entry.git);
+            Ok(())
+        })?;
+        if !gone.is_empty() {
+            self.map.each_from(HEADER, |at, entry| {
+                if at < upto {
+                    gone.remove(&entry.git);
+                }
+                Ok(())
+            })?;
+        }
+        Ok(gone)
+    }
+
+    /// [`Self::unconfirmed_objects`] with the blob map and the Tier 1 map
+    /// opened first, as a writer has them: a record of theirs that does
+    /// not read takes the objects stored after it as well.
+    pub(crate) fn unconfirmed_objects_whole(&self) -> Result<HashSet<ObjectId>, OdbError> {
+        self.blobs.open_map()?;
+        self.tier1()?;
+        self.unconfirmed_objects()
+    }
+
+    /// [`Self::get`] for whoever asks what the store holds. The blob map
+    /// and the Tier 1 map may be opened after `map.alt` was held to what
+    /// is stored, and end in a record that does not read: an object
+    /// whose content is then not found, among those a writer's cut
+    /// takes, is not stored, as it is for a handle that opened them
+    /// first.
+    pub fn get_stored(&self, oid: &ObjectId) -> Result<Option<RawObject>, OdbError> {
+        match self.get(oid) {
+            Err(OdbError::Store(StoreError::BlobNotFound(_)))
+                if self.confirmed.is_some() && self.unconfirmed_objects()?.contains(oid) =>
+            {
+                Ok(None)
+            }
+            got => got,
+        }
     }
 }

@@ -42,12 +42,13 @@
 //! bit 0 that the log has had a marker in this format: when the marker is
 //! then missing or does not read, a boundary was lost, not never written.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::Arc;
 
 use crate::OpLogError;
+use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
 
 /// Every log starts with a five-byte header.
@@ -57,14 +58,9 @@ const UNTRUSTED: u32 = 1;
 /// Where the generation starts in the flags.
 const GENERATION: u32 = 8;
 
-/// The generation and the boundary a handle's deferred appends reached,
-/// for its sink to record, and between them where the last record ends
-/// that the handle read and did not write.
-pub(crate) type Deferred = Arc<Mutex<(u32, u64, u64)>>;
-
 /// Syncs what the ops in the log name (see
 /// [`crate::OpLog::sync_named_with`]).
-pub type SyncNamed = Arc<dyn Fn() -> std::io::Result<()> + Send + Sync>;
+pub type SyncNamed = Arc<dyn Fn(&[crate::Op]) -> std::io::Result<()> + Send + Sync>;
 
 /// Before the marker is moved past `others_to`, where the ops of other
 /// writers end: when it does not record them as synced yet, what they name
@@ -75,7 +71,7 @@ pub(crate) fn sync_named(
     others_to: u64,
 ) -> std::io::Result<()> {
     match named {
-        Some(sync) if !marker.records(others_to) => sync(),
+        Some(sync) if !marker.records(others_to) => sync(&[]),
         _ => Ok(()),
     }
 }
@@ -171,18 +167,20 @@ impl Marker {
 
     /// Whether a record that does not read at `at` is an append that never
     /// finished rather than damage; `last`: no whole record can follow it.
-    /// Past a boundary that holds it never finished, and before it is
-    /// damage. The file length an older alt recorded is such a boundary.
-    /// Where nothing is recorded, or unsynced appends followed, only the
-    /// last record is taken for unfinished. A marker that is gone or does
-    /// not read, in a log that has had one, makes every such record damage.
+    /// Past the boundary a marker records nothing was ever synced, whether
+    /// or not appends were left unsynced there: it never finished, and
+    /// before the boundary it is damage. The file length an older alt
+    /// recorded is such a boundary. Where nothing is recorded only the
+    /// last record is taken for unfinished, and a marker that is gone or
+    /// does not read, in a log that has had one, makes every such record
+    /// damage.
     pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
         match Self::read(path) {
-            Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
+            Marker::Recorded(state) => at >= state.whole,
             // a length short of the header is not one an older alt
             // recorded: the marker is being replaced as it is read
             Marker::Legacy(eof) if eof >= HEADER => at >= eof,
-            Marker::Recorded(_) | Marker::Legacy(_) => last,
+            Marker::Legacy(_) => last,
             Marker::Unreadable | Marker::Absent => last && !bounded(path),
         }
     }
@@ -354,44 +352,6 @@ pub(crate) fn cut_records(durable: &Path, file: &File, at: u64) -> std::io::Resu
     })();
     let _ = unlock(&sync_lock);
     cut
-}
-
-pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
-}
-
-/// An fsync handle for the log that works without the [`crate::OpLog`] it
-/// came from (the daemon fsyncs off the write path): after the fsync it
-/// records how far that log's deferred appends had reached before it.
-pub struct OpLogSink {
-    pub(crate) file: File,
-    pub(crate) appended: Deferred,
-    pub(crate) durable_path: PathBuf,
-    pub(crate) named: Option<SyncNamed>,
-    pub(crate) note: Option<crate::NotePlace>,
-}
-
-impl OpLogSink {
-    pub fn fsync(&self) -> Result<(), OpLogError> {
-        let (generation, others_to, target) = *self.appended.lock().unwrap();
-        if target != 0 {
-            sync_named(&self.named, &Marker::read(&self.durable_path), others_to)?;
-        }
-        self.file.sync_all()?;
-        if target != 0 {
-            // a boundary this log wrote, not a file length: only a cut of
-            // whole records brings it down, and that changes the generation
-            let whole = record(&self.durable_path, generation, target, Some(target))?;
-            if let (Some(note), Some(whole)) = (&self.note, whole) {
-                note.raise(whole);
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

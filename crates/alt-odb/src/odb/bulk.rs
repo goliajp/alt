@@ -1,12 +1,33 @@
-//! Reading every object of the database in one pass.
+//! Reading every object of the database in one pass, and changing how
+//! objects are stored.
 
-use alt_store::BlobId;
+use alt_git_codec::{ObjectId, RawObject};
+use alt_store::{BlobId, CompactReport, StoreError};
 
 use super::Odb;
 use crate::OdbError;
 use crate::map::MapEntry;
 
 impl Odb {
+    /// [`Self::get`] with no hashing of what is read: for a caller that
+    /// had every record of the store verified before, as `alt fsck` has
+    /// when it walks what the refs lead to. A Tier 1 blob is recomposed
+    /// and hashed all the same.
+    pub fn get_unverified(&self, oid: &ObjectId) -> Result<Option<RawObject>, OdbError> {
+        let Some(entry) = self.map.by_git(oid)? else {
+            return Ok(None);
+        };
+        let data = match self.blobs.get_unverified(entry.alt) {
+            Err(StoreError::BlobNotFound(_)) => self.fetch_blob(entry.alt)?,
+            read => read?,
+        };
+        if data.len() as u64 != entry.size {
+            return Err(OdbError::SizeMismatch(*oid, entry.size));
+        }
+        let kind = entry.kind;
+        Ok(Some(RawObject { kind, data }))
+    }
+
     /// Bulk-materializes every mapped object's bytes exactly once, without
     /// per-object re-hashing — the read path for export / full-clone serving.
     /// Single-chunk objects (the lineage-delta'd ones) go through the chunk
@@ -50,5 +71,30 @@ impl Odb {
             }
         }
         Ok(())
+    }
+}
+
+impl Odb {
+    /// Compacts the underlying chunk store, reclaiming the dead weight left
+    /// by lineage delta re-encoding. Object identities and the map are
+    /// untouched — only physical storage is rewritten.
+    pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
+        self.acquire()?;
+        Ok(self.blobs.compact()?)
+    }
+}
+
+impl Odb {
+    /// Re-encodes `old`'s content as a lineage delta against `new`'s
+    /// (same-path predecessor → successor). Identity is untouched; only
+    /// the storage form changes. Returns whether a re-encoding happened.
+    pub fn lineage_delta(&mut self, old: &ObjectId, new: &ObjectId) -> Result<bool, OdbError> {
+        self.acquire()?;
+        let (Some(old_entry), Some(new_entry)) = (self.map.by_git(old)?, self.map.by_git(new)?)
+        else {
+            return Ok(false);
+        };
+        let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
+        Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
     }
 }

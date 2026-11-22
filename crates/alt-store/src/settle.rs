@@ -11,8 +11,9 @@
 //! over, and cut off by an opener that holds the writers' lock.
 //!
 //! Which records are not known synced is what [`Basis`] says: those at or
-//! past the boundary; with nothing recorded, the ones at the very end, as
-//! far back as they do not hold; with what was recorded gone, none: a
+//! past the boundary; with nothing recorded, or where the running boot
+//! left them unsynced, the ones at the very end, as far back as they do
+//! not hold; with what was recorded gone, none: a
 //! record that does not hold is then damage, reported when the chunk is
 //! read and by the full check.
 
@@ -25,6 +26,15 @@ impl ChunkStore {
     /// in the active pack (see [`Tail::deferring`]).
     pub fn unfinished(&self) -> bool {
         self.active.torn
+    }
+
+    /// Whether more than an append that never finished can lie past
+    /// where the active pack ends for this handle: room for a record.
+    /// Records that were written went there, read or not, and a handle
+    /// that read them holds them in its index when the pack is cut.
+    pub fn whole_past_unfinished(&self) -> Result<bool, StoreError> {
+        let past = self.pack_file_len()?.saturating_sub(self.active.len);
+        Ok(self.active.torn && past >= REC_HEADER_LEN as u64)
     }
 
     pub(crate) fn active_file(&self) -> &std::fs::File {
@@ -49,6 +59,15 @@ impl ChunkStore {
         }
         self.reload()?;
         Ok(true)
+    }
+
+    /// Reads the end of the active pack again, by what is known of it
+    /// now: for the holder of the write lock that no longer takes the
+    /// records there for what was written.
+    pub fn look_again(&mut self) -> Result<(), StoreError> {
+        self.tail.forget_synced();
+        self.tail = self.tail.clone().with_boot_run(None);
+        self.reload()
     }
 
     /// Checks the records a load just walked in the active pack and loads
@@ -81,6 +100,18 @@ impl ChunkStore {
         if fresh.recs.is_empty() || tail.synced_past(self.active.seq, fresh.size) {
             return Ok(None);
         }
+        // the records at the very end, as far back as they do not hold
+        // and were not synced
+        let at_end = |synced: u64| {
+            let mut from = None;
+            for rec in fresh.recs.iter().rev().take_while(|rec| rec.1 >= synced) {
+                if self.holds(rec)? {
+                    break;
+                }
+                from = Some(rec.1);
+            }
+            Ok(from)
+        };
         match tail.basis(self.active.seq, fresh.size) {
             Basis::Boundary(synced) => {
                 for rec in fresh.recs.iter().filter(|(_, offset)| *offset >= synced) {
@@ -90,16 +121,8 @@ impl ChunkStore {
                 }
                 Ok(None)
             }
-            Basis::LastOnly => {
-                let mut from = None;
-                for rec in fresh.recs.iter().rev() {
-                    if self.holds(rec)? {
-                        break;
-                    }
-                    from = Some(rec.1);
-                }
-                Ok(from)
-            }
+            Basis::Cached(synced) => at_end(synced),
+            Basis::LastOnly => at_end(0),
             // nothing here can be an unfinished append: damage is for the
             // read of the chunk and the full check to report
             Basis::Unknown => Ok(None),

@@ -10,7 +10,7 @@
 //! else changes with them. The file itself is written or removed only
 //! after the log, synced, says so.
 
-use super::super::super::recovery::{WorkspaceIdentity, durable_write, encode};
+use super::super::super::recovery::{WorkspaceIdentity, decode, durable_write, encode};
 use super::super::super::*;
 use super::{STATE_FILES, Tracked};
 
@@ -45,6 +45,23 @@ pub(super) struct StepMark {
     /// is not gone on with, and the step ends as it began
     #[json(default)]
     pub(super) gives_up: bool,
+}
+
+/// What a mark says to one who reads the log for the index a step left.
+pub(in crate::native) struct MarkSaid {
+    pub(in crate::native) workspace: WorkspaceIdentity,
+    /// the mark the step began with; none in that mark itself
+    pub(in crate::native) begin: Option<String>,
+    pub(in crate::native) gives_up: bool,
+}
+
+pub(in crate::native) fn mark_said(op: &alt_oplog::Op) -> Res<MarkSaid> {
+    let mark: StepMark = decode(&op.payload, STEP_MARK)?;
+    Ok(MarkSaid {
+        workspace: mark.workspace,
+        begin: mark.begin,
+        gives_up: mark.gives_up,
+    })
 }
 
 impl Tracked {

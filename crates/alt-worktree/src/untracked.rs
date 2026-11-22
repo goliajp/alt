@@ -1,13 +1,15 @@
 //! The directories the index knows nothing in: what a scan reports of them.
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io;
 use std::ops::ControlFlow;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::fsdir::{DirFd, Kind, Listing};
-use crate::ignore::{self, IgnoreStack};
+use crate::ignore::{self, IgnoreLayer, IgnoreStack};
 use crate::walk::{Reach, Walk, holds_repository, ignore_file};
 
 /// Which of the files the index does not have a scan reports.
@@ -25,30 +27,64 @@ pub enum Untracked {
     Hidden,
 }
 
-/// The outermost of `path` and the directories above it that an ignore
-/// rule hides, by the ignore files `excludes` outside the tree at `root`
-/// and those in it; `None` when no rule hides it.
-pub fn hidden_by(root: &Path, path: &[u8], excludes: &[&Path]) -> io::Result<Option<Vec<u8>>> {
-    let at = |rel: &[u8]| root.join(OsStr::from_bytes(rel));
-    let mut rules = IgnoreStack::of_files(excludes)?;
-    let mut from = 0usize;
-    loop {
-        let dir = &path[..from.saturating_sub(1)];
-        let file = at(dir).join(".gitignore");
+/// Finds what an ignore rule hides, by the ignore files outside a tree
+/// and those in it, each of which is read once however many paths are
+/// asked about.
+pub struct Hidden<'a> {
+    root: &'a Path,
+    outside: IgnoreStack,
+    /// the rules of each directory asked about that has an ignore file
+    inside: HashMap<Vec<u8>, Option<Arc<IgnoreLayer>>>,
+}
+
+impl<'a> Hidden<'a> {
+    /// For the tree at `root` and the ignore files `excludes` outside it.
+    pub fn new(root: &'a Path, excludes: &[&Path]) -> io::Result<Self> {
+        Ok(Self {
+            root,
+            outside: IgnoreStack::of_files(excludes)?,
+            inside: HashMap::new(),
+        })
+    }
+
+    /// The rules of the ignore file in `dir`, when it has one.
+    fn rules_of(&mut self, dir: &[u8]) -> io::Result<Option<Arc<IgnoreLayer>>> {
+        if let Some(rules) = self.inside.get(dir) {
+            return Ok(rules.clone());
+        }
+        let file = self.root.join(OsStr::from_bytes(dir)).join(".gitignore");
         // a symlink is not followed, as a scan does not follow one
-        if std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.is_file()) {
-            rules.push(ignore::parse_layer(&std::fs::read(&file)?, dir));
+        let rules = match std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.is_file()) {
+            true => Some(Arc::new(ignore::parse_layer(&std::fs::read(&file)?, dir))),
+            false => None,
+        };
+        self.inside.insert(dir.to_vec(), rules.clone());
+        Ok(rules)
+    }
+
+    /// The outermost of `path` and the directories above it that an
+    /// ignore rule hides; `None` when no rule hides it.
+    pub fn by(&mut self, path: &[u8]) -> io::Result<Option<Vec<u8>>> {
+        let root = self.root;
+        let at = |rel: &[u8]| root.join(OsStr::from_bytes(rel));
+        let mut rules = self.outside.clone();
+        let mut from = 0usize;
+        loop {
+            if let Some(layer) = self.rules_of(&path[..from.saturating_sub(1)])? {
+                rules = rules.with(layer);
+            }
+            let name = path[from..].iter().position(|b| *b == b'/');
+            let end = name.map_or(path.len(), |len| from + len);
+            let is_dir =
+                |part: &[u8]| std::fs::symlink_metadata(at(part)).is_ok_and(|m| m.is_dir());
+            if rules.is_ignored(&path[..end], end < path.len() || is_dir(path)) {
+                return Ok(Some(path[..end].to_vec()));
+            }
+            if end == path.len() {
+                return Ok(None);
+            }
+            from = end + 1;
         }
-        let name = path[from..].iter().position(|b| *b == b'/');
-        let end = name.map_or(path.len(), |len| from + len);
-        let is_dir = |part: &[u8]| std::fs::symlink_metadata(at(part)).is_ok_and(|m| m.is_dir());
-        if rules.is_ignored(&path[..end], end < path.len() || is_dir(path)) {
-            return Ok(Some(path[..end].to_vec()));
-        }
-        if end == path.len() {
-            return Ok(None);
-        }
-        from = end + 1;
     }
 }
 
@@ -165,4 +201,33 @@ fn as_one_path(
     let flow = each(path);
     path.pop();
     flow
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_is_hidden_is_found_with_each_ignore_file_read_once() {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("sub/out")).unwrap();
+        std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        std::fs::write(root.join("sub/.gitignore"), "out/\n!keep.log\n").unwrap();
+        let mut hidden = Hidden::new(root, &[]).unwrap();
+        let by = |hidden: &mut Hidden, path: &str| {
+            let by = hidden.by(path.as_bytes()).unwrap();
+            by.map(|by| String::from_utf8(by).unwrap())
+        };
+        assert_eq!(by(&mut hidden, "a.log").as_deref(), Some("a.log"));
+        assert_eq!(by(&mut hidden, "sub/out/f.txt").as_deref(), Some("sub/out"));
+        assert_eq!(by(&mut hidden, "sub/keep.log"), None);
+        assert_eq!(by(&mut hidden, "sub/f.txt"), None);
+        // the files are gone, and what they said holds for this one
+        std::fs::remove_file(root.join(".gitignore")).unwrap();
+        std::fs::remove_file(root.join("sub/.gitignore")).unwrap();
+        assert_eq!(by(&mut hidden, "b.log").as_deref(), Some("b.log"));
+        assert_eq!(by(&mut hidden, "sub/out").as_deref(), Some("sub/out"));
+        assert_eq!(by(&mut Hidden::new(root, &[]).unwrap(), "b.log"), None);
+    }
 }

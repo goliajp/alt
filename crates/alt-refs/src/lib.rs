@@ -11,6 +11,7 @@
 //! rebuild and is pure cache — missing, corrupt, or orphaned snapshots are
 //! ignored and rewritten.
 
+mod anchored;
 mod check;
 mod commit;
 mod policy;
@@ -45,13 +46,6 @@ pub enum RefTarget {
 /// How many symbolic hops `resolve` follows before giving up (git's limit).
 const MAX_SYMREF_DEPTH: usize = 5;
 
-/// Write a snapshot every this many ops (replay-cost ceiling).
-const SNAPSHOT_EVERY: usize = 1024;
-/// Also write one once this many log bytes follow the last snapshot — or
-/// half the snapshot's own size, when that is more: opening hashes every
-/// byte after the snapshot, and reads the snapshot itself anyway.
-const SNAPSHOT_BYTES: u64 = 16 << 10;
-
 /// Transactional ref state over the oplog.
 pub struct RefStore {
     oplog: OpLog,
@@ -75,9 +69,9 @@ pub struct RefStore {
     by_key: BTreeMap<IdemKey, OpId>,
     /// The oplog's count of reading the log anew that `refs` follows.
     reads_seen: u64,
-    /// Up to where the log was known synced when this store was opened, by
-    /// the snapshot's note or else by the log's marker; zero when neither
-    /// told.
+    /// The boundary up to which the log was known synced when this store
+    /// was opened or last wrote its snapshot, by the snapshot's note or
+    /// else by the log's marker; zero when neither told.
     synced: u64,
 }
 
@@ -95,12 +89,13 @@ impl RefStore {
     /// a snapshot that has fallen behind is written anew.
     fn open_as(alt_dir: PathBuf, read_only: bool, snapshots: bool) -> Result<Self, RefError> {
         let snapshot_path = alt_dir.join("refs").join("snapshot");
-        let snapshot = snapshot::read(&snapshot_path);
+        let log_dir = alt_dir.join("oplog");
+        let (snapshot, told) = anchored::read(&snapshot_path, &log_dir);
         let anchor = snapshot.as_ref().and_then(|snap| snap.anchor);
         let mut oplog = if read_only {
-            OpLog::open_read_only(&alt_dir.join("oplog"), anchor)?
+            OpLog::open_read_only(&log_dir, anchor)?
         } else {
-            OpLog::open_at(&alt_dir.join("oplog"), anchor)?
+            OpLog::open_at(&log_dir, anchor)?
         };
         oplog.note_synced_at(snapshot::note_place(&snapshot_path));
         // a log no longer than the snapshot notes as synced needs no look
@@ -108,7 +103,7 @@ impl RefStore {
         let noted = snapshot.as_ref().map(|snap| snap.synced);
         let synced = match noted.flatten() {
             Some(noted) if oplog.appended_len() <= noted => noted,
-            _ => oplog.synced_to().unwrap_or(0),
+            _ => told.unwrap_or_else(|| oplog.bounded_to()).unwrap_or(0),
         };
 
         let recent = oplog.recent();
@@ -140,15 +135,6 @@ impl RefStore {
             let _ = store.snapshot();
         }
         Ok(store)
-    }
-
-    fn snapshot_is_due(&self) -> bool {
-        if self.ops_since_snapshot == 0 {
-            return false;
-        }
-        let behind = self.oplog.appended_len().saturating_sub(self.snapshot_end);
-        self.ops_since_snapshot >= SNAPSHOT_EVERY
-            || behind >= SNAPSHOT_BYTES.max(self.snapshot_len / 2)
     }
 
     /// The op that applied a write carrying `key`, if one is in the idempotency
@@ -198,45 +184,6 @@ impl RefStore {
     /// daemon's off-write-path fsync.
     pub fn sync_handle(&self) -> Result<alt_oplog::OpLogSink, RefError> {
         Ok(self.oplog.sync_handle()?)
-    }
-
-    fn note_op(&mut self) -> Result<(), RefError> {
-        self.ops_since_snapshot += 1;
-        if self.snapshot_is_due() {
-            // the operation is in the log already; the snapshot is a cache
-            let _ = self.snapshot();
-        }
-        Ok(())
-    }
-
-    /// Writes the snapshot now (also happens automatically every
-    /// [`SNAPSHOT_EVERY`] ops).
-    pub fn snapshot(&mut self) -> Result<(), RefError> {
-        let Some(head) = self.oplog.anchor() else {
-            return Ok(()); // nothing to anchor a snapshot to
-        };
-        // every op the log holds must be in `refs` first: another writer's
-        // ops are folded in under the append lock, not here
-        if self.applied != self.oplog.recent().len() {
-            return Ok(());
-        }
-        if let Some(dir) = self.snapshot_path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        // ops this handle appended were synced since it was opened
-        if !self.known_synced() {
-            self.synced = self.oplog.synced_to().unwrap_or(self.synced);
-        }
-        self.snapshot_len = snapshot::write(
-            &self.snapshot_path,
-            &head,
-            self.synced,
-            self.refs.len(),
-            self.refs.iter(),
-        )?;
-        self.snapshot_end = head.end;
-        self.ops_since_snapshot = 0;
-        Ok(())
     }
 
     pub fn get(&self, name: &str) -> Option<&RefTarget> {

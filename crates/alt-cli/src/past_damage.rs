@@ -17,7 +17,7 @@ pub fn admit(command: &Command) -> Result<(), Failure> {
     if !alt_odb::reading_past_damage() {
         return Ok(());
     }
-    if !crate::native::only_reads(command) || matches!(command, Command::Fsck { .. }) {
+    if !crate::native::only_reads(command) || matches!(command, Command::Fsck(_)) {
         return Err(Failure::usage(
             "ALT_READ_PAST_DAMAGE is for commands that only read, and not for fsck: unset it",
         ));

@@ -15,6 +15,12 @@ impl BlobStore {
         Ok((self.chunks.unfinished(), self.map()?.unfinished()))
     }
 
+    /// The same of the active pack, and of the blob map where this
+    /// handle has opened it.
+    pub fn unfinished_as_opened(&self) -> bool {
+        self.chunks.unfinished() || self.map.get().is_some_and(|map| map.unfinished())
+    }
+
     /// The file of the blob map.
     pub fn map_path(&self) -> std::path::PathBuf {
         self.dir.join("manifests").join("blobmap")
@@ -59,9 +65,26 @@ impl BlobStore {
         }
     }
 
+    /// Whether [`Self::index_synced`] would build a run, told the same.
+    pub fn synced_pending(&self, pack: impl FnOnce(u32, u64) -> Option<u64>, map: u64) -> bool {
+        let (seq, len) = self.chunks.checkpoint().pack();
+        pack(seq, len).is_some_and(|upto| self.chunks.synced_pending(upto))
+            || self.map.get().is_some_and(|held| held.index_pending(map))
+    }
+
     /// See [`crate::ChunkStore::distrust_synced`].
     pub fn distrust_synced(&mut self) -> Result<bool, StoreError> {
         self.chunks.distrust_synced()
+    }
+
+    /// See [`crate::ChunkStore::look_again`].
+    pub fn look_again(&mut self) -> Result<(), StoreError> {
+        self.chunks.look_again()
+    }
+
+    /// The chunk store, for what a writer does about its boot run.
+    pub fn chunks_mut(&mut self) -> &mut crate::ChunkStore {
+        &mut self.chunks
     }
 
     /// Visits the blob map's records from byte `from` on: where each
@@ -72,6 +95,11 @@ impl BlobStore {
         each: impl FnMut(u64, BlobId, ChunkId) -> Result<(), StoreError>,
     ) -> Result<(), StoreError> {
         self.map()?.each_from(from, each)
+    }
+
+    /// See [`crate::reclog::RecLog::removal`], for the blob map.
+    pub fn map_removal(&self, gone: &[u64]) -> Result<crate::reclog::Removal, StoreError> {
+        self.map()?.removal(gone)
     }
 
     /// Whether the chunk a blob of one chunk is stored as is there.

@@ -30,6 +30,7 @@ pub mod daemon_meta;
 pub mod diagnostics;
 pub mod fsck;
 pub mod group_commit;
+pub mod hardening;
 pub mod held;
 pub mod index_tx;
 pub mod json;
@@ -60,5 +61,8 @@ pub mod execution;
 mod file_header;
 pub mod funcname;
 mod git_settings;
+/// For a thread that runs one command after another, before each: what
+/// the one before read of the configuration is not what this one goes by.
+pub use git_settings::forget as begin_command;
 
 pub mod durable;

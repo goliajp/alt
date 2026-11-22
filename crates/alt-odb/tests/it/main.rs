@@ -1,6 +1,11 @@
 //! Single integration-test binary for alt-odb.
 
 mod abbrev;
+mod boot_runs;
+mod boot_runs_noted;
+#[cfg(target_os = "linux")]
+mod boot_runs_stuck;
+mod boot_runs_unread;
 mod cache_failure;
 mod compact_readers;
 mod confirmed;
@@ -11,15 +16,22 @@ mod discarded;
 mod duplicate_records;
 mod full_check;
 mod head_record;
+mod left_unsynced;
+mod lost_dropped;
+mod lost_in_boot;
 mod marker;
 mod marker_states;
 mod marker_unreadable;
 mod merge_readers;
+mod moved;
 mod odb_index;
 mod odb_lifecycle;
+mod pack_regrown;
 mod rewind_batch;
 mod rewind_interrupted;
 mod second_handle;
 mod synced_marker;
 mod synced_note;
 mod synced_writers;
+mod taken_over;
+mod unverified;

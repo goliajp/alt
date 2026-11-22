@@ -170,7 +170,7 @@ fn an_index_written_by_a_program_that_knows_no_snapshot_is_followed() {
     // and the other way round: a snapshot of a later index beside an older one
     let new_scan = std::fs::read(&scan).unwrap();
     ok(alt(root, &["commit", "-m", "second"]));
-    std::fs::write(root.join(".alt/index"), &old_index).unwrap();
+    crate::replace_file(&root.join(".alt/index"), &old_index);
     std::fs::write(&scan, &new_scan).unwrap();
     let st = status(root);
     assert!(

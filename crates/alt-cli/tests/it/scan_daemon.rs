@@ -172,7 +172,7 @@ fn the_daemon_answers_from_the_snapshot_it_holds_as_a_direct_run_does() {
     let unstaged = std::fs::read(&index).unwrap();
     run(root, &["add", "src/lib.rs"], true);
     assert!(agree(root, "staged").contains("Changes to be committed:\n\tmodified:   src/lib.rs"));
-    std::fs::write(&index, &unstaged).unwrap();
+    crate::replace_file(&index, &unstaged);
     let status = run(root, &["status"], true);
     assert_eq!(
         status,

@@ -157,6 +157,8 @@ fn a_commit_the_log_kept_and_the_store_lost_is_passed_over_cut_and_made_again() 
         let tmp = alt_os::temp::tempdir().unwrap();
         let dir = tmp.path();
         let (first, second) = power_cut(dir, lost);
+        // the snapshot beside the index is a cache a status brings up to date
+        let cache = |(path, _): &(PathBuf, Vec<u8>)| path.ends_with("index.scan");
         let before = files(&dir.join(".alt"));
 
         // commands that read: the repository as it was before the commit
@@ -179,10 +181,10 @@ fn a_commit_the_log_kept_and_the_store_lost_is_passed_over_cut_and_made_again() 
         assert_eq!(ok(head).trim(), first);
         // the check does not pass: a whole operation is about to go
         assert_eq!(alt(dir, &["fsck"]).status.code(), Some(3), "{lost:?}");
-        assert!(
-            files(&dir.join(".alt")) == before,
-            "{lost:?}: a command that reads changed a file"
-        );
+        let after = files(&dir.join(".alt"));
+        let wrote = after.iter().zip(&before).any(|(a, b)| a != b && !cache(a));
+        let same = !wrote && after.len() == before.len();
+        assert!(same, "{lost:?}: a command that reads changed a file");
 
         // the first command that writes cuts the transaction off
         let add = alt(dir, &["add", "b.txt"]);

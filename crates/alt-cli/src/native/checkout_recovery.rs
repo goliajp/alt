@@ -65,11 +65,15 @@ impl NativeRepo<'_> {
         self.ensure_no_pending_recovery()
     }
 
-    pub(super) fn ensure_no_pending_checkout(&self) -> Res<()> {
+    /// Fails where `ops` hold a checkout of the workspace `identity` that
+    /// nothing among them completed.
+    pub(super) fn ensure_none_pending(
+        &self,
+        ops: &[alt_oplog::Op],
+        identity: &WorkspaceIdentity,
+    ) -> Res<()> {
         let mut completed = std::collections::HashSet::new();
-        // Identity is only allocated on writes, after the capability gate.
-        let identity = self.workspace_identity()?;
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
+        for op in ops.iter().rev() {
             match op.payload.first() {
                 Some(&COMPLETE_CHECKOUT) => {
                     let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
@@ -94,7 +98,7 @@ impl NativeRepo<'_> {
                     // the guard of a step is closed by the recovery of the
                     // step, or this command holds it
                     if !self.is_guard(&pending)?
-                        && pending.workspace == identity
+                        && pending.workspace == *identity
                         && !completed.contains(&op.id.to_string())
                     {
                         return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
@@ -105,7 +109,7 @@ impl NativeRepo<'_> {
                         && let Some(context) = tx.context
                     {
                         let context: recovery::RefContext = alt_json::from_slice(&context)?;
-                        if context.workspace == identity
+                        if context.workspace == *identity
                             && context.checkout.is_some()
                             && !completed.contains(&op.id.to_string())
                         {

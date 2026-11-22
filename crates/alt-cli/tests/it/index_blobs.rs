@@ -198,7 +198,7 @@ fn an_add_cut_before_its_sync_is_passed_over_and_discarded() {
     let index = add_never_synced(dir, || ());
     // neither the index nor the completion was written
     drop_last_op(dir);
-    fs::write(dir.join(".alt/index"), &index).unwrap();
+    crate::replace_file(&dir.join(".alt/index"), &index);
     let check = alt(dir, &["fsck"]);
     assert_eq!(check.status.code(), Some(3), "{}", stderr(&check));
     let said = stdout(&check);

@@ -2217,6 +2217,10 @@ Usage: alt fsck [OPTIONS]
 
 Options:
       --json                   Emit the record counts as a JSON object
+      --drop-lost              List the records of the object store that name content which is not stored, wherever they lie, and what names the objects that go with them; with --yes, take those records out
+      --yes                    With --drop-lost: take the records out
+      --committed              With --drop-lost --yes: take the records out also where a commit that a ref reaches names an object that goes with them
+      --no-connectivity        Leave out the walk from every ref through commits and trees, which finds the objects they name that are not stored
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help

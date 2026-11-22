@@ -193,3 +193,78 @@ fn ignore_rules_do_not_hide_tracked_files() {
     assert!(st.contains("modified:   logs/keep.log"), "{st}");
     assert!(!st.contains("new.log"), "{st}");
 }
+
+/// A pattern without a slash is held against the name of a path, not
+/// against the directories above it: those are decided on their own.
+fn rules_by_name(root: &Path, run: &dyn Fn(&[&str]) -> Output) {
+    std::fs::write(root.join(".gitignore"), "gen\n!gen/\n*.d\n!keep.d\n").unwrap();
+    for dir in ["gen", "keep.d", "sub/gen", "sub/keep.d"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+        // the directory is not hidden, and no rule names this file
+        std::fs::write(root.join(dir).join("out.txt"), "kept\n").unwrap();
+        // hidden by its own name in a directory that is not
+        std::fs::write(root.join(dir).join("x.d"), "hidden\n").unwrap();
+    }
+    std::fs::write(root.join("a.txt"), "a\n").unwrap();
+    ok(run(&["add", "."]));
+    ok(run(&["commit", "-m", "base"]));
+}
+
+#[test]
+fn a_rule_without_a_slash_goes_by_the_name_of_a_path_as_for_git() {
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (a, g) = (a.path(), g.path());
+    ok(alt(a, &["init", "."]));
+    ok(git(g, &["init", "-q", "-b", "main"]));
+    rules_by_name(a, &|args| alt(a, args));
+    rules_by_name(g, &|args| git(g, args));
+    let tree = |cat: String| cat.lines().next().unwrap().to_owned();
+    assert_eq!(
+        tree(ok(alt(a, &["cat-file", "-p", "main"]))),
+        tree(ok(git(g, &["cat-file", "-p", "HEAD"])))
+    );
+    let listed = ok(git(g, &["ls-files"]));
+    assert!(listed.contains("gen/out.txt") && listed.contains("sub/keep.d/out.txt"));
+    assert!(!listed.contains("x.d"), "{listed}");
+    // and what is left untracked is hidden for both
+    let st = ok(alt(a, &["status"]));
+    assert!(st.contains("working tree clean"), "{st}");
+    assert_eq!(ok(git(g, &["status", "--porcelain"])), "");
+}
+
+/// Rules that end in a tab, in spaces and in a space after a backslash,
+/// beside files whose names end the same ways and ones that do not.
+fn rules_that_end_in_blanks(root: &Path, run: &dyn Fn(&[&str]) -> Output) {
+    let rules = "tab.txt\t\nspace.txt  \nkept\\ \nboth\\   \n";
+    std::fs::write(root.join(".gitignore"), rules).unwrap();
+    let names = ["tab.txt", "tab.txt\t", "space.txt", "kept", "kept ", "both"];
+    for name in names.into_iter().chain(["both "]) {
+        std::fs::write(root.join(name), "x\n").unwrap();
+    }
+    ok(run(&["add", "."]));
+    ok(run(&["commit", "-m", "base"]));
+}
+
+#[test]
+fn a_rule_ends_as_for_git_in_a_tab_in_spaces_and_in_an_escaped_space() {
+    let (a, g) = (
+        alt_os::temp::tempdir().unwrap(),
+        alt_os::temp::tempdir().unwrap(),
+    );
+    let (a, g) = (a.path(), g.path());
+    ok(alt(a, &["init", "."]));
+    ok(git(g, &["init", "-q", "-b", "main"]));
+    rules_that_end_in_blanks(a, &|args| alt(a, args));
+    rules_that_end_in_blanks(g, &|args| git(g, args));
+    let tree = |cat: String| cat.lines().next().unwrap().to_owned();
+    assert_eq!(
+        tree(ok(alt(a, &["cat-file", "-p", "main"]))),
+        tree(ok(git(g, &["cat-file", "-p", "HEAD"])))
+    );
+    // a tab is part of the rule, spaces are not, an escaped space is
+    let listed = ok(git(g, &["ls-files", "-z"]));
+    assert_eq!(listed, ".gitignore\0both\0kept\0tab.txt\0");
+}

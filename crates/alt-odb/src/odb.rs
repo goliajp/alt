@@ -1,16 +1,21 @@
 //! The opened object database: the append files, the write lock over them
 //! and the prism pipeline. [`crate::NativeOdb`] opens one on first use.
 
+mod bound;
 mod bulk;
 mod confirmed;
 mod cut;
 mod durable;
 mod follow;
+mod lost;
 mod open;
+mod runs;
 mod settle;
 mod sink;
 
 pub use cut::Discarded;
+pub(crate) use cut::generation_kept;
+pub use lost::Lost;
 pub(crate) use open::Access;
 pub(crate) use settle::lost;
 pub use sink::OdbSink;
@@ -21,13 +26,13 @@ use std::sync::OnceLock;
 
 use alt_git_codec::{ObjectId, ObjectKind, RawObject};
 use alt_prism::Registry;
-use alt_store::{BlobStore, CompactReport, StoreError, Tail};
+use alt_store::{BlobStore, StoreError, Tail};
 
 use crate::head::Head;
-use crate::lock::{hold_exclusive, release_exclusive};
 use crate::map::{MapEntry, ObjectMap};
 use crate::synced::{Deferred, Lens};
 use crate::tier1::{self, Tier1Map};
+use crate::unsynced::Noted;
 use crate::{BlobId, OdbError};
 
 /// The native object database: blob store + git-identity map.
@@ -90,6 +95,16 @@ pub(crate) struct Odb {
     /// and name content which is not stored: how far the lock file noted
     /// each file as synced when the handle was opened.
     pub(crate) confirmed: Option<Lens>,
+    /// The lock file's note of unsynced appends as this handle last read
+    /// it ([`crate::unsynced`]), shared with what judges a record of the
+    /// files that does not read.
+    pub(crate) left: Noted,
+    /// The marker's generation as of what this handle holds of the
+    /// store, and as the lock file notes it ([`crate::repair`]); how the
+    /// store is opened again in the handle's place.
+    pub(crate) generation: Option<u64>,
+    pub(crate) noted: Option<u64>,
+    pub(crate) opened: (alt_store::BlobOptions, bool),
 }
 
 impl Odb {
@@ -99,49 +114,6 @@ impl Odb {
     /// stored.
     pub fn register_prism(&mut self, prism: Box<dyn alt_prism::Prism + Send + Sync>) {
         self.registry.register(prism);
-    }
-
-    /// Acquires the write lock for this batch (if not already held) and brings
-    /// the in-memory state up to date with concurrent writers.
-    fn acquire(&mut self) -> Result<(), OdbError> {
-        if self.held {
-            return Ok(());
-        }
-        hold_exclusive(&self.lock)?;
-        self.held = true;
-        let ready = self.catch_up().and_then(|()| self.bound());
-        if ready.is_err() {
-            // nothing was appended; the next call looks at the store again
-            release_exclusive(&self.lock);
-            self.held = false;
-            self.blobs.end_batch();
-        }
-        ready
-    }
-
-    /// Releases the write lock (best-effort; the fd closing also releases it).
-    fn release(&mut self) {
-        if self.held {
-            self.note_checked();
-            self.save_head();
-            release_exclusive(&self.lock);
-            self.held = false;
-            self.blobs.end_batch();
-        }
-    }
-
-    /// Read-path catch-up for a long-lived odb (the daemon between requests):
-    /// brings the in-memory state up to date with on-disk writes by concurrent
-    /// processes, then releases — reusing the proven write-path catch-up so a
-    /// torn tail is handled correctly. Must not be called mid-batch (it is a
-    /// request-boundary operation; a batch always reaches `flush` first).
-    pub fn refresh(&mut self) -> Result<(), OdbError> {
-        // a handle that is refreshed is one that lives across requests
-        self.map.keep_reads();
-        self.blobs.keep_reads();
-        self.acquire()?;
-        self.release();
-        Ok(())
     }
 
     /// Stores one git object's canonical payload and records its identity
@@ -305,27 +277,6 @@ impl Odb {
     /// and verification sweeps).
     pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
         self.map.entries()
-    }
-
-    /// Re-encodes `old`'s content as a lineage delta against `new`'s
-    /// (same-path predecessor → successor). Identity is untouched; only
-    /// the storage form changes. Returns whether a re-encoding happened.
-    pub fn lineage_delta(&mut self, old: &ObjectId, new: &ObjectId) -> Result<bool, OdbError> {
-        self.acquire()?;
-        let (Some(old_entry), Some(new_entry)) = (self.map.by_git(old)?, self.map.by_git(new)?)
-        else {
-            return Ok(false);
-        };
-        let (old_alt, new_alt) = (old_entry.alt, new_entry.alt);
-        Ok(self.blobs.lineage_delta(old_alt, new_alt)?)
-    }
-
-    /// Compacts the underlying chunk store, reclaiming the dead weight left
-    /// by lineage delta re-encoding. Object identities and the map are
-    /// untouched — only physical storage is rewritten.
-    pub fn compact(&mut self) -> Result<CompactReport, OdbError> {
-        self.acquire()?;
-        Ok(self.blobs.compact()?)
     }
 
     /// Number of mapped git objects.

@@ -31,7 +31,7 @@ fn a_log_regrown_to_the_same_length_and_last_record_is_not_taken_for_the_old_one
         log.append(&record(n, n)).unwrap();
     }
     log.index_tail(u64::MAX, true).unwrap();
-    assert!(!log.index_pending());
+    assert!(!log.index_pending(u64::MAX));
     drop(log);
 
     // records 100..599 replaced by others; the last one is the same record

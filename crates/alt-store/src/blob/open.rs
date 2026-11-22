@@ -94,7 +94,7 @@ impl BlobStore {
     fn pass_over_unsynced(&self, map: &mut BlobMap) -> Result<(), StoreError> {
         let end = map.appended_len();
         let from = match &self.map_synced {
-            Some((noted, unsynced)) if end > *noted => unsynced(),
+            Some((noted, unsynced)) if end > *noted => unsynced(self.chunks.unfinished()),
             _ => None,
         };
         let Some(from) = from.filter(|from| *from < end) else {
@@ -131,6 +131,11 @@ impl BlobStore {
             .map
             .get_mut()
             .expect("the blob map was opened just above"))
+    }
+
+    /// The record log of the blob map, opened now where it was not.
+    pub fn map_log(&mut self) -> Result<&mut crate::reclog::RecLog, StoreError> {
+        Ok(self.map_mut()?.log_mut())
     }
 
     /// What the next opener can be told about this store's files (see

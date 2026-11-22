@@ -3,11 +3,16 @@
 
 use super::*;
 
+mod as_read;
+mod held;
 mod index;
+mod left;
 mod prepared;
 mod undo;
-pub(super) use index::ABANDON;
+mod whole;
 pub use prepared::{export_git, prepared_blobs};
+pub(super) use whole::{FromFile, TornIndex, note_stored};
+pub(super) use {as_read::AsRead, index::ABANDON, left::sync_left};
 
 pub(super) const PREPARE: u8 = 0x30;
 pub(super) const COMPLETE: u8 = 0x31;
@@ -94,7 +99,12 @@ pub(super) fn decode<T: alt_json::FromJson>(bytes: &[u8], kind: u8) -> Res<T> {
 
 /// Cache/stat fields are not state. Conflict stages, flags, paths, oid and
 /// modes are state and must survive a restore exactly.
-pub(super) fn canonical_index(mut index: Index, algo: HashAlgo) -> Vec<u8> {
+pub(super) fn canonical_index(index: Index, algo: HashAlgo) -> Vec<u8> {
+    canonical(index).serialize(algo)
+}
+
+/// The index with what is not state taken out.
+fn canonical(mut index: Index) -> Index {
     for e in &mut index.entries {
         e.ctime = (0, 0);
         e.mtime = (0, 0);
@@ -104,28 +114,14 @@ pub(super) fn canonical_index(mut index: Index, algo: HashAlgo) -> Vec<u8> {
         e.gid = 0;
         e.size = 0;
     }
-    index.serialize(algo)
+    index
 }
 
 pub(super) fn hash(bytes: &[u8]) -> String {
     alt_hash::blake3::hash(bytes).to_hex().to_string()
 }
 
-pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Res<()> {
-    let parent = path.parent().ok_or("state path has no parent")?;
-    std::fs::create_dir_all(parent)?;
-    let mut tmp = alt_os::temp::NamedTempFile::new_in(parent)?;
-    tmp.write_all(bytes)?;
-    tmp.as_file().sync_all()?;
-    tmp.persist(path)?;
-    // Canonicalize the existing directory: Path::parent of a one-component
-    // relative path is the empty path, which cannot be opened for fsync.
-    let parent = std::fs::canonicalize(parent)?;
-    for directory in parent.ancestors().take(3) {
-        std::fs::File::open(directory)?.sync_all()?;
-    }
-    Ok(())
-}
+pub(super) use crate::durable::write_state as durable_write;
 
 pub(super) fn workspace_identity_at(index_path: &Path, name: &str) -> Res<WorkspaceIdentity> {
     let path = index_path.with_file_name("workspace-id");
@@ -163,26 +159,7 @@ impl NativeRepo<'_> {
     /// workspaces continue independently; shared refs still use their CAS lock.
     pub(super) fn lock_workspace(&mut self) -> Res<()> {
         if self.write_lock.is_none() {
-            let path = self.index_path.with_file_name("write.lock");
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(path)?;
-            #[cfg(unix)]
-            {
-                loop {
-                    match alt_os::sys::flock(&file, alt_os::sys::LOCK_EX) {
-                        Ok(()) => break,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                        Err(e) => return Err(e.into()),
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            return Err("workspace mutations require a supported Unix filesystem".into());
-            self.write_lock = Some(file);
+            self.write_lock = Some(held::locked(&self.index_path)?);
             self.store.refresh()?;
             self.caps = self.store.capabilities_for(&self.id.principal);
         }
@@ -191,22 +168,6 @@ impl NativeRepo<'_> {
 
     pub(super) fn workspace_identity(&self) -> Res<WorkspaceIdentity> {
         workspace_identity_at(&self.index_path, &self.workspace)
-    }
-
-    pub(super) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
-        let id = hash(bytes);
-        let path = self.store.alt_dir.join("recovery/objects").join(&id);
-        if !path.exists() {
-            durable_write(&path, bytes)?;
-        }
-        if hash(&std::fs::read(path)?) != id {
-            return Err("corrupt recovery snapshot".into());
-        }
-        Ok(id)
-    }
-
-    pub(super) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
-        prepared::read_snapshot_at(&self.store.alt_dir, id)
     }
 
     /// The working-tree state at `path`, as an index change records it. A
@@ -265,7 +226,7 @@ impl NativeRepo<'_> {
 
     pub(super) fn write_index_transaction(
         &mut self,
-        before: Index,
+        before: AsRead,
         after: Index,
         touched: &[BString],
         inverse_of: Option<String>,
@@ -273,9 +234,10 @@ impl NativeRepo<'_> {
         self.lock_workspace()?;
         self.ensure_no_pending_recovery()?;
         index_file::ensure_sound(&after)?;
-        let before = canonical_index(before, self.store.algo()?);
+        let unchanged = self.unchanged_since(&before)?;
+        let (before, read) = before.canonical(self.store.algo()?);
         let after = canonical_index(after, self.store.algo()?);
-        if canonical_index(self.index()?, self.store.algo()?) != before {
+        if !unchanged {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
                 "index changed while preparing operation",
@@ -286,18 +248,19 @@ impl NativeRepo<'_> {
             version: 1,
             workspace: self.workspace_identity()?,
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            before: self.snapshot(&before)?,
-            after: self.snapshot(&after)?,
+            before: self.snapshot_as(&before, read)?,
+            after: hash(&after),
             worktree: touched
                 .iter()
                 .map(|p| self.path_guard(p))
                 .collect::<Res<_>>()?,
             inverse_of,
         };
-        self.apply_index_intent(intent, &after)
+        let fresh = self.keep_snapshot_as(&intent.after, &after)?;
+        self.apply_index_intent(intent, &after, fresh)
     }
 
-    fn apply_index_intent(&mut self, intent: IndexIntent, after: &[u8]) -> Res<OpId> {
+    fn apply_index_intent(&mut self, intent: IndexIntent, after: &[u8], fresh: bool) -> Res<OpId> {
         self.store.odb.flush()?;
         let actor = self.id.actor(if intent.inverse_of.is_some() {
             "undo"
@@ -310,9 +273,9 @@ impl NativeRepo<'_> {
             .record_op(&actor, now_ms(), &encode(PREPARE, &intent)?)?;
         // Objects and then intent must be durable before replacing the index,
         // even when the daemon normally defers synchronization.
-        self.store.sink()?.fsync_all()?;
+        self.store.sync_held()?;
         self.check_guards(&intent.worktree)?;
-        durable_write(&self.index_path, after)?;
+        self.put_index(&intent.after, after, fresh)?;
         let done = Completion {
             version: 1,
             prepared: prepared.to_string(),

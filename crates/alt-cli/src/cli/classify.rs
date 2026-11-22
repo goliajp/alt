@@ -35,7 +35,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Identity { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
-            | Command::Fsck { .. }
+            | Command::Fsck(_)
             | Command::Complete(_)
             | Command::Prompt(_)
     )
@@ -116,7 +116,7 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Diff { .. }
             | Command::OpLog { .. }
             | Command::Verify { .. }
-            | Command::Fsck { .. }
+            | Command::Fsck(crate::fsck::FsckArgs { yes: false, .. })
             | Command::Complete(_)
             | Command::Prompt(_)
             | Command::Commit { validate: true, .. }

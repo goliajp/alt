@@ -8,6 +8,7 @@ use alt_bytes::{BString, ByteSlice};
 use alt_git_codec::{HashAlgo, ObjectId};
 
 mod clash;
+mod serialize;
 pub use clash::clash_among;
 
 /// Stage bits and friends live in `flags`; typed accessors below.
@@ -67,27 +68,37 @@ impl Index {
     }
 
     pub fn parse(data: &[u8], algo: HashAlgo) -> Result<Self, IndexError> {
+        Self::parse_as(data, algo, false)
+    }
+
+    /// [`Self::parse`] of bytes known to end in the checksum of what
+    /// comes before: the checksum is not computed again.
+    pub fn parse_checked(data: &[u8], algo: HashAlgo) -> Result<Self, IndexError> {
+        Self::parse_as(data, algo, true)
+    }
+
+    fn parse_as(data: &[u8], algo: HashAlgo, checked: bool) -> Result<Self, IndexError> {
         const ERR: fn(&'static str) -> IndexError = IndexError::Format;
         let raw = algo.raw_len();
         if data.len() < 12 + raw || &data[..4] != b"DIRC" {
-            return Err(ERR("not an index file (bad magic)"));
+            return Err(IndexError::Torn("not an index file (bad magic)"));
+        }
+
+        // trailer: hash of everything before it
+        let content_end = data.len() - raw;
+        let checksum = &data[content_end..];
+        let holds = || match algo {
+            HashAlgo::Sha1 => alt_hash::sha1(&data[..content_end])[..] == *checksum,
+            HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end])[..] == *checksum,
+        };
+        if !checked && !holds() {
+            return Err(IndexError::Torn("index checksum mismatch"));
         }
         let version = u32::from_be_bytes(data[4..8].try_into().unwrap());
         if !(2..=4).contains(&version) {
             return Err(ERR("unsupported index version"));
         }
         let count = u32::from_be_bytes(data[8..12].try_into().unwrap()) as usize;
-
-        // trailer: hash of everything before it
-        let content_end = data.len() - raw;
-        let checksum = &data[content_end..];
-        let computed: Vec<u8> = match algo {
-            HashAlgo::Sha1 => alt_hash::sha1(&data[..content_end]).to_vec(),
-            HashAlgo::Sha256 => alt_hash::sha256(&data[..content_end]).to_vec(),
-        };
-        if checksum != computed {
-            return Err(ERR("index checksum mismatch"));
-        }
 
         let mut pos = 12;
         // `count` is an untrusted header field; never pre-allocate it
@@ -123,67 +134,6 @@ impl Index {
             entries,
             extensions,
         })
-    }
-
-    /// Serializes the index. Entries are emitted sorted by (path, stage) as
-    /// git requires. Versions 2 and 3 are written faithfully; version 4's
-    /// path-prefix compression is a size optimization, so a v4 index is
-    /// written as v2 (full paths) — lossless, just larger. The trailer hash
-    /// is computed over the content.
-    pub fn serialize(&self, algo: HashAlgo) -> Vec<u8> {
-        let raw = algo.raw_len();
-        // the minimal faithful version: v3 only if an entry needs extended
-        // flags, else v2 (v4 downgrades here)
-        let has_extended = self.entries.iter().any(|e| e.extended_flags.is_some());
-        let version: u32 = if has_extended { 3 } else { 2 };
-
-        let mut sorted: Vec<&IndexEntry> = self.entries.iter().collect();
-        sorted.sort_by(|a, b| a.path.cmp(&b.path).then(a.stage().cmp(&b.stage())));
-
-        let mut out = Vec::with_capacity(12 + sorted.len() * (40 + raw + 8));
-        out.extend_from_slice(b"DIRC");
-        out.extend_from_slice(&version.to_be_bytes());
-        out.extend_from_slice(&(sorted.len() as u32).to_be_bytes());
-
-        for e in &sorted {
-            let start = out.len();
-            for v in [
-                e.ctime.0, e.ctime.1, e.mtime.0, e.mtime.1, e.dev, e.ino, e.mode, e.uid, e.gid,
-                e.size,
-            ] {
-                out.extend_from_slice(&v.to_be_bytes());
-            }
-            out.extend_from_slice(e.oid.as_bytes());
-            // rebuild flags: keep the high control bits, recompute the name
-            // length, and set the extended bit exactly when we emit one
-            let name_len = e.path.len().min(0x0FFF) as u16;
-            let mut flags = (e.flags & 0xF000) | name_len;
-            flags = match e.extended_flags {
-                Some(_) => flags | 0x4000,
-                None => flags & !0x4000,
-            };
-            out.extend_from_slice(&flags.to_be_bytes());
-            if let Some(ext) = e.extended_flags {
-                out.extend_from_slice(&ext.to_be_bytes());
-            }
-            out.extend_from_slice(&e.path);
-            // pad with 1–8 NULs to an 8-byte multiple of the whole entry
-            let pad = 8 - ((out.len() - start) % 8);
-            out.resize(out.len() + pad, 0);
-        }
-
-        for ext in &self.extensions {
-            out.extend_from_slice(&ext.signature);
-            out.extend_from_slice(&(ext.data.len() as u32).to_be_bytes());
-            out.extend_from_slice(&ext.data);
-        }
-
-        let trailer: Vec<u8> = match algo {
-            HashAlgo::Sha1 => alt_hash::sha1(&out).to_vec(),
-            HashAlgo::Sha256 => alt_hash::sha256(&out).to_vec(),
-        };
-        out.extend_from_slice(&trailer);
-        out
     }
 }
 
@@ -310,19 +260,53 @@ mod tests {
         buf.extend_from_slice(&u32::MAX.to_be_bytes());
         assert!(Index::parse(&with_trailer(buf), HashAlgo::Sha1).is_err());
     }
+
+    #[test]
+    fn bytes_that_are_not_a_file_written_whole_are_told_from_an_index_that_does_not_read() {
+        let mut header = b"DIRC".to_vec();
+        header.extend_from_slice(&2u32.to_be_bytes());
+        header.extend_from_slice(&0u32.to_be_bytes());
+        let whole = with_trailer(header.clone());
+        assert!(Index::parse(&whole, HashAlgo::Sha1).is_ok());
+        let torn = |bytes: &[u8]| {
+            matches!(
+                Index::parse(bytes, HashAlgo::Sha1),
+                Err(IndexError::Torn(_))
+            )
+        };
+        // empty, cut anywhere, zeroed, and with one bit of the checksum off
+        for cut in 0..whole.len() {
+            assert!(torn(&whole[..cut]), "cut at {cut}");
+        }
+        assert!(torn(&vec![0; whole.len()]));
+        let mut flipped = whole.clone();
+        *flipped.last_mut().unwrap() ^= 1;
+        assert!(torn(&flipped));
+        // a version this does not read, under a checksum that holds, is no tear
+        header[7] = 9;
+        assert!(matches!(
+            Index::parse(&with_trailer(header), HashAlgo::Sha1),
+            Err(IndexError::Format(_))
+        ));
+    }
 }
 
 #[derive(Debug)]
 pub enum IndexError {
     Io(std::io::Error),
+    /// what its own checksum covers does not read as an index
     Format(&'static str),
+    /// the bytes are not a file that was written whole: they are too
+    /// short, do not begin as an index does, or do not end in the
+    /// checksum of what comes before
+    Torn(&'static str),
 }
 
 impl std::fmt::Display for IndexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(_) => f.write_str("io"),
-            Self::Format(v) => write!(f, "index format: {v}"),
+            Self::Format(v) | Self::Torn(v) => write!(f, "index format: {v}"),
         }
     }
 }

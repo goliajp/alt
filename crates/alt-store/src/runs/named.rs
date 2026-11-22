@@ -62,7 +62,8 @@ impl Runs {
     /// The log range of each run, oldest first: what [`Runs::open_named`]
     /// takes.
     pub fn chain(&self) -> Vec<(u64, u64)> {
-        self.runs.iter().map(|run| (run.start, run.end)).collect()
+        let chain = &self.runs[..self.chained()];
+        chain.iter().map(|run| (run.start, run.end)).collect()
     }
 
     /// Removes every run file, finished or not, that is not part of the
@@ -80,6 +81,10 @@ impl Runs {
             if ours && !self.runs.iter().any(|run| run.path == path) {
                 remove_if_present(&path)?;
                 removed = true;
+            } else if entry.file_type()?.is_dir() {
+                // a boot run begins where the chain ended before this
+                // run was written: nobody opens it, whether it goes or not
+                let _ = super::boot::remove_dir(&path);
             }
         }
         if removed {
@@ -87,6 +92,14 @@ impl Runs {
         }
         Ok(())
     }
+}
+
+/// Whether a run is fsynced before it takes the place of others. A run
+/// is over records that were synced, and a search that misses in it is
+/// taken at its word: one that a power cut left in part would hide
+/// records that are there.
+pub fn written_synced() -> bool {
+    !alt_os::durability::never_synced()
 }
 
 /// The run files in `dir` by the log range each is named for; one that
@@ -132,4 +145,32 @@ pub fn unusable(dir: &Path) -> Result<Vec<PathBuf>, StoreError> {
     }
     out.sort();
     Ok(out)
+}
+
+/// Removes every run file in `dir` that reaches past byte `target` of its
+/// log, and fsyncs the removal: a run that is gone cannot come back under
+/// records that were since written there.
+pub fn remove_past(dir: &Path, target: u64) -> Result<(), StoreError> {
+    let listing = match fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut removed = false;
+    for entry in listing {
+        let entry = entry?;
+        let past = entry
+            .file_name()
+            .to_str()
+            .and_then(parse_name)
+            .is_some_and(|(_, end)| end > target);
+        if past {
+            remove_if_present(&entry.path())?;
+            removed = true;
+        }
+    }
+    if removed {
+        crate::pack::fsync_dir(dir)?;
+    }
+    Ok(())
 }

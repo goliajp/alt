@@ -9,7 +9,6 @@ use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::synced::{self, Lens, Marker, State};
 use crate::tier1::Tier1Map;
 use crate::{OdbCheckpoint, OdbError};
-use alt_store::StoreError;
 
 impl Odb {
     /// Finish an unfinished object batch, including after a command error.
@@ -64,35 +63,6 @@ impl Odb {
         self.sync_to(target, generation)
     }
 
-    /// With the write lock held and every file this handle has open read
-    /// to its end: a store whose marker does not record boundaries that
-    /// hold — an older alt wrote it, the marker was removed, or appends
-    /// were left unsynced — gets them before anything is appended. Where
-    /// fsyncs are skipped the marker is made to say so instead.
-    pub(super) fn bound(&mut self) -> Result<(), OdbError> {
-        let marker = Marker::read(&self.durable_path);
-        // a pack noted as synced is not, once the marker stops saying so
-        if !marker.trusted() && self.blobs.distrust_synced()? {
-            head::forget_synced(&self.lock)?;
-        }
-        self.settle(&marker)?;
-        if alt_store::relaxed_durability() {
-            let said = |state: &State| state.flags & synced::UNTRUSTED != 0;
-            if !marker.recorded().is_some_and(said) {
-                synced::distrust(&self.durable_path)?;
-            }
-        } else if !marker.trusted() {
-            self.blobs.fsync()?;
-            self.tier1_mut()?.sync()?;
-            self.map.fsync()?;
-            let whole = self.appended_whole()?;
-            synced::establish(&self.durable_path, whole)?;
-            head::note_synced(&self.lock, whole);
-        }
-        self.head.bounded = true;
-        Ok(())
-    }
-
     /// The record boundaries this handle's appends reached. A file it has
     /// not opened it has not appended to: zero, short of any length.
     fn appended(&self) -> Result<Lens, OdbError> {
@@ -107,49 +77,12 @@ impl Odb {
     }
 
     /// The same with every file opened: boundaries in all four.
-    fn appended_whole(&self) -> Result<Lens, OdbError> {
+    pub(super) fn appended_whole(&self) -> Result<Lens, OdbError> {
         let tier1 = self.tier1()?.appended_len();
         Ok(Lens {
             tier1,
             ..self.appended()?
         })
-    }
-
-    /// Folds long enough log tails into the index runs. A run is fsynced
-    /// as it is written, so the records it covers are fsynced first: no
-    /// crash leaves a run over records that were lost. The runs are a
-    /// cache: failing to write one is not an error, anything else is.
-    pub(super) fn index_tails(&mut self) -> Result<(), OdbError> {
-        let pending = self.blobs.index_pending()
-            || self.tier1.get().is_some_and(|tier1| tier1.index_pending())
-            || self.map.index_pending();
-        if !self.held || !pending {
-            return Ok(());
-        }
-        // indexing the blob store opens its map: opened here, it is
-        // fsynced with the rest before a run is built over it
-        self.blobs.open_map()?;
-        if !alt_store::relaxed_durability() {
-            self.blobs.fsync()?;
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.sync()?;
-            }
-            self.map.fsync()?;
-        }
-        let indexed = (|| -> Result<(), StoreError> {
-            self.blobs.index_tail()?;
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.index_tail(u64::MAX)?;
-            }
-            Ok(())
-        })();
-        match indexed
-            .map_err(OdbError::from)
-            .and_then(|()| self.map.index_tail(u64::MAX))
-        {
-            Err(OdbError::Store(StoreError::IndexWrite(_))) => Ok(()),
-            other => other,
-        }
     }
 
     /// Snapshots the write cursor across all three append files (chunks pack,
@@ -202,7 +135,8 @@ impl Odb {
         rewound
     }
 
-    pub(super) fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+    fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+        self.end_boot_runs()?;
         self.blobs.check_rewind(ckpt.blobs)?;
         self.tier1()?.check_rewind(ckpt.tier1_len)?;
         self.map.check_rewind(ckpt.map_len)?;
@@ -242,7 +176,7 @@ impl Odb {
                     ..*state
                 },
                 None => State {
-                    generation: 1,
+                    generation: super::generation_kept(marker),
                     flags: 0,
                     eof: after,
                     whole: after,
@@ -250,6 +184,7 @@ impl Odb {
             })
         })?;
         head::note_synced(&self.lock, after);
+        self.generation = Some(Marker::read(&self.durable_path).generation());
         Ok(())
     }
 
@@ -310,38 +245,5 @@ impl Odb {
         })();
         let _ = unlock(&sync_lock);
         result
-    }
-
-    /// Under the sync lock and the shared append lock (so no rewind and no
-    /// writer's cut is under way): fsyncs unless one since the last rewind
-    /// covered the files as far as `target`, and records it.
-    fn sync_locked(&mut self, target: Lens, generation: u64) -> Result<(), OdbError> {
-        let covered = Marker::read(&self.durable_path)
-            .recorded()
-            .is_some_and(|state| state.generation == generation && state.eof.reaches(&target));
-        let eof = if covered {
-            None
-        } else {
-            let (pack, blobmap) = self.blobs.file_lens()?;
-            let eof = Lens {
-                seq: target.seq,
-                pack,
-                blobmap,
-                // not opened, not fsynced
-                tier1: self.tier1.get().map_or(Ok(0), Tier1Map::file_len)?,
-                map: self.map.file_len()?,
-            };
-            self.blobs.fsync()?; // chunks then blobmap, in order
-            // then tier1 (references blob ids above)
-            if let Some(tier1) = self.tier1.get_mut() {
-                tier1.sync()?;
-            }
-            self.map.fsync()?; // then map.alt (may reference tier1 ids)
-            Some(eof)
-        };
-        if let Some(whole) = synced::record(&self.durable_path, generation, target, eof)? {
-            head::note_synced(&self.lock, whole);
-        }
-        Ok(())
     }
 }

@@ -34,7 +34,7 @@ pub(super) fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
     let before = lens(dir);
     let index = fs::read(dir.join(".alt/index")).unwrap();
     fs::write(dir.join("new.txt"), "never arrived\n").unwrap();
-    ok(relaxed(dir, &["add", "new.txt"]));
+    ok(alt(dir, &["add", "new.txt"]));
     for (file, len) in LOGS.iter().zip(before).take(4) {
         let file = fs::OpenOptions::new()
             .write(true)
@@ -44,7 +44,7 @@ pub(super) fn add_cut_short(dir: &Path, replaced: bool) -> Vec<u8> {
     }
     drop_last_op(dir);
     if !replaced {
-        fs::write(dir.join(".alt/index"), &index).unwrap();
+        crate::replace_file(&dir.join(".alt/index"), &index);
     }
     index
 }
@@ -145,28 +145,71 @@ fn a_recovery_and_a_command_that_moves_a_ref_abandon_it_too() {
 }
 
 /// An index that is neither the one from before the add nor the one it
-/// prepared is not put back: the operation stays pending.
+/// prepared was put in place after it by a command whose record the log
+/// does not hold: it is kept, and the add is abandoned.
 #[test]
-fn an_index_in_a_third_state_is_left_and_the_add_stays_pending() {
+fn an_index_in_a_third_state_is_kept_and_the_add_abandoned() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let dir = tmp.path();
     add_cut_short(dir, true);
     let id = pending(dir).pop().unwrap();
-    // the index of another repository: a third one
+    // what a later add staged, as far as the index tells
+    fs::write(dir.join("later.txt"), "later\n").unwrap();
     let other = alt_os::temp::tempdir().unwrap();
     ok(alt(other.path(), &["init"]));
-    fs::write(other.path().join("z.txt"), "elsewhere\n").unwrap();
-    ok(alt(other.path(), &["add", "z.txt"]));
+    fs::write(other.path().join("a.txt"), "one\n").unwrap();
+    fs::write(other.path().join("later.txt"), "later\n").unwrap();
+    ok(alt(other.path(), &["add", "a.txt", "later.txt"]));
     let third = fs::read(other.path().join(".alt/index")).unwrap();
-    fs::write(dir.join(".alt/index"), &third).unwrap();
-    fs::write(dir.join("other.txt"), "other\n").unwrap();
-    let add = alt(dir, &["add", "other.txt"]);
-    assert!(!add.status.success());
+    crate::replace_file(&dir.join(".alt/index"), &third);
+    let add = alt(dir, &["add", "new.txt", "later.txt"]);
+    let said = stderr(&add);
     assert!(
-        stderr(&add).contains("recovery required"),
-        "{}",
-        stderr(&add)
+        said.contains(&format!("warning: abandoned operation {id}: ")),
+        "{said}"
     );
-    assert_eq!(pending(dir), [id]);
-    assert_eq!(fs::read(dir.join(".alt/index")).unwrap(), third);
+    assert!(said.contains("What the index stages now is kept"), "{said}");
+    ok(add);
+    assert!(pending(dir).is_empty());
+    assert!(staged(dir, "later.txt") && staged(dir, "new.txt"));
+    goes_on(dir);
+}
+
+/// The index from before the add names a blob that an earlier add left
+/// unsynced and the power cut took as well: the add is abandoned all the
+/// same, and the earlier file is named like any staged one whose blob is
+/// lost.
+#[test]
+fn an_add_is_abandoned_though_the_index_from_before_it_names_a_lost_blob_as_well() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    ok(alt(dir, &["init"]));
+    fs::write(dir.join("a.txt"), "one\n").unwrap();
+    ok(alt(dir, &["add", "a.txt"]));
+    ok(alt(dir, &["commit", "-m", "first"]));
+    let before = lens(dir);
+    fs::write(dir.join("earlier.txt"), "earlier\n").unwrap();
+    ok(alt(dir, &["add", "earlier.txt"]));
+    fs::write(dir.join("new.txt"), "never arrived\n").unwrap();
+    ok(alt(dir, &["add", "new.txt"]));
+    for (file, len) in LOGS.iter().zip(before).take(4) {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join(".alt").join(file));
+        file.unwrap().set_len(len).unwrap();
+    }
+    drop_last_op(dir);
+    let id = pending(dir).pop().unwrap();
+    let add = alt(dir, &["add", "new.txt", "earlier.txt"]);
+    let said = stderr(&add);
+    assert!(
+        said.contains(&format!("warning: abandoned operation {id}: ")),
+        "{said}"
+    );
+    assert!(!said.contains("recovery required"), "{said}");
+    ok(add);
+    assert!(pending(dir).is_empty());
+    assert!(staged(dir, "earlier.txt") && staged(dir, "new.txt"));
+    ok(alt(dir, &["commit", "-m", "second"]));
+    ok(alt(dir, &["fsck"]));
 }

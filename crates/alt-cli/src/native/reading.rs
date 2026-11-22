@@ -40,7 +40,7 @@ pub fn open_for_command(
 ) -> Res<(Store, Repository)> {
     let repo = Repository::open_alt(alt_dir.clone(), Some(root.to_owned()))?;
     let store = match command {
-        Command::Fsck { .. } => Store::open_read_only(alt_dir)?,
+        Command::Fsck(_) => Store::open_read_only(alt_dir)?,
         _ => Store::open_for(alt_dir, cli::mutates_command(command))?,
     };
     Ok((store, view_for(repo, command)))
@@ -53,6 +53,9 @@ impl Store {
             refs,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
+            attributed: Default::default(),
+            checked: None,
+            seen: Default::default(),
             alt_dir,
         })
     }
@@ -74,11 +77,12 @@ impl Store {
     /// command that writes cuts (see [`RefStore::open_confirmed`]).
     pub fn open_reading(alt_dir: PathBuf) -> Res<Self> {
         let odb = NativeOdb::reading(&alt_dir);
-        // an object that does not read is reported by whoever reads it
+        // a store that cannot be asked is reported by whoever reads it
         let also = prepared_blobs(&alt_dir);
-        let refs = RefStore::open_confirmed(&alt_dir, Some(&also), |oid| {
-            odb.contains(oid).unwrap_or(true)
-        })?;
+        let stored = unconfirmed::stored_unsettled(&odb);
+        let held = |oid: &ObjectId| stored(oid).unwrap_or(true);
+        let refs = RefStore::open_confirmed(&alt_dir, Some(&also), held)?;
+        drop(stored);
         Self::opened(alt_dir, odb, refs)
     }
 
@@ -88,7 +92,8 @@ impl Store {
     /// not read. Such a command is answered by a process that opens the
     /// store without them.
     pub fn holds_unconfirmed(&self) -> Res<bool> {
-        let stored = |oid: &ObjectId| self.odb.contains(oid).unwrap_or(true);
+        let stored = unconfirmed::stored_unsettled(&self.odb);
+        let stored = |oid: &ObjectId| stored(oid).unwrap_or(true);
         let also = prepared_blobs(&self.alt_dir);
         Ok(self.refs.unread()? > 0 || self.refs.unheld(Some(&also), stored)?.is_some())
     }

@@ -108,7 +108,9 @@ pub(super) fn plan<'a>(
     };
     let displaced = displaced(before, &taken);
     let acted = taken.iter().copied().chain(deleted);
-    let acted: HashSet<&[u8]> = acted.map(|p| p.as_slice()).chain(displaced).collect();
+    let mut acted: Vec<&[u8]> = acted.map(|p| p.as_slice()).chain(displaced).collect();
+    acted.sort_unstable();
+    acted.dedup();
     // a conflicted path among those named is resolved by what the working
     // tree has there: the file when there is one (`unmerged`), a removal
     // when there is none. git does the same whether the path is named,
@@ -116,7 +118,7 @@ pub(super) fn plan<'a>(
     // does not report a conflicted submodule without a directory as
     // deleted, so those are dropped here
     let resolved = |e: &&IndexEntry| !renormalize && e.stage() != 0 && named(&e.path);
-    let unchanged = |e: &&IndexEntry| !acted.contains(e.path.as_slice());
+    let unchanged = |e: &&IndexEntry| acted.binary_search(&e.path.as_slice()).is_err();
     let stays = before
         .entries
         .iter()

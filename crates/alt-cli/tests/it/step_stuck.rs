@@ -16,7 +16,7 @@ use crate::step_crash::bench::{Bench, alt, copy, restore, run, said};
 const LARGE: usize = 1 << 20;
 
 /// `alt` under a limit of 512 blocks on the files it writes.
-fn limited(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
+pub(crate) fn limited(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
     let alt = crate::alt_command();
     let mut command = std::process::Command::new("sh");
     command
@@ -36,7 +36,7 @@ fn limited(repo: &Path, args: &[&str], crash: Option<&str>) -> Output {
     command.output().unwrap()
 }
 
-fn pending(repo: &Path) -> Vec<String> {
+pub(crate) fn pending(repo: &Path) -> Vec<String> {
     let listed = run(repo, &["operation", "pending"], 0);
     let id = |line: &str| line.split(' ').next().unwrap().to_owned();
     listed.lines().map(id).collect()
@@ -44,7 +44,7 @@ fn pending(repo: &Path) -> Vec<String> {
 
 /// `main` and `side` part after one commit: both change `f.txt`; `side`
 /// adds `new.txt` and makes `z.txt` another large file.
-fn diverged() -> Bench {
+pub(crate) fn diverged() -> Bench {
     let bench = Bench::new();
     run(&bench.repo(), &["init", "."], 0);
     bench.write("f.txt", "1\n2\n3\n");
@@ -82,7 +82,7 @@ fn to_revert() -> Bench {
     bench
 }
 
-const MERGE: &[&str] = &["merge", "side"];
+pub(crate) const MERGE: &[&str] = &["merge", "side"];
 const REVERT: &[&str] = &["revert", "HEAD", "HEAD~2"];
 
 /// The workspace `bench` holds, kept as `began`, with every file the
@@ -101,7 +101,7 @@ fn begun(bench: &Bench, command: &[&str], abort: &[&str]) -> [crate::step_crash:
 
 /// The command fails at the large file: it is left as one that was
 /// killed there, with its checkout to be finished.
-fn stuck(bench: &Bench, command: &[&str]) {
+pub(crate) fn stuck(bench: &Bench, command: &[&str]) {
     let repo = bench.repo();
     restore(&repo, &bench.kept("began"));
     let failed = limited(&repo, command, None);
@@ -122,7 +122,7 @@ fn stuck(bench: &Bench, command: &[&str]) {
 }
 
 /// What a command that writes says while the checkout cannot be finished.
-fn refused(tried: &Output) {
+pub(crate) fn refused(tried: &Output) {
     assert_eq!(tried.status.code(), Some(75), "{}", said(tried));
     let told = said(tried);
     assert!(

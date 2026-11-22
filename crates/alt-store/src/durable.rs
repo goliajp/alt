@@ -72,7 +72,7 @@ impl ChunkStore {
 impl Drop for ChunkStore {
     fn drop(&mut self) {
         // best-effort durability; explicit flush() is the checked path
-        if self.unsynced {
+        if self.unsynced && !relaxed_durability() {
             let _ = self.active.write.sync_all();
         }
     }

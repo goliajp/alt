@@ -61,21 +61,16 @@ impl NativeRepo<'_> {
         {
             return Ok(prior.expect("just matched"));
         }
-        let bytes = match std::fs::read(&self.index_path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Snapshot::of_index(&empty_index(), &[], algo, None));
-            }
-            Err(e) => return Err(e.into()),
+        let (index, Some(bytes)) = self.read_index()? else {
+            return Ok(Snapshot::of_index(&empty_index(), &[], algo, None));
         };
-        let index = Index::parse(&bytes, algo)?;
         let id = &bytes[bytes.len() - algo.raw_len()..];
         Ok(Snapshot::of_index(&index, id, algo, prior.as_ref()))
     }
 
     /// Keeps what a scan learned. The snapshot is a cache: where it cannot
     /// be written, the next scan reads the files again.
-    pub(super) fn keep_snapshot(&self, snapshot: &Snapshot) {
+    pub(super) fn keep_snapshot(&self, snapshot: &mut Snapshot) {
         let path = self.snapshot_path();
         if snapshot.changed && snapshot.save(&path).is_ok() {
             HELD.put(&path, snapshot);
@@ -208,12 +203,12 @@ impl NativeRepo<'_> {
         if let Some(prior) = &prior {
             self.follow_index(prior, &mut next);
         }
-        self.keep_snapshot(&next);
+        self.keep_snapshot(&mut next);
         Ok(())
     }
 
     /// The tree of the commit HEAD names; `None` when there is no commit yet.
-    fn head_tree(&self) -> Res<Option<ObjectId>> {
+    pub(super) fn head_tree(&self) -> Res<Option<ObjectId>> {
         let Some(commit) = self.store.refs.resolve(&self.head_branch()?)? else {
             return Ok(None);
         };
@@ -236,7 +231,7 @@ impl NativeRepo<'_> {
         snapshot.fill_trees();
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
         let delta = self.scan_delta(&mut snapshot, untracked)?;
-        self.keep_snapshot(&snapshot);
+        self.keep_snapshot(&mut snapshot);
         Ok(TreeState {
             snapshot,
             staged,
@@ -244,51 +239,18 @@ impl NativeRepo<'_> {
         })
     }
 
-    /// The files staged over what HEAD has that `named` names and whose
-    /// blob the store does not hold: staged before records that were
-    /// never synced were cut. What HEAD has as the index has it is stored.
-    pub(super) fn staged_unstored(
-        &self,
-        snapshot: &mut Snapshot,
-        index: &Index,
-        named: &dyn Fn(&[u8]) -> bool,
-    ) -> Res<Vec<BString>> {
-        // asking the store about a few entries is less than walking HEAD,
-        // which reads a tree for every directory with something staged
-        const FEW: usize = 32;
-        let files = |e: &&IndexEntry| e.stage() == 0 && e.mode != 0o160000 && named(&e.path);
-        let few: Vec<&IndexEntry> = index.entries.iter().filter(files).take(FEW + 1).collect();
-        let mut lost = Vec::new();
-        if few.len() <= FEW {
-            for entry in few {
-                if !self.store.odb.contains(&entry.oid)? {
-                    lost.push(entry.path.clone());
-                }
-            }
-            return Ok(lost);
-        }
-        snapshot.fill_trees();
-        let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
-        for new in staged.into_iter().filter_map(|s| s.new) {
-            if new.mode != 0o160000 && named(&new.path) && !self.store.odb.contains(&new.oid)? {
-                lost.push(new.path);
-            }
-        }
-        Ok(lost)
-    }
-
     /// HEAD to index alone.
     pub(super) fn staged_changes(&self) -> Res<Vec<Staged>> {
         let mut snapshot = self.worktree_snapshot()?;
         snapshot.fill_trees();
         let staged = snapshot.staged(&self.store.odb, self.head_tree()?)?;
-        self.keep_snapshot(&snapshot);
+        self.keep_snapshot(&mut snapshot);
         Ok(staged)
     }
 }
 
 /// The checksum the index file at `path` ends in; `None` when there is no
-/// index file.
+/// index file, or one too short to end in a checksum.
 pub(super) fn index_checksum(path: &Path, len: usize) -> Res<Option<Vec<u8>>> {
     let file = match std::fs::File::open(path) {
         Ok(file) => file,
@@ -297,9 +259,9 @@ pub(super) fn index_checksum(path: &Path, len: usize) -> Res<Option<Vec<u8>>> {
     };
     let size = file.metadata()?.len();
     let mut id = vec![0; len];
-    let at = size
-        .checked_sub(len as u64)
-        .ok_or("index file is truncated")?;
+    let Some(at) = size.checked_sub(len as u64) else {
+        return Ok(None);
+    };
     file.read_exact_at(&mut id, at)?;
     Ok(Some(id))
 }

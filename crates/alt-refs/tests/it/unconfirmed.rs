@@ -147,7 +147,7 @@ fn store_cut_while_it_appends(dir: &Path) -> RefStore {
     let mut store = RefStore::open(dir).unwrap();
     assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(2))));
     let (done, path) = (AtomicBool::new(false), dir.to_owned());
-    store.sync_objects_with(Arc::new(move || {
+    store.sync_objects_with(Arc::new(move |_| {
         if !done.swap(true, Ordering::Relaxed) {
             let mut other = RefStore::open(&path).unwrap();
             assert!(other.settle(held).unwrap().is_some());

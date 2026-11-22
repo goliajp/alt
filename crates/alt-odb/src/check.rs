@@ -6,7 +6,7 @@ use alt_git_codec::ObjectId;
 use alt_store::Basis;
 
 use crate::odb::Odb;
-use crate::synced::{HEADER, Log, Marker};
+use crate::synced::Log;
 use crate::{NativeOdb, OdbError, lock};
 
 /// How many records a full check read and verified.
@@ -83,6 +83,15 @@ impl NativeOdb {
     pub fn check(&self) -> Result<OdbChecked, OdbError> {
         self.odb()?.check()
     }
+
+    /// [`Self::get`] with no hashing of what is read: for a caller that
+    /// had [`Self::check`] verify every record before.
+    pub fn get_unverified(
+        &self,
+        oid: &alt_git_codec::ObjectId,
+    ) -> Result<Option<alt_git_codec::RawObject>, OdbError> {
+        self.odb()?.get_unverified(oid)
+    }
 }
 
 impl NativeOdb {
@@ -92,7 +101,7 @@ impl NativeOdb {
     /// under the write lock before it appends.
     pub fn check_synced(&self) -> Result<(), OdbError> {
         let odb = self.odb()?;
-        crate::odb::lost(&Marker::read(&odb.durable_path), &odb.holds()?)
+        crate::odb::lost(&odb.marker().0, &odb.holds()?)
     }
 }
 
@@ -129,22 +138,23 @@ impl NativeOdb {
     /// name content which is not stored, and those after them: the ones
     /// no record before the cut names.
     pub fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
-        let odb = self.odb()?;
-        let upto = odb.unconfirmed()?[2];
-        let mut gone = HashSet::new();
-        odb.map.each_from(upto, |_, entry| {
-            gone.insert(entry.git);
-            Ok(())
-        })?;
-        if !gone.is_empty() {
-            odb.map.each_from(HEADER, |at, entry| {
-                if at < upto {
-                    gone.remove(&entry.git);
-                }
-                Ok(())
-            })?;
+        self.odb()?.unconfirmed_objects()
+    }
+
+    /// Whether an object is stored, for whoever judges an operation by
+    /// what it names and holds no write lock: the object reads, and its
+    /// record is not one a writer cuts off, whichever file of the store
+    /// that record or one before it names content of. Every file is
+    /// opened on the first call, so that the answer is a writer's.
+    pub fn stored_past_cuts(&self) -> impl Fn(&ObjectId) -> Result<bool, OdbError> + '_ {
+        let gone = std::cell::OnceCell::new();
+        move |oid: &ObjectId| {
+            if gone.get().is_none() {
+                let _ = gone.set(self.odb()?.unconfirmed_objects_whole()?);
+            }
+            let kept = gone.get().is_some_and(|gone| !gone.contains(oid));
+            Ok(kept && matches!(self.get(oid), Ok(Some(_))))
         }
-        Ok(gone)
     }
 }
 
@@ -152,20 +162,39 @@ impl NativeOdb {
     /// For each of the four append files, in the order of
     /// [`Self::passed`]: the byte from which on its records are not known
     /// to have been synced, where the marker records a boundary that
-    /// holds. A record that does not read at or past it was never
-    /// confirmed; without a boundary nothing tells it from damage.
+    /// holds, for a check. A record that does not read at or past it was
+    /// never confirmed; without a boundary nothing tells it from damage.
     pub fn unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
+        let bounds = self.bounds(true)?;
+        Ok(bounds.map(|basis| match basis {
+            Basis::Boundary(at) | Basis::Cached(at) => Some(at),
+            Basis::LastOnly | Basis::Unknown => None,
+        }))
+    }
+
+    /// For a check, of the same files: the boundary past which appends
+    /// were left unsynced in the running boot. A record that does not
+    /// read past it was never confirmed either, and the check tells it
+    /// apart from one before the boundary.
+    pub fn left_unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
+        let bounds = self.bounds(false)?;
+        Ok(bounds.map(|basis| match basis {
+            Basis::Cached(at) => Some(at),
+            _ => None,
+        }))
+    }
+
+    /// What tells an unfinished append from damage in each of the four
+    /// files, for a check or for a command that reads.
+    fn bounds(&self, check: bool) -> Result<[Basis; 4], OdbError> {
         let odb = self.odb()?;
-        let marker = Marker::read(&odb.durable_path);
+        let (marker, cached) = odb.marker();
         let (seq, _, _) = odb.blobs.checkpoint()?.lens();
         let (pack_len, _) = odb.blobs.file_lens()?;
         let logs = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map];
-        Ok(
-            logs.map(|log| match marker.basis(log, seq, pack_len, || true) {
-                Basis::Boundary(at) => Some(at),
-                Basis::LastOnly | Basis::Unknown => None,
-            }),
-        )
+        Ok(logs.map(|log| {
+            crate::unsynced::basis(&marker, (cached, check), (log, seq, pack_len), || true)
+        }))
     }
 }
 

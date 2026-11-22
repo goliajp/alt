@@ -15,12 +15,15 @@ pub(crate) fn clock_probe(dir: &Path) -> PathBuf {
 
 /// Puts `bytes` at `path` in one step, through a file beside it, and
 /// clears away what killed processes left of theirs. Nothing is synced.
-pub(crate) fn put(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Returns what the file looked like before it took the name.
+pub(crate) fn put(path: &Path, bytes: &[u8]) -> std::io::Result<std::fs::Metadata> {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-    std::fs::write(&tmp, bytes)?;
+    let mut file = std::fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    let meta = file.metadata()?;
     std::fs::rename(&tmp, path)?;
     sweep(path);
-    Ok(())
+    Ok(meta)
 }
 
 /// Removes the temporary files of `path` and the clock probes beside it

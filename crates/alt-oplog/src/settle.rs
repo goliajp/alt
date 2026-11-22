@@ -14,7 +14,11 @@
 //! ([`OpLog::unconfirmed`]), to open the log again as it stood before it
 //! ([`end_reads_at`]). An op before the boundary that names content which
 //! is not stored is damage and is neither looked for nor cut here, and
-//! where the marker records no boundary that holds, no op is looked at.
+//! where the marker records no boundary, no op is looked at. Past a
+//! boundary that appends were left unsynced past, the ops are looked at
+//! the same, and `held` is told so: an op there may be one whose writer
+//! went on without what it names (an index change), which whoever knows
+//! the op lets stand.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -93,7 +97,7 @@ pub fn passed_damage() -> Option<(PathBuf, u64, u64)> {
     PASSED_DAMAGE.get().cloned()
 }
 
-fn record_len(op: &Op) -> u64 {
+pub(crate) fn record_len(op: &Op) -> u64 {
     // length, the fixed part of a body, the checksum
     (4 + 78 + op.actor.len() + op.payload.len() + CHECKSUM_LEN) as u64
 }
@@ -186,17 +190,19 @@ impl OpLog {
     }
 
     /// The first op at or past byte `from` that `held` does not vouch for,
-    /// with the ops after it.
-    fn first_unheld<E: From<OpLogError>>(
+    /// with the ops after it. A handle that began after `from` reads the
+    /// whole chain for it: whoever opens the log at an anchor has it lie
+    /// at or before the boundary the marker records, which is where a
+    /// caller looks from.
+    pub(crate) fn first_unheld<E: From<OpLogError>>(
         &self,
         from: u64,
         mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         let recent_from = self.base.map_or(HEADER_LEN as u64, |anchor| anchor.end);
-        let (ops, mut at) = if from < recent_from {
-            (self.ops()?, HEADER_LEN as u64)
-        } else {
-            (&self.ops[..], recent_from)
+        let (ops, mut at) = match from >= recent_from {
+            true => (&self.ops[..], recent_from),
+            false => (self.ops()?, HEADER_LEN as u64),
         };
         for (index, op) in ops.iter().enumerate() {
             if at >= from && !held(op)? {
@@ -215,12 +221,9 @@ impl OpLog {
     /// and takes no lock; nothing changes.
     pub fn unconfirmed<E: From<OpLogError>>(
         &self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        match Marker::read(&self.durable_path).unsynced_from() {
-            Some(from) if from < self.len_bytes => self.first_unheld(from, held),
-            _ => Ok(None),
-        }
+        self.unconfirmed_past(|op, _| held(op))
     }
 
     /// For a writer, before it appends: reads the log to its end and cuts
@@ -235,15 +238,14 @@ impl OpLog {
     /// and has read it to its end, for as long as this runs.
     pub fn settle<E: From<OpLogError>>(
         &mut self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        self.locked(|log| log.settle_locked(held))
-            .map_err(OpLogError::from)?
+        self.settle_past(|op, _| held(op))
     }
 
-    fn settle_locked<E: From<OpLogError>>(
+    pub(crate) fn settle_locked<E: From<OpLogError>>(
         &mut self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         match self.catch_up() {
             Err(OpLogError::CutBack) => {
@@ -254,10 +256,11 @@ impl OpLog {
         }
         let marker = Marker::read(&self.durable_path);
         synced::lost(&marker, self.len_bytes)?;
-        let Some(from) = marker.unsynced_from().filter(|from| *from < self.len_bytes) else {
+        let judged = marker.judged_from();
+        let Some((from, left)) = judged.filter(|(from, _)| *from < self.len_bytes) else {
             return Ok(None);
         };
-        let Some(cut) = self.first_unheld(from, held)? else {
+        let Some(cut) = self.first_unheld(from, |op| held(op, left))? else {
             return Ok(None);
         };
         let ops = self.ops()?;

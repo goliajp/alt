@@ -14,6 +14,9 @@ use alt_store::{BlobId, StoreError};
 
 use crate::OdbError;
 
+mod log;
+mod prefix;
+
 /// Record: algo u8 + git oid 32 (sha1 zero-padded) + blake3 32 + kind u8 +
 /// size u64 + checksum 8. All integers little-endian.
 const REC_LEN: usize = 82;
@@ -161,12 +164,12 @@ impl ObjectMap {
     /// once there are enough of them. Run under the odb write lock.
     pub fn index_tail(&mut self, upto: u64) -> Result<(), OdbError> {
         self.log
-            .index_tail(upto, !alt_store::relaxed_durability())
+            .index_tail(upto, alt_store::runs::written_synced())
             .map_err(lift)
     }
 
-    pub fn index_pending(&self) -> bool {
-        self.log.index_pending()
+    pub fn index_pending(&self, upto: u64) -> bool {
+        self.log.index_pending(upto)
     }
 
     pub fn by_git(&self, oid: &ObjectId) -> Result<Option<MapEntry>, OdbError> {
@@ -187,33 +190,6 @@ impl ObjectMap {
             .iter()
             .map(|rec| MapEntry::parse(rec))
             .collect()
-    }
-
-    /// Entries whose git oid starts with the given hex digits (lowercase),
-    /// one for each oid, at most `cap` of them.
-    pub fn by_prefix(&self, hex: &str, cap: usize) -> Result<Vec<MapEntry>, OdbError> {
-        let (mut lo, mut hi) = ([0u8; 32], [0xffu8; 32]);
-        for (i, digit) in hex.bytes().enumerate() {
-            let nibble = (digit as char).to_digit(16).unwrap() as u8;
-            let shift = if i % 2 == 0 { 4 } else { 0 };
-            lo[i / 2] |= nibble << shift;
-            hi[i / 2] &= !(0xf << shift) | nibble << shift;
-        }
-        let mut out: Vec<MapEntry> = Vec::new();
-        // the padded key range also holds shorter oids ending in zeros
-        for rec in self.log.range(&lo, &hi, usize::MAX).map_err(lift)? {
-            let entry = MapEntry::parse(&rec)?;
-            if entry.git.to_string().starts_with(hex) {
-                out.push(entry);
-            }
-        }
-        // the range comes run by run and then the tail, not in order of
-        // id, and an object two writers stored at once has a record from
-        // each: in order, those lie next to each other
-        out.sort_by_key(|entry| entry.git);
-        out.dedup_by_key(|entry| entry.git);
-        out.truncate(cap);
-        Ok(out)
     }
 
     /// Full check of the log (see [`RecLog::check`]); `each` sees every
@@ -237,6 +213,11 @@ impl ObjectMap {
             .each_from(from, |at, rec| each(at, MapEntry::parse(rec)?))
     }
 
+    /// See [`RecLog::removal`].
+    pub fn removal(&self, gone: &[u64]) -> Result<reclog::Removal, StoreError> {
+        self.log.removal(gone)
+    }
+
     /// See [`RecLog::pass_over_from`].
     pub fn pass_over_from(&mut self, at: u64) -> Result<(), OdbError> {
         self.log.pass_over_from(at).map_err(lift)
@@ -250,25 +231,6 @@ impl ObjectMap {
     /// See [`RecLog::passed`].
     pub fn passed(&self) -> Result<alt_store::Passed, StoreError> {
         self.log.passed()
-    }
-
-    /// All entries in append order.
-    pub fn entries(&self) -> Result<Vec<MapEntry>, OdbError> {
-        let mut out = Vec::with_capacity(self.log.count());
-        let mut bad = None;
-        self.log
-            .for_each(|rec| -> Result<(), StoreError> {
-                match MapEntry::parse(rec) {
-                    Ok(entry) => out.push(entry),
-                    Err(e) => bad = bad.take().or(Some(e)),
-                }
-                Ok(())
-            })
-            .map_err(lift)?;
-        match bad {
-            Some(e) => Err(e),
-            None => Ok(out),
-        }
     }
 
     pub fn len(&self) -> usize {

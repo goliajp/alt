@@ -31,7 +31,7 @@ pub mod commit;
 mod complete;
 mod convert;
 mod coord;
-pub use coord::{Coord, resolve_workspace};
+pub use coord::{Coord, branch_at, resolve_workspace};
 mod diff;
 mod http_auth;
 mod identity;
@@ -94,6 +94,11 @@ pub struct Store {
     /// the zero-regression default. Daemon re-reads in [`refresh`](Self::refresh)
     /// so an operator edit is picked up on the next request.
     policy: Policy,
+    attributed: std::sync::Mutex<requests::Attributed>,
+    /// where and what [`Self::keep_checked`] writes
+    checked: Option<(PathBuf, Vec<u8>)>,
+    /// the note that an index file is whole, which it writes as well
+    seen: std::sync::Mutex<Option<(PathBuf, Vec<u8>)>>,
 }
 
 impl Store {
@@ -104,6 +109,9 @@ impl Store {
             refs: unconfirmed::open_refs(&alt_dir)?,
             policy: Policy::load(&alt_dir)?,
             algo: std::sync::OnceLock::new(),
+            attributed: Default::default(),
+            checked: None,
+            seen: Default::default(),
             alt_dir,
         })
     }
@@ -229,14 +237,15 @@ impl StoreSink {
     /// when it runs. Callers must flush their odb batch first to release its
     /// exclusive write lock, including when durability is deferred.
     pub fn fsync_all(&self) -> Res<()> {
-        // Each barrier needs an independent open-file description: sharing a
-        // cloned fd would let one concurrent barrier unlock another's lock.
-        // Closing the fd releases it on both success and error.
+        // what other writers' ops name is synced before the barrier is
+        // taken: that may wait for `odb.lock` exclusively
+        let reached = self.oplog.reached()?;
+        // a barrier has a file description of its own, or one could unlock
+        // another's; closing it gives the lock up, also on an error
         let _barrier = std::fs::File::open(&self.odb_lock)?;
         alt_odb::held::lock_shared(&_barrier)?;
         self.odb.fsync()?;
-        self.oplog.fsync()?;
-        Ok(())
+        Ok(self.oplog.fsync_to(reached)?)
     }
 }
 
@@ -311,7 +320,8 @@ pub fn import(
         "cli/import@{}",
         std::env::var("USER").as_deref().unwrap_or("unknown")
     );
-    let report = alt_import::import_git(repo, &alt_dir, &actor, timestamp_ms)?;
+    let prepare = |refs: &mut RefStore| unconfirmed::sync_objects_first(refs, &alt_dir);
+    let report = alt_import::import_git_with(repo, &alt_dir, &actor, timestamp_ms, prepare)?;
     writeln!(
         out,
         "imported {} objects ({} new), {} refs ({} changed), \
@@ -616,6 +626,11 @@ pub struct NativeRepo<'a> {
     /// the checkout this command worked out from the entries of a tree:
     /// the index it ends with, and what it writes at each path
     planned: std::cell::RefCell<Option<tree_state::Planned>>,
+    /// the head of the log when this workspace was last found to have
+    /// nothing left open
+    recovery_checked: Option<OpId>,
+    /// what this command made of an index file that is not whole
+    torn: recovery::TornIndex,
     /// what a command that begins, goes on with or ends an operation has done
     step: std::cell::RefCell<Option<in_progress::Tracked>>,
 }
@@ -645,6 +660,8 @@ impl<'a> NativeRepo<'a> {
             checkout_intent: None,
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
+            recovery_checked: None,
+            torn: recovery::TornIndex::default(),
             step: std::cell::RefCell::default(),
         }
     }
@@ -746,25 +763,6 @@ impl<'a> NativeRepo<'a> {
             return Ok(None);
         }
         Ok(Some(self.is_ancestor(old, new)?))
-    }
-
-    fn ensure_writable(&mut self, verb: &str) -> Res<()> {
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                format!("capability denied: principal cannot {verb} (read-only)"),
-            )
-            .into());
-        }
-        self.lock_workspace()?;
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                format!("capability denied: principal cannot {verb} (read-only)"),
-            )
-            .into());
-        }
-        self.ensure_no_pending_recovery()
     }
 
     /// Refuse `verb` on a protected branch (`main` / `develop` from the
@@ -1026,16 +1024,6 @@ impl<'a> NativeRepo<'a> {
             }
         }
         Ok(false)
-    }
-
-    fn index(&self) -> Res<Index> {
-        match Index::open(&self.index_path, self.store.algo()?) {
-            Ok(i) => Ok(i),
-            Err(alt_git_index::IndexError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                Ok(empty_index())
-            }
-            Err(e) => Err(e.into()),
-        }
     }
 
     fn read_for(&self, w: &WorkEntry) -> Res<Vec<u8>> {

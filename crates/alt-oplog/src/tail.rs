@@ -140,12 +140,24 @@ impl OpLog {
             self.others_to = new_len;
         }
         if cut && replayed.valid < tail.len() {
-            // drop a crashed writer's unfinished record, and what follows it
-            synced::cut(&self.durable_path, &self.file, new_len)?;
-            self.note_discarded(Discarded::unread(new_len, size, &tail[replayed.valid..]));
+            self.cut_unread(new_len, size, &tail[replayed.valid..])?;
         }
         self.passed = !cut && replayed.valid < tail.len();
         self.len_bytes = new_len;
+        Ok(())
+    }
+
+    /// Drops a crashed writer's unfinished record at `at` of a log `size`
+    /// bytes long, and what follows it, `rest`. A handle that appended a
+    /// whole record there records nothing as synced under another
+    /// generation.
+    fn cut_unread(&mut self, at: u64, size: u64, rest: &[u8]) -> Result<(), OpLogError> {
+        let discarded = Discarded::unread(at, size, rest);
+        match discarded.ops.is_empty() {
+            true => synced::cut(&self.durable_path, &self.file, at)?,
+            false => synced::cut_records(&self.durable_path, &self.file, at)?,
+        }
+        self.note_discarded(discarded);
         Ok(())
     }
 
@@ -164,11 +176,29 @@ impl OpLog {
         Ok(whole_ops(&read_at(&self.file, self.len_bytes, rest)?).0)
     }
 
-    /// From which byte on the records of the log are not known to have
-    /// been synced, where the marker records a boundary that holds. Reads
-    /// the marker and takes no lock.
+    /// For a check: from which byte on the records of the log are not
+    /// known to have been synced, where the marker records a boundary
+    /// that holds, or one that appends were left unsynced past in
+    /// another boot ([`crate::left`]). Reads the marker and takes no lock.
     pub fn unsynced_from(&self) -> Option<u64> {
-        Marker::read(&self.durable_path).unsynced_from()
+        let marker = Marker::read(&self.durable_path);
+        marker.unsynced_from().or_else(|| self.left_in_boot(false))
+    }
+
+    /// The boundary appends were left unsynced past, where they were
+    /// left so in the running boot (`running`) or in another.
+    fn left_in_boot(&self, running: bool) -> Option<u64> {
+        let marker = Marker::read(&self.durable_path);
+        let (from, left) = marker.judged_from()?;
+        (left && crate::left::cached(&self.durable_path) == running).then_some(from)
+    }
+
+    /// For a check: the boundary past which appends were left unsynced
+    /// in the running boot. A record that does not read past it was
+    /// never confirmed either, and the check tells it apart from one
+    /// before the boundary.
+    pub fn left_unsynced_from(&self) -> Option<u64> {
+        self.left_in_boot(true)
     }
 
     /// What this handle cut off the end of the log since the last call,

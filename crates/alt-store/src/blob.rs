@@ -14,6 +14,8 @@
 
 mod open;
 mod settle;
+mod sync;
+pub use sync::BlobSink;
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -73,9 +75,11 @@ impl StoreCheckpoint {
     }
 }
 
-/// Says from which byte on the blob map's records are not known to have
-/// been synced; `None` when nothing tells.
-pub type Unsynced = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+/// Says from which byte on the blob map's records are to be looked at as
+/// not known to have been synced, told whether the active pack ends, for
+/// the handle, in a record that does not read; `None` when nothing tells
+/// or none is to be.
+pub type Unsynced = std::sync::Arc<dyn Fn(bool) -> Option<u64> + Send + Sync>;
 
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
 /// over a [`ChunkStore`].
@@ -358,7 +362,8 @@ impl BlobStore {
     /// Whether [`Self::index_tail`] has anything to do. A blob map this
     /// handle has not opened is not looked at.
     pub fn index_pending(&self) -> bool {
-        self.chunks.index_pending() || self.map.get().is_some_and(BlobMap::index_pending)
+        let map = self.map.get();
+        self.chunks.index_pending() || map.is_some_and(|map| map.index_pending(u64::MAX))
     }
 
     /// Folds the records appended since the last index runs into new runs,
@@ -367,17 +372,6 @@ impl BlobStore {
     pub fn index_tail(&mut self) -> Result<(), StoreError> {
         self.chunks.index_tail()?;
         self.map_mut()?.index_tail(u64::MAX)
-    }
-
-    /// Raw fsync of chunks then the blob map, in that order — so a crash never
-    /// leaves a durable map record pointing at lost chunks. Group commit calls
-    /// this once for a batch of coalesced commits.
-    pub fn fsync(&mut self) -> Result<(), StoreError> {
-        self.chunks.fsync()?;
-        match self.map.get_mut() {
-            Some(map) => map.fsync(),
-            None => Ok(()),
-        }
     }
 
     /// Our appended cursors: (chunk pack, blob map) bytes we have written.
@@ -413,31 +407,6 @@ impl BlobStore {
     pub fn rewind(&mut self, ckpt: StoreCheckpoint) -> Result<(), StoreError> {
         self.map_mut()?.rewind(ckpt.blobmap_len)?;
         self.chunks.rewind(ckpt.chunks)?;
-        Ok(())
-    }
-
-    /// An independent fsync handle (chunks + blobmap) for the daemon's
-    /// off-write-path group commit.
-    pub fn sink(&self) -> Result<BlobSink, StoreError> {
-        Ok(BlobSink {
-            chunks: self.chunks.sink(),
-            blobmap: self.map()?.sync_handle()?,
-        })
-    }
-}
-
-/// Off-write-path fsync handle for a [`BlobStore`]: the chunk pack then the blob
-/// map, the same order [`BlobStore::fsync`] keeps so a crash never leaves a
-/// durable map record pointing at lost chunks.
-pub struct BlobSink {
-    chunks: crate::ChunkSink,
-    blobmap: std::fs::File,
-}
-
-impl BlobSink {
-    pub fn fsync(&self) -> Result<(), StoreError> {
-        self.chunks.fsync()?;
-        self.blobmap.sync_all()?;
         Ok(())
     }
 }

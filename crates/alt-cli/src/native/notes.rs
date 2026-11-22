@@ -82,10 +82,23 @@ impl NativeRepo<'_> {
     /// Writes `note` for `target` on the current notes tip and returns the
     /// ref change that publishes it.
     pub(super) fn note_change(&mut self, target: ObjectId, note: &Meta) -> Res<RefChange> {
+        self.note_change_with((target, None), note)
+    }
+
+    /// [`Self::note_change`] for a commit that is given with its bytes
+    /// where it is not stored yet: it is stored in the batch the note is,
+    /// and the two are synced as one.
+    fn note_change_with(&mut self, of: (ObjectId, Option<&[u8]>), note: &Meta) -> Res<RefChange> {
+        let (target, unstored) = of;
         let parent = self.store.refs.resolve(meta::NOTES_REF)?;
         // another writer flushes its objects before it moves the ref, so
-        // catching the odb up after reading the ref makes the tip readable
-        self.store.odb.refresh()?;
+        // catching the odb up after reading the ref makes the tip readable;
+        // a batch this command has open, with the tree of the commit, has
+        // kept every other writer out since it began
+        self.store.odb.refresh_unless_writing()?;
+        if let Some(bytes) = unstored {
+            self.store.odb.put(target, ObjectKind::Commit, bytes)?;
+        }
         let (name, email) = self.id.sig();
         let signature = format!("{name} <{email}> {} +0000", now_ms() / 1000);
         let algo = self.store.algo()?;
@@ -108,20 +121,21 @@ impl NativeRepo<'_> {
     }
 
     /// Applies `changes` together with `note` for `target` in one ref
-    /// transaction. Concurrent commits contend only for the notes ref; when
-    /// another writer moved it first, the note is rebuilt on the new tip and
-    /// the transaction tried again.
+    /// transaction; `target` comes with the bytes of the commit where it
+    /// is yet to be stored. Concurrent commits contend only for the notes
+    /// ref; when another writer moved it first, the note is rebuilt on the
+    /// new tip and the transaction tried again.
     pub(super) fn commit_refs_with_note(
         &mut self,
         verb: &str,
         changes: &[RefChange],
-        target: ObjectId,
+        target: (ObjectId, Option<&[u8]>),
         note: &Meta,
         effects: recovery::RefEffects,
     ) -> Res<OpId> {
         loop {
             let mut all = changes.to_vec();
-            all.push(self.note_change(target, note)?);
+            all.push(self.note_change_with(target, note)?);
             match self.commit_refs_with(verb, &all, None, effects) {
                 Ok(operation) => return Ok(operation),
                 Err(e) if notes_moved(&*e) => continue,
@@ -202,7 +216,8 @@ impl NativeRepo<'_> {
                 format!("{m}\n")
             });
         }
-        self.commit_refs_with_note("meta", &[], commit, &note, recovery::RefEffects::RefsOnly)?;
+        let effects = recovery::RefEffects::RefsOnly;
+        self.commit_refs_with_note("meta", &[], (commit, None), &note, effects)?;
         writeln!(out, "metadata updated for {commit}")?;
         Ok(())
     }

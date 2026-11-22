@@ -101,7 +101,10 @@ alt fsck --json
 
 It decodes and hashes every stored chunk, reassembles every large blob, hashes
 every object to its Git id, compares each index with the file it indexes,
-verifies the whole operation log and replays it against the refs. It changes
+verifies the whole operation log and replays it against the refs. Then it
+walks from every ref through tags, commits and trees, and names each object
+they lead to that is not stored (Objects that commits name and the store does
+not hold, below); `alt fsck --no-connectivity` leaves that walk out. It changes
 nothing: no file under `.alt` is written, repaired, rebuilt or created. It
 exits 0 after printing how many records of each kind it verified, and non-zero
 at the first record that fails, saying what failed. Indexes and the ref
@@ -370,8 +373,7 @@ again. To keep what is about to go, copy the whole `.alt` directory
 somewhere else before you run another command; `alt fsck` has cut nothing,
 however often it runs.
 
-The index is written with a sync of its own and can be ahead of the object
-store: after such a power cut it may still name the blobs of files that were
+The index can be ahead of the object store: after such a power cut it may still name the blobs of files that were
 added and whose content went. The command that cuts says which entries those
 are, in the last lines of its warning (above): one `index entry PATH names
 blob ID, which is not stored: add the file again` for each. Add those paths
@@ -388,10 +390,115 @@ fatal: fsck: index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b0380
 tree that names a blob which is not there. After `alt add b.txt`, `alt fsck`
 exits 0.
 
+Until a command that writes has cut the tail, a command that only reads such
+a blob is told that it is not stored, and changes nothing: `alt cat-file -p
+ID` fails with `fatal: object ID not found` and `alt diff --cached` with
+`fatal: object missing from store`, whichever file of the store the content
+went with.
+
 Only entries whose blob is really gone are listed. A file that was added and
 synced before the commit that was discarded still has its blob: neither the
 command that cuts nor `alt fsck` says anything of its entry, and the commit
 is made again without another `alt add`.
+
+### Records of lost content among synced ones
+
+The rule above cuts a record whose content never arrived only where the
+record lies past the synced point. One case puts such a record before it.
+`alt add` does not sync what it writes. After a power cut, this alt looks at
+those unsynced records before it records anything as synced. An older alt
+does not know of them: when it is the first to write after the power cut, it
+records the files as synced the way it finds them and appends its own records
+behind. From then on every command of this alt that writes fails with
+
+```
+fatal: the record at byte 2547 of map.alt names content the store does not hold: `alt fsck --drop-lost` lists such records and takes them out
+```
+
+and changes nothing: cutting the file at that record would take the synced
+records behind it as well. Commands that only read go on working. The older
+alt does not notice; it takes the record at its word, and reading that object
+fails.
+
+`alt fsck --drop-lost` reads the blob map, `tier1` and `map.alt` whole and
+lists every record that names content which is not stored, the objects that
+go with those records, the index entries that stage one of them, and the
+commits, reached from a ref, that name one. It changes nothing and exits 1:
+
+```
+the record at byte 2547 of map.alt names content that is not stored
+blob 39b06ed55e6f8670685412ead3dd38b50b038047 goes with them: no other record names it
+index entry b.txt names blob 39b06ed55e6f8670685412ead3dd38b50b038047, which is not stored: add the file again
+nothing was changed: `alt fsck --drop-lost --yes` takes these 1 record(s) out
+```
+
+`alt fsck --drop-lost --yes` takes the listed records out and keeps every
+other record: the last records of the file are written over the ones that
+go, and the file ends that many records earlier. It is a command that
+writes: it waits for the lock of the workspace it is run in and for the write
+lock of the object store, and under a `--request-id` it runs once. Unlike
+other commands that write it is not held up by an operation of the workspace
+that was left open, which stays open. A daemon that serves the
+repository is stopped first. Afterwards commands that write work again, an
+older alt reads the repository as before, and the files whose blobs went are
+added again with `alt add`; `alt commit` refuses a tree that names a blob
+which is not stored until they are.
+
+An object that a commit names, or a tag or a tree that a ref leads to without
+a commit, is another matter: it is part of what the refs keep, and taking its
+record out does not bring it back. With such an object in the list, `--yes`
+changes nothing and says so. Fetch the object from another copy of the
+repository if there is one. `alt fsck --drop-lost --yes --committed` takes
+the records out all the same; what names the objects stays as it is and names
+objects that are not stored, which `alt fsck` reports until the objects are
+stored again. A lost blob whose file is still in the working tree comes back
+with `alt add` of that file, or of the tree it is in: the ids of the objects
+taken out this way are kept in `.alt/objects.lost` until all of them are
+stored again, so that `alt add` stores such a blob again although the index
+holds the file as the commit does.
+
+The records that are moved are first kept in `.alt/odb.repair` and synced. A
+run that is interrupted leaves that file. The next command that writes
+finishes the removal before it does anything else, and so does the next
+`alt fsck --drop-lost`, with or without `--yes`, before it lists anything.
+Commands that only read change no file: they go on where every record reads,
+and where the interruption left a record half written they fail with `taking
+lost records out of the object store was interrupted` until a command that
+writes, or `alt fsck --drop-lost`, has finished the removal.
+
+### Objects that commits name and the store does not hold
+
+Records that all read do not make a history that is whole: a commit can name
+a blob, a tree or a parent that no record holds, after `--committed` above
+or in a copy of `.alt` that lacks part of the store. `alt fsck` therefore
+walks from every ref, and from what each ref was before operations that are
+about to be discarded, through tags, commits and trees. Each object that is
+not stored is named once, with the first commit and path found that name it,
+and the check fails:
+
+```
+fatal: fsck: missing blob 39b06ed55e6f8670685412ead3dd38b50b038047: commit 8d2f0c41e1a9c0f4b7a54d3e7f6f2f7c1f0e9a55, reached from refs/heads/main, names it at b.txt
+```
+
+A tree that is missing is named at its directory (`names it at sub/`), a
+commit as the parent of the commit that has it (`has it as a parent`). A
+tree that a ref or a tag names itself, with no commit, is walked the same
+way, and what it leads to is told with that tree in the place of the commit
+(`tree T, reached from REF, names it at PATH`).
+Nothing below a missing tree or commit is known, so nothing below it is
+listed. A commit of another repository recorded at a path (a submodule) is
+not an object of this store and is not looked for. For an object listed in
+`.alt/objects.lost` the line goes on to say that its records were taken out
+with `alt fsck --drop-lost --yes --committed`; the check reports it like any
+other and leaves the list as it is.
+
+To store a missing blob again, put the file with that content in the working
+tree and `alt add` it. A missing tree or commit comes back only from another
+copy of the repository. `git fsck` reports the same state as `missing blob
+ID` and `broken link from tree ID to blob ID`, without the commit and path.
+
+The walk reads every commit and tree that a ref leads to once.
+`alt fsck --no-connectivity` checks the records and the refs only.
 
 ### An unconfirmed tail
 
@@ -503,9 +610,10 @@ the tables above and on these. None of them changes a file.
 | --- | --- | --- |
 | `FILE reads up to byte N, and a whole record begins past that, at byte M` | nothing records how far `FILE` was synced, and the bytes commands pass over at its end hold a record that reads: the record at byte N is damaged, not unfinished. Past a synced point that holds, this is an unconfirmed tail instead (above) | restore `FILE`, or read past the damage |
 | `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
+| `missing KIND ID: commit C, reached from REF, names it at PATH` (or `has it as a parent`; `tag T, reached from REF, names it`; `tree T, reached from REF, names it at PATH`) | every record reads, and a commit, a tag or a tree that a ref leads to names an object no record holds | see Objects that commits name and the store does not hold, below |
 | `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
 | `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
-| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content |
+| `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content, or take the record out (Records of lost content among synced ones, below) |
 | `pack holds bytes that are not records` | a pack does not read as records to its end | restore the pack |
 | `refs disagree with the operation log`, `ref state diverged during replay` | replaying the log does not give the refs the repository shows | move `.alt/refs/snapshot`, a cache, aside and check again; when it still fails, restore `.alt/oplog/log` |
 | `index run corrupt`, `chunk index misses a record`, `chunk index names a superseded record`, `chunk index names a record no pack holds`, `pack shorter than its index` | an index does not match the file it indexes | see Indexes below |
@@ -514,6 +622,120 @@ The third, fourth and fifth of these are also what a command that writes
 fails with before it changes anything: it holds every file against what was
 synced before it appends. Commands that only read do not look, and go on
 reading what is left.
+
+### What a command syncs before it answers
+
+A command that moves a ref or writes files of the working tree (`alt commit`,
+`merge`, `switch`, `branch`, `tag`, `cherry-pick`, `revert`, `rebase`, `undo`,
+`fetch` and the rest) syncs what it wrote before it answers. Once
+`alt commit` has answered, the commit, every object it refers to, the
+operation log and the index it was made from are on disk.
+
+`alt add` only stages, and by default it does not sync: it answers once the
+kernel has what it wrote, as `git add` does under git's default `core.fsync`.
+The next command that syncs makes the staged content durable together with
+its own writes: the objects, the operation log, the index of every workspace
+and, for each workspace, the two recovery snapshots of its last add: the index
+that add began from and the one it left. Those are what `alt undo` of that add
+and the recovery of an add that was cut short read. The snapshots between
+earlier adds are not synced, however many adds there were: `alt undo` takes
+back the last operation only, and once a later index is on disk nothing puts
+an earlier one back. A power cut can leave such a snapshot as a file that does
+not read; the add that makes the same index again writes it anew. A power cut
+before the command that syncs can lose the
+adds made since the last command that synced, whole or in part, and nothing
+else. What is left of them is dealt with as the sections above and below
+describe: records that did not arrive whole are cut by the next command that
+writes, an index entry whose blob is not stored is reported with
+`add the file again`, and an add that was cut short is abandoned.
+
+The index file is put in place by a rename without a sync, as git's is. On a
+file system that does not write a file out before it records the rename, a
+power cut can leave the index file empty, cut short or filled with zeros. alt
+tells such a file from an index by its length, its first bytes and the
+checksum it ends in, and puts the last index the operation log vouches for in
+its place:
+
+- the index that the latest operation of the workspace left (an add, an undo
+  of one, a checkout, a merge that stopped on conflicts), where the recovery
+  snapshot of that index reads and every blob it names is stored. An add whose
+  snapshot or blobs went with the power cut is passed over for the one before
+  it, back to the last operation that moved a ref of the workspace: the index
+  is never put back to a state from before the last commit or switch;
+- otherwise the tree of HEAD, with nothing staged.
+
+The first command that writes in the workspace restores the file and says
+what it restored:
+
+```
+warning: the index file of this workspace is not a whole index (a power cut leaves it so when the last `alt add` was not synced); it was restored to the index operation 5c0e4a3d… left. What was staged after that is not staged any more: add the files again
+```
+
+Files of the working tree are not touched. Run `alt status` to see what is
+not staged, and add it again. A command that only reads (`alt status`,
+`alt diff`) changes no file: it answers from the same index and says
+`this shows the workspace with …` in place of `it was restored to …`.
+`alt fsck` names each workspace whose index file is not whole and still
+exits 0 when every record verifies. Each workspace has its own index and is
+restored by the first command that writes in it.
+
+The index a merge leaves when it stops on conflicts is recorded by no
+operation. alt keeps a snapshot of it and notes it in `index.stopped` beside
+the index, so that a torn index is restored to the conflicts and not to the
+state before the merge. An older alt ignores that file; it cannot restore a
+torn index and fails with `index format: ...` until a current alt has run a
+command that writes.
+
+A merge that an older alt stopped has no such note. The first `alt add` of a
+current alt in that workspace keeps the index as the older alt left it, and
+syncs that, before it changes it. The same holds for a revert and a rebase
+that stopped on conflicts.
+
+Where a merge, a revert or a rebase is stopped on conflicts, the index file
+is not whole, and the index the stop left cannot be put back (its note or its
+snapshot is gone as well), what can be put back is from before the stop and
+holds nothing of what the stop staged. A commit made from it would leave the
+other side's changes out without a word, so alt does not put it in place for
+such a command. A command that only reads shows it and says that the index
+the stop left is lost. A command that writes is refused:
+
+```
+fatal: the index file of this workspace is not a whole index (a power cut leaves it so when the last `alt add` was not synced), and the index the merge that stopped on conflicts left is lost with it. What can be put back is from before the merge stopped and holds nothing of what it staged: a commit made from it would leave that out. Stage the working tree as a whole again with `alt add -A` and look at `alt status` before going on
+```
+
+The working tree still holds the outcome of the stop: the files that merged,
+and the conflicted ones as far as they were resolved. `alt add -A` (or
+`alt add .` at the top of the workspace) stages it again as a whole and is not
+refused; check `alt status` and the conflicted files before committing. Once
+that is done a revert or a rebase can also be given up, with
+`alt revert --abort` and `alt rebase --abort`: before it, they are refused
+like any other command that writes, since by an index from before the stop
+they would leave the files the stop wrote as they are.
+
+To have `alt add` sync before it answers:
+
+```
+alt config core.fsync added
+```
+
+`core.fsync` is read from the system's, the user's and the repository's
+configuration as git reads it: a comma-separated list that starts from the
+default, where `none` empties the list, a name adds a component and `-name`
+takes one out. The component alt acts on is `index`, alone or as part of
+`added` or `all`: with it in the list, `alt add` syncs everything it writes.
+The other names git has (`loose-object`, `pack`, `pack-metadata`,
+`commit-graph`, `objects`, `reference`, `derived-metadata`, `committed`) are
+accepted and change nothing, because alt syncs what they stand for whenever a
+command moves a ref and never before. A name git does not have is ignored
+with a warning. `core.fsyncMethod` is not read; alt syncs with `fsync`.
+
+A command given a request id with `--request-id` syncs whatever it does, an
+`alt add` included: the caller may ask for the result of that id after a power
+cut, and the receipt must then be there with everything it records.
+
+`ALT_RELAXED_DURABILITY` in the environment has every command leave what it
+writes unsynced, commits included, whatever `core.fsync` says. It is for tests
+and for diagnosis.
 
 ### Older repositories, upgrades and unsynced commits
 
@@ -527,12 +749,84 @@ still running for the repository is stopped by the first command of this
 alt that would use it, which starts its own; an older alt does the same to
 this one's daemon, so the two can be used in turn.
 
-Commits made with `ALT_RELAXED_DURABILITY` set are not synced, and what was
-recorded is marked as no longer holding until a command without it writes:
-in between, too, only the last record of a file can be an unfinished one, and
-a power cut can lose such commits whole or in part.
+A daemon of this alt keeps what it has read of the store from one command
+that only reads to the next, and reads the store again when a file of it has
+another length or the generation the synced marker records has moved. An
+older alt records no generation: it can take records that were never synced
+out of a file and append others until the file is as long as it was. So while
+the marker is one an older alt wrote, the daemon reads the store again for
+each command. That costs what a command without a daemon pays to open the
+store, and ends with the first command of this alt that writes.
 
-An `alt add` that a power cut interrupts while syncs are skipped can leave its
+What `alt add` leaves unsynced, and commits made with
+`ALT_RELAXED_DURABILITY` set, are not synced, and what was recorded is marked
+as no longer holding until a command that syncs writes: in between, a power
+cut can lose such adds and commits whole or in part.
+
+Until the machine goes down, what was left unsynced is in the kernel's cache
+as it was written, and no command looks at it again. Nothing past the point a
+file was synced to was ever confirmed, though: a record there that does not
+read, in the boot it was written in as after another, is not damage to a
+command. One that only reads passes over it and what follows it in the file.
+The first command that stores an object, an `alt add` among them, or the next
+`alt commit`, cuts the file at that record with the records that name what
+went, and syncs what is left; `alt status`, `alt fsck` and `alt commit` then
+name the staged files to add again. Until that cut, `alt fsck`, which changes
+nothing, reports such a record in the boot it was written in and does not
+pass: the kernel lost what it held. It says so apart from damage to what was
+synced (`that record lies past where its file was last synced to (…), among
+what was written since this machine started and never confirmed as synced:
+nothing that was synced is damaged`) and which command cuts the file there.
+The operation log goes by the same rule: a record of it past where it was
+synced to that does not read ends the log for a command that only reads,
+which says how many operations after it it leaves out, and the next command
+that writes cuts the log there and says what it discarded. A commit made with
+`ALT_RELAXED_DURABILITY` whose objects went with such records was never
+confirmed either: a command that only reads shows the repository as it was
+before that commit and says so, and the next command that writes discards the
+commit and those after it and names the refs they moved. alt notes in `odb.lock`
+which boot the unsynced records were written in. After another boot each of
+the store's files may end anywhere past the point it was synced to, each on
+its own, so a record that names an object can be there without the object's
+content. The first command that writes then reads the records past the synced
+boundaries, cuts off those that name content which is not stored, syncs what
+is left and records it as synced; a command that only reads passes over the
+same records. An object is never taken for stored on the word of such a
+record. A staged file whose blob went this way is named by `alt status` and
+`alt fsck` (`index entry … names blob …, which is not stored: add the file
+again`) and stored again by the next `alt add` of it.
+
+An add that leaves 256 records or more of a file unsynced indexes them, so
+that the commands after it look a record up instead of reading every one of
+them each time they open the store. These indexes lie in a directory of their
+own under the file's index directory, `map.alt.idx/<boot>-<generation>/` for
+`map.alt` and `store/chunks.idx/<boot>-<generation>/` for the packs, are
+noted in `odb.lock`, and are never synced. A command looks in
+them only in the boot they were written in, and only while the generation the
+synced marker records is the one they were written under: every cut of
+records moves it. After another boot, or once records were taken out of the
+store, no command opens them, and the first one that writes removes them. A
+command that syncs reads the records they cover before it records them as
+synced, those of a pack with what they hold hashed against its name, removes
+these indexes, and indexes the records with all the others. A record among
+them that does not read, or that does not hold what its name says, ends its
+file for that command as it would after a power cut: the file is cut there,
+with the records that name what went, and the command names the staged files
+to add again. A directory of these indexes that cannot be removed, as on a
+network file system that keeps a file another process still has mapped, stays
+until it can be: once the note in `odb.lock` is gone no command opens it.
+An older alt does not look in these directories and leaves them where they
+are.
+
+An older alt keeps no such note. Where one is the first to write after the
+power cut, it records the files as synced as it finds them. A current alt
+that runs later still reads the records the note tells of, whatever the
+older alt recorded; one of them that
+names content which is not stored is then reported as damage
+(`the record at byte … of map.alt names content the store does not hold`), and nothing is cut, because records
+the older alt synced may follow it.
+
+An `alt add` that was not synced and that a power cut interrupts can leave its
 intent in the log and its blobs nowhere, like the one described under Records
 whose content never arrived. Here nothing says the intent was never synced, so
 it is not discarded with the end of the log. The next command that writes in
@@ -549,8 +843,10 @@ is run for such an operation abandons it the same way. Afterwards
 `alt operation status` shows the operation as `abandoned`, with the outcome
 `not_applied`, and the file is added again. The same is done for an add whose
 intent was synced and whose blob the store has lost since. An index that is
-neither the one from before the add nor the one it prepared is left alone,
-and the operation stays pending.
+neither the one from before the add nor the one it prepared was put in place
+by a later add whose records the power cut took. It is kept as it is, the
+operation is abandoned, and the command says so; a file the index stages
+whose blob is lost is named the same way and is added again.
 
 ### A merge, pick, revert or rebase that was interrupted
 

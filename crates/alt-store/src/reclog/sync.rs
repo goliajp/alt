@@ -1,6 +1,6 @@
 //! Keeping a held log handle and the index runs in step with the file.
 
-use super::{End, HEADER_LEN, INDEX_AT, RecLog, SECONDARY, guard_at};
+use super::{End, HEADER_LEN, INDEX_AT, RecLog, guard_at};
 use crate::StoreError;
 use crate::runs::Runs;
 
@@ -55,6 +55,11 @@ impl RecLog {
         Ok(())
     }
 
+    /// An independent fd to the log file, for an off-write-path fsync.
+    pub fn sync_handle(&self) -> Result<std::fs::File, StoreError> {
+        Ok(self.file.try_clone()?)
+    }
+
     /// For a handle that lives long and looks the same records up again
     /// and again: records read from behind the runs are kept in memory
     /// from now on.
@@ -68,9 +73,16 @@ impl RecLog {
         self.runs.chain()
     }
 
-    /// Whether the tail is long enough for [`Self::index_tail`] to act.
-    pub fn index_pending(&self) -> bool {
-        self.tail.len() / self.layout.rec_len >= INDEX_AT
+    /// Whether the tail holds enough records before byte `upto` for
+    /// [`Self::index_tail`] to act.
+    pub fn index_pending(&self, upto: u64) -> bool {
+        self.indexable(upto) >= INDEX_AT
+    }
+
+    /// How many records of the tail lie before byte `upto`.
+    fn indexable(&self, upto: u64) -> usize {
+        let from = self.len - self.tail.len() as u64;
+        (upto.min(self.len).saturating_sub(from) / self.layout.rec_len as u64) as usize
     }
 
     /// Moves a long enough tail into the index runs: the records before
@@ -80,7 +92,7 @@ impl RecLog {
     /// `durable` fsyncs the new run before it replaces the old ones.
     pub fn index_tail(&mut self, upto: u64, durable: bool) -> Result<(), StoreError> {
         let rec_len = self.layout.rec_len;
-        if !self.index_pending() {
+        if !self.index_pending(upto) {
             return Ok(());
         }
         // the runs on disk may have moved since this handle read them; the
@@ -88,21 +100,12 @@ impl RecLog {
         // never claims a record it has no entry for
         self.reload(self.len, End::Whole)?;
         let from = self.len - self.tail.len() as u64;
-        let take = (upto.min(self.len).saturating_sub(from) / rec_len as u64) as usize;
+        let take = self.indexable(upto);
         if take < INDEX_AT {
             return Ok(());
         }
         let end = from + (take * rec_len) as u64;
-        let mut entries = Vec::with_capacity(take);
-        let mut position = from;
-        for rec in self.tail[..take * rec_len].chunks_exact(rec_len) {
-            let (key, second) = (self.layout.keys)(rec);
-            entries.push((key, position));
-            if let Some(second) = second {
-                entries.push((second, position | SECONDARY));
-            }
-            position += rec_len as u64;
-        }
+        let entries = self.entries(&self.tail[..take * rec_len], from);
         let guard = guard_at(&self.file, &self.layout, self.len, end)
             .ok_or(StoreError::Format(self.layout.corrupt))?;
         self.runs.extend(&entries, from, end, guard, durable)?;

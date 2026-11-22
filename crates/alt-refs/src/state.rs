@@ -212,6 +212,23 @@ impl Refs {
         Ok(())
     }
 
+    /// Takes one transaction back (`back`), putting each ref where the
+    /// transaction found it, or makes it again; neither is checked.
+    pub fn turn(&mut self, changes: &[RefChange], back: bool) {
+        match back {
+            true => {
+                for change in changes.iter().rev() {
+                    self.changed.insert(change.name.clone(), change.old.clone());
+                }
+            }
+            false => {
+                for change in changes {
+                    self.changed.insert(change.name.clone(), change.new.clone());
+                }
+            }
+        }
+    }
+
     /// Checks, then applies, one transaction.
     pub fn apply(&mut self, changes: &[RefChange], replaying: bool) -> Result<(), RefError> {
         self.check(changes, replaying)?;

@@ -282,7 +282,7 @@ fn pack_seqs(dir: &Path, known: Option<&Known>, read_only: bool) -> Result<Vec<u
 fn first_pack(
     dir: &Path,
     first: Location,
-    runs: Option<&[(u64, u64)]>,
+    runs: crate::index::Named<'_>,
     tail: &Tail,
 ) -> Result<(PackState, Fresh), StoreError> {
     if tail.is_read_only() {
@@ -307,7 +307,7 @@ pub(crate) fn load_from(
     tail: &Tail,
 ) -> Result<(PackState, Fresh), StoreError> {
     let seqs = pack_seqs(dir, known, tail.is_read_only())?;
-    let runs = known.and_then(|known| known.chunk_runs.as_deref());
+    let runs = crate::index::named(known, tail);
     let first = Location {
         seq: seqs.first().copied().unwrap_or(1),
         offset: pack::HEADER_LEN as u64,

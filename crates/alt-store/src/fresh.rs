@@ -36,7 +36,8 @@ impl ChunkStore {
     /// Loads the store again after `self` (the newest state so far) found
     /// one of its packs gone.
     fn reloaded(&self) -> Result<&ChunkStore, StoreError> {
-        let open = || ChunkStore::open_known(&self.dir, self.opts, None, self.tail.clone());
+        let tail = self.tail.clone().with_boot_run(None);
+        let open = || ChunkStore::open_known(&self.dir, self.opts, None, tail.clone());
         let mut fresh = match &self.open_lock {
             Some(lock) => with_shared_lock(lock, open)?,
             None => open()?,

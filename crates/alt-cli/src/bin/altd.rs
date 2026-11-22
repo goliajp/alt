@@ -231,11 +231,14 @@ mod unix {
                 return Ok(());
             }
         };
+        alt_cli::begin_command();
         let execution = match Execution::prepare(
             parsed,
             req.cwd.clone(),
             Identity::from_map(&req.env),
             req.id,
+            req.drawn,
+            None,
         ) {
             Ok(execution) => execution,
             Err(response) => {
@@ -262,7 +265,9 @@ mod unix {
                 response = not_durable(&execution, machine::causes(&error));
                 barrier_ok = false;
             }
-            let ticket = execution.writing.then(|| group.assign());
+            // a command that leaves what it wrote unsynced waits for no fsync
+            let synced = execution.writing && !alt_os::durability::unsynced();
+            let ticket = synced.then(|| group.assign());
             (response, operations, ticket, barrier_ok)
         };
         let response = if barrier_ok {

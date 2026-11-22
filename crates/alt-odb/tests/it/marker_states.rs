@@ -242,3 +242,31 @@ fn a_writer_bounds_the_store_before_it_appends() {
         std::mem::forget(odb);
     }
 }
+
+#[test]
+fn a_store_whose_marker_records_no_generation_gets_one_it_has_not_held() {
+    for state in [State::Older, State::Removed] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        store(dir.path(), State::Recorded, Fault::None);
+        // what a store begins at, and stays at while nothing is taken out
+        let began = NativeOdb::deferred(dir.path()).generation();
+        assert_eq!(began, Some(0));
+        drop(dir);
+        let dir = alt_os::temp::tempdir().unwrap();
+        store(dir.path(), state, Fault::None);
+        assert_eq!(NativeOdb::deferred(dir.path()).generation(), None);
+        let mut odb = NativeOdb::open(dir.path()).unwrap();
+        let (oid, data) = object(OBJECTS);
+        odb.put(oid, ObjectKind::Blob, &data).unwrap();
+        odb.flush().unwrap();
+        // whoever replaced or removed the marker may have taken records
+        // out: what was found stored at the first generation is not
+        // taken for stored now
+        let given = odb.generation();
+        assert!(given.is_some() && given != began, "{state:?}: {given:?}");
+        let (oid, data) = object(OBJECTS + 1);
+        odb.put(oid, ObjectKind::Blob, &data).unwrap();
+        odb.flush().unwrap();
+        assert_eq!(odb.generation(), given, "{state:?}");
+    }
+}

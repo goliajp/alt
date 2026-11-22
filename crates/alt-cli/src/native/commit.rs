@@ -285,16 +285,14 @@ impl NativeRepo<'_> {
             bytes = signed;
         }
         let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
-        self.store.odb.put(commit, ObjectKind::Commit, &bytes)?;
-        self.store.odb.flush()?;
         let note = self.meta_for(c.message, c.tree, c.parents, meta)?;
         let move_branch = RefChange {
             name: branch.to_owned(),
             old: old.map(RefTarget::Oid),
             new: Some(RefTarget::Oid(commit)),
         };
-        let operation =
-            self.commit_refs_with_note(verb, &[move_branch], commit, &note, c.effects)?;
+        let of = (commit, Some(&bytes[..]));
+        let operation = self.commit_refs_with_note(verb, &[move_branch], of, &note, c.effects)?;
         if let Some(intent) = self.checkout_intent.clone() {
             self.apply_prepared_checkout(operation, &intent)?;
         }

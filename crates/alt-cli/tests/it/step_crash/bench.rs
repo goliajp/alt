@@ -81,7 +81,7 @@ fn files(dir: &Path, root: &Path, found: &mut BTreeMap<String, String>) {
 /// it makes: those differ from one run to the next.
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Shape {
-    index: String,
+    pub(crate) index: String,
     files: BTreeMap<String, String>,
     state: Vec<Option<String>>,
     status: String,

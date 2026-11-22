@@ -52,10 +52,12 @@ impl AltBackend {
             return Ok(refs);
         }
         let refs = match self.reading {
-            // an object that does not read is reported by whoever reads it
-            true => alt_refs::RefStore::open_confirmed(&self.alt_dir, self.also.as_ref(), |oid| {
-                self.odb.contains(oid).unwrap_or(true)
-            })?,
+            // a store that cannot be asked is reported by whoever reads it
+            true => {
+                let stored = self.odb.stored_past_cuts();
+                let held = |oid: &alt_git_codec::ObjectId| stored(oid).unwrap_or(true);
+                alt_refs::RefStore::open_confirmed(&self.alt_dir, self.also.as_ref(), held)?
+            }
             false => alt_refs::RefStore::open(&self.alt_dir)?,
         };
         Ok(self.refs.get_or_init(|| refs))

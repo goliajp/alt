@@ -10,8 +10,12 @@
 //! records that were never synced and name what is not stored. Those a
 //! command that writes cuts off; they are not damage. Where what is cut
 //! holds whole records, the check says how much goes, which command takes
-//! it, and does not pass ([`tails`]). It changes no file.
+//! it, and does not pass ([`tails`]). It changes no file,
+//! unless it is asked to take out records that name content which is not
+//! stored ([`lost`]).
 
+mod lost;
+mod reach;
 mod tails;
 
 use std::io::Write;
@@ -21,6 +25,9 @@ use crate::json::{self, Json};
 use crate::native::Store;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+/// The command line a check was asked for with, the directory it was
+/// run in and the caller.
+pub type By<'a> = (&'a crate::cli::Cli, &'a Path, &'a crate::native::Identity);
 
 /// The append files below the object store's three maps, as
 /// [`alt_odb::OdbChecked::unconfirmed`] counts them.
@@ -56,10 +63,11 @@ fn ends(store: &mut Store) -> Res<Vec<End>> {
 /// The entries of every workspace's index that name a blob which is not
 /// stored, or one that goes with the records a writer cuts off: an index
 /// is written with its own fsync and can be ahead of the object store.
-fn unstored_index_entries(store: &Store) -> Res<Vec<String>> {
+/// Beside them, a line for each index file that is not a whole index.
+fn index_findings(store: &Store) -> Res<(Vec<String>, Vec<String>)> {
     let gone = store.odb().unconfirmed_objects().map_err(with_cause)?;
     Ok(store
-        .unstored_index_entries(&gone)
+        .index_findings(&gone)
         .map_err(|error| format!("fsck: {error}"))?)
 }
 
@@ -78,31 +86,54 @@ fn counts(
     ]
 }
 
-pub fn run<W: Write>(store: &mut Store, json: bool, out: &mut W) -> Res<u8> {
+#[derive(alt_args::Args, Clone)]
+pub struct FsckArgs {
+    /// Emit the record counts as a JSON object
+    #[arg(long, conflicts_with_all = ["drop_lost"])]
+    json: bool,
+    /// List the records of the object store that name content which is
+    /// not stored, wherever they lie, and what names the objects that go
+    /// with them; with --yes, take those records out
+    #[arg(long)]
+    drop_lost: bool,
+    /// With --drop-lost: take the records out
+    #[arg(long, requires = "drop_lost")]
+    pub(crate) yes: bool,
+    /// With --drop-lost --yes: take the records out also where a commit
+    /// that a ref reaches names an object that goes with them
+    #[arg(long, requires = "yes")]
+    committed: bool,
+    /// Leave out the walk from every ref through commits and trees, which
+    /// finds the objects they name that are not stored
+    #[arg(long, conflicts_with_all = ["drop_lost"])]
+    no_connectivity: bool,
+}
+
+pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, by: By<'_>, out: &mut W) -> Res<u8> {
+    if args.drop_lost {
+        return lost::run(store, args, by, out);
+    }
+    let json = args.json;
     // looked for before the store is opened, which may replace them
     let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
-    // a file that ends short of the records its marker says were synced
-    store.odb().check_synced().map_err(with_cause)?;
-    store
-        .refs_mut()
-        .oplog()
-        .check_synced()
-        .map_err(with_cause)?;
-    let ends = ends(store)?;
+    let (ends, left) = tails::ends(store)?;
     let odb = store.odb().check().map_err(with_cause)?;
     let refs = store.refs_mut().check().map_err(with_cause)?;
     let unconfirmed = store.unconfirmed()?;
     let named = unconfirmed.map_or(0, |found| found.ops);
-    let dangling = store.dangling_refs(named)?;
-    let unstored = unstored_index_entries(store)?;
+    let dangling = reach::missing(store, named, args.no_connectivity)?;
+    let (unstored, torn) = index_findings(store)?;
     let found = Found {
         ends: &ends,
         odb: &odb,
         unconfirmed: named,
         dangling: &dangling,
-        settles: store.refs_mut().unsettled(),
+        left: &left,
+        settles: named > 0 || store.refs_mut().unsettled(),
     };
     let (mut notes, mut damage, tails) = findings(store.alt_dir(), &found);
+    // nothing is lost with a torn index that a command which syncs left
+    notes.extend(torn);
     // an index ahead of the store is what a power cut leaves beside
     // records that are about to be cut; on its own it is reported
     match tails && damage.is_empty() {
@@ -180,7 +211,11 @@ struct Found<'a> {
     odb: &'a alt_odb::OdbChecked,
     /// operations that were never synced and name objects not stored
     unconfirmed: usize,
-    dangling: &'a [(String, alt_git_codec::ObjectId)],
+    /// refs that point at what is not stored, objects below the refs
+    /// that are not stored
+    dangling: &'a [String],
+    /// for each of `ends`: from where appends were left unsynced in this boot
+    left: &'a [Option<u64>],
     /// whether a command that writes settles the object store whatever
     /// it writes ([`tails::cutter`])
     settles: bool,
@@ -197,7 +232,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
         inside.display().to_string()
     };
     let (mut notes, mut damage, mut tails) = (Vec::new(), Vec::new(), false);
-    for (path, passed, bound) in found.ends {
+    for ((path, passed, bound), left) in found.ends.iter().zip(found.left) {
         let (file, holds) = (name(path), passed.holds);
         let bytes = passed.len.saturating_sub(holds);
         match passed.whole_at {
@@ -211,9 +246,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
                 tails = true;
                 notes.push(tails::found(&file, holds, bytes, at));
             }
-            Some(at) => damage.push(format!(
-                "{file} reads up to byte {holds}, and a whole record begins past that, at byte {at}"
-            )),
+            Some(at) => damage.extend(tails::unread(&file, holds, at, *left)),
         }
     }
     for (file, bytes) in MAPS.iter().zip(found.odb.unconfirmed) {
@@ -234,9 +267,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
             found.unconfirmed
         ));
     }
-    for (name, oid) in found.dangling {
-        damage.push(format!("ref {name} points at {oid}, which is not stored"));
-    }
+    damage.extend(found.dangling.iter().cloned());
     (notes, damage, tails)
 }
 

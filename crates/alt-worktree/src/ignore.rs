@@ -13,8 +13,8 @@
 //! ## Supported syntax
 //!
 //! - Blank lines and lines starting with `#` are skipped.
-//! - Trailing whitespace is stripped (a literal trailing space must be
-//!   escaped as `\ `).
+//! - Spaces at the end of a line are stripped (a literal trailing space
+//!   must be escaped as `\ `); a tab there is part of the pattern.
 //! - A leading `!` negates the rule (the path is *unignored* if it would
 //!   otherwise be ignored).
 //! - A leading `/` anchors the pattern at the directory holding the
@@ -30,19 +30,9 @@
 //! - `[abc]`, `[a-z]`, `[!a-z]` and `[[:alpha:]]` match one character of
 //!   the class; `\x` matches `x` itself.
 
-use crate::glob::glob_match;
-
-/// One parsed `.gitignore` line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Rule {
-    /// The pattern in its post-strip form (no leading `!`, no trailing `/`).
-    pattern: Vec<u8>,
-    negate: bool,
-    dir_only: bool,
-    /// True if the pattern contains a `/` other than a trailing one — i.e.
-    /// it should match against the full relative path, not just the basename.
-    anchored: bool,
-}
+mod rule;
+pub(crate) use rule::Against;
+use rule::Rule;
 
 /// One `.gitignore` file's worth of rules, anchored at a base directory.
 ///
@@ -67,6 +57,17 @@ pub(crate) struct IgnoreLayer {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct IgnoreStack {
     layers: Vec<std::sync::Arc<IgnoreLayer>>,
+}
+
+/// The decision of `layers`, the deepest first, on `path`.
+fn decided(
+    layers: &[std::sync::Arc<IgnoreLayer>],
+    path: &[u8],
+    is_dir: bool,
+    against: Against,
+) -> bool {
+    let matched = |layer: &std::sync::Arc<IgnoreLayer>| match_layer(layer, path, is_dir, against);
+    layers.iter().rev().find_map(matched).unwrap_or(false)
 }
 
 impl IgnoreStack {
@@ -117,13 +118,18 @@ impl IgnoreStack {
     /// can override an earlier `*.log`). Across layers a deeper layer's
     /// match wins over a shallower one's, and a layer that does not match
     /// the path falls through to the next-shallower layer.
+    ///
+    /// As for git, a pattern without a `/` is held against the name of
+    /// the path alone: what a rule hides by a directory above the path is
+    /// for the caller to find, by asking about that directory first.
     pub(crate) fn is_ignored(&self, path: &[u8], is_dir: bool) -> bool {
-        for layer in self.layers.iter().rev() {
-            if let Some(decision) = match_layer(layer, path, is_dir) {
-                return decision;
-            }
-        }
-        false
+        decided(&self.layers, path, is_dir, Against::Name)
+    }
+
+    /// Whether a rule matches the file `path` or a directory above it,
+    /// with nothing asked about those directories before.
+    pub(crate) fn matches_within(&self, path: &[u8]) -> bool {
+        decided(&self.layers, path, false, Against::Components)
     }
 }
 
@@ -142,15 +148,11 @@ pub fn default_excludes_file() -> Option<std::path::PathBuf> {
 /// the `.gitignore` (relative to the working-tree root, slash-joined).
 pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
     let lines = content.split(|&b| b == b'\n');
-    let rules: Vec<Rule> = lines.filter_map(parse_rule).collect();
+    let rules: Vec<Rule> = lines.filter_map(Rule::parse).collect();
     let mut exact: std::collections::HashMap<Vec<u8>, Vec<u32>> = Default::default();
     let mut general = Vec::new();
     for (at, rule) in rules.iter().enumerate() {
-        let literal = !rule
-            .pattern
-            .iter()
-            .any(|b| matches!(b, b'*' | b'?' | b'[' | b'\\'));
-        match rule.anchored && literal {
+        match rule.exact() {
             true => exact
                 .entry(rule.pattern.clone())
                 .or_default()
@@ -166,73 +168,30 @@ pub(crate) fn parse_layer(content: &[u8], base: &[u8]) -> IgnoreLayer {
     }
 }
 
-/// The rule one line of an ignore file states, when it states one.
-fn parse_rule(line: &[u8]) -> Option<Rule> {
-    let line = strip_trailing_ws(strip_cr(line));
-    if line.is_empty() || line[0] == b'#' {
-        return None;
-    }
-    let (negate, body) = match line.strip_prefix(b"!") {
-        Some(body) => (true, body),
-        None => (false, line),
-    };
-    let (body, dir_only) = match body.strip_suffix(b"/") {
-        Some(body) => (body, true),
-        None => (body, false),
-    };
-    if body.is_empty() {
-        return None;
-    }
-    // a pattern with a `/` inside it is anchored as well
-    let (anchored, body) = match body.strip_prefix(b"/") {
-        Some(body) => (true, body),
-        None => (body.contains(&b'/'), body),
-    };
-    Some(Rule {
-        pattern: body.to_vec(),
-        negate,
-        dir_only,
-        anchored,
-    })
-}
-
-fn strip_cr(line: &[u8]) -> &[u8] {
-    if line.last() == Some(&b'\r') {
-        &line[..line.len() - 1]
-    } else {
-        line
-    }
-}
-
-fn strip_trailing_ws(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
-    while end > 0 && (line[end - 1] == b' ' || line[end - 1] == b'\t') {
-        end -= 1;
-    }
-    &line[..end]
-}
-
 /// Run a path through a single layer. `Some(true)` = ignored, `Some(false)`
 /// = explicitly unignored (a `!` rule fired), `None` = no rule in this
 /// layer touched the path; fall through to the next-shallower layer.
-fn match_layer(layer: &IgnoreLayer, path: &[u8], is_dir: bool) -> Option<bool> {
+fn match_layer(layer: &IgnoreLayer, path: &[u8], is_dir: bool, against: Against) -> Option<bool> {
     // `path` is relative to the working-tree root; the layer is anchored
     // at `layer.base`. If the path doesn't sit under the layer's base, no
     // rule in this layer can match.
     let rel = strip_base(path, &layer.base)?;
     let applies = |at: &&u32| !layer.rules[**at as usize].dir_only || is_dir;
     // the last rule that matches decides
-    let named = layer
-        .exact
-        .get(rel)
-        .and_then(|at| at.iter().rev().find(applies));
+    let named = match layer.exact.is_empty() {
+        true => None,
+        false => layer
+            .exact
+            .get(rel)
+            .and_then(|at| at.iter().rev().find(applies)),
+    };
     let general = layer
         .general
         .iter()
         .rev()
         .take_while(|at| named.is_none_or(|n| *at > n))
         .filter(applies)
-        .find(|at| matches_rule(&layer.rules[**at as usize], rel));
+        .find(|at| layer.rules[**at as usize].matches(rel, against));
     general
         .or(named)
         .map(|at| !layer.rules[*at as usize].negate)
@@ -254,19 +213,6 @@ fn strip_base<'p>(path: &'p [u8], base: &[u8]) -> Option<&'p [u8]> {
     Some(&path[base.len() + 1..])
 }
 
-/// `rel` is the candidate path relative to the rule's layer base.
-fn matches_rule(rule: &Rule, rel: &[u8]) -> bool {
-    let pattern = rule.pattern.as_slice();
-    if rule.anchored {
-        glob_match(pattern, rel)
-    } else {
-        // an unanchored pattern matches any component of the path, the
-        // last one included: the same as `**/pattern`
-        rel.split(|&b| b == b'/')
-            .any(|seg| glob_match(pattern, seg))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,7 +225,7 @@ mod tests {
         let slow = |path: &[u8], is_dir: bool| {
             let mut decision = None;
             for rule in &layer.rules {
-                if (!rule.dir_only || is_dir) && matches_rule(rule, path) {
+                if (!rule.dir_only || is_dir) && rule.matches(path, Against::Name) {
                     decision = Some(!rule.negate);
                 }
             }
@@ -299,18 +245,30 @@ mod tests {
         ] {
             for is_dir in [false, true] {
                 assert_eq!(
-                    match_layer(&layer, path, is_dir),
+                    match_layer(&layer, path, is_dir, Against::Name),
                     slow(path, is_dir),
                     "{:?}",
                     path
                 );
             }
         }
-        assert_eq!(match_layer(&layer, b"out", false), Some(true));
-        assert_eq!(match_layer(&layer, b"keep.log", false), Some(false));
-        assert_eq!(match_layer(&layer, b"dir", false), None);
-        assert_eq!(match_layer(&layer, b"x.tmp", false), Some(true));
-        assert_eq!(match_layer(&layer, b"a/b", false), Some(true));
+        assert_eq!(
+            match_layer(&layer, b"out", false, Against::Name),
+            Some(true)
+        );
+        assert_eq!(
+            match_layer(&layer, b"keep.log", false, Against::Name),
+            Some(false)
+        );
+        assert_eq!(match_layer(&layer, b"dir", false, Against::Name), None);
+        assert_eq!(
+            match_layer(&layer, b"x.tmp", false, Against::Name),
+            Some(true)
+        );
+        assert_eq!(
+            match_layer(&layer, b"a/b", false, Against::Name),
+            Some(true)
+        );
     }
 
     fn check(patterns: &str, path: &str, is_dir: bool) -> bool {
@@ -427,6 +385,25 @@ mod tests {
         assert!(!check(g, "crates", true));
         assert!(!check(g, "scripts", true));
         assert!(!check(g, "Cargo.toml", false));
+    }
+
+    #[test]
+    fn a_pattern_without_a_slash_is_held_against_the_name_alone() {
+        // the directory is let through, the file in it is not named
+        assert!(!check("gen\n!gen/", "gen", true));
+        assert!(!check("gen\n!gen/", "gen/out.txt", false));
+        // the rule that lets the directory through says nothing of what is in it
+        assert!(!check("*.d\n!keep.d", "keep.d", true));
+        assert!(check("*.d\n!keep.d", "keep.d/x.d", false));
+        // asked without the directories above, every component counts
+        let within = |patterns: &str, path: &str| {
+            let mut stack = IgnoreStack::new();
+            stack.push(parse_layer(patterns.as_bytes(), b""));
+            stack.matches_within(path.as_bytes())
+        };
+        assert!(within("assets", "assets/big.bin"));
+        assert!(within("*.bin", "assets/big.bin"));
+        assert!(!within("assets", "other/big.bin"));
     }
 
     #[test]

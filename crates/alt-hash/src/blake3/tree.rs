@@ -236,7 +236,7 @@ pub(super) fn root(input: &[u8], key: &[u32; 8], flags: u32, backend: Backend) -
 
 /// Below this a subtree is not worth handing to another thread. Measured on sixteen
 /// x86 threads: 16 KiB and 64 KiB are each slower somewhere between 128 KiB and 1 MiB.
-const THREAD_LEN: usize = 32 << 10;
+pub(super) const THREAD_LEN: usize = 32 << 10;
 
 /// The hash of a whole input, with the upper levels of the tree spread over the
 /// thread pool: each split offers the right half to another thread, `depth` times over.

@@ -142,6 +142,36 @@ fn a_sink_that_passes_another_writers_op_syncs_its_objects_first() {
     assert_objects_recorded(&alt_dir, others_end);
 }
 
+/// `sync_held` syncs what a store wrote with its fsyncs left for later,
+/// objects and log, and makes no fsync where the store synced each write
+/// as it made it: the second store is asked with its sink made
+/// impossible.
+#[test]
+fn what_the_markers_record_as_synced_is_not_synced_again_and_the_rest_is() {
+    let root = alt_os::temp::tempdir().unwrap();
+    let alt_dir = root.path().join(".alt");
+    let (deferred, _) = deferred_writer(&alt_dir);
+    assert_ne!(objects_synced(&alt_dir), lens(&alt_dir));
+    deferred.sync_held().unwrap();
+    assert_eq!(objects_synced(&alt_dir), lens(&alt_dir));
+    assert_eq!(log_synced(&alt_dir), log_len(&alt_dir));
+    drop(deferred);
+
+    let mut direct = Store::open(alt_dir.clone()).unwrap();
+    let third = blob("third\n");
+    let odb = direct.odb_mut();
+    odb.put(third, ObjectKind::Blob, b"third\n").unwrap();
+    odb.flush().unwrap();
+    let change = points("refs/heads/third", third);
+    direct.refs_mut().commit("direct", 0, &[change]).unwrap();
+    assert_eq!(objects_synced(&alt_dir), lens(&alt_dir));
+    assert_eq!(log_synced(&alt_dir), log_len(&alt_dir));
+    // the sink takes the lock file of the object store first
+    std::fs::remove_file(alt_dir.join("odb.lock")).unwrap();
+    assert!(direct.sink().and_then(|sink| sink.fsync_all()).is_err());
+    direct.sync_held().unwrap();
+}
+
 /// A log whose marker is gone gets its boundary from the next append, at
 /// the end of the log as it then is.
 #[test]

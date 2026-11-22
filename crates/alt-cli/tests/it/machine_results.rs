@@ -5,7 +5,7 @@ use std::process::Output;
 
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
-fn run(root: &Path, args: &[&str], daemon: bool) -> Output {
+pub(super) fn run(root: &Path, args: &[&str], daemon: bool) -> Output {
     let mut command = crate::alt_command();
     command
         .current_dir(root)
@@ -22,7 +22,7 @@ fn run(root: &Path, args: &[&str], daemon: bool) -> Output {
     }
     command.output().unwrap()
 }
-fn ok(root: &Path, args: &[&str]) -> Output {
+pub(super) fn ok(root: &Path, args: &[&str]) -> Output {
     let output = run(root, args, false);
     assert!(
         output.status.success(),
@@ -31,7 +31,7 @@ fn ok(root: &Path, args: &[&str]) -> Output {
     );
     output
 }
-fn fixture() -> alt_os::temp::TempDir {
+pub(super) fn fixture() -> alt_os::temp::TempDir {
     let directory = alt_os::temp::tempdir().unwrap();
     ok(directory.path(), &["init", "."]);
     std::fs::write(directory.path().join("a.txt"), "base\n").unwrap();

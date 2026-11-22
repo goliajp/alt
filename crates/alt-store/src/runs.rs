@@ -34,8 +34,10 @@ use alt_os::map::Mmap;
 use crate::StoreError;
 use crate::run_write::write_run;
 
+mod boot;
 mod named;
-pub use named::unusable;
+pub use boot::{BootRun, remove_boot_runs};
+pub use named::{remove_past, unusable, written_synced};
 
 pub const KEY_LEN: usize = 32;
 /// How many log bytes before a run's end its guard holds, at most.
@@ -305,15 +307,6 @@ impl Runs {
         Ok(())
     }
 
-    /// Visits every entry, oldest run first.
-    pub fn for_each(&self, mut each: impl FnMut(&[u8], u64)) {
-        for run in &self.runs {
-            for entry in run.entries().as_chunks::<ENTRY_LEN>().0 {
-                each(&entry[..KEY_LEN], Run::position(entry));
-            }
-        }
-    }
-
     /// Re-hashes every run against its trailer checksum.
     pub fn verify(&self) -> Result<(), StoreError> {
         for run in &self.runs {
@@ -356,16 +349,7 @@ impl Runs {
         durable: bool,
     ) -> Result<(), StoreError> {
         self.remove_stale()?;
-        let mut fresh: Vec<[u8; ENTRY_LEN]> = entries
-            .iter()
-            .map(|(key, position)| {
-                let mut entry = [0u8; ENTRY_LEN];
-                entry[..KEY_LEN].copy_from_slice(key);
-                entry[KEY_LEN..].copy_from_slice(&position.to_be_bytes());
-                entry
-            })
-            .collect();
-        fresh.sort_unstable();
+        let fresh = boot::sorted(entries);
         let fresh = fresh.as_flattened();
 
         let mut keep = self.runs.len();
@@ -413,28 +397,7 @@ impl Runs {
     pub fn truncate(&mut self, target: u64) -> Result<(), StoreError> {
         self.remove_stale()?;
         self.runs.retain(|run| run.end <= target);
-        let listing = match fs::read_dir(&self.dir) {
-            Ok(listing) => listing,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
-        };
-        let mut removed = false;
-        for entry in listing {
-            let entry = entry?;
-            let past = entry
-                .file_name()
-                .to_str()
-                .and_then(parse_name)
-                .is_some_and(|(_, end)| end > target);
-            if past {
-                remove_if_present(&entry.path())?;
-                removed = true;
-            }
-        }
-        if removed {
-            crate::pack::fsync_dir(&self.dir)?;
-        }
-        Ok(())
+        remove_past(&self.dir, target)
     }
 
     /// Removes run files left outside the chain (a crash mid-merge, or a log

@@ -443,11 +443,7 @@ pub enum Command {
     /// blob and object against its hash, each index against the file it
     /// indexes, the whole operation log, and the refs against a replay of
     /// that log. Exits non-zero at the first record that fails.
-    Fsck {
-        /// Emit the record counts as a JSON object
-        #[arg(long)]
-        json: bool,
-    },
+    Fsck(crate::fsck::FsckArgs),
     /// Verify the `alt-sig` header on one or more commit objects.
     /// With no args, walks the current branch's commit chain back to root
     /// (newest first). Each row is one of:

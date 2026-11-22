@@ -9,6 +9,10 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::process::Output;
 
+mod first_add;
+mod unstored;
+mod went_since;
+
 fn alt(repo: &Path, relaxed: bool, args: &[&str]) -> Output {
     let mut command = crate::alt_command();
     command
@@ -99,11 +103,11 @@ fn marker_flags(path: &Path, first: usize, slot: usize, flags: usize) -> u32 {
     u32::from_le_bytes(data[at + flags..at + flags + 4].try_into().unwrap())
 }
 
-fn odb_flags(alt_dir: &Path) -> u32 {
+pub(super) fn odb_flags(alt_dir: &Path) -> u32 {
     marker_flags(&alt_dir.join("odb.durable"), 32, 96, 16)
 }
 
-fn oplog_flags(alt_dir: &Path) -> u32 {
+pub(super) fn oplog_flags(alt_dir: &Path) -> u32 {
     marker_flags(&alt_dir.join("oplog/durable"), 16, 36, 8)
 }
 
@@ -158,18 +162,25 @@ fn an_unfinished_record_in_a_repository_without_markers_is_cut_like_an_older_alt
     }
 }
 
-#[test]
-fn damage_in_what_unsynced_commits_wrote_is_reported_and_nothing_is_cut() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    repo(tmp.path());
-    let alt_dir = tmp.path().join(".alt");
+/// Three commits that synced nothing on top of the three of [`repo`],
+/// and then one byte changed of a record twenty before the end of
+/// `map.alt`, among those of the second of them: its commit and all that
+/// the third stored lie past it. Returns the first of the three, and
+/// `map.alt` as it then is.
+fn unsynced_commits_past_a_record_that_does_not_read(dir: &Path) -> (String, Vec<u8>) {
+    repo(dir);
+    let alt_dir = dir.join(".alt");
+    let mut first = String::new();
     for tag in ["relaxed-1", "relaxed-2", "relaxed-3"] {
-        commit(tmp.path(), true, tag, 10);
+        commit(dir, true, tag, 10);
+        if tag == "relaxed-1" {
+            first = ok(alt(dir, false, &["rev-parse", "HEAD"]))
+                .trim()
+                .to_owned();
+        }
     }
     assert_eq!((odb_flags(&alt_dir), oplog_flags(&alt_dir)), (1, 1));
-    ok(alt(tmp.path(), false, &["fsck"]));
-
-    // one byte of a record twenty before the end of map.alt
+    ok(alt(dir, false, &["fsck"]));
     let map = alt_dir.join("map.alt");
     let at = len(&map) - 20 * 82 + 10;
     let file = OpenOptions::new()
@@ -180,19 +191,97 @@ fn damage_in_what_unsynced_commits_wrote_is_reported_and_nothing_is_cut() {
     let mut byte = [0u8];
     file.read_exact_at(&mut byte, at).unwrap();
     file.write_all_at(&[byte[0] ^ 0xff], at).unwrap();
-    let damaged = fs::read(&map).unwrap();
-    for args in [&["fsck"][..], &["status"], &["log", "-n", "4"]] {
-        let out = alt(tmp.path(), false, args);
-        assert!(!out.status.success(), "alt {args:?}");
-        let said = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert!(
-            said.contains("map.alt record corrupt"),
-            "alt {args:?}: {said}"
-        );
-    }
-    assert!(fs::read(&map).unwrap() == damaged, "the file is as it was");
+    (first, fs::read(&map).unwrap())
+}
 
-    // with the record restored, a commit that syncs bounds the store again
-    file.write_all_at(&byte, at).unwrap();
-    usable(tmp.path(), 6);
+/// In the boot they were made in, commits that synced nothing and whose
+/// objects lie past a record that does not read were never confirmed: a
+/// command that reads shows the repository without them, says so and
+/// cuts nothing. The check tells of the record and does not pass.
+#[test]
+fn unsynced_commits_whose_objects_do_not_read_are_left_out_by_a_command_that_reads() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (first, damaged) = unsynced_commits_past_a_record_that_does_not_read(tmp.path());
+    let alt_dir = tmp.path().join(".alt");
+    let log = fs::read(alt_dir.join("oplog/log")).unwrap();
+    let left_out = "operation(s) in the operation log were never synced to disk and name objects \
+                    that are not stored; this shows the repository as it was before them";
+    for args in [&["status"][..], &["log", "-n", "9"], &["rev-parse", "HEAD"]] {
+        let out = alt(tmp.path(), false, args);
+        let said = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(out.status.success(), "alt {args:?}: {said}");
+        assert!(said.contains(left_out), "alt {args:?}: {said}");
+        let shown = String::from_utf8_lossy(&out.stdout).into_owned();
+        match args[0] {
+            "log" => {
+                assert!(shown.contains("relaxed-1"), "{shown}");
+                assert!(!shown.contains("relaxed-2"), "{shown}");
+                assert_eq!(shown.lines().count(), 4, "{shown}");
+            }
+            "rev-parse" => assert_eq!(shown.trim(), first),
+            // the index is still that of the last commit
+            _ => assert!(shown.contains("relaxed-3-0.txt"), "{shown}"),
+        }
+    }
+    let check = alt(tmp.path(), false, &["fsck"]);
+    assert!(!check.status.success());
+    let said = String::from_utf8_lossy(&check.stderr).into_owned();
+    assert!(said.contains("map.alt record corrupt"), "{said}");
+    let past = "lies past where its file was last synced to (map.alt from byte";
+    assert!(said.contains(past), "{said}");
+    assert!(
+        said.contains("nothing that was synced is damaged"),
+        "{said}"
+    );
+    assert!(fs::read(alt_dir.join("map.alt")).unwrap() == damaged);
+    assert!(fs::read(alt_dir.join("oplog/log")).unwrap() == log);
+}
+
+/// The next command that writes, one that syncs or one that does not,
+/// discards those commits with the record and says which refs they
+/// moved; what was staged is added again and committed on the commit
+/// before them.
+#[test]
+fn unsynced_commits_whose_objects_do_not_read_are_discarded_by_the_next_command_that_writes() {
+    for writes in [&["add", "new.txt"][..], &["tag", "after"]] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        let (first, damaged) = unsynced_commits_past_a_record_that_does_not_read(dir);
+        let alt_dir = dir.join(".alt");
+        fs::write(dir.join("new.txt"), "new\n").unwrap();
+        let wrote = alt(dir, false, writes);
+        let said = String::from_utf8_lossy(&wrote.stderr).into_owned();
+        assert!(wrote.status.success(), "alt {writes:?}: {said}");
+        let discarded = "operation(s) at the end of the operation log: they were never synced to \
+                         disk and name objects that are not stored";
+        assert!(said.contains(discarded), "alt {writes:?}: {said}");
+        let moved = format!("refs/heads/main: 2 update(s), from {first} to ");
+        assert!(said.contains(&moved), "alt {writes:?}: {said}");
+        assert!(
+            said.contains("at the end of map.alt"),
+            "alt {writes:?}: {said}"
+        );
+        // cut where the record began, twenty records before the end
+        let map = fs::read(alt_dir.join("map.alt")).unwrap();
+        let cut = damaged.len() - 20 * 82;
+        assert!(map.len() < damaged.len() && map[..cut] == damaged[..cut]);
+        assert!(map.len() <= cut + 82, "alt {writes:?}: {}", map.len());
+        assert_eq!(ok(alt(dir, false, &["rev-parse", "HEAD"])).trim(), first);
+
+        // what the commits that went had staged is stored again
+        ok(alt(dir, false, &["add", "."]));
+        ok(alt(dir, false, &["commit", "-m", "after"]));
+        let log = ok(alt(dir, false, &["log"]));
+        assert_eq!(log.lines().count(), 5, "{log}");
+        assert!(
+            !log.contains("relaxed-2") && log.contains("relaxed-1"),
+            "{log}"
+        );
+        assert_eq!(ok(alt(dir, false, &["rev-parse", "HEAD~1"])).trim(), first);
+        ok(alt(dir, false, &["fsck"]));
+        assert!(ok(alt(dir, false, &["status"])).contains("nothing to commit"));
+        // both markers record boundaries that hold, of other generations
+        let flags = (odb_flags(&alt_dir), oplog_flags(&alt_dir));
+        assert_eq!((flags.0 & 1, flags.1 & 1), (0, 0));
+    }
 }

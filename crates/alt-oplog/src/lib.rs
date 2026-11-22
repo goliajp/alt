@@ -24,12 +24,15 @@
 //! op *means* (ref updates, imports, …) is the caller's encoding.
 
 mod bound;
+mod left;
 mod lock;
 mod note;
 mod op;
 mod read;
 mod scan;
 mod settle;
+mod since;
+mod sink;
 mod sync;
 mod synced;
 mod tail;
@@ -42,12 +45,14 @@ use std::sync::OnceLock;
 pub use note::{NOTE_LEN, NotePlace, encode_note, parse_note};
 pub use op::{Op, OpId, OpLogError, ROOT};
 pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
-pub use synced::{OpLogSink, SyncNamed};
+pub use sink::{OpLogSink, Reached};
+pub use sync::{bounded_in, relaxed_durability};
+pub use synced::SyncNamed;
 pub use tail::Discarded;
 
 use lock::{lock_exclusive, lock_shared, unlock};
-use read::{read_at, read_log, scan, scan_and_create};
-use scan::{CHECKSUM_LEN, HEADER_LEN, check_header, encode_body, replay_records};
+use read::{read_log, scan, scan_and_create};
+use scan::{CHECKSUM_LEN, HEADER_LEN, encode_body};
 
 /// A place in the log to start reading from instead of its first record:
 /// the op whose record occupies bytes `start..end`, being op number `count`
@@ -95,7 +100,7 @@ pub struct OpLog {
     unsynced: bool,
     /// How far this handle's deferred appends reach, for its sink to record
     /// once it has fsynced.
-    deferred: synced::Deferred,
+    deferred: sink::Deferred,
     /// The marker's generation when this handle last appended.
     generation: u32,
     /// Set when the open stopped short of the file's end on request.
@@ -189,7 +194,7 @@ impl OpLog {
             defer: false,
             write_count: 0,
             unsynced: false,
-            deferred: synced::Deferred::default(),
+            deferred: sink::Deferred::default(),
             generation: 0,
             clamped: scan.clamped,
             passed: scan.passed,
@@ -361,30 +366,6 @@ impl OpLog {
         &self.ops
     }
 
-    /// All ops in chain order — the replay basis. On a log opened at an
-    /// anchor the first call reads and verifies the part before it.
-    pub fn ops(&self) -> Result<&[Op], OpLogError> {
-        let Some(base) = self.base else {
-            return Ok(&self.ops);
-        };
-        if let Some(full) = self.full.get() {
-            return Ok(full);
-        }
-        // the records before the anchor never change; no lock needed
-        let data = read_at(&self.file, 0, base.end as usize)?;
-        check_header(&data)?;
-        let mut all = Vec::new();
-        let replayed = replay_records(&data, HEADER_LEN.min(data.len()), ROOT, &mut all)?;
-        if replayed.valid as u64 != base.end
-            || all.len() as u64 != base.count
-            || all.last().map(|op| op.id) != Some(base.op)
-        {
-            return Err(OpLogError::Format("oplog does not lead to its anchor"));
-        }
-        all.extend_from_slice(&self.ops);
-        Ok(self.full.get_or_init(|| all))
-    }
-
     pub fn get(&self, id: &OpId) -> Result<Option<&Op>, OpLogError> {
         Ok(self.ops()?.iter().find(|op| op.id == *id))
     }
@@ -403,16 +384,10 @@ impl OpLog {
     }
 }
 
-/// Repro/diagnostic knob (env `ALT_RELAXED_DURABILITY`): skip per-commit
-/// fsyncs. Used to open the concurrency race window for investigation.
-pub fn relaxed_durability() -> bool {
-    std::env::var_os("ALT_RELAXED_DURABILITY").is_some()
-}
-
 impl Drop for OpLog {
     fn drop(&mut self) {
         // best-effort durability; explicit sync() is the checked path
-        if self.unsynced {
+        if self.unsynced && !relaxed_durability() {
             let _ = self.file.sync_all();
         }
     }

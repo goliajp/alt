@@ -94,6 +94,9 @@ impl NativeRepo<'_> {
             });
         }
         self.record_and_checkout(intent)?;
+        // where a torn index file finds the index of the stop again
+        let index = self.index()?;
+        self.keep_stopped(index)?;
         // the state file planned for the stop holds with what was written,
         // or by itself where the merge left everything as it was
         self.settle_state()

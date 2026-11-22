@@ -26,14 +26,15 @@ use super::super::*;
 mod abandon;
 mod abort;
 mod guard;
+mod held;
 mod left;
 mod mark;
 mod notes;
 mod recover;
 mod undo;
 
-pub(in crate::native) use mark::STEP_MARK;
 use mark::StateText;
+pub(in crate::native) use mark::{MarkSaid, STEP_MARK, mark_said};
 
 pub(in crate::native) const STEP: u8 = 0x36;
 

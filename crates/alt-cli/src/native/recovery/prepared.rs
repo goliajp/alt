@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use super::whole::FromFile;
 use super::*;
 
 /// The recovery snapshot `id` of the store under `alt_dir`.
@@ -21,6 +22,88 @@ pub(super) fn read_snapshot_at(alt_dir: &Path, id: &str) -> Res<Vec<u8>> {
         return Err("corrupt recovery snapshot".into());
     }
     Ok(bytes)
+}
+
+impl NativeRepo<'_> {
+    pub(in crate::native) fn snapshot(&self, bytes: &[u8]) -> Res<String> {
+        let id = hash(bytes);
+        let path = self.store.alt_dir.join("recovery/objects").join(&id);
+        // byte for byte: what was there before, or what is written now.
+        // A file of that name with other bytes is one a power cut left of
+        // a snapshot that was not synced: it is written anew
+        let mut held = crate::durable::holds(&path, bytes)?;
+        if held != Some(true) {
+            durable_write(&path, bytes)?;
+            held = crate::durable::holds(&path, bytes)?;
+        }
+        match held {
+            Some(true) => Ok(id),
+            _ => Err("corrupt recovery snapshot".into()),
+        }
+    }
+
+    fn recovery_object(&self, id: &str) -> PathBuf {
+        self.store.alt_dir.join("recovery/objects").join(id)
+    }
+
+    /// [`Self::snapshot`] of bytes that were read from the file `read`,
+    /// where they were read from one: a snapshot that is that very file
+    /// holds them and is not read to be compared, and where the file is
+    /// noted as that snapshot the bytes are not hashed either. An index
+    /// change leaves the index and its snapshot as one file.
+    pub(in crate::native) fn snapshot_as(
+        &self,
+        bytes: &[u8],
+        read: Option<FromFile>,
+    ) -> Res<String> {
+        use std::os::unix::fs::MetadataExt;
+        let Some(read) = read else {
+            return self.snapshot(bytes);
+        };
+        let same = |meta: std::fs::Metadata| (meta.dev(), meta.ino()) == read.file;
+        let is_the_file = |id: &str| std::fs::metadata(self.recovery_object(id)).is_ok_and(same);
+        if let Some(id) = read.snapshot
+            && is_the_file(&id)
+        {
+            return Ok(id);
+        }
+        let id = hash(bytes);
+        if !is_the_file(&id) {
+            self.keep_snapshot_as(&id, bytes)?;
+        }
+        Ok(id)
+    }
+
+    /// Keeps `bytes` as the snapshot `id`, their hash; whether this wrote
+    /// the file, which is then as synced as what the thread writes is. A
+    /// file that was there is compared byte for byte, and one with other
+    /// bytes, which a power cut leaves of a snapshot that was not synced,
+    /// is written anew.
+    pub(in crate::native) fn keep_snapshot_as(&self, id: &str, bytes: &[u8]) -> Res<bool> {
+        let path = self.recovery_object(id);
+        if crate::durable::holds(&path, bytes)? == Some(true) {
+            return Ok(false);
+        }
+        durable_write(&path, bytes)?;
+        Ok(true)
+    }
+
+    /// Puts the snapshot `id`, which holds `bytes`, in place as the index
+    /// of the workspace: the one file under both names, or a file of its
+    /// own where the file system links none. `fresh` says this command
+    /// wrote the snapshot.
+    pub(in crate::native) fn put_index(&self, id: &str, bytes: &[u8], fresh: bool) -> Res<()> {
+        let snapshot = self.recovery_object(id);
+        if !crate::durable::link_state(&snapshot, &self.index_path, fresh)? {
+            durable_write(&self.index_path, bytes)?;
+        }
+        self.note_whole(&std::fs::metadata(&self.index_path)?, Some(id));
+        Ok(())
+    }
+
+    pub(in crate::native) fn read_snapshot(&self, id: &str) -> Res<Vec<u8>> {
+        read_snapshot_at(&self.store.alt_dir, id)
+    }
 }
 
 /// The blobs of the index that `op` prepares, where it is the intent of

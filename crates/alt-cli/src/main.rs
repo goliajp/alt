@@ -16,7 +16,7 @@ unsafe extern "C" {}
 
 use alt_cli::cli::{self, Command};
 use alt_cli::daemon::Response;
-use alt_cli::execution::Execution;
+use alt_cli::execution::{Execution, submit};
 use alt_cli::machine::{self, Failure};
 use alt_cli::native::pathspec::Place;
 use alt_cli::native::{self, Identity};
@@ -114,32 +114,12 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
     let (forwarded, identity) = Identity::of_process();
     let native_write =
         cli::is_native(&parsed.cli.command) && cli::mutates_command(&parsed.cli.command);
+    let (mut drawn, mut bound) = (false, None);
     if native_write {
-        let id = match parsed.cli.request_id.as_deref() {
-            Some(id) => match alt_cli::request::parse_id(id) {
-                Ok(id) => id,
-                Err(error) => return error.response(parsed.json, Some(id)),
-            },
-            None => match alt_cli::request::new_id() {
-                Ok(id) => id,
-                Err(error) => {
-                    return machine::from_error(&error, false).response(parsed.json, None);
-                }
-            },
+        (parsed, bound, drawn) = match submit(&mut args, parsed, &cwd, &identity) {
+            Ok((parsed, bound, drawn)) => (parsed, Some(bound), drawn),
+            Err(response) => return response,
         };
-        if parsed.cli.request_id.is_none() {
-            args.splice(1..1, ["--request-id".into(), machine::hex(&id).into()]);
-            parsed = match machine::parse(args.clone()) {
-                Ok(parsed) => parsed,
-                Err(response) => return response,
-            };
-        }
-        let submitted = alt_cli::execution::binding(&parsed, &cwd, &identity)
-            .and_then(|(dir, _, _, value)| alt_cli::request::record_submission(&dir, id, &value));
-        if let Err(error) = submitted {
-            return machine::from_error(error.as_ref(), false)
-                .response(parsed.json, Some(&machine::hex(&id)));
-        }
     }
     #[cfg(unix)]
     if alt_cli::client::routes_through_daemon(&parsed.cli.command)
@@ -152,11 +132,11 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
             args: (words.map(|s| s.to_str().expect("validated arguments").to_owned())).collect(),
             cwd: cwd.clone(),
             env: forwarded,
-            id: None,
+            ..Default::default()
         };
         let outcome = if native_write {
             let id = parsed.cli.request_id.as_deref().expect("write id");
-            request.id = Some(alt_cli::request::parse_id(id).expect("validated id"));
+            (request.id, request.drawn) = (alt_cli::request::parse_id(id).ok(), drawn);
             alt_cli::client::serve_write(&alt_dir, &request)
         } else {
             alt_cli::client::try_serve(&alt_dir, &request)
@@ -186,7 +166,7 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
             Outcome::NotSent | Outcome::LostAfterSend => {}
         }
     }
-    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None) {
+    let execution = match Execution::prepare(parsed, cwd.clone(), identity, None, drawn, bound) {
         Ok(execution) => execution,
         Err(response) => return response,
     };
@@ -282,7 +262,7 @@ fn on_native_store(execution: Execution, cwd: &std::path::Path) -> Response {
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
         .and_then(|()| {
             if execution.writing {
-                store.sink()?.fsync_all()
+                store.sync_held()
             } else {
                 Ok(())
             }

@@ -217,12 +217,12 @@ fn attempt(
         Err(_) if moved.get() => return Ok(None),
         Err(e) => return Ok(Some(Landed::Refused(format!("ref tx: {e}")))),
     };
-    // in the log, whatever fails from here on: the objects stay
+    // in the log, whatever fails from here on: the objects stay, synced first
     batch.keep();
     observe(Step::Recorded);
     let stored = batch.end().map_err(|e| e.to_string());
-    let finished = tx.finish(refs, op).map_err(|e| e.to_string());
-    Ok(Some(match stored.and(finished) {
+    let finished = stored.and_then(|()| tx.finish(refs, op).map_err(|e| e.to_string()));
+    Ok(Some(match finished {
         Ok(()) => Landed::Moved,
         Err(e) => Landed::Refused(format!("durability: {e}")),
     }))

@@ -248,8 +248,13 @@ fn a_state_file_that_is_not_as_the_log_says_keeps_the_step_open_until_it_is_clos
     std::fs::write(repo.join(".alt/MERGE_HEAD"), &side).unwrap();
 
     let not_as_said = "MERGE_HEAD is not as the operation log says";
-    for args in [&["commit", "-m", "m"][..], &["add", "f.txt"]] {
+    // one command after another is refused: none of them notes the log as
+    // read past the step
+    let checked = || std::fs::read(repo.join(".alt/recovery.checked")).ok();
+    let kept = checked();
+    for args in [&["commit", "-m", "m"][..], &["add", "f.txt"], &["add", "."]] {
         let refused = run(&new, repo, args);
+        assert_eq!(checked(), kept, "{args:?}");
         assert_eq!(
             refused.status.code(),
             Some(75),

@@ -19,9 +19,9 @@ unsafe extern "C" {
     fn munmap(address: *mut c_void, length: usize) -> c_int;
 }
 
-/// A whole file mapped read-only and shared.
+/// A file, or the start of one, mapped read-only and shared.
 ///
-/// Dereferences to the file's bytes. The mapping is removed when the value is
+/// Dereferences to the bytes mapped. The mapping is removed when the value is
 /// dropped; the file itself may be closed earlier.
 pub struct Mmap {
     start: NonNull<u8>,
@@ -44,6 +44,19 @@ impl Mmap {
                 "memory map length overflows usize",
             )
         })?;
+        // SAFETY: the file is that long, and the rest is the caller's
+        unsafe { Self::map_len(file, length) }
+    }
+
+    /// Maps the first `length` bytes of `file`.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Mmap::map`], and the file must be at least `length` bytes
+    /// long for as long as the mapping is alive. What a process writes
+    /// past the bytes that are read through the mapping does no harm when
+    /// those are reached through [`Mmap::first`] alone.
+    pub unsafe fn map_len(file: &File, length: usize) -> io::Result<Self> {
         if length == 0 {
             // the kernel rejects a zero-length mapping
             return Ok(Self {
@@ -71,6 +84,17 @@ impl Mmap {
             start: NonNull::new(address.cast()).expect("mapping address"),
             length,
         })
+    }
+}
+
+impl Mmap {
+    /// The first `length` of the bytes mapped, with no reference made to
+    /// those after them.
+    pub fn first(&self, length: usize) -> &[u8] {
+        assert!(length <= self.length, "more than is mapped");
+        // SAFETY: `start` is valid for reads of that many bytes until drop
+        // (or dangling with length zero), and the mapping is never writable
+        unsafe { std::slice::from_raw_parts(self.start.as_ptr(), length) }
     }
 }
 

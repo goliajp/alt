@@ -15,7 +15,7 @@ fn recovers_from(root: &Path, midway: &dyn Fn(&Path), complete: &dyn Fn(&Path)) 
     let index_before = index_bytes(root);
     ok(alt(root, &["switch", "other"]));
     remove_final_log_frame(root);
-    std::fs::write(root.join(".alt/index"), index_before).unwrap();
+    crate::replace_file(&root.join(".alt/index"), index_before);
     midway(root);
     recover_pending(root);
     complete(root);
