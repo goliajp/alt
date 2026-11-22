@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::Odb;
 use crate::synced::{self, Lens, Marker, State};
-use crate::{NativeOdb, OdbError, head};
+use crate::{NativeOdb, OdbCheckpoint, OdbError, head};
 
 /// Bytes a writer cut off the end of an append file: an append that never
 /// finished, or records that were never synced and name content which is
@@ -94,6 +94,23 @@ pub(crate) fn generation_kept(marker: &Marker) -> u64 {
         .map_or_else(anew, |state| state.generation)
 }
 
+impl Odb {
+    /// Takes the write lock for a batch before its first write. Returns
+    /// where the files end with what other writers appended read in. The
+    /// lock is held until the batch is flushed, so that no other writer
+    /// appends meanwhile, or leaves out of its own writes what this batch
+    /// brought: a [`Self::rewind`] to the returned point before the flush
+    /// takes this batch and nothing else.
+    pub fn begin_batch(&mut self) -> Result<OdbCheckpoint, OdbError> {
+        self.acquire()?;
+        let begun = self.cursor();
+        if begun.is_err() {
+            self.release();
+        }
+        begun
+    }
+}
+
 impl NativeOdb {
     /// A number that is another once records were taken out of the
     /// store: by a rewind, by a cut of records that were never synced,
@@ -104,6 +121,11 @@ impl NativeOdb {
     pub fn generation(&self) -> Option<u64> {
         let marker = Marker::read(&self.alt_dir.join("odb.durable"));
         marker.recorded().map(|state| state.generation)
+    }
+
+    /// See [`Odb::begin_batch`].
+    pub fn begin_batch(&mut self) -> Result<OdbCheckpoint, OdbError> {
+        self.odb_mut()?.begin_batch()
     }
 
     /// What this handle cut off the ends of the append files since the

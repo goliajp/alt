@@ -24,10 +24,10 @@ exit 0
 out| {"objects":0,"operation_ids":[],"refs":[],"remote":"origin","request_id":"<id32:4>","schema_version":1}
 $ [repo] alt push origin --json
 exit 0
-out| {"objects":5,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:5>","schema_version":1}
+out| {"objects":5,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:5>","schema_version":1,"updated":true}
 $ [repo] alt push origin --json
 exit 0
-out| {"operation_ids":[],"refs":[],"remote":"origin","request_id":"<id32:6>","schema_version":1,"updated":false}
+out| {"objects":0,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"up-to-date"}],"remote":"origin","request_id":"<id32:6>","schema_version":1,"updated":false}
 $ [repo] alt fetch origin --json
 exit 0
 out| {"objects":1,"operation_ids":["<id64:7>"],"pack_bytes":<volatile>,"refs":[{"local":"refs/remotes/origin/main","oid":"<id40:8>","old":null,"server":"refs/heads/main"}],"remote":"origin","request_id":"<id32:9>","schema_version":1}
@@ -37,8 +37,8 @@ out| {"schema_version":1,"current":"main","branches":[{"name":"main","current":t
 $ [repo] alt tag v1
 exit 0
 $ [repo] alt push origin refs/tags/v1:refs/tags/v1 --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"server rejected push: unpack eof before pack header was fully read","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+exit 0
+out| {"objects":0,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/tags/v1","status":"ok"}],"remote":"origin","request_id":"<id32:10>","schema_version":1,"updated":true}
 $ alt clone <server> copy --json
 exit 0
 out| Initialized empty alt repository in copy/.alt
@@ -61,7 +61,7 @@ $ [copy] alt commit -m second
 exit 0
 $ [copy] alt push origin --json
 exit 0
-out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:11>","schema_version":1}
+out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:11>","schema_version":1,"updated":true}
 $ [repo] alt fetch origin --json
 exit 0
 out| {"objects":1,"operation_ids":["<id64:12>"],"pack_bytes":<volatile>,"refs":[{"local":"refs/remotes/origin/main","oid":"<id40:13>","old":"<id40:8>","server":"refs/heads/main"}],"remote":"origin","request_id":"<id32:14>","schema_version":1}
@@ -80,7 +80,7 @@ exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"non-fast-forward push to 'refs/heads/main'; pass -f to override","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:16>","retryable":false},"schema_version":1}
 $ [repo] alt push origin -f --json
 exit 0
-out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:17>","schema_version":1}
+out| {"objects":3,"operation_ids":[],"pack_bytes":<volatile>,"refs":[{"name":"refs/heads/main","status":"ok"}],"remote":"origin","request_id":"<id32:17>","schema_version":1,"updated":true}
 $ [repo] alt push origin nonesuch --json
 exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"local ref 'refs/heads/nonesuch' does not exist","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:18>","retryable":false},"schema_version":1}

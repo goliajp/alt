@@ -24,7 +24,6 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
-use crate::lock::{lock_exclusive, unlock};
 use crate::synced::Marker;
 use crate::{Op, OpLog, OpLogError, Unconfirmed};
 
@@ -80,10 +79,8 @@ impl OpLog {
         &mut self,
         held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        lock_exclusive(&self.file).map_err(OpLogError::from)?;
-        let settled = self.settle_locked(held);
-        let _ = unlock(&self.file);
-        settled
+        self.locked(|log| log.settle_locked(held))
+            .map_err(OpLogError::from)?
     }
 }
 

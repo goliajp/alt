@@ -249,10 +249,8 @@ impl OpLog {
         if actor.len() > u16::MAX as usize {
             return Err(OpLogError::TooLarge(actor.len()).into());
         }
-        lock_exclusive(&self.file).map_err(OpLogError::from)?;
-        let result = self.append_checked_locked(actor, timestamp_ms, build);
-        let _ = unlock(&self.file);
-        result
+        self.locked(|log| log.append_checked_locked(actor, timestamp_ms, build))
+            .map_err(OpLogError::from)?
     }
 
     /// Read-path catch-up for a long-lived log (the daemon between requests):

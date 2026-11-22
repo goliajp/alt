@@ -12,7 +12,7 @@ use std::process::{Command, Output};
 
 use crate::wire_test_server;
 
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(crate) fn alt(repo: &Path, args: &[&str]) -> Output {
     crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -23,7 +23,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(label: &str, o: Output) -> String {
+pub(crate) fn ok(label: &str, o: Output) -> String {
     assert!(
         o.status.success(),
         "{label} failed: stderr={} stdout={}",
@@ -33,7 +33,7 @@ fn ok(label: &str, o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-fn git(repo: &Path, args: &[&str]) -> String {
+pub(crate) fn git(repo: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(repo)
         .args(args)
@@ -49,7 +49,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 
 /// Spin up a bare git repo to act as the push target. `--bare` so it can
 /// receive pushes without checking out a working tree.
-fn empty_server_repo() -> alt_os::temp::TempDir {
+pub(crate) fn empty_server_repo() -> alt_os::temp::TempDir {
     let dir = alt_os::temp::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q", "--bare", "-b", "main", "."]);

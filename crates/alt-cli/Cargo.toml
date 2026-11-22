@@ -76,6 +76,7 @@ alt-server-store.workspace = true
 alt-pg.workspace = true
 tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
+alt-store.workspace = true
 alt-testutil.workspace = true
 criterion.workspace = true
 

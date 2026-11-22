@@ -167,6 +167,13 @@ impl Store {
         }
     }
 
+    /// The ref store and the object store together, for a ref transaction
+    /// whose state check reads or writes objects: its caller takes
+    /// `odb.lock` before the transaction takes the log's.
+    pub fn refs_and_odb(&mut self) -> (&mut RefStore, &mut NativeOdb) {
+        (&mut self.refs, &mut self.odb)
+    }
+
     /// For a command that only reads: how many operations at the end of
     /// the log a command that writes would cut, and where the first of
     /// them starts.

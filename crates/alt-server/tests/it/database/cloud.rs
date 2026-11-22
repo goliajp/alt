@@ -5,23 +5,23 @@ use golia_platform_contract::{
 };
 use std::sync::{Arc, atomic::AtomicUsize};
 use tiny_http::{Header, Response, Server};
-fn secret(value: &str) -> Secret {
+pub(super) fn secret(value: &str) -> Secret {
     value.to_owned().try_into().unwrap()
 }
-fn time() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+pub(super) fn time() -> u64 {
+    future() - 3_600_000
 }
-fn lease(audience: &Audience, sequence: u64) -> Lease {
+pub(super) fn lease(audience: &Audience, sequence: u64) -> Lease {
+    // one clock reading: a second one can land in the next millisecond and
+    // make the lease longer than the contract allows
+    let issued = time();
     Lease {
         version: 1,
         audience: audience.clone(),
         sequence: Counter(sequence),
         revocation_generation: Counter(1),
-        issued_at_unix_ms: Counter(time()),
-        expires_at_unix_ms: Counter(time() + 60_000),
+        issued_at_unix_ms: Counter(issued),
+        expires_at_unix_ms: Counter(issued + 60_000),
     }
 }
 

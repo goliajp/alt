@@ -12,6 +12,7 @@
 //! ignored and rewritten.
 
 mod check;
+mod commit;
 mod policy;
 mod reading;
 mod record;
@@ -148,80 +149,6 @@ impl RefStore {
         let behind = self.oplog.appended_len().saturating_sub(self.snapshot_end);
         self.ops_since_snapshot >= SNAPSHOT_EVERY
             || behind >= SNAPSHOT_BYTES.max(self.snapshot_len / 2)
-    }
-
-    /// Applies one atomic transaction: all expected-old values must match
-    /// the current state or nothing happens (no op is recorded). On success
-    /// the transaction is one durable op; returns its id.
-    pub fn commit(
-        &mut self,
-        actor: &str,
-        timestamp_ms: u64,
-        changes: &[RefChange],
-    ) -> Result<OpId, RefError> {
-        self.commit_idempotent(actor, timestamp_ms, changes, None, None)
-    }
-
-    /// Like [`commit`](Self::commit) but stamps the transaction with a client
-    /// idempotency `key`, recorded durably with the op. A later write carrying
-    /// the same key is detected via [`applied_request`](Self::applied_request)
-    /// and not applied again — the basis of the daemon's exactly-once retry.
-    ///
-    /// An optional [`RefPolicy`] gate runs **inside** the append lock, after
-    /// the CAS catch-up but before validation — a denied transaction aborts
-    /// with zero on-disk side effect (no oplog write, no idempotency entry).
-    /// `policy = None` is the unconstrained path used by tests, imports, and
-    /// the legacy [`commit`](Self::commit) shim; production CLI callers pass
-    /// `Some(&policy)` so the chokepoint enforces the capability gate.
-    pub fn commit_idempotent(
-        &mut self,
-        actor: &str,
-        timestamp_ms: u64,
-        changes: &[RefChange],
-        key: Option<IdemKey>,
-        policy: Option<&RefPolicy<'_>>,
-    ) -> Result<OpId, RefError> {
-        self.commit_scoped(actor, timestamp_ms, changes, key, policy, None)
-    }
-
-    /// A ref transaction with caller-owned recovery context, committed in the
-    /// same log frame as the ref changes. Legacy callers omit the context.
-    pub fn commit_scoped(
-        &mut self,
-        actor: &str,
-        timestamp_ms: u64,
-        changes: &[RefChange],
-        key: Option<IdemKey>,
-        policy: Option<&RefPolicy<'_>>,
-        context: Option<&[u8]>,
-    ) -> Result<OpId, RefError> {
-        // The validate → append must be atomic against other writers: inside
-        // the append lock, fold in any ops they committed since (so `refs` is
-        // the true current state), then CAS-validate this transaction against
-        // it. A rejected transaction aborts with nothing written.
-        let op_id = self.append_op(actor, timestamp_ms, |refs| {
-            // Policy gate first: a CapabilityDenied here aborts the
-            // append (no oplog row, no idempotency update) — denial
-            // costs nothing observable.
-            if let Some(p) = policy {
-                p.check(refs, changes)?;
-            }
-            refs.check(changes, false)?;
-            Ok(match context {
-                Some(context) => tx::encode_scoped_tx(changes, key, context),
-                None => tx::encode_tx(changes, key),
-            })
-        })?;
-        self.oplog.sync()?;
-        // our own op is durable now; fold it into the map, the cursor, and the
-        // idempotency index (so a retry with the same key is detected)
-        self.refs.apply(changes, false)?;
-        if let Some(k) = key {
-            self.by_key.insert(k, op_id);
-        }
-        self.applied = self.oplog.recent().len();
-        self.note_op()?;
-        Ok(op_id)
     }
 
     /// The op that applied a write carrying `key`, if one is in the idempotency

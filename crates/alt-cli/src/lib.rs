@@ -11,6 +11,7 @@ macro_rules! crash_point {
     };
 }
 
+pub mod added_commits;
 pub mod auth;
 pub mod blame;
 pub mod charset;
@@ -47,6 +48,7 @@ pub mod portable;
 pub mod precommit;
 pub mod prompt;
 pub mod quote;
+pub mod receive;
 pub mod request;
 pub mod runner;
 pub mod sequence_args;

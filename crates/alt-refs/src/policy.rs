@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use alt_oplog::OpLogError;
+use alt_oplog::{OpId, OpLogError};
 
 use crate::state::Refs;
 use crate::{RefChange, RefTarget};
@@ -24,6 +24,12 @@ pub enum RefError {
     /// The caller's [`RefPolicy::state_check`] refused the transaction
     /// against the current ref state.
     Rejected(String),
+    /// The transaction is in the log as `op`; `cause` is what failed after
+    /// it was appended. Every other error left the log as it was.
+    Recorded {
+        op: OpId,
+        cause: Box<RefError>,
+    },
 }
 
 impl std::fmt::Display for RefError {
@@ -39,6 +45,7 @@ impl std::fmt::Display for RefError {
             }
             Self::CapabilityDenied(what) => write!(f, "capability denied: {what}"),
             Self::Rejected(reason) => write!(f, "{reason}"),
+            Self::Recorded { op, .. } => write!(f, "after the transaction was recorded as {op}"),
         }
     }
 }
@@ -48,6 +55,7 @@ impl std::error::Error for RefError {
         match self {
             Self::Io(e) => Some(e),
             Self::OpLog(e) => Some(e),
+            Self::Recorded { cause, .. } => Some(cause),
             Self::Format(_)
             | Self::Conflict { .. }
             | Self::SymrefDepth(_)
@@ -93,11 +101,12 @@ pub struct RefPolicy<'a> {
     /// to: `f` sees every ref as it stands after catching up on other
     /// writers, inside the same lock, so the verdict cannot go stale before
     /// the write. `Err(reason)` aborts it as [`RefError::Rejected`].
-    pub state_check: Option<&'a StateCheck>,
+    pub state_check: Option<&'a StateCheck<'a>>,
 }
 
 /// See [`RefPolicy::state_check`].
-pub type StateCheck = dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String>;
+pub type StateCheck<'a> =
+    dyn Fn(&BTreeMap<String, RefTarget>, &[RefChange]) -> Result<(), String> + 'a;
 
 impl RefPolicy<'_> {
     /// The unconstrained policy: any ref, any direction. Pass this (or simply
@@ -111,7 +120,10 @@ impl RefPolicy<'_> {
         }
     }
 
-    pub(crate) fn check(&self, refs: &Refs, changes: &[RefChange]) -> Result<(), RefError> {
+    /// The part of the gate that looks at no ref: whether the principal
+    /// may write the refs `changes` names at all. A caller that has work
+    /// to do before its transaction asks this first.
+    pub fn check_names(&self, changes: &[RefChange]) -> Result<(), RefError> {
         if self.read_only && !changes.is_empty() {
             return Err(RefError::CapabilityDenied(
                 "<read-only>: principal cannot write any ref".into(),
@@ -127,6 +139,11 @@ impl RefPolicy<'_> {
                 }
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, refs: &Refs, changes: &[RefChange]) -> Result<(), RefError> {
+        self.check_names(changes)?;
         if let Some(f) = self.state_check {
             f(&refs.to_map(), changes).map_err(RefError::Rejected)?;
         }

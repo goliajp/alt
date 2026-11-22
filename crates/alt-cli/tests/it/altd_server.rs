@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-fn alt(repo: &Path, args: &[&str]) -> Output {
+pub(crate) fn alt(repo: &Path, args: &[&str]) -> Output {
     crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
@@ -23,7 +23,7 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn ok(o: Output) -> String {
+pub(crate) fn ok(o: Output) -> String {
     assert!(
         o.status.success(),
         "stderr: {}",
@@ -32,10 +32,10 @@ fn ok(o: Output) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-struct Server {
+pub(crate) struct Server {
     child: Child,
-    addr: String,
-    stderr: Option<BufReader<std::process::ChildStderr>>,
+    pub(crate) addr: String,
+    pub(crate) stderr: Option<BufReader<std::process::ChildStderr>>,
 }
 
 impl Server {
@@ -78,7 +78,7 @@ impl Drop for Server {
 /// Spawn `altd-server` on a kernel-chosen port and wait until it logs
 /// the bind address — that's the handshake telling the test the server
 /// is actually ready to accept the next request. Single-repo mode.
-fn spawn_server(repo_dir: &Path) -> Server {
+pub(crate) fn spawn_server(repo_dir: &Path) -> Server {
     spawn_server_with_env(&[("ALT_SERVER_REPO", repo_dir.to_str().unwrap())])
 }
 
@@ -924,7 +924,7 @@ fn altd_server_alt_to_alt_clone_push_clone_round_trip() {
 /// `<client>/.alt/sign-policy`. After this returns, an `alt push` from
 /// `client` carries `alt-principal=<principal>` + `alt-sig=<ed25519>`
 /// caps the server can verify against `<principal>.pub`.
-fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
+pub(crate) fn enable_signed_push(client: &Path, server: &Path, principal: &str) {
     use alt_sign::SecretKey;
     let (sec, pubkey) = SecretKey::generate();
 

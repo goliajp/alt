@@ -99,3 +99,42 @@ fn empty_pack_is_rejected_only_by_count_mismatch() {
     let writer = PackWriter::create(dir.path(), HashAlgo::Sha1, 1).unwrap();
     assert!(writer.finish().is_err());
 }
+
+/// What a push with nothing to send still puts on the wire: the 12-byte
+/// header and its digest, as long as the repository's hash.
+#[test]
+fn a_pack_of_no_objects_is_its_header_and_digest() {
+    for (format, algo) in [("sha1", HashAlgo::Sha1), ("sha256", HashAlgo::Sha256)] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let written = PackWriter::create(dir.path(), algo, 0)
+            .unwrap()
+            .finish()
+            .unwrap();
+        let bytes = std::fs::read(&written.pack_path).unwrap();
+        assert_eq!(bytes.len(), 12 + algo.raw_len(), "{format}");
+        assert_eq!(&bytes[..12], b"PACK\0\0\0\x02\0\0\0\0");
+        assert_eq!(
+            IndexedPack::open(&written.pack_path, algo)
+                .unwrap()
+                .idx()
+                .len(),
+            0
+        );
+
+        // git reads it from a stream, as receive-pack does
+        let repo = alt_os::temp::tempdir().unwrap();
+        alt_testutil::make_repo(repo.path(), format);
+        let indexed = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["index-pack", "--stdin"])
+            .stdin(std::fs::File::open(&written.pack_path).unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            indexed.status.success(),
+            "git index-pack --stdin ({format}): {}",
+            String::from_utf8_lossy(&indexed.stderr)
+        );
+    }
+}

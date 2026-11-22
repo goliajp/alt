@@ -1,0 +1,300 @@
+//! A push as a server takes it in: what it brings into the object store,
+//! and what its refs may point at.
+//!
+//! The pack of a push is indexed where it was received, and the push is
+//! looked at before anything is written, with no lock held: against the
+//! refs as they are read then, everything it adds to the history served
+//! has to be held by the object store or the pack, and its commits have
+//! to pass `require-signed-commits` (see [`crate::added_commits`]). A push
+//! that is refused there has written nothing.
+//!
+//! What the push adds is written then, under `odb.lock` alone, and of the
+//! pack nothing else: an object no new value reaches, or one under what
+//! the refs reach already, was not looked at and stays out. Git keeps
+//! such objects of a pack; here one of them could be a commit the policy
+//! refuses, lying in wait under history that lacks it.
+//!
+//! The ref transaction comes last. Under the log's lock its state check
+//! only compares: every object a ref pointed at when the push was looked
+//! at, a ref still points at. Then what was found added is still all the
+//! push adds, and the transaction is appended. Otherwise another process
+//! moved a ref away meanwhile, the objects are taken out again and the
+//! push is looked at anew, [`ATTEMPTS`] times at most. So the log's lock
+//! is held for a comparison and an append, whatever the size of the push,
+//! and whoever reads the refs meanwhile waits for no more than that.
+//!
+//! Once the transaction is appended the refs moved for whoever reads the
+//! log: the objects stay then, whatever fails afterwards, a panic too.
+//!
+//! `odb.lock` is held from the first object written until the refs moved,
+//! or until the objects are taken out again: no other process appends in
+//! between, so the rollback takes this push's objects and no others, and
+//! none has left an object out of its own writes because this push had
+//! brought it. Where that rollback cannot be done (the write filled the
+//! active pack, which is sealed then), the objects stay with no ref at
+//! them. They are whole and passed the checks of this push, and a ref
+//! comes to point at one only through a push that is looked at the same
+//! way, as for any object the store holds unreferenced.
+
+mod batch;
+mod ref_tx;
+pub mod signed;
+
+use std::cell::Cell;
+use std::collections::{BTreeMap, HashSet};
+
+use alt_git_codec::{HashAlgo, ObjectId, RawObject};
+use alt_odb::NativeOdb;
+use alt_refs::{RefChange, RefTarget};
+use alt_wire::push::RefUpdate;
+
+use crate::added_commits::{self, Source};
+use crate::held::Held;
+use crate::native::{Principal, Store};
+use batch::Batch;
+use signed::Checked;
+
+type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+/// How many times a push is looked at before it is refused because the
+/// refs keep moving under it.
+pub const ATTEMPTS: usize = 4;
+
+/// A pack indexed and ready to replay. The second element is the order
+/// of `(offset, idx)` pairs, so that a write visits records in file
+/// order.
+pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
+
+/// Indexes the pack on disk at `path`. Nothing of the store is needed.
+pub fn prepare_pack(path: &std::path::Path) -> Res<PreparedPack> {
+    let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
+    let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
+    let idx = ip.idx();
+    let mut order: Vec<(u64, u32)> = (0..idx.len())
+        .map(|i| (idx.offset_at(i).expect("idx in range"), i))
+        .collect();
+    order.sort_unstable();
+    Ok((ip, order))
+}
+
+/// The objects a push may name: those the odb holds and those of its
+/// pack, which is not in the odb yet.
+pub(crate) struct Objects<'a> {
+    odb: &'a NativeOdb,
+    pack: Option<&'a PreparedPack>,
+}
+
+impl Objects<'_> {
+    pub(crate) fn get(&self, oid: &ObjectId) -> Res<Option<RawObject>> {
+        if let Some(held) = self.odb.get(oid)? {
+            return Ok(Some(held));
+        }
+        match self.pack {
+            Some((ip, _)) => Ok(ip.read(oid)?.map(|packed| packed.to_raw())),
+            None => Ok(None),
+        }
+    }
+
+    fn contains(&self, oid: &ObjectId) -> Res<bool> {
+        let packed = |(ip, _): &PreparedPack| ip.idx().lookup(oid).is_some();
+        Ok(self.pack.is_some_and(packed) || self.odb.contains(oid)?)
+    }
+}
+
+/// A push as it stands once its commands are read and its pack is
+/// indexed.
+pub struct Push<'a> {
+    /// the pack, absent when the push sent none
+    pub pack: Option<&'a PreparedPack>,
+    /// what `require-signed-commits` is checked with, when the pusher is
+    /// held to it
+    pub checked: Option<&'a Checked>,
+    pub updates: &'a [RefUpdate],
+    pub principal: &'a Principal,
+    pub sig_label: &'a str,
+}
+
+/// What became of a push.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Landed {
+    /// the refs moved
+    Moved,
+    /// writing the pack failed; nothing of the push is left
+    Unpack(String),
+    /// every command is refused with this; nothing of the push is left
+    Refused(String),
+}
+
+/// Where a push is on its way in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// its objects are in the odb, once for each look at the push
+    Written,
+    /// its ref transaction is in the log
+    Recorded,
+}
+
+fn oid(target: &RefTarget) -> Option<&ObjectId> {
+    match target {
+        RefTarget::Oid(oid) => Some(oid),
+        RefTarget::Symbolic(_) => None,
+    }
+}
+
+/// What the push adds with the refs at `served`, or why it is refused.
+fn vet(
+    odb: &NativeOdb,
+    push: &Push<'_>,
+    served: &[ObjectId],
+) -> Res<Result<HashSet<ObjectId>, String>> {
+    let objects = Objects {
+        odb,
+        pack: push.pack,
+    };
+    let new: Vec<ObjectId> = push.updates.iter().filter_map(|u| u.new).collect();
+    let get = |oid: &ObjectId| objects.get(oid);
+    let holds = |oid: &ObjectId| objects.contains(oid);
+    let had = |oid: &ObjectId| -> Res<bool> { Ok(odb.contains(oid)?) };
+    let fails = |oid: &ObjectId| match push.checked {
+        Some(checked) => checked.fails(&objects, oid),
+        None => Ok(None),
+    };
+    let source = Source {
+        get: &get,
+        holds: &holds,
+        had: &had,
+        fails: &fails,
+    };
+    added_commits::added(&source, served, &new)
+}
+
+/// One look at the push and, when nothing refuses it, its objects and
+/// its ref transaction; `None` when a ref moved away meanwhile.
+fn attempt(
+    store: &mut Store,
+    push: &Push<'_>,
+    tx: &ref_tx::Tx,
+    observe: &dyn Fn(Step),
+) -> Res<Option<Landed>> {
+    let (refs, odb) = store.refs_and_odb();
+    // refs before objects: a writer stores its objects before the ref
+    // that names them
+    refs.refresh()?;
+    odb.refresh()?;
+    let served: Vec<ObjectId> = refs.iter().filter_map(|(_, to)| oid(to).copied()).collect();
+    // the transaction of a push that does not find the refs where it
+    // expects them is refused: nothing of it needs looking at
+    let expected = |u: &RefUpdate| refs.get(&u.name) == u.old.map(RefTarget::Oid).as_ref();
+    let added = match push.updates.iter().all(expected) {
+        true => match vet(odb, push, &served)? {
+            Ok(added) => Some(added),
+            Err(reason) => return Ok(Some(Landed::Refused(reason))),
+        },
+        false => None,
+    };
+    let mut batch = Batch::begin(odb)?;
+    if let Some(added) = &added
+        && let Err(e) = batch.write(push.pack, added)
+    {
+        return Ok(Some(Landed::Unpack(format!("index-pack: {e}"))));
+    }
+    observe(Step::Written);
+    let moved = Cell::new(false);
+    let state = |now: &BTreeMap<String, RefTarget>, changes: &[RefChange]| {
+        // the transaction refuses this as a conflict right after
+        if changes.iter().any(|c| now.get(&c.name) != c.old.as_ref()) {
+            return Ok(());
+        }
+        let pointed: HashSet<&ObjectId> = now.values().filter_map(oid).collect();
+        if added.is_some() && served.iter().all(|oid| pointed.contains(oid)) {
+            return Ok(());
+        }
+        moved.set(true);
+        Err("a ref moved".to_owned())
+    };
+    let op = match tx.append(refs, &state) {
+        Ok(op) => op,
+        Err(_) if moved.get() => return Ok(None),
+        Err(e) => return Ok(Some(Landed::Refused(format!("ref tx: {e}")))),
+    };
+    // in the log, whatever fails from here on: the objects stay
+    batch.keep();
+    observe(Step::Recorded);
+    let stored = batch.end().map_err(|e| e.to_string());
+    let finished = tx.finish(refs, op).map_err(|e| e.to_string());
+    Ok(Some(match stored.and(finished) {
+        Ok(()) => Landed::Moved,
+        Err(e) => Landed::Refused(format!("durability: {e}")),
+    }))
+}
+
+/// Brings what a push adds into the odb and moves its refs, or leaves
+/// both as they were (see the module's description).
+pub fn land(store: &mut Store, push: &Push<'_>) -> Res<Landed> {
+    land_observed(store, push, &|_| ())
+}
+
+/// [`land`], with `observe` called at each [`Step`] it comes to.
+pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step)) -> Res<Landed> {
+    let tx = ref_tx::Tx::new(store.capabilities_for(push.principal), push);
+    if let Err(denied) = tx.names_allowed() {
+        return Ok(Landed::Refused(format!("ref tx: {denied}")));
+    }
+    for _ in 0..ATTEMPTS {
+        if let Some(landed) = attempt(store, push, &tx, observe)? {
+            return Ok(landed);
+        }
+    }
+    Ok(Landed::Refused(
+        "the refs moved while the push was looked at: push again".into(),
+    ))
+}
+
+/// How the unpack went and, when the refs moved, what `moved` gave (none
+/// for a push of no commands); otherwise the reason every command is
+/// refused with.
+pub type Report<T> = (Result<(), String>, Result<Option<T>, String>);
+
+/// Takes in the push of `updates` by `principal` (and how its signature
+/// went) with the pack at `pack`, when it sent one. The pack is indexed
+/// and the signatures of its commits are checked before the store is
+/// taken in hand; `moved` is called with it still in hand.
+pub fn take_in<T>(
+    store: &Held<Store>,
+    pack: Option<&std::path::Path>,
+    updates: &[RefUpdate],
+    (principal, sig_label): &(Principal, &str),
+    moved: impl FnOnce() -> T,
+) -> Res<Report<T>> {
+    // a pack that fails to index is reported as the unpack error
+    let prepared = match pack.map(prepare_pack) {
+        Some(Err(_)) => {
+            let unpack = Err("index-pack: failed to prepare pack".into());
+            return Ok((unpack, Err("pack unpack failed".into())));
+        }
+        Some(Ok(prepared)) => Some(prepared),
+        None => None,
+    };
+    // nothing would name the objects
+    if updates.is_empty() {
+        return Ok((Ok(()), Ok(None)));
+    }
+    let trust = signed::trust_for(&store.take(), principal)?;
+    let checked = match trust {
+        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
+        None => None,
+    };
+    let push = Push {
+        pack: prepared.as_ref(),
+        checked: checked.as_ref(),
+        updates,
+        principal,
+        sig_label,
+    };
+    let mut store = store.take();
+    Ok(match land(&mut store, &push)? {
+        Landed::Moved => (Ok(()), Ok(Some(moved()))),
+        Landed::Unpack(e) => (Err(e), Err("pack unpack failed".into())),
+        Landed::Refused(reason) => (Ok(()), Err(reason)),
+    })
+}
