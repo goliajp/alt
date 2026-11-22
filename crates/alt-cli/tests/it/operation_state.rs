@@ -144,13 +144,16 @@ fn a_cherry_pick_head_has_moved_away_from_is_over_and_the_next_write_forgets_it(
     let marker = repo.join(".alt/CHERRY_PICK_HEAD");
     let stopped = run(repo, &["cherry-pick", "feature/side"]);
     assert_eq!(stopped.status.code(), Some(1));
-    // takes back the commit before the pick: HEAD is no longer where it stopped
-    alt(repo, &["undo"]);
+    let left = std::fs::read(&marker).unwrap();
+    std::fs::write(repo.join("f.txt"), "both\n").unwrap();
+    alt(repo, &["add", "f.txt"]);
+    alt(repo, &["commit", "-m", "picked"]);
+    // an older alt commits without removing the file: HEAD has moved on
+    std::fs::write(&marker, left).unwrap();
     assert_eq!(operation(repo), "null");
     // a command that only reads leaves the file
     assert!(marker.exists());
-    std::fs::write(repo.join("f.txt"), "both\n").unwrap();
-    alt(repo, &["add", "f.txt"]);
+    alt(repo, &["branch", "after"]);
     assert!(!marker.exists());
     assert_eq!(operation(repo), "null");
 }

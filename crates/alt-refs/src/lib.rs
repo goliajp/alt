@@ -14,6 +14,7 @@
 mod check;
 mod policy;
 mod reading;
+mod record;
 mod settle;
 mod snapshot;
 mod state;
@@ -228,24 +229,6 @@ impl RefStore {
     /// executing a keyed write, so a retry returns instead of applying twice.
     pub fn applied_request(&self, key: &IdemKey) -> Option<OpId> {
         self.by_key.get(key).copied()
-    }
-
-    /// Records a non-ref op (import, future workflow ops) in the shared
-    /// log. The ref-transaction kind byte is reserved.
-    pub fn record_op(
-        &mut self,
-        actor: &str,
-        timestamp_ms: u64,
-        payload: &[u8],
-    ) -> Result<OpId, RefError> {
-        if payload.first() == Some(&PAYLOAD_REF_TX) {
-            return Err(RefError::ReservedPayload(PAYLOAD_REF_TX));
-        }
-        let op_id = self.append_op(actor, timestamp_ms, |_| Ok(payload.to_vec()))?;
-        self.oplog.sync()?;
-        self.applied = self.oplog.recent().len();
-        self.note_op()?;
-        Ok(op_id)
     }
 
     /// Read-path catch-up for a long-lived store (the daemon between requests):

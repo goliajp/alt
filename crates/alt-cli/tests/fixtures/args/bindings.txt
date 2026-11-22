@@ -138,6 +138,10 @@ alt operation pending
 {"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"json":["66616c7365"]}},"name":"pending"},"values":{"json":["66616c7365"]}},"name":"operation"},"values":{"json":["66616c7365"]}}
 alt operation status abc --json
 {"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Status":["6964"],"id":["616263"],"json":["74727565"]}},"name":"status"},"values":{"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
+alt operation --json abandon abc
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Abandon":["6964"],"id":["616263"],"json":["74727565"],"keep_changes":["66616c7365"]}},"name":"abandon"},"values":{"Operation":["6a736f6e"],"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
+alt operation --json abandon abc --keep-changes
+{"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Abandon":["6964","6b6565705f6368616e676573"],"id":["616263"],"json":["74727565"],"keep_changes":["74727565"]}},"name":"abandon"},"values":{"Operation":["6a736f6e"],"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
 alt operation --json recover abc
 {"subcommand":{"arguments":{"subcommand":{"arguments":{"subcommand":null,"values":{"Recover":["6964"],"id":["616263"],"json":["74727565"]}},"name":"recover"},"values":{"Operation":["6a736f6e"],"json":["74727565"]}},"name":"operation"},"values":{"json":["74727565"]}}
 alt workspace add task /tmp/task
@@ -456,3 +460,9 @@ alt add -u
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["757064617465"],"json":["66616c7365"],"update":["74727565"]}},"name":"add"},"values":{}}
 alt add -A .
 {"subcommand":{"arguments":{"subcommand":null,"values":{"Add":["616c6c","7061746873"],"all":["74727565"],"json":["66616c7365"],"paths":["2e"]}},"name":"add"},"values":{}}
+alt cherry-pick --continue
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CherryPick":["636f6e74696e75655f7069636b"],"continue_pick":["74727565"],"json":["66616c7365"]}},"name":"cherry-pick"},"values":{}}
+alt cherry-pick --abort --json
+{"subcommand":{"arguments":{"subcommand":null,"values":{"CherryPick":["61626f72745f7069636b","6a736f6e"],"abort_pick":["74727565"],"json":["74727565"]}},"name":"cherry-pick"},"values":{}}
+alt merge --abort
+{"subcommand":{"arguments":{"subcommand":null,"values":{"Merge":["61626f72745f6d65726765"],"abort_merge":["74727565"],"json":["66616c7365"]}},"name":"merge"},"values":{}}

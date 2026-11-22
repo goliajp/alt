@@ -334,25 +334,37 @@ fn conflicting(root: &Path) -> String {
     second
 }
 
+/// `side` as [`conflicting`] leaves it and a `main` that moved: replaying
+/// `second` there conflicts in `c.txt`, and `m.txt` comes with `main`.
+fn stopped_rebase(root: &Path) {
+    conflicting(root);
+    ok(alt(root, &["switch", "main"]));
+    write(root, "c.txt", "c on main\n");
+    write(root, "m.txt", "m\n");
+    ok(alt(root, &["add", "."]));
+    ok(alt(root, &["commit", "-m", "main moves"]));
+    ok(alt(root, &["switch", "side"]));
+    assert!(!alt(root, &["rebase", "main"]).status.success());
+}
+
 #[test]
 fn an_undo_that_writes_back_an_edited_file_does_not_hide_the_edit() {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
-    let second = conflicting(root);
-    // stops in c.txt; r.txt goes back to r1 and is staged
-    assert!(!alt(root, &["revert", &second]).status.success());
-    assert_eq!(std::fs::read_to_string(root.join("r.txt")).unwrap(), "r1\n");
-    write(root, "r.txt", "edited and not added\n");
-    cache_agrees(root, "edited during the revert");
-    ok(alt(root, &["revert", "--abort"]));
+    stopped_rebase(root);
+    write(root, "m.txt", "edited and not added\n");
+    cache_agrees(root, "edited during the rebase");
+    // the branch has no m.txt: the abort removes the file, edit and all
+    ok(alt(root, &["rebase", "--abort"]));
+    assert!(!root.join("m.txt").exists());
     cache_agrees(root, "after the abort");
     ok(alt(root, &["undo"]));
     assert_eq!(
-        std::fs::read_to_string(root.join("r.txt")).unwrap(),
+        std::fs::read_to_string(root.join("m.txt")).unwrap(),
         "edited and not added\n"
     );
     let status = ok(alt(root, &["status"]));
-    assert!(status.contains("modified:   r.txt"), "{status}");
+    assert!(status.contains("modified:   m.txt"), "{status}");
     assert!(ok(alt(root, &["diff"])).contains("+edited and not added"));
     cache_agrees(root, "after the undo");
 }
@@ -360,21 +372,13 @@ fn an_undo_that_writes_back_an_edited_file_does_not_hide_the_edit() {
 /// `rebase --abort` never puts a file back that it did not plan from a
 /// tree: it checks out the branch as it was, and where the working tree
 /// already holds that content the file is left alone, so an edit made
-/// while the rebase was stopped stays in place. Its last ref change, HEAD
-/// leaving the scratch ref, records no checkout to invert, so the `undo`
-/// that follows is refused and writes nothing either.
+/// while it was stopped stays, through the `undo` of the abort as well.
 #[test]
-fn an_aborted_rebase_keeps_an_edit_and_its_undo_is_refused() {
+fn an_aborted_rebase_keeps_an_edit_and_so_does_its_undo() {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
-    conflicting(root);
-    ok(alt(root, &["switch", "main"]));
-    write(root, "c.txt", "c on main\n");
-    ok(alt(root, &["add", "."]));
-    ok(alt(root, &["commit", "-m", "main moves"]));
-    ok(alt(root, &["switch", "side"]));
     // stops in c.txt at the first commit replayed; r.txt is already r2
-    assert!(!alt(root, &["rebase", "main"]).status.success());
+    stopped_rebase(root);
     cache_agrees(root, "stopped");
     write(root, "r.txt", "edited and not added\n");
     cache_agrees(root, "edited during the rebase");
@@ -382,17 +386,13 @@ fn an_aborted_rebase_keeps_an_edit_and_its_undo_is_refused() {
     let edited = "On branch side\nChanges not staged for commit:\n\tmodified:   r.txt\n";
     assert_eq!(status(root), edited);
     cache_agrees(root, "after the abort");
-    let undo = alt(root, &["undo"]);
-    assert_eq!(undo.status.code(), Some(1));
-    let said = String::from_utf8_lossy(&undo.stderr);
-    assert!(said.contains("automatic undo refused"), "{said}");
-    assert_eq!(
-        std::fs::read_to_string(root.join("r.txt")).unwrap(),
-        "edited and not added\n"
-    );
-    assert_eq!(std::fs::read_to_string(root.join("c.txt")).unwrap(), "c3\n");
-    assert_eq!(status(root), edited);
-    cache_agrees(root, "after the refused undo");
+    ok(alt(root, &["undo"]));
+    let edit = std::fs::read_to_string(root.join("r.txt")).unwrap();
+    assert_eq!(edit, "edited and not added\n");
+    let conflict = std::fs::read_to_string(root.join("c.txt")).unwrap();
+    assert!(conflict.starts_with("<<<<<<< "), "{conflict}");
+    assert!(root.join(".alt/REBASE_STATE").exists());
+    cache_agrees(root, "after the undo");
 }
 
 /// The stat the snapshot holds for `path`, when it is the one the file

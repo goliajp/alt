@@ -2,6 +2,9 @@
 
 use super::*;
 
+mod step;
+pub(super) use step::{STEP, STEP_MARK, Tracked};
+
 /// What was begun in a workspace and waits to be finished.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OperationKind {

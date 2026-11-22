@@ -77,6 +77,8 @@ fn rebase_stops_and_resumes() {
     s.json(&["rebase", "main", "--json"]);
     s.json(&["rebase", "--abort", "--json"]);
     s.json(&["undo", "--json"]);
+    s.json(&["status", "--json"]);
+    s.setup(&["rebase", "--abort"]);
     s.setup(&["switch", "main"]);
     s.setup(&["switch", "-c", "skipping"]);
     s.setup(&["switch", "feat"]);
@@ -109,5 +111,38 @@ fn revert_and_cherry_pick() {
     s.json(&["revert", "HEAD", "HEAD~1", "--no-edit", "--json"]);
     s.json(&["revert", "absent", "--json"]);
     s.json(&["log", "--json", "-n", "3"]);
+    s.finish();
+}
+
+#[test]
+fn merge_given_up() {
+    let mut s = diverged("merge-abort");
+    s.json(&["merge", "--abort", "--json"]);
+    s.json(&["merge", "feat", "--json"]);
+    // a file the merge brought, changed since: the abort would write over it
+    s.write("only-feat.txt", "changed\n");
+    s.json(&["merge", "--abort", "--json"]);
+    s.write("only-feat.txt", "x\n");
+    s.json(&["merge", "--abort", "--json"]);
+    s.json(&["status", "--json"]);
+    s.json(&["op-log", "-n", "2", "--json"]);
+    s.finish();
+}
+
+#[test]
+fn cherry_pick_gone_on_with_or_given_up() {
+    let mut s = diverged("cherry-pick-resume");
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["cherry-pick", "feat~1", "--json"]);
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["cherry-pick", "--abort", "--json"]);
+    s.json(&["status", "--json"]);
+    s.json(&["cherry-pick", "--abort", "--json"]);
+    s.json(&["cherry-pick", "feat~1", "--json"]);
+    s.write("f.txt", "l1\npicked\nl3\n");
+    s.setup(&["add", "."]);
+    s.json(&["cherry-pick", "--continue", "--json"]);
+    s.json(&["show", "--json"]);
+    s.json(&["op-log", "-n", "4", "--json"]);
     s.finish();
 }

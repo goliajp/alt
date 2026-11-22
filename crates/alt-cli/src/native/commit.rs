@@ -71,12 +71,13 @@ impl NativeRepo<'_> {
             tz: "+0000",
         };
         let msg = with_newline(message);
+        let picked = self.concluding()?;
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
-                author: &me,
+                author: picked.as_ref().unwrap_or(&me),
                 committer: &me,
                 message: &msg,
             },
@@ -85,10 +86,7 @@ impl NativeRepo<'_> {
             "commit",
             &opts.meta(None),
         )?;
-        if merging.is_some() {
-            self.finish_merge()?;
-        }
-        self.sequence_committed()?;
+        self.settle_state()?;
         report_commit(&branch, commit, tree, json, out)
     }
 

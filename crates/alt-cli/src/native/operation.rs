@@ -6,8 +6,21 @@ use crate::json::Json;
 use checkout_recovery::{COMPLETE_CHECKOUT, CheckoutIntent, PREPARE_CHECKOUT};
 use recovery::{ABANDON, COMPLETE, IndexIntent, PREPARE, RefContext, WorkspaceIdentity, decode};
 
+/// The workspace a task operation was recorded in.
+fn task_workspace(op: &alt_oplog::Op) -> Res<WorkspaceIdentity> {
+    let operation: task::TaskOperation = decode(&op.payload, task::TASK_OPERATION)?;
+    if operation.version != 1 {
+        return Err(crate::machine::Failure::refusal(
+            "unsupported_record",
+            "unsupported task operation version",
+        )
+        .into());
+    }
+    Ok(operation.workspace)
+}
+
 impl NativeRepo<'_> {
-    fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
+    pub(super) fn operation_by_id(&self, id: &str) -> Res<alt_oplog::Op> {
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(crate::machine::Failure::usage(
                 "operation id must be 64 hexadecimal digits",
@@ -44,19 +57,15 @@ impl NativeRepo<'_> {
         Ok(false)
     }
 
-    fn operation_info(&self, op: &alt_oplog::Op) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
+    pub(super) fn operation_info(
+        &self,
+        op: &alt_oplog::Op,
+    ) -> Res<(Option<WorkspaceIdentity>, bool, bool)> {
         match op.payload.first() {
-            Some(&task::TASK_OPERATION) => {
-                let operation: task::TaskOperation = decode(&op.payload, task::TASK_OPERATION)?;
-                if operation.version != 1 {
-                    return Err(crate::machine::Failure::refusal(
-                        "unsupported_record",
-                        "unsupported task operation version",
-                    )
-                    .into());
-                }
-                Ok((Some(operation.workspace), true, false))
-            }
+            Some(&task::TASK_OPERATION) => Ok((Some(task_workspace(op)?), true, false)),
+            // the record of a whole step is written when the step is done
+            Some(&in_progress::STEP) => Ok((Some(self.step_workspace(op)?), true, false)),
+            Some(&in_progress::STEP_MARK) => self.step_mark_info(op),
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
                 let closed = self.operation_complete(op.id, COMPLETE)?
@@ -210,26 +219,25 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// Pending state is the reason for a recovery: unlike ordinary writes
+    /// it checks capabilities and takes the lock without rejecting pending.
+    pub(super) fn ensure_may_recover(&mut self) -> Res<()> {
+        for locked in [false, true] {
+            if locked {
+                self.lock_workspace()?;
+            }
+            if self.caps.read_only {
+                let why = "capability denied: principal cannot recover (read-only)";
+                return Err(crate::machine::Failure::refusal("capability_denied", why).into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn operation_recover(&mut self, id: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        // Pending state is the reason for this command; unlike ordinary writes
-        // it checks capabilities and takes the lock without rejecting pending.
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                "capability denied: principal cannot recover (read-only)",
-            )
-            .into());
-        }
-        self.lock_workspace()?;
-        if self.caps.read_only {
-            return Err(crate::machine::Failure::refusal(
-                "capability_denied",
-                "capability denied: principal cannot recover (read-only)",
-            )
-            .into());
-        }
+        self.ensure_may_recover()?;
         let op = self.operation_by_id(id)?;
-        let (workspace, completed, recoverable) = self.operation_info(&op)?;
+        let (workspace, _, recoverable) = self.operation_info(&op)?;
         if workspace.as_ref() != Some(&self.workspace_identity()?) {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -243,39 +251,47 @@ impl NativeRepo<'_> {
                     .into(),
             );
         }
-        if !completed {
-            match op.payload.first() {
-                Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?)?,
-                Some(&PREPARE_CHECKOUT) => {
-                    self.finish_interrupted_checkout(op.id, decode(&op.payload, PREPARE_CHECKOUT)?)?
-                }
-                Some(&alt_refs::PAYLOAD_REF_TX) => {
-                    let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
-                    for change in &tx.changes {
-                        if self.store.refs.get(&change.name) != change.new.as_ref() {
-                            return Err(crate::machine::Failure::refusal(
-                                "precondition_failed",
-                                "recovery precondition failed: refs changed",
-                            )
-                            .into());
-                        }
-                    }
-                    let context: RefContext =
-                        alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
-                    self.finish_interrupted_checkout(
-                        op.id,
-                        context.checkout.ok_or("missing checkout intent")?,
-                    )?;
-                }
-                _ => {
-                    return Err(crate::machine::Failure::refusal(
-                        "unsupported_record",
-                        "unsupported recovery operation",
-                    )
-                    .into());
-                }
-            }
+        // a step that was cut short is brought to an end as a whole
+        self.recover_open_step(true)?;
+        if !self.operation_info(&op)?.1 {
+            self.finish_prepared(&op, false)?;
         }
         self.operation_status(id, json, out)
+    }
+
+    /// Finishes the index change or the checkout that `op` prepared and
+    /// no record completes; `of_step` where it is a record of a step.
+    pub(super) fn finish_prepared(&mut self, op: &alt_oplog::Op, of_step: bool) -> Res<()> {
+        match op.payload.first() {
+            Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?),
+            Some(&PREPARE_CHECKOUT) => {
+                let intent = decode(&op.payload, PREPARE_CHECKOUT)?;
+                self.finish_interrupted_checkout(op.id, intent, of_step)
+            }
+            Some(&alt_refs::PAYLOAD_REF_TX) => {
+                let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
+                // the notes ref is shared: a commit of another workspace
+                // since has put its note on top of the one written here
+                let own = |c: &&RefChange| c.name != crate::meta::NOTES_REF;
+                for change in tx.changes.iter().filter(own) {
+                    if self.store.refs.get(&change.name) != change.new.as_ref() {
+                        return Err(crate::machine::Failure::refusal(
+                            "precondition_failed",
+                            "recovery precondition failed: refs changed",
+                        )
+                        .into());
+                    }
+                }
+                let context: RefContext =
+                    alt_json::from_slice(&tx.context.ok_or("missing recovery scope")?)?;
+                let intent = context.checkout.ok_or("missing checkout intent")?;
+                self.finish_interrupted_checkout(op.id, intent, of_step)
+            }
+            _ => Err(crate::machine::Failure::refusal(
+                "unsupported_record",
+                "unsupported recovery operation",
+            )
+            .into()),
+        }
     }
 }

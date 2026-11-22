@@ -4,19 +4,23 @@
 use super::*;
 
 impl NativeRepo<'_> {
-    /// The last operation of the log, or the checkout its completion
-    /// closes.
+    /// The last operation of the log that changed anything, or the
+    /// checkout its completion closes. A step is its record: by the time
+    /// an undo looks, no step of this workspace is without one, so no
+    /// record of a step is taken back by itself. A step that was cut
+    /// short before it changed anything is passed over, mark and record.
+    /// A record of a step that is the last all the same, as the completion
+    /// of one of its checkouts written after the step was closed, stands
+    /// for the step.
     fn last_undoable(&self) -> Res<alt_oplog::Op> {
-        let mut last = self
-            .store
-            .refs
-            .oplog()
-            .ops()?
-            .last()
-            .ok_or_else(|| {
-                crate::machine::Failure::refusal("precondition_failed", "nothing to undo")
-            })?
-            .clone();
+        let mut ops = self.store.refs.oplog().ops()?;
+        while let Some(begin) = ops.last().map(|op| self.step_without_change(op)) {
+            let Some(begin) = begin? else { break };
+            let at = ops.iter().rposition(|op| op.id.to_string() == begin);
+            ops = &ops[..at.ok_or("missing step mark")?];
+        }
+        let nothing = || crate::machine::Failure::refusal("precondition_failed", "nothing to undo");
+        let mut last = ops.last().ok_or_else(nothing)?.clone();
         if last.payload.first() == Some(&checkout_recovery::COMPLETE_CHECKOUT) {
             let done: checkout_recovery::CheckoutDone =
                 decode(&last.payload, checkout_recovery::COMPLETE_CHECKOUT)?;
@@ -37,6 +41,13 @@ impl NativeRepo<'_> {
                 .ok_or("missing checkout intent")?
                 .clone();
         }
+        let kind = last.payload.first();
+        if (kind == Some(&checkout_recovery::PREPARE_CHECKOUT)
+            || kind == Some(&alt_refs::PAYLOAD_REF_TX))
+            && let Some(step) = self.step_of(&last)?
+        {
+            last = step;
+        }
         Ok(last)
     }
 
@@ -49,29 +60,8 @@ impl NativeRepo<'_> {
         use crate::json::Json;
         let mut fields = vec![("undone", Json::Bool(true))];
         match last.payload.first() {
-            Some(&COMPLETE) => {
-                let done: Completion = decode(&last.payload, COMPLETE)?;
-                let prepared = self.store.refs.oplog().ops()?.iter()
-                    .find(|op| op.id.to_string() == done.prepared).ok_or("missing recovery intent")?;
-                let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
-                if intent.workspace != workspace { return Err(crate::machine::Failure::refusal("precondition_failed", "last operation belongs to a different workspace instance; select its workspace").into()); }
-                if intent.version != 1 || done.version != 1 { return Err(crate::machine::Failure::refusal("unsupported_record", "unsupported recovery record").into()); }
-                if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.after {
-                    return Err(crate::machine::Failure::refusal("precondition_failed", "recovery precondition failed: index changed").into());
-                }
-                self.check_guards(&intent.worktree)?;
-                for guard in &intent.worktree {
-                    self.ensure_path_allowed(&guard.path)?;
-                }
-                let bytes = self.read_snapshot(&intent.before)?;
-                self.read_snapshot(&intent.after)?;
-                fields.extend(crate::json::paths("paths", "paths_bytes", intent.worktree.iter().map(|g| g.path.as_slice())));
-                let inverse = IndexIntent {
-                    before: intent.after, after: intent.before,
-                    inverse_of: Some(prepared.id.to_string()), request_id: self.request_id.map(|id| crate::machine::hex(&id)), ..intent
-                };
-                self.apply_index_intent(inverse, &bytes, false)?;
-            }
+            Some(&COMPLETE) => self.undo_index(&last, &workspace, &mut fields)?,
+            Some(&in_progress::STEP) => self.undo_step(&last)?,
             Some(&checkout_recovery::PREPARE_CHECKOUT) => {
                 let intent: checkout_recovery::CheckoutIntent = decode(
                     &last.payload, checkout_recovery::PREPARE_CHECKOUT,
@@ -95,6 +85,66 @@ impl NativeRepo<'_> {
         } else {
             writeln!(out, "Undid the last operation")?;
         }
+        Ok(())
+    }
+
+    /// Takes back the index change `last` completes.
+    fn undo_index(
+        &mut self,
+        last: &alt_oplog::Op,
+        workspace: &WorkspaceIdentity,
+        fields: &mut Vec<(&'static str, crate::json::Json)>,
+    ) -> Res<()> {
+        let done: Completion = decode(&last.payload, COMPLETE)?;
+        let prepared = self
+            .store
+            .refs
+            .oplog()
+            .ops()?
+            .iter()
+            .find(|op| op.id.to_string() == done.prepared)
+            .ok_or("missing recovery intent")?;
+        let intent: IndexIntent = decode(&prepared.payload, PREPARE)?;
+        if intent.workspace != *workspace {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "last operation belongs to a different workspace instance; select its workspace",
+            )
+            .into());
+        }
+        if intent.version != 1 || done.version != 1 {
+            return Err(crate::machine::Failure::refusal(
+                "unsupported_record",
+                "unsupported recovery record",
+            )
+            .into());
+        }
+        if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.after {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "recovery precondition failed: index changed",
+            )
+            .into());
+        }
+        self.check_guards(&intent.worktree)?;
+        for guard in &intent.worktree {
+            self.ensure_path_allowed(&guard.path)?;
+        }
+        let bytes = self.read_snapshot(&intent.before)?;
+        self.read_snapshot(&intent.after)?;
+        fields.extend(crate::json::paths(
+            "paths",
+            "paths_bytes",
+            intent.worktree.iter().map(|g| g.path.as_slice()),
+        ));
+        let inverse = IndexIntent {
+            before: intent.after,
+            after: intent.before,
+            inverse_of: Some(prepared.id.to_string()),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+            ..intent
+        };
+        self.apply_index_intent(inverse, &bytes, false)?;
         Ok(())
     }
 

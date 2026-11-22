@@ -84,7 +84,7 @@ pub fn mutates_command(cmd: &Command) -> bool {
     if matches!(
         cmd,
         Command::Operation {
-            op: OperationOp::Recover { .. },
+            op: OperationOp::Recover { .. } | OperationOp::Abandon { .. },
             ..
         }
     ) {

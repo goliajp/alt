@@ -127,8 +127,9 @@ impl NativeRepo<'_> {
     }
 
     /// Fails where an operation of this workspace was interrupted and is
-    /// to be recovered first. An index change that cannot be completed is
-    /// abandoned here and is in no command's way.
+    /// to be recovered first. A step that was cut short is brought to an
+    /// end here, and an index change that cannot be completed is
+    /// abandoned: neither is in a command's way.
     ///
     /// Only the ops the workspace has not been checked against are read:
     /// where none of them is left open, how far the log reaches is kept
@@ -141,9 +142,15 @@ impl NativeRepo<'_> {
         }
         let identity = self.workspace_identity()?;
         let place = self.index_path.with_file_name(checked::NAME);
+        // a step that is cut short began with a mark among those ops
+        let marked = |op: &alt_oplog::Op| op.payload.first() == Some(&in_progress::STEP_MARK);
+        let unread = checked::unread(self.store.refs.oplog(), &place, &identity)?;
+        if unread.iter().any(marked) {
+            self.recover_open_step(false)?;
+        }
         let (read, pending) = {
             let ops = checked::unread(self.store.refs.oplog(), &place, &identity)?;
-            checkout_recovery::ensure_none_pending(&ops, &identity)?;
+            self.ensure_none_pending(&ops, &identity)?;
             (!ops.is_empty(), pending_index(&ops, &identity)?)
         };
         if let Some((id, intent)) = pending

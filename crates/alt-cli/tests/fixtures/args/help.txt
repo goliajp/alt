@@ -1680,12 +1680,14 @@ Options:
 ### alt cherry-pick
 Apply the changes from a commit on top of the current branch
 
-Usage: alt cherry-pick [OPTIONS] <REV>
+Usage: alt cherry-pick [OPTIONS] [REV]
 
 Arguments:
-  <REV>  Revision of the commit to apply
+  [REV]  Revision of the commit to apply
 
 Options:
+      --continue               Commit the resolved cherry-pick
+      --abort                  Put the index and the files back as they were before the cherry-pick
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
@@ -1737,12 +1739,13 @@ Options:
 ### alt merge
 Join another branch into the current one
 
-Usage: alt merge [OPTIONS] <BRANCH>
+Usage: alt merge [OPTIONS] [BRANCH]
 
 Arguments:
-  <BRANCH>  Branch to merge into the current branch
+  [BRANCH]  Branch to merge into the current branch
 
 Options:
+      --abort                  Put the index and the files back as they were before the merge
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
@@ -1912,6 +1915,7 @@ Commands:
   pending  List incomplete operations belonging to this workspace instance
   status   Show the durable state of one operation
   recover  Finish a prepared operation after checking every affected prestate
+  abandon  Give up the interrupted merge, cherry-pick, revert or rebase command an operation belongs to: the workspace is put back as it was before that command
 
 Options:
       --json                   
@@ -1950,6 +1954,20 @@ Arguments:
   <ID>  
 
 Options:
+      --json                   
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt operation abandon
+Give up the interrupted merge, cherry-pick, revert or rebase command an operation belongs to: the workspace is put back as it was before that command
+
+Usage: alt operation abandon [OPTIONS] <ID>
+
+Arguments:
+  <ID>  
+
+Options:
+      --keep-changes           Leave a file that was changed since the command was interrupted as it is
       --json                   
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
