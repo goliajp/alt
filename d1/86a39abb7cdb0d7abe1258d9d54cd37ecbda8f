@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: build the run of the chain over the records of a boot run of the chunk index in a process that never syncs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/never_synced_runs.rs
+touched: crates/alt-store/src/index/boot.rs
+touched: crates/alt-store/src/indexing.rs
