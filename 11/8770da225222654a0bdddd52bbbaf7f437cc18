@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: check the counts of a table once, where room is made for it
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/zone/tzif.rs
