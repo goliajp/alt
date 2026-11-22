@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: go on where a directory of boot runs cannot be removed, since nobody opens what its note no longer names
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/unsynced/boot_runs.rs
+touched: crates/alt-odb/tests/it/boot_runs_stuck.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-store/src/reclog/tests.rs
+touched: crates/alt-store/src/runs/boot.rs
+touched: crates/alt-store/src/runs/named.rs
