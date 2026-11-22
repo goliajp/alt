@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: read the end of a day, a zone beside one that is none, and blanks as git reads them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/signature.rs
+touched: crates/alt-cli/src/native/signature/date.rs
+touched: crates/alt-cli/src/native/signature/date/git_dates.tsv
+touched: crates/alt-cli/src/native/signature/date/tests.rs
+touched: crates/alt-cli/tests/it/signing/zones.rs
