@@ -159,38 +159,21 @@ impl ChunkIndex {
         self.tail.is_empty() && self.runs.count() == 0
     }
 
-    /// Every chunk's current location.
-    pub fn all(&self) -> IdMap<ChunkId, Location> {
+    /// Every chunk's current location. `boot` is the records the boot
+    /// run covers, in append order, as the packs have them; with `None`
+    /// they are the ones the boot run names.
+    pub fn all(&self, boot: Option<Vec<(ChunkId, Location)>>) -> IdMap<ChunkId, Location> {
         let mut all = IdMap::default();
         all.reserve(self.runs.count() + self.tail.len());
-        self.runs.for_each(|key, position| {
+        self.runs.for_each(boot.is_none(), |key, position| {
             let id = ChunkId(key.try_into().unwrap());
             let loc = Location::at(position);
             // runs sort by key then position, oldest run first
             all.insert(id, loc);
         });
-        for (id, loc) in &self.tail {
-            all.insert(*id, *loc);
-        }
+        all.extend(boot.into_iter().flatten());
+        all.extend(self.tail.iter().copied());
         all
-    }
-
-    /// Every record of pack `seq`, superseded ones included.
-    pub fn pack_entries(&self, seq: u32) -> Vec<(ChunkId, u64)> {
-        let mut entries = Vec::new();
-        self.runs.for_each(|key, position| {
-            let loc = Location::at(position);
-            if loc.seq == seq {
-                entries.push((ChunkId(key.try_into().unwrap()), loc.offset));
-            }
-        });
-        entries.extend(
-            self.tail
-                .iter()
-                .filter(|(_, loc)| loc.seq == seq)
-                .map(|(id, loc)| (*id, loc.offset)),
-        );
-        entries
     }
 
     /// The range of each run, oldest first (see [`Runs::open_named`]).

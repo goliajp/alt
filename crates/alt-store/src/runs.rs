@@ -307,15 +307,6 @@ impl Runs {
         Ok(())
     }
 
-    /// Visits every entry, oldest run first.
-    pub fn for_each(&self, mut each: impl FnMut(&[u8], u64)) {
-        for run in &self.runs {
-            for entry in run.entries().as_chunks::<ENTRY_LEN>().0 {
-                each(&entry[..KEY_LEN], Run::position(entry));
-            }
-        }
-    }
-
     /// Re-hashes every run against its trailer checksum.
     pub fn verify(&self) -> Result<(), StoreError> {
         for run in &self.runs {

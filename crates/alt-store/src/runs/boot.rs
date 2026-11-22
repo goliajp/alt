@@ -117,6 +117,19 @@ impl Runs {
         Ok(self)
     }
 
+    /// Visits every entry of the chain, oldest run first, and with `boot`
+    /// those of the boot run after them.
+    pub fn for_each(&self, boot: bool, mut each: impl FnMut(&[u8], u64)) {
+        let runs = match boot {
+            true => &self.runs[..],
+            false => &self.runs[..self.chained()],
+        };
+        for entry in runs.iter().flat_map(|run| run.entries().as_chunks().0) {
+            let entry: &[u8; ENTRY_LEN] = entry;
+            each(&entry[..KEY_LEN], Run::position(entry));
+        }
+    }
+
     /// No longer looks in the boot run. Its file stays.
     pub fn drop_boot_run(&mut self) {
         self.runs.truncate(self.chained());
