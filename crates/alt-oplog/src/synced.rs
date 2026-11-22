@@ -44,8 +44,8 @@
 
 use std::fs::File;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::Arc;
 
 use crate::OpLogError;
 use crate::left::open_sync_lock;
@@ -57,11 +57,6 @@ const HEADER: u64 = 5;
 const UNTRUSTED: u32 = 1;
 /// Where the generation starts in the flags.
 const GENERATION: u32 = 8;
-
-/// The generation and the boundary a handle's deferred appends reached,
-/// for its sink to record, and between them where the last record ends
-/// that the handle read and did not write.
-pub(crate) type Deferred = Arc<Mutex<(u32, u64, u64)>>;
 
 /// Syncs what the ops in the log name (see
 /// [`crate::OpLog::sync_named_with`]).
@@ -357,36 +352,6 @@ pub(crate) fn cut_records(durable: &Path, file: &File, at: u64) -> std::io::Resu
     })();
     let _ = unlock(&sync_lock);
     cut
-}
-
-/// An fsync handle for the log that works without the [`crate::OpLog`] it
-/// came from (the daemon fsyncs off the write path): after the fsync it
-/// records how far that log's deferred appends had reached before it.
-pub struct OpLogSink {
-    pub(crate) file: File,
-    pub(crate) appended: Deferred,
-    pub(crate) durable_path: PathBuf,
-    pub(crate) named: Option<SyncNamed>,
-    pub(crate) note: Option<crate::NotePlace>,
-}
-
-impl OpLogSink {
-    pub fn fsync(&self) -> Result<(), OpLogError> {
-        let (generation, others_to, target) = *self.appended.lock().unwrap();
-        if target != 0 {
-            sync_named(&self.named, &Marker::read(&self.durable_path), others_to)?;
-        }
-        self.file.sync_all()?;
-        if target != 0 {
-            // a boundary this log wrote, not a file length: only a cut of
-            // whole records brings it down, and that changes the generation
-            let whole = record(&self.durable_path, generation, target, Some(target))?;
-            if let (Some(note), Some(whole)) = (&self.note, whole) {
-                note.raise(whole);
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

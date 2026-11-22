@@ -32,6 +32,7 @@ mod read;
 mod scan;
 mod settle;
 mod since;
+mod sink;
 mod sync;
 mod synced;
 mod tail;
@@ -44,7 +45,9 @@ use std::sync::OnceLock;
 pub use note::{NOTE_LEN, NotePlace, encode_note, parse_note};
 pub use op::{Op, OpId, OpLogError, ROOT};
 pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
-pub use synced::{OpLogSink, SyncNamed};
+pub use sink::{OpLogSink, Reached};
+pub use sync::{bounded_in, relaxed_durability};
+pub use synced::SyncNamed;
 pub use tail::Discarded;
 
 use lock::{lock_exclusive, lock_shared, unlock};
@@ -97,7 +100,7 @@ pub struct OpLog {
     unsynced: bool,
     /// How far this handle's deferred appends reach, for its sink to record
     /// once it has fsynced.
-    deferred: synced::Deferred,
+    deferred: sink::Deferred,
     /// The marker's generation when this handle last appended.
     generation: u32,
     /// Set when the open stopped short of the file's end on request.
@@ -191,7 +194,7 @@ impl OpLog {
             defer: false,
             write_count: 0,
             unsynced: false,
-            deferred: synced::Deferred::default(),
+            deferred: sink::Deferred::default(),
             generation: 0,
             clamped: scan.clamped,
             passed: scan.passed,
@@ -379,12 +382,6 @@ impl OpLog {
     pub fn appended_len(&self) -> u64 {
         self.len_bytes
     }
-}
-
-/// Whether the running thread leaves what it writes unsynced: a command
-/// that only stages does ([`alt_os::durability`]).
-pub fn relaxed_durability() -> bool {
-    alt_os::durability::unsynced()
 }
 
 impl Drop for OpLog {

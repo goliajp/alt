@@ -17,6 +17,8 @@ use super::super::unconfirmed_tails::noise;
 use super::base::{ADDED, Base, CUT};
 use super::{VERIFIED, goes_on, sound};
 
+mod grown;
+
 /// What the check says of a record that does not read among what the
 /// running boot left unsynced.
 const LEFT_UNREAD: &str = "lies past where its file was last synced to";

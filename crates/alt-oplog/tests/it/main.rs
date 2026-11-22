@@ -8,6 +8,7 @@ mod marker_unsynced;
 mod note;
 mod oplog_lifecycle;
 mod panic;
+mod sink_generation;
 mod synced_marker;
 mod synced_writers;
 mod unconfirmed;

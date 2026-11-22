@@ -97,7 +97,7 @@ pub fn passed_damage() -> Option<(PathBuf, u64, u64)> {
     PASSED_DAMAGE.get().cloned()
 }
 
-fn record_len(op: &Op) -> u64 {
+pub(crate) fn record_len(op: &Op) -> u64 {
     // length, the fixed part of a body, the checksum
     (4 + 78 + op.actor.len() + op.payload.len() + CHECKSUM_LEN) as u64
 }
@@ -190,21 +190,19 @@ impl OpLog {
     }
 
     /// The first op at or past byte `from` that `held` does not vouch for,
-    /// with the ops after it.
+    /// with the ops after it. A handle that began after `from` reads the
+    /// whole chain for it: whoever opens the log at an anchor has it lie
+    /// at or before the boundary the marker records, which is where a
+    /// caller looks from.
     pub(crate) fn first_unheld<E: From<OpLogError>>(
         &self,
         from: u64,
         mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         let recent_from = self.base.map_or(HEADER_LEN as u64, |anchor| anchor.end);
-        let past;
-        let (ops, mut at) = if from >= recent_from {
-            (&self.ops[..], recent_from)
-        } else if let Some(read) = self.ops_past(from)? {
-            past = read;
-            (&past[..], from)
-        } else {
-            (self.ops()?, HEADER_LEN as u64)
+        let (ops, mut at) = match from >= recent_from {
+            true => (&self.ops[..], recent_from),
+            false => (self.ops()?, HEADER_LEN as u64),
         };
         for (index, op) in ops.iter().enumerate() {
             if at >= from && !held(op)? {

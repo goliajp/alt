@@ -98,7 +98,9 @@ fn history_that_names_an_object_taken_out_on_request_is_kept_by_an_add_and_a_com
     assert_eq!(ok(run(&new, dir, &["log"])).lines().count(), 2);
     // and where the marker is gone when a command that syncs comes first
     fs::remove_file(alt_dir.join("oplog/durable")).unwrap();
-    goes_on("after a commit over no marker");
+    let tagged = run(&new, dir, &["tag", "over-no-marker"]);
+    assert!(tagged.status.success(), "{}", text(&tagged.stderr));
+    goes_on("after a tag over no marker");
     assert_eq!(ok(run(&new, dir, &["log"])).lines().count(), 3);
     assert!(!ok(run(&new, dir, &["cat-file", "-t", "HEAD"])).is_empty());
     let read = run(&new, dir, &["cat-file", "-p", &blob.to_string()]);

@@ -237,14 +237,15 @@ impl StoreSink {
     /// when it runs. Callers must flush their odb batch first to release its
     /// exclusive write lock, including when durability is deferred.
     pub fn fsync_all(&self) -> Res<()> {
-        // Each barrier needs an independent open-file description: sharing a
-        // cloned fd would let one concurrent barrier unlock another's lock.
-        // Closing the fd releases it on both success and error.
+        // what other writers' ops name is synced before the barrier is
+        // taken: that may wait for `odb.lock` exclusively
+        let reached = self.oplog.reached()?;
+        // a barrier has a file description of its own, or one could unlock
+        // another's; closing it gives the lock up, also on an error
         let _barrier = std::fs::File::open(&self.odb_lock)?;
         alt_odb::held::lock_shared(&_barrier)?;
         self.odb.fsync()?;
-        self.oplog.fsync()?;
-        Ok(())
+        Ok(self.oplog.fsync_to(reached)?)
     }
 }
 

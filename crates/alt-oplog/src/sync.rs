@@ -2,8 +2,9 @@
 
 use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
-use crate::synced::{self, Marker, OpLogSink, SyncNamed};
-use crate::{OpLog, OpLogError, relaxed_durability};
+use crate::sink::OpLogSink;
+use crate::synced::{self, Marker, SyncNamed};
+use crate::{OpLog, OpLogError};
 
 impl OpLog {
     /// Durability point for everything appended so far. Group commit: fsync
@@ -19,7 +20,7 @@ impl OpLog {
             // the daemon's group-commit coordinator fsyncs off the write path
             // (via `sync_handle`) and then records how far this append reached
             self.write_count += 1;
-            *self.deferred.lock().unwrap() = (self.generation, self.others_to, self.len_bytes);
+            self.defer_sync();
             return Ok(());
         }
         self.sync_to(self.len_bytes)
@@ -69,10 +70,11 @@ impl OpLog {
         self.note = Some(place);
     }
 
-    /// How far the marker says the log is synced, where it records a
-    /// boundary that holds. Reads the marker and takes no lock.
-    pub fn synced_to(&self) -> Option<u64> {
-        Marker::read(&self.durable_path).unsynced_from()
+    /// The boundary the marker records: up to it the log was synced,
+    /// whether or not appends were left unsynced past it. `None` where
+    /// it records none. Reads the marker and takes no lock.
+    pub fn bounded_to(&self) -> Option<u64> {
+        bounded_to(&self.durable_path)
     }
 
     /// The fsync-coalescing core: fsync only if no other committer already made
@@ -81,6 +83,7 @@ impl OpLog {
     fn sync_to(&mut self, target: u64) -> Result<(), OpLogError> {
         let marker = Marker::read(&self.durable_path);
         if marker.generation() == self.generation && marker.records(target) {
+            self.note_synced(target);
             return Ok(());
         }
         synced::sync_named(&self.named, &marker, self.others_to)?;
@@ -98,6 +101,7 @@ impl OpLog {
                 self.generation = marker.generation();
             }
             if marker.records(target) {
+                self.note_synced(target);
                 return Ok(());
             }
             // a cut of the log waits for the sync lock: the length measured
@@ -112,12 +116,31 @@ impl OpLog {
                 }
             };
             let whole = synced::record(&self.durable_path, self.generation, target, eof)?;
-            if let (Some(note), Some(whole)) = (&self.note, whole) {
-                note.raise(whole);
+            if let Some(whole) = whole {
+                self.note_synced(whole);
+                if let Some(note) = &self.note {
+                    note.raise(whole);
+                }
             }
             Ok(())
         })();
         let _ = unlock(&sync_lock);
         result
     }
+}
+
+/// [`OpLog::bounded_to`] of the log in `dir`, for whoever has not opened
+/// it yet.
+pub fn bounded_in(dir: &std::path::Path) -> Option<u64> {
+    bounded_to(&dir.join("durable"))
+}
+
+fn bounded_to(durable: &std::path::Path) -> Option<u64> {
+    Marker::read(durable).judged_from().map(|(whole, _)| whole)
+}
+
+/// Whether the running thread leaves what it writes unsynced: a command
+/// that only stages does ([`alt_os::durability`]).
+pub fn relaxed_durability() -> bool {
+    alt_os::durability::unsynced()
 }

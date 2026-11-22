@@ -32,32 +32,33 @@ impl OpLog {
         Ok(self.full.get_or_init(|| all))
     }
 
-    /// The ops whose records begin at or past byte `from`, for a handle
-    /// that began after it, when a record begins there and those from it
-    /// on lead to where the handle began: the last of them has the id of
-    /// the anchor, which names all that came before it. Only they are
-    /// read. `None` otherwise, and where the whole chain is at hand.
-    pub(crate) fn ops_past(&self, from: u64) -> Result<Option<Vec<Op>>, OpLogError> {
-        let Some(base) = self
-            .base
-            .filter(|base| self.full.get().is_none() && from < base.end)
-        else {
-            return Ok(None);
-        };
-        let data = read_at(&self.file, from, (base.end - from) as usize)?;
-        let Some(parent) = data.get(4..36) else {
-            return Ok(None);
-        };
-        let parent = crate::OpId(parent.try_into().unwrap());
-        let mut ops = Vec::new();
-        let Ok(replayed) = replay_records(&data, 0, parent, &mut ops) else {
-            return Ok(None);
-        };
-        if replayed.valid != data.len() || ops.last().map(|op| op.id) != Some(base.op) {
-            return Ok(None);
+    /// The anchor naming the last op this handle holds whose record ends
+    /// at or before byte `bound`, or else the one it began after, and
+    /// how many ops it holds after that one. `None` where the handle
+    /// neither holds nor began after an op that ends there.
+    pub fn anchor_within(&self, bound: u64) -> Option<(Anchor, usize)> {
+        if self.len_bytes <= bound {
+            return self.anchor().map(|head| (head, 0));
         }
-        ops.extend_from_slice(&self.ops);
-        Ok(Some(ops))
+        let began = self.base.filter(|base| base.end <= bound);
+        let mut found = began.map(|base| (base, self.ops.len()));
+        let mut start = self.base.map_or(HEADER_LEN as u64, |base| base.end);
+        let count = self.base.map_or(0, |base| base.count);
+        for (index, op) in self.ops.iter().enumerate() {
+            let end = start + crate::settle::record_len(op);
+            if end > bound {
+                break;
+            }
+            let anchor = Anchor {
+                op: op.id,
+                start,
+                end,
+                count: count + index as u64 + 1,
+            };
+            found = Some((anchor, self.ops.len() - index - 1));
+            start = end;
+        }
+        found
     }
 
     /// The ops after the one `anchor` names, in chain order, when the
