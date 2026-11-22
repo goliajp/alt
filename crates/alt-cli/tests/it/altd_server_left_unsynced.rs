@@ -9,6 +9,7 @@ use std::path::Path;
 use alt_cli::native::Store;
 use alt_cli::receive::Landed;
 use alt_git_codec::ObjectId;
+use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefStore, RefTarget};
 
 use crate::altd_server::{alt, ok};
@@ -30,6 +31,9 @@ fn commits_what_was_staged(root: &Path) {
     let alt_dir = root.join(".alt");
     assert!(free(&alt_dir, "odb.lock") && free(&alt_dir, "oplog/log"));
     assert!(RefStore::open(&alt_dir).unwrap().confirmed());
+    // the push answered with its objects synced, whatever the add left
+    let odb = NativeOdb::open(&alt_dir).unwrap();
+    assert!(!odb.is_empty().unwrap() && odb.held_confirmed().unwrap());
     ok(alt(root, &["commit", "-m", "staged"]));
     assert_eq!(ok(alt(root, &["show", "HEAD:staged.txt"])), "staged\n");
     ok(alt(root, &["fsck"]));
