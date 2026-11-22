@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: say that a commit, a tag or a tree a ref leads to names the objects fsck --drop-lost refuses to take out
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck/lost.rs
+touched: crates/alt-cli/tests/it/power_cut/mixed_versions/tree_lost.rs
+touched: docs/recovery.md
