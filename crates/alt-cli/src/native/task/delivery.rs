@@ -347,8 +347,8 @@ impl NativeRepo<'_> {
                 .into());
             }
         }
-        self.run_precommit()?;
         let (author, committer) = (self.author()?, self.committer()?);
+        self.run_precommit()?;
         let message = if review.commit_message.ends_with('\n') {
             review.commit_message.clone()
         } else {

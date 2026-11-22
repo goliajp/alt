@@ -8,6 +8,8 @@ impl NativeRepo<'_> {
         let mut state = self
             .rebase_state()?
             .ok_or("rebase --skip: no rebase in progress")?;
+        // the steps that follow are committed by whoever skips this one
+        self.committer()?;
         let head = self.rebase_head()?;
         state.current = None;
         self.save_rebase_state(&state)?;

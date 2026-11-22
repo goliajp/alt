@@ -19,6 +19,7 @@ const NAMING: [&str; 8] = [
 ];
 
 mod beside_git;
+mod stopped;
 mod zones;
 
 type Env<'a> = &'a [(&'a str, &'a str)];

@@ -24,7 +24,7 @@ pub(super) fn ok(root: &Path, args: &[&str]) -> Output {
     );
     output
 }
-fn value(root: &Path, args: &[&str]) -> Value {
+pub(super) fn value(root: &Path, args: &[&str]) -> Value {
     alt_json::from_slice(&ok(root, args).stdout).unwrap()
 }
 pub(super) struct Fixture {
@@ -111,7 +111,7 @@ fn fixture_with_paths(script: &str, allowed_paths: &[&str]) -> Fixture {
         profile,
     }
 }
-fn observed(f: &Fixture) -> Value {
+pub(super) fn observed(f: &Fixture) -> Value {
     value(
         &f.workspace,
         &[
@@ -124,7 +124,7 @@ fn observed(f: &Fixture) -> Value {
         ],
     )
 }
-fn review(f: &Fixture, evidence: &str) -> Value {
+pub(super) fn review(f: &Fixture, evidence: &str) -> Value {
     value(
         &f.workspace,
         &[
@@ -143,7 +143,7 @@ fn review(f: &Fixture, evidence: &str) -> Value {
         ],
     )
 }
-fn free_target(f: &Fixture) {
+pub(super) fn free_target(f: &Fixture) {
     ok(&f.main, &["switch", "-c", "target-hold"]);
 }
 fn git_path() -> PathBuf {
