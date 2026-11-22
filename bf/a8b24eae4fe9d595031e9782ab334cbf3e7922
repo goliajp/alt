@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: take a record past where a file was synced to that does not read for one that was never synced, in the boot it was written in as after another
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/log_tails.rs
+touched: crates/alt-cli/tests/it/power_cut.rs
+touched: crates/alt-cli/tests/it/power_cut/base.rs
+touched: crates/alt-cli/tests/it/power_cut/pack_head.rs
+touched: crates/alt-cli/tests/it/power_cut/unread.rs
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-odb/src/odb/bound.rs
+touched: crates/alt-odb/src/odb/confirmed.rs
+touched: crates/alt-odb/src/odb/lost.rs
+touched: crates/alt-odb/src/odb/open.rs
+touched: crates/alt-odb/src/odb/settle.rs
+touched: crates/alt-odb/src/unsynced.rs
+touched: crates/alt-odb/tests/it/left_unsynced.rs
+touched: crates/alt-odb/tests/it/lost_in_boot.rs
+touched: crates/alt-store/src/blob.rs
+touched: crates/alt-store/src/blob/open.rs
+touched: crates/alt-store/src/blob/settle.rs
+touched: crates/alt-store/src/settle.rs
+touched: crates/alt-store/src/tail.rs
+touched: docs/recovery.md
