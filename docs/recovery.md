@@ -474,7 +474,10 @@ fatal: fsck: missing blob 39b06ed55e6f8670685412ead3dd38b50b038047: commit 8d2f0
 ```
 
 A tree that is missing is named at its directory (`names it at sub/`), a
-commit as the parent of the commit that has it (`has it as a parent`).
+commit as the parent of the commit that has it (`has it as a parent`). A
+tree that a ref or a tag names itself, with no commit, is walked the same
+way, and what it leads to is told with that tree in the place of the commit
+(`tree T, reached from REF, names it at PATH`).
 Nothing below a missing tree or commit is known, so nothing below it is
 listed. A commit of another repository recorded at a path (a submodule) is
 not an object of this store and is not looked for. For an object listed in
@@ -600,7 +603,7 @@ the tables above and on these. None of them changes a file.
 | --- | --- | --- |
 | `FILE reads up to byte N, and a whole record begins past that, at byte M` | nothing records how far `FILE` was synced, and the bytes commands pass over at its end hold a record that reads: the record at byte N is damaged, not unfinished. Past a synced point that holds, this is an unconfirmed tail instead (above) | restore `FILE`, or read past the damage |
 | `ref NAME points at ID, which is not stored` | the object a ref names is gone | restore, or point the ref at a commit that is stored |
-| `missing KIND ID: commit C, reached from REF, names it at PATH` (or `has it as a parent`; `tag T, reached from REF, names it`) | every record reads, and a commit or a tag that a ref leads to names an object no record holds | see Objects that commits name and the store does not hold, below |
+| `missing KIND ID: commit C, reached from REF, names it at PATH` (or `has it as a parent`; `tag T, reached from REF, names it`; `tree T, reached from REF, names it at PATH`) | every record reads, and a commit, a tag or a tree that a ref leads to names an object no record holds | see Objects that commits name and the store does not hold, below |
 | `FILE ends at byte N, but records up to byte M of it were committed and synced` | the end of a file that was synced is gone | restore `FILE` |
 | `the operation log ends at byte N, but records up to byte M of it were committed and synced` | the same for `.alt/oplog/log` | restore it |
 | `the record at byte N of FILE names content the store does not hold` | a record that was synced, or that nothing tells from a synced one, names content that is gone | restore the file that held the content, or take the record out (Records of lost content among synced ones, below) |
@@ -779,7 +782,13 @@ records moves it. After another boot, or once records were taken out of the
 store, no command opens them, and the first one that writes removes them. A
 command that syncs reads the records they cover before it records them as
 synced, those of a pack with what they hold hashed against its name, removes
-these indexes, and indexes the records with all the others.
+these indexes, and indexes the records with all the others. A record among
+them that does not read, or that does not hold what its name says, ends its
+file for that command as it would after a power cut: the file is cut there,
+with the records that name what went, and the command names the staged files
+to add again. A directory of these indexes that cannot be removed, as on a
+network file system that keeps a file another process still has mapped, stays
+until it can be: once the note in `odb.lock` is gone no command opens it.
 An older alt does not look in these directories and leaves them where they
 are.
 
