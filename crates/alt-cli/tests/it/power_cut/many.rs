@@ -20,6 +20,7 @@ use super::base::copy_tree;
 use super::{VERIFIED, another_boot, checked, sound, writes};
 
 mod boot_runs;
+mod drop_lost;
 
 /// Records from which a writer that syncs folds a tail into a run.
 const RUN_FROM: usize = 256;

@@ -39,9 +39,20 @@ impl Lost {
 }
 
 impl Odb {
-    /// With the write lock held and the files read to their ends: every
-    /// record that names content which is not stored, or content only
-    /// such a record names. Changes nothing.
+    /// Reads the pack as a writer that syncs reads it: what the running
+    /// boot left unsynced is not taken for written as it is, and the
+    /// pack ends at the first record that does not hold what it names.
+    /// The records are listed and taken out by the same reading: one
+    /// that names a chunk past that record is lost to both.
+    fn look(&mut self) -> Result<(), OdbError> {
+        *self.left.lock().unwrap() = None;
+        Ok(self.blobs.look_again()?)
+    }
+
+    /// With the write lock held, the files read to their ends and the
+    /// pack looked at ([`Self::look`]): every record that names content
+    /// which is not stored, or content only such a record names.
+    /// Changes nothing.
     fn lost(&self) -> Result<Lost, OdbError> {
         let mut gone: [Vec<u64>; 3] = Default::default();
         let mut blobs = HashSet::new();
@@ -147,8 +158,7 @@ impl Odb {
         // synced, and nobody looks at them there again: the pack is read
         // as a writer that syncs reads it, and all four files are synced,
         // content first
-        *self.left.lock().unwrap() = None;
-        self.blobs.look_again()?;
+        self.look()?;
         if self.lost()? != *lost {
             return Ok(false);
         }
@@ -175,7 +185,8 @@ impl NativeOdb {
     /// name content the store does not hold, wherever they lie, found
     /// under the write lock by reading all three. Changes nothing.
     pub fn lost(&mut self) -> Result<Lost, OdbError> {
-        self.odb_mut()?.unsettled(|odb| odb.lost())
+        self.odb_mut()?
+            .unsettled(|odb| odb.look().and_then(|()| odb.lost()))
     }
 
     /// Takes the records of `lost` out of their logs and keeps every
