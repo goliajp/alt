@@ -142,6 +142,8 @@ mod step_recovered_synced;
 mod step_refused;
 #[cfg(debug_assertions)]
 mod step_stuck;
+#[cfg(debug_assertions)]
+mod step_stuck_found;
 mod step_synced;
 mod step_undo;
 mod stopped_trees;
