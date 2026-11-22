@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: list lost records by the reading of the pack they are taken out by, so that fsck --drop-lost --yes goes through after a page of the pack was lost in its boot
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut/many.rs
+touched: crates/alt-cli/tests/it/power_cut/many/drop_lost.rs
+touched: crates/alt-odb/src/odb/lost.rs
