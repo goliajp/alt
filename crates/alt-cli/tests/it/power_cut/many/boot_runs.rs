@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 
-use super::super::super::sync_order::{FILES, lens, objects_synced};
+use super::super::super::sync_order::{FILES, lens};
 use super::super::super::unconfirmed::{alt, ok, stderr};
 use super::super::base::copy_tree;
-use super::{Many, PAGE, RUNS, VERIFIED, files_stored, goes_on, run_ends};
+use super::{Many, PAGE, RUNS, goes_on, run_ends};
 
 /// The boot run files of the record log `file`.
 fn boot_runs(alt_dir: &Path, file: usize) -> Vec<PathBuf> {
@@ -109,45 +109,53 @@ fn an_add_that_is_not_synced_leaves_boot_runs_no_command_looks_in_after_another_
 #[test]
 fn a_page_lost_under_a_boot_run_in_its_boot_is_found_by_the_command_that_syncs() {
     let base = Many::build();
-    let dir = base.tmp.path().join("same-boot");
-    copy_tree(&base.tmp.path().join("base"), &dir);
-    let alt_dir = dir.join(".alt");
-    let middle = (base.synced[3] + base.ends[3]) / 2;
-    let at = middle - middle % PAGE;
-    let mut map = fs::OpenOptions::new();
-    let map = map.read(true).write(true);
-    let map = map.open(alt_dir.join(FILES[3])).unwrap();
-    let mut page = vec![0u8; PAGE as usize];
-    map.read_exact_at(&mut page, at).unwrap();
-    map.write_all_at(&[0u8; PAGE as usize], at).unwrap();
-    // commands that only read, and an add, do not read those records;
-    // the check reads every record
-    ok(alt(&dir, &["status"]));
-    let check = alt(&dir, &["fsck"]);
-    assert!(!check.status.success(), "{}", stderr(&check));
-    assert!(
-        stderr(&check).contains("map.alt record corrupt"),
-        "{}",
-        stderr(&check)
-    );
-    fs::write(dir.join("one-more.txt"), "one more\n").unwrap();
-    ok(alt(&dir, &["add", "one-more.txt"]));
-    let (before, head) = (lens(&alt_dir), ok(alt(&dir, &["rev-parse", "HEAD"])));
-    let refused = alt(&dir, &["commit", "-m", "second"]);
-    let said = stderr(&refused);
-    assert!(!refused.status.success(), "{said}");
-    assert!(said.contains("map.alt record corrupt"), "{said}");
-    assert_eq!(lens(&alt_dir), before);
-    assert_eq!(ok(alt(&dir, &["rev-parse", "HEAD"])), head);
-    // with the page as the add wrote it, the commit syncs the records
-    // and the boot runs go
-    map.write_all_at(&page, at).unwrap();
-    ok(alt(&dir, &["commit", "-m", "second"]));
-    assert_eq!(objects_synced(&alt_dir), lens(&alt_dir));
-    assert_eq!(all_boot_runs(&alt_dir), Vec::<PathBuf>::new());
-    staged_read("after the commit", &dir);
-    assert!(ok(alt(&dir, &["fsck"])).ends_with(VERIFIED));
-    files_stored("after the commit", &dir);
+    // the blob map, the Tier 1 map and map.alt
+    for file in 1..4 {
+        let what = format!("a page of {} lost in the boot of the add", FILES[file]);
+        let dir = base.tmp.path().join(format!("same-boot-{file}"));
+        copy_tree(&base.tmp.path().join("base"), &dir);
+        let alt_dir = dir.join(".alt");
+        let middle = (base.synced[file] + base.ends[file]) / 2;
+        let at = middle - middle % PAGE;
+        let log = fs::OpenOptions::new()
+            .write(true)
+            .open(alt_dir.join(FILES[file]));
+        log.unwrap()
+            .write_all_at(&[0u8; PAGE as usize], at)
+            .unwrap();
+        // commands that only read, and an add, do not read those
+        // records; the check reads every record
+        ok(alt(&dir, &["status"]));
+        let check = alt(&dir, &["fsck"]);
+        assert!(!check.status.success(), "{what}: {}", stderr(&check));
+        assert!(stderr(&check).contains("record corrupt"), "{what}");
+        fs::write(dir.join("one-more.txt"), "one more\n").unwrap();
+        ok(alt(&dir, &["add", "one-more.txt"]));
+        // the one that syncs reads them before it records them as
+        // synced: the log ends for it at the first that does not read,
+        // as after a power cut, and what the add staged with a blob
+        // that went is to be added again
+        let (ended, head) = (lens(&alt_dir)[file], ok(alt(&dir, &["rev-parse", "HEAD"])));
+        let refused = alt(&dir, &["commit", "-m", "second"]);
+        let said = stderr(&refused);
+        assert!(!refused.status.success(), "{what}: {said}");
+        assert!(said.contains("add the file again"), "{what}: {said}");
+        // from the record the page begins in on
+        let discarded = format!(" byte(s) at the end of {}", FILES[file]);
+        let cut = said.split("discarded ").find_map(|rest| {
+            let bytes = rest.split_once(&discarded)?.0.parse::<u64>().ok()?;
+            Some(ended - bytes)
+        });
+        assert!(
+            cut.is_some_and(|cut| cut > base.synced[file] && cut <= at),
+            "{what}: {said}"
+        );
+        assert_eq!(ok(alt(&dir, &["rev-parse", "HEAD"])), head);
+        assert_eq!(boot_runs(&alt_dir, 0), Vec::<PathBuf>::new(), "{what}");
+        assert_eq!(all_boot_runs(&alt_dir), Vec::<PathBuf>::new(), "{what}");
+        goes_on(&what, &base, &dir, true);
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[test]

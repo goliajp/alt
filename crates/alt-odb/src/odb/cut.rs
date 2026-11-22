@@ -20,6 +20,15 @@ pub struct Discarded {
 }
 
 impl Odb {
+    /// Whether one of the logs that name content holds a record that
+    /// reads past an append that never finished: whole records go when
+    /// the log is cut there.
+    pub(super) fn whole_past_unfinished(&mut self) -> Result<bool, OdbError> {
+        Ok(self.blobs.map_log()?.whole_past_unfinished()?
+            || self.tier1_mut()?.log_mut().whole_past_unfinished()?
+            || self.map.log_mut().whole_past_unfinished()?)
+    }
+
     /// Cuts the files back to `after`: `map.alt`, the Tier 1 map, the blob
     /// map, then what never finished in the pack. What the marker and the
     /// lock file say of how far the files were synced comes down first.

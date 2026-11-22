@@ -171,7 +171,7 @@ impl Odb {
             ..holds
         };
         lost(marker, &after)?;
-        let moved = cuts != ends;
+        let moved = cuts != ends || self.whole_past_unfinished()?;
         if moved || pack_torn || torn.contains(&true) {
             self.cut_back(after, moved)?;
         }

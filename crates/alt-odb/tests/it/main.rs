@@ -14,6 +14,7 @@ mod full_check;
 mod head_record;
 mod left_unsynced;
 mod lost_dropped;
+mod lost_in_boot;
 mod marker;
 mod marker_states;
 mod marker_unreadable;

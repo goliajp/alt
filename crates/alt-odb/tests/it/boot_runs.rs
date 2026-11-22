@@ -22,7 +22,7 @@ fn batch() -> impl Iterator<Item = u32> {
 
 /// A store of thirty synced objects and then [`batch`], not synced; the
 /// file lengths before the batch.
-fn store(dir: &Path) -> [u64; 4] {
+pub(super) fn store(dir: &Path) -> [u64; 4] {
     let mut odb = open(dir);
     put(&mut odb, 0..30);
     drop(odb);
@@ -33,13 +33,13 @@ fn store(dir: &Path) -> [u64; 4] {
 
 /// A handle that only reads, with the prism every third object is
 /// stored through.
-fn reading(dir: &Path) -> NativeOdb {
+pub(super) fn reading(dir: &Path) -> NativeOdb {
     let mut odb = NativeOdb::reading(dir);
     odb.register_prism(Box::new(Split)).unwrap();
     odb
 }
 
-fn put_unsynced(dir: &Path, objects: impl Iterator<Item = u32>) {
+pub(super) fn put_unsynced(dir: &Path, objects: impl Iterator<Item = u32>) {
     let _unsynced = alt_os::durability::leave_unsynced(true);
     let mut odb = open(dir);
     for n in objects {
@@ -50,7 +50,7 @@ fn put_unsynced(dir: &Path, objects: impl Iterator<Item = u32>) {
 }
 
 /// The boot run files of the chunk index and of the record logs.
-fn boot_runs(dir: &Path) -> Vec<PathBuf> {
+pub(super) fn boot_runs(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let logs = FILES[1..].iter().map(|log| format!("{log}.idx"));
     for idx in logs.chain(["store/chunks.idx".to_owned()]) {
@@ -107,7 +107,7 @@ fn spoiled(run: &Path) -> bool {
     fs::read(run).is_ok_and(|bytes| bytes[entries(&bytes)].iter().all(|byte| *byte == 0))
 }
 
-fn all_read(odb: &NativeOdb) {
+pub(super) fn all_read(odb: &NativeOdb) {
     for n in (0..30).chain(batch()) {
         reads(odb, n);
     }
@@ -144,18 +144,9 @@ fn a_batch_left_unsynced_is_looked_up_in_boot_runs_and_read_by_the_writer_that_s
     assert!(found > 500 && found < batch().count(), "{found} found");
     // a writer that leaves its appends unsynced goes on as well
     put_unsynced(dir, 1500..1501);
-    // the one that syncs reads every record before it records them as
-    // synced, and changes nothing
-    let before = lens(dir);
-    let mut writer = open(dir);
-    let (oid, data) = object(1503);
-    let refused = writer.put(oid, ObjectKind::Blob, &data).unwrap_err();
-    let refused = format!("{refused:?}");
-    assert!(refused.contains("map.alt record corrupt"), "{refused}");
-    drop(writer);
-    assert_eq!(lens(dir), before);
     assert_eq!(boot_runs(dir).len(), 3);
-    // with the page as it was written the batch is synced, indexed by
+    // with the page as it was written, the one that syncs reads every
+    // record before it records them as synced: the batch is indexed by
     // the chain, and the boot runs are gone
     map.write_all_at(&page, at).unwrap();
     let mut writer = open(dir);

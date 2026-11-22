@@ -45,16 +45,34 @@ impl RecLog {
 
     /// For a writer that syncs: no longer looks in the boot run, and
     /// reads the records it covered, as every open did before the run was
-    /// written. They were all written whole: one that does not read is
-    /// damage, and the handle is then as it was.
+    /// written. One that does not read where the log is not known synced
+    /// (see [`crate::Tail`]) ends the log for this handle, as an append
+    /// that never finished does: nothing vouches for what was left
+    /// unsynced. Anywhere else it is damage, and the handle is then as it
+    /// was.
     pub fn drop_boot_run(&mut self) -> Result<(), StoreError> {
         if self.runs.boot_run().is_none() {
             return Ok(());
         }
-        let tail = self.read_records(self.runs.chain_end(), self.len, End::Whole)?;
+        let (from, end) = (self.runs.chain_end(), End::MaybeTorn { cut: false });
+        let tail = self.read_records(from, self.len, end)?;
         self.runs.drop_boot_run();
+        self.unfinished |= from + (tail.len() as u64) < self.len;
         self.set_tail(&tail);
         Ok(())
+    }
+
+    /// Whether a record that reads lies past an append that never
+    /// finished: a writer went on after records that were then lost, and
+    /// what it wrote goes with them when the log is cut there.
+    pub fn whole_past_unfinished(&self) -> Result<bool, StoreError> {
+        if !self.unfinished {
+            return Ok(false);
+        }
+        let mut past = vec![0u8; (self.file.metadata()?.len() - self.len) as usize];
+        read_exact_at(&self.file, &mut past, self.len)?;
+        let mut records = past.chunks_exact(self.layout.rec_len);
+        Ok(records.any(|rec| self.layout.intact(rec)))
     }
 
     /// For a writer that leaves its appends unsynced: moves a long enough

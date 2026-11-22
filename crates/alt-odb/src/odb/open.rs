@@ -95,7 +95,11 @@ fn tail(
             File::open(read.with_file_name("odb.lock")).is_ok_and(|lock| Head::read(&lock).bounded)
         };
         let marker = Marker::read(&read);
-        let cached = unsynced::cached(&marker, *left.lock().unwrap());
+        // a writer that syncs takes no record of a log past the marker's
+        // boundary for written as it is: one that does not read there is
+        // passed over, for `Odb::settle` to cut the log at
+        let as_written = matches!(log, Log::Pack) || read_only || alt_store::relaxed_durability();
+        let cached = as_written && unsynced::cached(&marker, *left.lock().unwrap());
         unsynced::basis(&marker, cached, (log, seq, len), bounded)
     })
     .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at))
