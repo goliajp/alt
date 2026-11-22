@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: make files and rules part by part so that the reading of each part is tried
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/zone/rule.rs
+touched: crates/alt-os/src/zone/tzif.rs
