@@ -118,7 +118,7 @@ impl NativeRepo<'_> {
 
         // point this workspace's HEAD at the branch (one ref transaction);
         // if the store refuses it, the markers above must not outlive it
-        if let Err(error) = self.commit_refs_unkeyed("workspace", &changes) {
+        if let Err(error) = self.commit_refs("workspace", &changes) {
             let cleanup = crate::durable::remove_file(abs.join(".alt"))
                 .and_then(|()| crate::durable::remove_dir_all(&ws_dir));
             if let Err(cleanup) = cleanup {
@@ -153,7 +153,7 @@ impl NativeRepo<'_> {
             .get(&head_ref)
             .cloned()
             .ok_or_else(|| format!("no such workspace '{name}'"))?;
-        self.commit_refs_unkeyed(
+        self.commit_refs(
             "workspace",
             &[RefChange {
                 name: head_ref,

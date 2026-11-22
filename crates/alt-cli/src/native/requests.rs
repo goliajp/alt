@@ -37,7 +37,9 @@ pub(super) fn operation_request(op: &alt_oplog::Op) -> Res<Option<String>> {
         | Some(&recovery::PREPARE)
         | Some(&recovery::COMPLETE)
         | Some(&checkout_recovery::PREPARE_CHECKOUT)
-        | Some(&checkout_recovery::COMPLETE_CHECKOUT) => {
+        | Some(&checkout_recovery::COMPLETE_CHECKOUT)
+        | Some(&in_progress::STEP)
+        | Some(&in_progress::STEP_MARK) => {
             if op.payload.get(1) != Some(&1) {
                 return Ok(None);
             }

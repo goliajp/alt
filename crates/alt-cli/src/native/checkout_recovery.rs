@@ -4,6 +4,10 @@
 use super::*;
 use recovery::{WorkspaceIdentity, canonical_index, decode, durable_write, encode, hash};
 
+mod finish;
+mod inverse;
+mod prestate;
+
 pub(super) const PREPARE_CHECKOUT: u8 = 0x32;
 pub(super) const COMPLETE_CHECKOUT: u8 = 0x33;
 
@@ -87,7 +91,12 @@ impl NativeRepo<'_> {
                         )
                         .into());
                     }
-                    if pending.workspace == identity && !completed.contains(&op.id.to_string()) {
+                    // the guard of a step is closed by the recovery of the
+                    // step, or this command holds it
+                    if !self.is_guard(&pending)?
+                        && pending.workspace == identity
+                        && !completed.contains(&op.id.to_string())
+                    {
                         return Err(crate::machine::Failure::pending(op.id, format!("operation {} has an incomplete checkout; recovery required (outcome unknown)", op.id)).into());
                     }
                 }
@@ -110,217 +119,6 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    pub(super) fn snapshot_workspace(&self) -> Res<String> {
-        let index = self.index()?;
-        let mut files = Vec::new();
-        for entry in &index.entries {
-            let state = self.observed(&entry.path, true, entry.mode == 0o160000, &|_| false)?;
-            files.push((entry.path.to_vec(), state));
-        }
-        let snapshot = WorkspaceSnapshot {
-            version: 1,
-            workspace: self.workspace_identity()?,
-            index: self.snapshot(&canonical_index(index, self.store.algo()?))?,
-            files,
-        };
-        self.snapshot(&alt_json::to_vec(&snapshot)?)
-    }
-
-    pub(super) fn completed_workspace_delta(&self, snapshot: &str) -> Res<CheckoutIntent> {
-        let snapshot: WorkspaceSnapshot = alt_json::from_slice(&self.read_snapshot(snapshot)?)?;
-        if snapshot.version != 1 || snapshot.workspace != self.workspace_identity()? {
-            return Err("invalid workspace recovery snapshot".into());
-        }
-        Index::parse(&self.read_snapshot(&snapshot.index)?, self.store.algo()?)?;
-        let index = self.index()?;
-        let before: std::collections::BTreeMap<_, _> = snapshot.files.into_iter().collect();
-        let paths: std::collections::BTreeSet<_> = before
-            .keys()
-            .cloned()
-            .chain(index.entries.iter().map(|e| e.path.to_vec()))
-            .collect();
-        let gitlinks: std::collections::HashSet<&[u8]> = index
-            .entries
-            .iter()
-            .filter(|e| e.mode == 0o160000)
-            .map(|e| e.path.as_slice())
-            .collect();
-        let mut files = Vec::new();
-        for path in &paths {
-            let path_bytes = BString::from(path.clone());
-            let before = before.get(path).cloned().flatten();
-            let gitlink = gitlinks.contains(path.as_slice())
-                || before.as_ref().is_some_and(|s| s.mode == 0o160000);
-            let after = self.observed(&path_bytes, true, gitlink, &|p| paths.contains(p))?;
-            let path = path.clone();
-            if before != after {
-                files.push(FileChange {
-                    path,
-                    before,
-                    after,
-                });
-            }
-        }
-        Ok(CheckoutIntent {
-            version: 1,
-            workspace: snapshot.workspace,
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: snapshot.index,
-            index_after: self.snapshot(&canonical_index(index, self.store.algo()?))?,
-            files,
-        })
-    }
-
-    /// A multi-step operation has already materialized this delta. Its ref
-    /// transaction still needs an explicit completion; interrupted recovery
-    /// can validate the recorded poststate and finish the same operation.
-    pub(super) fn complete_checkout_record(&mut self, operation: OpId) -> Res<()> {
-        self.store.sink()?.fsync_all()?;
-        self.store.refs.record_op(
-            &self.id.actor("checkout"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: operation.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
-        Ok(())
-    }
-
-    /// Invert the recorded workspace delta, after validating its entire
-    /// poststate. Resolve no files from the new or old HEAD trees.
-    pub(super) fn inverse_checkout(&self, intent: &CheckoutIntent) -> Res<CheckoutIntent> {
-        if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err(crate::machine::Failure::refusal(
-                "unsupported_record",
-                "invalid checkout recovery scope",
-            )
-            .into());
-        }
-        for id in [&intent.index_before, &intent.index_after] {
-            Index::parse(&self.read_snapshot(id)?, self.store.algo()?)?;
-        }
-        if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.index_after {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: index changed",
-            )
-            .into());
-        }
-        let paths: std::collections::HashSet<&[u8]> =
-            intent.files.iter().map(|c| c.path.as_slice()).collect();
-        for change in &intent.files {
-            let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(&path)?;
-            for state in [&change.before, &change.after].into_iter().flatten() {
-                if state.mode != 0o160000 {
-                    self.read_snapshot(&state.contents)?;
-                }
-            }
-            if self.observed_among(&paths, change)? != change.after {
-                return Err(crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    "recovery precondition failed: working-tree path changed",
-                )
-                .into());
-            }
-        }
-        Ok(CheckoutIntent {
-            version: 1,
-            workspace: intent.workspace.clone(),
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-            index_before: intent.index_after.clone(),
-            index_after: intent.index_before.clone(),
-            files: intent
-                .files
-                .iter()
-                .map(|change| FileChange {
-                    path: change.path.clone(),
-                    before: change.after.clone(),
-                    after: change.before.clone(),
-                })
-                .collect(),
-        })
-    }
-
-    pub(super) fn finish_interrupted_checkout(
-        &mut self,
-        operation: OpId,
-        intent: CheckoutIntent,
-    ) -> Res<()> {
-        if intent.version != 1 || intent.workspace != self.workspace_identity()? {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery workspace instance does not match",
-            )
-            .into());
-        }
-        // Check every path and snapshot before changing the first byte.
-        let mut outstanding = Vec::new();
-        let paths: std::collections::HashSet<&[u8]> =
-            intent.files.iter().map(|c| c.path.as_slice()).collect();
-        for change in &intent.files {
-            let path = BString::from(change.path.clone());
-            self.ensure_path_allowed(&path)?;
-            for state in [&change.before, &change.after].into_iter().flatten() {
-                if state.mode != 0o160000 {
-                    self.read_snapshot(&state.contents)?;
-                }
-            }
-            let actual = self.observed_among(&paths, change)?;
-            // a path that changes between a submodule directory and a file
-            // is absent for a moment: the one goes before the other comes
-            let kinds =
-                [&change.before, &change.after].map(|s| s.as_ref().map(|s| s.mode == 0o160000));
-            let between = actual.is_none() && matches!(kinds, [Some(a), Some(b)] if a != b);
-            if actual != change.before && actual != change.after && !between {
-                return Err(crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    "recovery precondition failed: path matches neither recorded state",
-                )
-                .into());
-            }
-            if actual != change.after {
-                outstanding.push(change);
-            }
-        }
-        let before = self.read_snapshot(&intent.index_before)?;
-        let after = self.read_snapshot(&intent.index_after)?;
-        Index::parse(&before, self.store.algo()?)?;
-        Index::parse(&after, self.store.algo()?)?;
-        let current = hash(&canonical_index(self.index()?, self.store.algo()?));
-        if current != intent.index_before && current != intent.index_after {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "recovery precondition failed: index matches neither recorded state",
-            )
-            .into());
-        }
-        self.ensure_directories_replaceable(&intent)?;
-        self.apply_changes(outstanding.iter().copied())?;
-        if current != intent.index_after {
-            durable_write(&self.index_path, &after)?;
-        }
-        self.snapshot_checked_out(&after)?;
-        self.store.refs.record_op(
-            &self.id.actor("recover"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: operation.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
-        Ok(())
-    }
-
     pub(super) fn recoverable_checkout(
         &mut self,
         old: &[WorkEntry],
@@ -330,15 +128,32 @@ impl NativeRepo<'_> {
         self.ensure_no_pending_recovery()?;
         self.preflight_checkout(old, target)?;
         let intent = self.prepare_checkout(old, target)?;
+        self.record_and_checkout(intent)
+    }
+
+    /// Does what `intent` tells, its intent in the log first; nothing
+    /// where it changes nothing.
+    pub(super) fn record_and_checkout(&mut self, intent: CheckoutIntent) -> Res<()> {
         if intent.files.is_empty() && intent.index_before == intent.index_after {
             return Ok(());
         }
-        let actor = self.id.actor("checkout");
-        let prepared =
-            self.store
-                .refs
-                .record_op(&actor, now_ms(), &encode(PREPARE_CHECKOUT, &intent)?)?;
+        let prepared = self.record_checkout("checkout", &intent)?;
         self.apply_prepared_checkout(prepared, &intent)
+    }
+
+    /// Writes the intent of a checkout to the log, refused before that
+    /// where a directory in its way holds what it does not remove.
+    pub(super) fn record_checkout(&mut self, verb: &str, intent: &CheckoutIntent) -> Res<OpId> {
+        self.ensure_directories_replaceable(intent)?;
+        self.step_effect()?;
+        let payload = encode(PREPARE_CHECKOUT, intent)?;
+        crash_point!("checkout-intent:before");
+        let actor = self.id.actor(verb);
+        let prepared = self.store.refs.record_op(&actor, now_ms(), &payload)?;
+        crash_point!("checkout-intent:after");
+        self.step_effected();
+        self.step_unfinished(true);
+        Ok(prepared)
     }
 
     pub(super) fn apply_prepared_checkout(
@@ -368,22 +183,34 @@ impl NativeRepo<'_> {
             .into());
         }
         self.ensure_directories_replaceable(intent)?;
+        self.step_checkout(intent);
+        // a state file that holds with this checkout is there before its files
+        self.apply_state(false)?;
         self.apply_changes(intent.files.iter())?;
         let index = self.read_snapshot(&intent.index_after)?;
+        crash_point!("checkout-index:before");
         durable_write(&self.index_path, &index)?;
         self.snapshot_checked_out(&index)?;
-        self.store.refs.record_op(
-            &self.id.actor("checkout"),
-            now_ms(),
-            &encode(
-                COMPLETE_CHECKOUT,
-                &CheckoutDone {
-                    version: 1,
-                    prepared: prepared.to_string(),
-                    request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-                },
-            )?,
-        )?;
+        crash_point!("checkout-done:before");
+        self.record_checkout_done("checkout", prepared)?;
+        self.step_unfinished(false);
+        Ok(())
+    }
+
+    /// The record that closes the checkout `prepared` is the intent of.
+    pub(super) fn checkout_done(&self, prepared: OpId) -> Res<Vec<u8>> {
+        let done = CheckoutDone {
+            version: 1,
+            prepared: prepared.to_string(),
+            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
+        };
+        encode(COMPLETE_CHECKOUT, &done)
+    }
+
+    pub(super) fn record_checkout_done(&mut self, verb: &str, prepared: OpId) -> Res<()> {
+        let payload = self.checkout_done(prepared)?;
+        let actor = self.id.actor(verb);
+        self.store.refs.record_op(&actor, now_ms(), &payload)?;
         Ok(())
     }
 }

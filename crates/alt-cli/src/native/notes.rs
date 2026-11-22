@@ -130,9 +130,19 @@ impl NativeRepo<'_> {
         }
     }
 
+    /// The commit `rev` names for `alt meta`: `HEAD` is the head of the
+    /// workspace the command runs in.
+    fn meta_commit(&self, rev: &str) -> Res<ObjectId> {
+        if rev != "HEAD" {
+            return self.rev(rev);
+        }
+        let head = self.store.refs.resolve(&self.head_ref)?;
+        Ok(head.ok_or("bad revision 'HEAD'")?)
+    }
+
     /// `alt meta show <rev>`: the note on a commit.
     pub fn meta_show(&self, rev: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let commit = self.rev(rev)?;
+        let commit = self.meta_commit(rev)?;
         let note = self
             .read_meta(commit)?
             .ok_or_else(|| format!("no metadata recorded for {commit}"))?;
@@ -169,7 +179,7 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<()> {
         self.ensure_writable("meta set")?;
-        let commit = self.rev(rev)?;
+        let commit = self.meta_commit(rev)?;
         let mut note = self.read_meta(commit)?.unwrap_or_default();
         if note.fields.is_empty() {
             note.fields.push(("schema".into(), meta::SCHEMA.into()));
@@ -199,7 +209,7 @@ impl NativeRepo<'_> {
 }
 
 /// Whether a failed ref transaction lost the race for the notes ref only.
-fn notes_moved(e: &(dyn std::error::Error + 'static)) -> bool {
+pub(super) fn notes_moved(e: &(dyn std::error::Error + 'static)) -> bool {
     matches!(
         e.downcast_ref::<alt_refs::RefError>(),
         Some(alt_refs::RefError::Conflict { name }) if name == meta::NOTES_REF

@@ -3,6 +3,14 @@
 //! the `altd` binary (daemon) build on this, so command logic and the wire
 //! protocol live here, not in either binary.
 
+/// A point a debug build can be made to die at; nothing in a release build.
+macro_rules! crash_point {
+    ($name:expr) => {
+        #[cfg(debug_assertions)]
+        $crate::crash::point($name);
+    };
+}
+
 pub mod added_commits;
 pub mod auth;
 pub mod blame;
@@ -15,6 +23,8 @@ mod combined;
 pub mod commit_sign;
 pub mod complete;
 pub mod config_cmd;
+#[cfg(debug_assertions)]
+mod crash;
 pub mod daemon;
 pub mod daemon_meta;
 pub mod diagnostics;
@@ -40,6 +50,7 @@ pub mod quote;
 pub mod receive;
 pub mod request;
 pub mod runner;
+pub mod sequence_args;
 pub mod shell;
 mod tree_changes;
 pub mod workers;

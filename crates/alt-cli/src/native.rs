@@ -53,6 +53,7 @@ pub mod notes;
 mod object_format;
 use merge::Resolved;
 mod reading;
+mod ref_checkout;
 pub use reading::{only_reads, open_for_command, view_for};
 mod rebase;
 mod recovery;
@@ -615,6 +616,8 @@ pub struct NativeRepo<'a> {
     /// the checkout this command worked out from the entries of a tree:
     /// the index it ends with, and what it writes at each path
     planned: std::cell::RefCell<Option<tree_state::Planned>>,
+    /// what a command that begins, goes on with or ends an operation has done
+    step: std::cell::RefCell<Option<in_progress::Tracked>>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -642,6 +645,7 @@ impl<'a> NativeRepo<'a> {
             checkout_intent: None,
             written: std::cell::RefCell::default(),
             planned: std::cell::RefCell::default(),
+            step: std::cell::RefCell::default(),
         }
     }
 
@@ -852,8 +856,8 @@ impl<'a> NativeRepo<'a> {
         }
         for c in changes {
             let force = match (&c.old, &c.new) {
-                // deletion is the canonical force op
-                (Some(_), None) => true,
+                // deletion is the canonical force op, but of the ref a rebase works on
+                (Some(_), None) => c.name != self.scratch_ref(),
                 // creation cannot rewrite history
                 (None, _) => false,
                 // symref move: the source/destination are names, not commits;
@@ -875,106 +879,6 @@ impl<'a> NativeRepo<'a> {
             }
         }
         Ok(())
-    }
-
-    /// The single gate every CLI ref-changing op must go through: enforces
-    /// read-only and force/non-FF *before* entering the ref store, then asks
-    /// the store to do the atomic CAS-append with the namespace gate folded
-    /// in (via [`RefPolicy`]). A denial — at any axis — costs no on-disk
-    /// state. All subtransactions carry the request id in their context.
-    fn commit_refs(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
-    }
-
-    /// Intermediate ref transaction, attributed to the same whole command.
-    fn commit_refs_unkeyed(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None, recovery::RefEffects::Unknown)
-    }
-
-    fn commit_refs_only(&mut self, verb: &str, changes: &[RefChange]) -> Res<OpId> {
-        self.commit_refs_with(verb, changes, None, recovery::RefEffects::RefsOnly)
-    }
-
-    fn commit_refs_checkout(
-        &mut self,
-        verb: &str,
-        changes: &[RefChange],
-        old: &[WorkEntry],
-        target: &[WorkEntry],
-    ) -> Res<OpId> {
-        self.lock_workspace()?;
-        self.ensure_no_pending_recovery()?;
-        self.preflight_checkout(old, target)?;
-        let intent = self.prepare_checkout(old, target)?;
-        self.checkout_intent = Some(intent.clone());
-        let result = self.commit_refs(verb, changes);
-        self.checkout_intent = None;
-        let operation = result?;
-        self.apply_prepared_checkout(operation, &intent)?;
-        Ok(operation)
-    }
-
-    fn commit_refs_with(
-        &mut self,
-        verb: &str,
-        changes: &[RefChange],
-        key: Option<IdemKey>,
-        effects: recovery::RefEffects,
-    ) -> Res<OpId> {
-        self.ensure_writable(verb)?;
-        self.lock_workspace()?;
-        self.ensure_no_force(changes)?;
-        let allow = self.caps.branch_allow.clone();
-        let deny = self.caps.branch_deny.clone();
-        let read_only = self.caps.read_only;
-        let has_constraint = !allow.is_empty() || !deny.is_empty();
-        let is_branch_allowed = move |name: &str| {
-            // deny wins over allow
-            if deny.iter().any(|g| g.matches(name)) {
-                return false;
-            }
-            allow.is_empty() || allow.iter().any(|g| g.matches(name))
-        };
-        let own_head = self.head_ref.clone();
-        let one_workspace_per_branch = move |refs: &_, changes: &[RefChange]| {
-            workspace::one_workspace_per_branch(&own_head, refs, changes)
-        };
-        let policy = RefPolicy {
-            read_only,
-            is_branch_allowed: if has_constraint {
-                Some(&is_branch_allowed)
-            } else {
-                None
-            },
-            state_check: Some(&one_workspace_per_branch),
-        };
-        let actor = self.id.actor(verb);
-        let context = alt_json::to_vec(&recovery::RefContext {
-            version: 2,
-            effects: if self.checkout_intent.is_some() {
-                recovery::RefEffects::Checkout
-            } else {
-                effects
-            },
-            workspace: self.workspace_identity()?,
-            inverse_of: self.inverse_of.clone(),
-            checkout: self.checkout_intent.clone(),
-            request_id: self.request_id.map(|id| crate::machine::hex(&id)),
-        })?;
-        let id = self.store.refs.commit_scoped(
-            &actor,
-            now_ms(),
-            changes,
-            key,
-            Some(&policy),
-            Some(&context),
-        )?;
-        // opt-in op-level signing. Best-effort — a missing sec key
-        // logs nothing and is not fatal (signing is a per-repo capability,
-        // not a hard requirement). Verification at read time tells the
-        // auditor which ops are signed and which aren't.
-        self.maybe_sign_op(id)?;
-        Ok(id)
     }
 
     /// Look up the active signing policy and, when enabled and the
@@ -1148,21 +1052,6 @@ impl<'a> NativeRepo<'a> {
         }
     }
 
-    fn make_entry(&self, w: &WorkEntry) -> Res<IndexEntry> {
-        // Gitlinks (submodules) have no on-disk file at the path — only an
-        // empty placeholder directory (or nothing, when the submodule has
-        // not been initialised). Git encodes their index entry with zero
-        // stat fields; do the same so the index round-trips cleanly.
-        if w.mode == 0o160000 {
-            return Ok(gitlink_entry(w));
-        }
-        let abs = self
-            .root
-            .join(w.path.to_path().map_err(|_| "non-utf8 path")?);
-        let meta = std::fs::symlink_metadata(&abs)?;
-        Ok(stat_entry(&meta, w))
-    }
-
     /// The HEAD commit's tree flattened to entries (empty when unborn).
     fn head_entries(&self) -> Res<Vec<WorkEntry>> {
         match self.store.refs.resolve(&self.head_branch()?)? {
@@ -1215,7 +1104,7 @@ impl<'a> NativeRepo<'a> {
     /// used by clone to seed `refs/heads/<branch>` from a fetched
     /// remote-tracking tip before switching to it.
     pub fn create_branch_at(&mut self, full_name: &str, oid: ObjectId) -> Res<()> {
-        self.commit_refs_unkeyed(
+        self.commit_refs(
             "branch",
             &[RefChange {
                 name: full_name.to_owned(),
@@ -1232,7 +1121,7 @@ impl<'a> NativeRepo<'a> {
     pub fn point_head_at(&mut self, target: &str) -> Res<()> {
         let head_ref = self.head_ref.clone();
         let old = self.store.refs.get(&head_ref).cloned();
-        self.commit_refs_unkeyed(
+        self.commit_refs(
             "switch",
             &[RefChange {
                 name: head_ref,
@@ -1636,7 +1525,7 @@ impl<'a> NativeRepo<'a> {
             if let Some(commit) = self.store.refs.resolve(&current)? {
                 // non-terminal tx of switch-with-create: the move_head below
                 // is the one that carries this command's idempotency key.
-                self.commit_refs_unkeyed(
+                self.commit_refs(
                     "branch",
                     &[RefChange {
                         name: full.clone(),
@@ -1689,46 +1578,6 @@ impl<'a> NativeRepo<'a> {
     /// `old` that are absent from `target`, and rewrites the index to match.
     fn checkout(&mut self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
         self.recoverable_checkout(old, target)
-    }
-
-    /// Writes one tree entry to the working tree (regular file, executable,
-    /// or symlink), creating parent dirs and replacing whatever was there.
-    /// Gitlink entries (mode 160000) point at a submodule commit that lives
-    /// in another repo — there is nothing to write at our odb's level. Match
-    /// git's plain `clone` (no `--recurse-submodules`) by ensuring the
-    /// placeholder directory exists and stopping there. Submodule
-    /// fetch/checkout is not implemented; this only avoids the materialise crash.
-    fn materialize(&self, w: &WorkEntry, attrs: &convert::Converter) -> Res<()> {
-        let abs = self.abs(&w.path)?;
-        if w.mode == 0o160000 {
-            if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                crate::durable::remove_file(&abs)?;
-            }
-            std::fs::create_dir_all(&abs)?;
-            return Ok(());
-        }
-        if let Some(parent) = abs.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if abs.symlink_metadata().is_ok() {
-            crate::durable::remove_file(&abs)?;
-        }
-        let obj = self
-            .store
-            .odb
-            .get(&w.oid)?
-            .ok_or("blob missing from store")?;
-        if w.mode == 0o120000 {
-            symlink_to(&obj.data, &abs)?;
-        } else {
-            let content = match alt_lfs::Pointer::parse(&obj.data) {
-                Some(p) => self.lfs_content(&p)?,
-                None => attrs.to_worktree(&w.path, &obj.data)?,
-            };
-            crate::durable::write(&abs, content.as_deref().unwrap_or(&obj.data))?;
-            set_exec(&abs, w.mode == 0o100755)?;
-        }
-        Ok(())
     }
 
     /// Removes now-empty directories from `dir` up toward the root.
@@ -1815,8 +1664,8 @@ impl<'a> NativeRepo<'a> {
                 Ok(false)
             }
             MergeOutcome::Conflicted(resolved) => {
-                self.write_conflicted(&resolved)?;
                 self.start_merge(theirs)?;
+                self.write_conflicted(&resolved)?;
                 let conflicts: Vec<BString> = resolved
                     .iter()
                     .filter(|r| r.conflicted)
@@ -3207,28 +3056,6 @@ impl<'a> NativeRepo<'a> {
         }
         Ok(out)
     }
-
-    /// Advances `branch` from `old` to `new` in one ref transaction.
-    fn advance_branch_checkout(
-        &mut self,
-        branch: &str,
-        old: ObjectId,
-        new: ObjectId,
-        before: &[WorkEntry],
-        after: &[WorkEntry],
-    ) -> Res<()> {
-        self.commit_refs_checkout(
-            "merge",
-            &[RefChange {
-                name: branch.to_owned(),
-                old: Some(RefTarget::Oid(old)),
-                new: Some(RefTarget::Oid(new)),
-            }],
-            before,
-            after,
-        )?;
-        Ok(())
-    }
 }
 
 /// JSON shape for a perceptual hint:
@@ -3506,14 +3333,6 @@ fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
 fn symlink_to(target: &[u8], at: &Path) -> Res<()> {
     // no symlink support: fall back to a regular file holding the target text
     crate::durable::write(at, target)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_exec(path: &Path, exec: bool) -> Res<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let perm = if exec { 0o755 } else { 0o644 };
-    crate::durable::set_permissions(path, std::fs::Permissions::from_mode(perm))?;
     Ok(())
 }
 
@@ -4103,26 +3922,6 @@ fn stat_entry(meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
 
 #[cfg(not(unix))]
 fn stat_entry(_meta: &std::fs::Metadata, w: &WorkEntry) -> IndexEntry {
-    IndexEntry {
-        ctime: (0, 0),
-        mtime: (0, 0),
-        dev: 0,
-        ino: 0,
-        mode: w.mode,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: w.oid,
-        flags: (w.path.len().min(0x0FFF)) as u16,
-        extended_flags: None,
-        path: w.path.clone(),
-    }
-}
-
-/// Zero-stat index entry for a gitlink (mode 160000). Git emits the same
-/// shape: there is no on-disk file to stat, only the recorded submodule
-/// commit oid. Keeps the index byte-comparable across alt and git.
-fn gitlink_entry(w: &WorkEntry) -> IndexEntry {
     IndexEntry {
         ctime: (0, 0),
         mtime: (0, 0),

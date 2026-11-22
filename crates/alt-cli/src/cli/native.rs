@@ -9,6 +9,19 @@ use crate::native::NativeRepo;
 /// Runs a native command against an attached repo, returning the process exit
 /// code (1 when a merge stops in conflict, else 0).
 pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
+    let done = prepare(repo, cmd).and_then(|given_up| match given_up {
+        Some(said) => Ok(writeln!(out, "{said}").map(|()| 0)?),
+        None => dispatch(repo, cmd, out),
+    });
+    // what a command did before it failed is its step all the same, but
+    // for a checkout it failed in the middle of
+    let ended = repo.end_step();
+    let code = done?;
+    ended?;
+    Ok(code)
+}
+
+fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     if matches!(
         cmd,
         Command::Rebase {
@@ -23,7 +36,6 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         )
         .into());
     }
-    prepare(repo, cmd)?;
     match cmd {
         Command::Task { op, json } => repo.task_command(op, *json, out)?,
         Command::Candidate { op, json } => repo.candidate_command(op, *json, out)?,
@@ -136,6 +148,9 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
             OperationOp::Pending => repo.operation_pending(*json, out)?,
             OperationOp::Status { id } => repo.operation_status(id, *json, out)?,
             OperationOp::Recover { id } => repo.operation_recover(id, *json, out)?,
+            OperationOp::Abandon { id, keep_changes } => {
+                repo.operation_abandon(id, *keep_changes, *json, out)?
+            }
         },
         Command::Workspace { op, json } => match op {
             WorkspaceOp::Add { name, path, branch } => {
@@ -243,22 +258,8 @@ fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> 
             // git exits 1 when a revert stops in conflict
             Ok(if stopped { 1 } else { 0 })
         }
-        Command::CherryPick { rev, json } => {
-            // git exits 1 when a cherry-pick stops in conflict
-            Ok(if repo.cherry_pick(rev, *json, out)? {
-                1
-            } else {
-                0
-            })
-        }
-        Command::Merge { branch, json } => {
-            // git exits 1 when a merge stops in conflict
-            Ok(if repo.merge(branch, *json, out)? {
-                1
-            } else {
-                0
-            })
-        }
+        Command::CherryPick { args } => sequence::cherry_pick(repo, args, out),
+        Command::Merge { args } => sequence::merge(repo, args, out),
         _ => Err("not a native command".into()),
     }
 }

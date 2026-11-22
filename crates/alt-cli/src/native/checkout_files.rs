@@ -128,13 +128,14 @@ impl NativeRepo<'_> {
         changes: impl Iterator<Item = &'c FileChange> + Clone,
     ) -> Res<()> {
         let removed = |c: &&FileChange| c.after.is_none();
-        for change in changes.clone().filter(removed) {
-            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
-        }
-        for change in changes.filter(|c| !removed(c)) {
-            self.apply_file_state(&BString::from(change.path.clone()), &change.after)?;
-        }
-        Ok(())
+        let apply = |change: &FileChange| -> Res<()> {
+            crash_point!("checkout-file:before");
+            let path = BString::from(change.path.clone());
+            let applied = self.apply_file_state(&path, &change.after);
+            applied.map_err(|e| format!("cannot write '{path}': {e}").into())
+        };
+        changes.clone().filter(removed).try_for_each(apply)?;
+        changes.filter(|c| !removed(c)).try_for_each(apply)
     }
 
     /// Refuses, before anything is written, a change that would put a file

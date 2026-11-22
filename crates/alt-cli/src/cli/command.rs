@@ -4,7 +4,7 @@ use alt_args::Subcommand;
 
 use super::vcs::parse_key_value;
 use super::*;
-use crate::{log_cmd, worktree_args};
+use crate::{log_cmd, sequence_args, worktree_args};
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -263,12 +263,8 @@ pub enum Command {
     },
     /// Apply the changes from a commit on top of the current branch
     CherryPick {
-        /// Revision of the commit to apply
-        #[arg(hint = "rev")]
-        rev: String,
-        /// Emit a structured JSON result instead of human lines.
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: sequence_args::CherryPick,
     },
     /// Read or update git-style config keys (`user.name`, …)
     Config {
@@ -327,12 +323,8 @@ pub enum Command {
     },
     /// Join another branch into the current one
     Merge {
-        /// Branch to merge into the current branch
-        #[arg(hint = "branch")]
-        branch: String,
-        /// Emit a structured JSON result instead of the human lines
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: sequence_args::Merge,
     },
     /// git-flow workflow operations (atomic, undoable)
     Flow {

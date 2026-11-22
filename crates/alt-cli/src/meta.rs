@@ -16,7 +16,9 @@
 //! decision: chose Result over Option to match the parser
 //! ```
 
+mod back;
 mod lookup;
+pub use back::{NotesChange, take_back};
 pub use lookup::Notes;
 
 use alt_bytes::BString;
@@ -231,14 +233,7 @@ pub fn store(
     put_entry(&mut root, fan, EntryMode::from_bytes(b"40000")?, sub_id);
     let root_id = write(ObjectKind::Tree, &root.serialize())?;
 
-    let mut body = format!("tree {root_id}\n");
-    if let Some(p) = parent {
-        body.push_str(&format!("parent {p}\n"));
-    }
-    body.push_str(&format!(
-        "author {signature}\ncommitter {signature}\n\nNotes added by 'alt'\n"
-    ));
-    write(ObjectKind::Commit, body.as_bytes())
+    back::commit_on(write, root_id, parent, signature)
 }
 
 fn commit_tree(read: &Read, commit: ObjectId) -> Res<ObjectId> {

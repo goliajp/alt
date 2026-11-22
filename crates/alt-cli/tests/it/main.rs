@@ -28,6 +28,7 @@ mod byte_names;
 mod capability_gate;
 mod charset;
 mod cherry_pick;
+mod cherry_pick_resume;
 mod ci_validate;
 mod clone;
 mod closed_fds;
@@ -37,6 +38,11 @@ mod complete;
 mod config;
 #[cfg(target_os = "linux")]
 mod config_paths;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod conflict_killed;
+mod conflict_reset;
+mod conflict_untracked;
 mod crash_fixture;
 mod credential_helper;
 mod cwd_paths;
@@ -73,6 +79,7 @@ mod log_patch;
 mod log_tails;
 mod machine_results;
 mod merge;
+mod merge_abort;
 mod merge_criss_cross;
 mod merge_modes;
 mod mixed_versions;
@@ -85,6 +92,7 @@ mod past_damage;
 mod path_gate;
 mod pathspec_git;
 mod patterns;
+mod pick_by_commit;
 mod precommit;
 mod prompt;
 mod push;
@@ -112,6 +120,22 @@ mod status_json;
 mod status_labels;
 mod status_replaced;
 mod status_untracked;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod step_changed;
+#[cfg(debug_assertions)]
+mod step_crash;
+#[cfg(debug_assertions)]
+mod step_given_up;
+mod step_left;
+#[cfg(debug_assertions)]
+mod step_notes;
+mod step_refused;
+#[cfg(debug_assertions)]
+mod step_stuck;
+mod step_synced;
+mod step_undo;
+mod stopped_trees;
 mod store_refresh;
 mod switch_kinds;
 mod sync_order;
@@ -142,6 +166,9 @@ mod funcname_drivers;
 mod funcname_git;
 mod funcname_long;
 mod git_settings;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
+mod recover_shared_refs;
 mod recovery_kinds;
 mod stack_overflow;
 mod value_hints;

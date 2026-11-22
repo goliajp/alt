@@ -27,13 +27,13 @@ fn unchanged<'a>(
 /// The files of the working tree that are not ignored, read when the first
 /// directory standing in a file's way has to be judged.
 #[derive(Default)]
-struct Visible(Option<std::collections::HashSet<BString>>);
+pub(super) struct Visible(Option<std::collections::HashSet<BString>>);
 
 impl NativeRepo<'_> {
     /// The ignored files in the directory at `path`, which is about to
     /// become a file: they go with the directory, as in git. An untracked
     /// file that is not ignored refuses the checkout instead.
-    fn ignored_in_the_way(
+    pub(super) fn ignored_in_the_way(
         &self,
         path: &BString,
         tracked: &dyn Fn(&[u8]) -> bool,
