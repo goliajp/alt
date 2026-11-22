@@ -96,6 +96,9 @@ before using a new build with an existing repository.
 # fresh project
 alt init my-project
 cd my-project
+# who commits here; skipped where ~/.gitconfig already says
+alt config user.name "Your Name"
+alt config user.email "you@example.com"
 echo "hello" > a.txt
 alt add a.txt
 alt commit -m "first"
