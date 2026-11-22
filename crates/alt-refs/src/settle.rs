@@ -41,6 +41,14 @@ pub fn all_stored(
     Ok(held)
 }
 
+/// Whether `op` is judged by what it names: past a boundary that appends
+/// were left unsynced past (`left`), only a ref transaction is. Any other
+/// op there is one whose writer went on without syncing what it names,
+/// and what reads it deals with content that never arrived.
+fn judged(op: &Op, left: bool) -> bool {
+    !left || op.payload.first() == Some(&tx::PAYLOAD_REF_TX)
+}
+
 impl RefStore {
     /// Has `sync` sync the objects that ops of other writers name before
     /// this store records those ops as synced (see
@@ -77,6 +85,21 @@ impl RefStore {
         !self.known_synced() && self.oplog.unsettled()
     }
 
+    /// [`Self::unsettled`] for a writer that can tell whether what an op
+    /// names is stored (`held`): past a boundary that appends were left
+    /// unsynced past, only a ref transaction `held` does not vouch for is
+    /// one to look at. The marker is read once.
+    pub fn unsettled_by<E: From<OpLogError>>(
+        &self,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<bool, E> {
+        if self.known_synced() {
+            return Ok(false);
+        }
+        self.oplog
+            .unsettled_past(|op| Ok(!judged(op, true) || held(op)?))
+    }
+
     /// For a reader: the ops at the end of the log that were never synced
     /// and name an object `stored` does not vouch for ([`all_stored`]),
     /// the ops a writer would cut. Nothing changes, and nothing is read
@@ -97,9 +120,10 @@ impl RefStore {
     /// Nothing changes.
     pub fn unconfirmed<E: From<OpLogError>>(
         &self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        self.oplog.unconfirmed(held)
+        self.oplog
+            .unconfirmed_past(|op, left| Ok(!judged(op, left) || held(op)?))
     }
 
     /// For a writer, before it appends: cuts the log from the first op on
@@ -109,9 +133,11 @@ impl RefStore {
     /// its end. Returns what was cut.
     pub fn settle<E: From<OpLogError> + From<RefError>>(
         &mut self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        let cut = self.oplog.settle(held)?;
+        let cut = self
+            .oplog
+            .settle_past(|op, left| Ok::<_, E>(!judged(op, left) || held(op)?))?;
         if self.oplog.reads() != self.reads_seen {
             self.rebuild()?;
         } else {

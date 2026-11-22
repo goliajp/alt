@@ -164,17 +164,35 @@ impl NativeOdb {
     /// holds, for a check. A record that does not read at or past it was
     /// never confirmed; without a boundary nothing tells it from damage.
     pub fn unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
+        let bounds = self.bounds(true)?;
+        Ok(bounds.map(|basis| match basis {
+            Basis::Boundary(at) | Basis::Cached(at) => Some(at),
+            Basis::LastOnly | Basis::Unknown => None,
+        }))
+    }
+
+    /// For a check, of the same files: the boundary past which appends
+    /// were left unsynced in the running boot. A record that does not
+    /// read past it was never confirmed either, and the check tells it
+    /// apart from one before the boundary.
+    pub fn left_unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
+        let bounds = self.bounds(false)?;
+        Ok(bounds.map(|basis| match basis {
+            Basis::Cached(at) => Some(at),
+            _ => None,
+        }))
+    }
+
+    /// What tells an unfinished append from damage in each of the four
+    /// files, for a check or for a command that reads.
+    fn bounds(&self, check: bool) -> Result<[Basis; 4], OdbError> {
         let odb = self.odb()?;
         let (marker, cached) = odb.marker();
         let (seq, _, _) = odb.blobs.checkpoint()?.lens();
         let (pack_len, _) = odb.blobs.file_lens()?;
         let logs = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map];
         Ok(logs.map(|log| {
-            let file = (log, seq, pack_len);
-            match crate::unsynced::basis(&marker, (cached, true), file, || true) {
-                Basis::Boundary(at) | Basis::Cached(at) => Some(at),
-                Basis::LastOnly | Basis::Unknown => None,
-            }
+            crate::unsynced::basis(&marker, (cached, check), (log, seq, pack_len), || true)
         }))
     }
 }

@@ -766,8 +766,19 @@ The first command that stores an object, an `alt add` among them, or the next
 `alt commit`, cuts the file at that record with the records that name what
 went, and syncs what is left; `alt status`, `alt fsck` and `alt commit` then
 name the staged files to add again. Until that cut, `alt fsck`, which changes
-nothing, reports such a record in the boot it was written in as damage: the
-kernel lost what it held. alt notes in `odb.lock`
+nothing, reports such a record in the boot it was written in and does not
+pass: the kernel lost what it held. It says so apart from damage to what was
+synced (`that record lies past where its file was last synced to (…), among
+what was written since this machine started and never confirmed as synced:
+nothing that was synced is damaged`) and which command cuts the file there.
+The operation log goes by the same rule: a record of it past where it was
+synced to that does not read ends the log for a command that only reads,
+which says how many operations after it it leaves out, and the next command
+that writes cuts the log there and says what it discarded. A commit made with
+`ALT_RELAXED_DURABILITY` whose objects went with such records was never
+confirmed either: a command that only reads shows the repository as it was
+before that commit and says so, and the next command that writes discards the
+commit and those after it and names the refs they moved. alt notes in `odb.lock`
 which boot the unsynced records were written in. After another boot each of
 the store's files may end anywhere past the point it was synced to, each on
 its own, so a record that names an object can be there without the object's

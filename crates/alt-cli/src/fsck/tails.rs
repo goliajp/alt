@@ -30,9 +30,98 @@ pub(super) fn found(file: &str, holds: u64, bytes: u64, whole_at: u64) -> String
     )
 }
 
+/// What the check adds to `error`, a record of the object store that
+/// does not read, where a command that only reads opens the store all
+/// the same: the record lies past where its file was last synced to,
+/// among appends left unsynced in the running boot, which the check
+/// reads record by record and such a command does not.
+fn left_unread(alt_dir: &std::path::Path, error: Cause) -> Cause {
+    let said = error.to_string();
+    // a file short of what was synced is told as that
+    if said.contains("ends at byte") {
+        return error;
+    }
+    let Ok(passed) = alt_odb::NativeOdb::reading(alt_dir).passed() else {
+        return error;
+    };
+    let stops = passed
+        .iter()
+        .filter(|(_, passed)| passed.holds < passed.len);
+    let stops: Vec<String> = stops
+        .map(|(path, passed)| {
+            let file = path.strip_prefix(alt_dir).unwrap_or(path);
+            format!("{} from byte {} on", file.display(), passed.holds)
+        })
+        .collect();
+    if stops.is_empty() {
+        return error;
+    }
+    let files = stops.join(", ");
+    format!(
+        "{said}\nfsck: {}",
+        left_unread_note(&files, OBJECTS_WRITER, "what was staged since")
+    )
+    .into()
+}
+
+/// How the five append files go on past the records held of them
+/// ([`super::ends`]) and, for each, from where appends were left unsynced
+/// in the running boot. A file that ends short of the records its marker
+/// says were synced fails this.
+pub(super) fn ends(store: &mut Store) -> Res<(Vec<super::End>, Vec<Option<u64>>)> {
+    let alt_dir = store.alt_dir().to_owned();
+    let left_unread = |error| left_unread(&alt_dir, error);
+    let synced = store.odb().check_synced().map_err(super::with_cause);
+    synced.map_err(left_unread)?;
+    let log = store.refs_mut().oplog().check_synced();
+    log.map_err(super::with_cause)?;
+    let ends = super::ends(store).map_err(left_unread)?;
+    let left = store.odb().left_unsynced_from();
+    let mut left = left.map_err(super::with_cause)?.to_vec();
+    left.push(store.refs_mut().oplog().left_unsynced_from());
+    Ok((ends, left))
+}
+
+/// What is told of `file`, which reads up to byte `holds` with a whole
+/// record past that at byte `at`, where nothing says the file was never
+/// synced there; `left`: from where it was left unsynced in this boot.
+pub(super) fn unread(file: &str, holds: u64, at: u64, left: Option<u64>) -> Vec<String> {
+    let mut told = vec![format!(
+        "{file} reads up to byte {holds}, and a whole record begins past that, at byte {at}"
+    )];
+    if left.is_some_and(|left| holds >= left) {
+        told.push(left_unread_in(file, holds));
+    }
+    told
+}
+
+/// The same of one file, `file`, that reads up to byte `holds`.
+fn left_unread_in(file: &str, holds: u64) -> String {
+    let files = format!("{file} from byte {holds} on");
+    match file == LOG {
+        true => left_unread_note(&files, ANY_WRITER, "an add it discarded"),
+        false => left_unread_note(&files, OBJECTS_WRITER, "what was staged since"),
+    }
+}
+
+/// What is said of a record that does not read among appends left
+/// unsynced in the running boot, in `files`; `by` cuts it off.
+fn left_unread_note(files: &str, by: &str, again: &str) -> String {
+    format!(
+        "that record lies past where its file was last synced to ({files}), among what was \
+         written since this machine started and never confirmed as synced: nothing that was \
+         synced is damaged. {by} cuts the file there and says what it discarded; {again} is \
+         then to be added again"
+    )
+}
+
+type Cause = Box<dyn std::error::Error>;
+
 const ANY: &str = "the next command that writes";
 const OBJECTS: &str = "the next command that writes objects";
+const OBJECTS_WRITER: &str = "The next command that stores objects";
 const LOG: &str = "oplog/log";
+const ANY_WRITER: &str = "The next command that writes";
 
 /// Which command cuts the end off `file`. The operation log's goes with
 /// the next command that writes. So does the object store's when

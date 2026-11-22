@@ -3,7 +3,7 @@
 //! the kernel lost or never wrote. In the boot of the adds as after a
 //! power cut, nothing past where a file was synced to was ever confirmed:
 //! every command goes on, and what does not read is cut off by the first
-//! that writes objects.
+//! that writes objects; in the operation log, by the first that writes.
 
 use std::fs;
 use std::os::unix::fs::FileExt;
@@ -15,6 +15,10 @@ use super::super::unconfirmed_tails::noise;
 use super::base::{ADDED, Base, CUT};
 use super::{VERIFIED, goes_on, sound};
 
+/// What the check says of a record that does not read among what the
+/// running boot left unsynced.
+const LEFT_UNREAD: &str = "lies past where its file was last synced to";
+
 /// What is found where the stretch was written.
 #[derive(Clone, Copy, Debug)]
 enum Unread {
@@ -23,6 +27,10 @@ enum Unread {
     /// of a pack, where a record begins: a head of a kind there is none
     /// of, naming a length by which whole records follow it
     Head,
+    /// of the operation log, where a record begins: one byte of what
+    /// the record holds is another, its length as it was, so that the
+    /// records after it are found
+    Byte,
 }
 
 fn spoil(path: &Path, (from, to): (u64, u64), how: Unread) {
@@ -35,6 +43,10 @@ fn spoil(path: &Path, (from, to): (u64, u64), how: Unread) {
         Unread::Head => {
             file.write_all_at(&[0xff], from + 32).unwrap();
             file.write_all_at(&[0; 4], from + 37).unwrap();
+        }
+        Unread::Byte => {
+            let was = fs::read(path).unwrap()[from as usize + 14];
+            file.write_all_at(&[!was], from + 14).unwrap();
         }
     }
 }
@@ -52,6 +64,15 @@ fn goes_on_in_its_boot(what: &str, base: &Base, dir: &Path, adds_first: bool) {
     let check = alt(dir, &["fsck"]);
     assert!(!check.status.success(), "{what}: fsck passed");
     assert!(!stderr(&check).contains("panicked"), "{what}");
+    // told apart from damage to what was synced; where all that does
+    // not read is the end of its file, the check tells of no record
+    // and names the staged file whose blob went
+    let said = ok_or_said(&check);
+    let cut_by = "The next command that stores objects cuts";
+    let left = said.contains(LEFT_UNREAD) && said.contains(cut_by);
+    let staged = said.contains("which is not stored: add the file again");
+    let record = said.contains("corrupt") || said.contains("damaged") || said.contains("reads up");
+    assert!(left || (staged && !record), "{what}: {said}");
     let mut add = vec!["add"];
     add.extend(ADDED);
     // an add of what is staged cuts where it finds a blob no longer
@@ -91,20 +112,70 @@ fn goes_on_in_its_boot(what: &str, base: &Base, dir: &Path, adds_first: bool) {
     }
 }
 
-/// What each add appended to each file of the object store, in turn,
-/// does not read, in the boot of the adds or after a power cut that took
-/// nothing else.
+/// The operation log in the boot of the adds: a command that reads
+/// answers from the log as it was before the stretch and changes
+/// nothing, telling of the operations past it that read; the check does
+/// not pass where there are such. The next command that writes cuts the
+/// log, and every command goes on as after a power cut.
+fn the_log_goes_on_in_its_boot(what: &str, base: &Base, dir: &Path, adds_first: bool, last: bool) {
+    let log = dir.join(".alt/oplog/log");
+    let before = fs::read(&log).unwrap();
+    let status = alt(dir, &["status"]);
+    sound(what, &status);
+    assert!(status.status.success(), "{what}: {}", stderr(&status));
+    let left_out = "were never synced to disk and follow a record that does not read";
+    assert_ne!(stderr(&status).contains(left_out), last, "{what}");
+    let check = alt(dir, &["fsck"]);
+    assert!(!ok_or_said(&check).contains("panicked"), "{what}");
+    if !last {
+        assert!(!check.status.success(), "{what}: fsck passed");
+        let said = ok_or_said(&check);
+        assert!(
+            said.contains("oplog/log reads up to byte"),
+            "{what}: {said}"
+        );
+        assert!(said.contains(LEFT_UNREAD), "{what}: {said}");
+        assert!(said.contains("The next command that writes cuts"), "{what}");
+    }
+    assert!(
+        fs::read(&log).unwrap() == before,
+        "{what}: a read cut the log"
+    );
+    // a command that writes, and here writes nothing, cuts the log
+    let wrote = alt(dir, &["branch", "-d", "no-such-branch"]);
+    let said = stderr(&wrote);
+    assert!(
+        !said.contains("panicked") && !said.contains("corrupt"),
+        "{what}: {said}"
+    );
+    let cut = said.contains("discarded ") && said.contains("at the end of oplog/log");
+    assert!(cut, "{what}: {said}");
+    goes_on(what, base, dir, alt, adds_first);
+}
+
+/// What a command printed, on either stream.
+fn ok_or_said(out: &std::process::Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), stderr(out))
+}
+
+/// What each add appended to each file of the object store and to the
+/// operation log, in turn, does not read, in the boot of the adds or
+/// after a power cut that took nothing else.
 fn stretches(in_boot: bool) {
     let base = Base::build();
-    for (file, name) in CUT.iter().enumerate().take(4) {
+    for (file, name) in CUT.iter().enumerate().take(5) {
         for step in 0..3 {
             let (from, to) = (base.ends[file][step], base.ends[file][step + 1]);
             if from == to {
                 continue;
             }
-            for how in [Unread::Noise, Unread::Head] {
+            for how in [Unread::Noise, Unread::Head, Unread::Byte] {
                 // a record of the pack begins where an add began to append
                 if matches!(how, Unread::Head) && (file != 0 || to - from < 82) {
+                    continue;
+                }
+                // with the records of a later add after it
+                if matches!(how, Unread::Byte) && (file != 4 || step == 2) {
                     continue;
                 }
                 for adds_first in [false, true] {
@@ -118,9 +189,12 @@ fn stretches(in_boot: bool) {
                         false => base.left(&case, &[]),
                     };
                     spoil(&dir.join(".alt").join(name), (from, to), how);
-                    match in_boot {
-                        true => goes_on_in_its_boot(&what, &base, &dir, adds_first),
-                        false => goes_on(&what, &base, &dir, alt, adds_first),
+                    match (in_boot, file) {
+                        (true, 4) => {
+                            the_log_goes_on_in_its_boot(&what, &base, &dir, adds_first, step == 2)
+                        }
+                        (true, _) => goes_on_in_its_boot(&what, &base, &dir, adds_first),
+                        (false, _) => goes_on(&what, &base, &dir, alt, adds_first),
                     }
                     fs::remove_dir_all(dir).unwrap();
                 }

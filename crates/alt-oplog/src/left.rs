@@ -1,28 +1,91 @@
-//! The boot appends to the log were left unsynced in.
+//! Appends to the log that were left unsynced, and the boot they were
+//! left unsynced in.
 //!
 //! A writer that leaves its appends unsynced marks the synced marker so.
-//! For as long as the machine stays up, what it appended is in the
-//! kernel's cache as it was written: a record that does not read with
-//! whole records after it is damage. After another boot the log may hold
-//! anything past the boundary, a stretch that never reached the disk
-//! with records after it that did: the first record that does not read
-//! there ends the log, as past a boundary that holds.
+//! Nothing past the boundary the marker then records was ever synced: a
+//! record there that does not read ends the log, as past a boundary that
+//! holds, and an op there that makes a ref point at an object which is
+//! not stored was never confirmed ([`Marker::judged_from`]).
 //!
-//! So the writer notes the running boot in `sync.lock` before it marks
-//! the marker, past the byte of flags:
+//! The writer also notes the running boot in `sync.lock` before it marks
+//! the marker, past the byte of flags. The full check goes by it: in the
+//! running boot it tells a record that does not read there, with whole
+//! ones after it, as damage that the next writer cuts off, and an older
+//! alt takes what was appended in the running boot for whole.
 //!
 //! ```text
 //! [8..24) boot  [24..32) checksum = blake3(boot)[..8]
 //! ```
 //!
 //! It is not fsynced: a note that was lost reads as another boot's. An
-//! older alt only locks the file.
+//! alt older than that only locks the file.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
+use crate::lock::{lock_exclusive, unlock};
+use crate::synced::Marker;
+use crate::{Op, OpLog, OpLogError, Unconfirmed};
+
 const AT: u64 = 8;
+
+impl Marker {
+    /// From which byte on the ops of the log were never synced and are
+    /// judged by what they name ([`crate::OpLog::settle`]), and whether
+    /// appends were left unsynced past it; `None` where the marker has
+    /// no boundary.
+    pub(crate) fn judged_from(&self) -> Option<(u64, bool)> {
+        match self.recorded() {
+            Some(state) => Some((state.whole, !self.trusted())),
+            None => self.unsynced_from().map(|from| (from, false)),
+        }
+    }
+}
+
+impl OpLog {
+    /// [`Self::unconfirmed`] with `held` told whether the op lies past a
+    /// boundary that appends were left unsynced past.
+    pub fn unconfirmed_past<E: From<OpLogError>>(
+        &self,
+        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        match Marker::read(&self.durable_path).judged_from() {
+            Some((from, left)) if from < self.len_bytes => {
+                self.first_unheld(from, |op| held(op, left))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Whether a writer has ops to look at under the lock
+    /// ([`Self::settle`]): ops past a boundary that holds, or, past one
+    /// that appends were left unsynced past, an op `held` does not vouch
+    /// for. Reads the marker once and takes no lock.
+    pub fn unsettled_past<E: From<OpLogError>>(
+        &self,
+        held: impl FnMut(&Op) -> Result<bool, E>,
+    ) -> Result<bool, E> {
+        match Marker::read(&self.durable_path).judged_from() {
+            Some((from, left)) if from < self.len_bytes => {
+                Ok(!left || self.first_unheld(from, held)?.is_some())
+            }
+            _ => Ok(false),
+        }
+    }
+
+    /// [`Self::settle`] with `held` told whether the op lies past a
+    /// boundary that appends were left unsynced past.
+    pub fn settle_past<E: From<OpLogError>>(
+        &mut self,
+        held: impl FnMut(&Op, bool) -> Result<bool, E>,
+    ) -> Result<Option<Unconfirmed>, E> {
+        lock_exclusive(&self.file).map_err(OpLogError::from)?;
+        let settled = self.settle_locked(held);
+        let _ = unlock(&self.file);
+        settled
+    }
+}
 
 /// `sync.lock`, created where it is not there, with what it holds left.
 pub(crate) fn open_sync_lock(path: &Path) -> std::io::Result<File> {

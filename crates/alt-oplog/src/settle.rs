@@ -14,12 +14,16 @@
 //! ([`OpLog::unconfirmed`]), to open the log again as it stood before it
 //! ([`end_reads_at`]). An op before the boundary that names content which
 //! is not stored is damage and is neither looked for nor cut here, and
-//! where the marker records no boundary that holds, no op is looked at.
+//! where the marker records no boundary, no op is looked at. Past a
+//! boundary that appends were left unsynced past, the ops are looked at
+//! the same, and `held` is told so: an op there may be one whose writer
+//! went on without what it names (an index change), which whoever knows
+//! the op lets stand.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::lock::{lock_exclusive, unlock};
+use crate::lock::unlock;
 use crate::read::{read_at, read_log, scan};
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN};
 use crate::synced::{self, Marker};
@@ -193,10 +197,14 @@ impl OpLog {
         mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         let recent_from = self.base.map_or(HEADER_LEN as u64, |anchor| anchor.end);
-        let (ops, mut at) = if from < recent_from {
-            (self.ops()?, HEADER_LEN as u64)
-        } else {
+        let past;
+        let (ops, mut at) = if from >= recent_from {
             (&self.ops[..], recent_from)
+        } else if let Some(read) = self.ops_past(from)? {
+            past = read;
+            (&past[..], from)
+        } else {
+            (self.ops()?, HEADER_LEN as u64)
         };
         for (index, op) in ops.iter().enumerate() {
             if at >= from && !held(op)? {
@@ -215,12 +223,9 @@ impl OpLog {
     /// and takes no lock; nothing changes.
     pub fn unconfirmed<E: From<OpLogError>>(
         &self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        match Marker::read(&self.durable_path).unsynced_from() {
-            Some(from) if from < self.len_bytes => self.first_unheld(from, held),
-            _ => Ok(None),
-        }
+        self.unconfirmed_past(|op, _| held(op))
     }
 
     /// For a writer, before it appends: reads the log to its end and cuts
@@ -235,17 +240,14 @@ impl OpLog {
     /// and has read it to its end, for as long as this runs.
     pub fn settle<E: From<OpLogError>>(
         &mut self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        lock_exclusive(&self.file).map_err(OpLogError::from)?;
-        let settled = self.settle_locked(held);
-        let _ = unlock(&self.file);
-        settled
+        self.settle_past(|op, _| held(op))
     }
 
-    fn settle_locked<E: From<OpLogError>>(
+    pub(crate) fn settle_locked<E: From<OpLogError>>(
         &mut self,
-        held: impl FnMut(&Op) -> Result<bool, E>,
+        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         match self.catch_up() {
             Err(OpLogError::CutBack) => {
@@ -256,10 +258,11 @@ impl OpLog {
         }
         let marker = Marker::read(&self.durable_path);
         synced::lost(&marker, self.len_bytes)?;
-        let Some(from) = marker.unsynced_from().filter(|from| *from < self.len_bytes) else {
+        let judged = marker.judged_from();
+        let Some((from, left)) = judged.filter(|(from, _)| *from < self.len_bytes) else {
             return Ok(None);
         };
-        let Some(cut) = self.first_unheld(from, held)? else {
+        let Some(cut) = self.first_unheld(from, |op| held(op, left))? else {
             return Ok(None);
         };
         let ops = self.ops()?;

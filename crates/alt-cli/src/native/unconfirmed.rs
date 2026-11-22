@@ -7,6 +7,9 @@
 //! happened. A command that writes cuts the log from the first one on
 //! before it does anything else. A command that only reads answers from
 //! the log as it stood before them, and says so; it changes no file.
+//! The same goes for a transaction a commit that syncs nothing left past
+//! the boundary, whose objects went with records of the object store
+//! that do not read, in the boot it was made in or after another.
 //!
 //! # The order locks are taken in
 //!
@@ -71,8 +74,30 @@ pub(super) fn sync_objects_first(refs: &mut RefStore, alt_dir: &Path) {
     let alt_dir = alt_dir.to_owned();
     refs.sync_objects_with(std::sync::Arc::new(move |left| {
         NativeOdb::sync_stored(&alt_dir).map_err(std::io::Error::other)?;
+        confirm_left(&alt_dir, left)?;
         recovery::sync_left(&alt_dir, left)
     }));
+}
+
+/// Before a boundary is set over `left`, the ops that were appended while
+/// appends were left unsynced, the object store synced: a ref transaction
+/// among them whose objects are not stored then never will have them, and
+/// no boundary is to take it in. A command that writes cuts it before it
+/// does anything else, so this one saw the objects go after that.
+fn confirm_left(alt_dir: &Path, left: &[Op]) -> std::io::Result<()> {
+    let mut odb = None;
+    for op in left {
+        for oid in alt_refs::named_objects(op).map_err(std::io::Error::other)? {
+            let odb = odb.get_or_insert_with(|| NativeOdb::reading(alt_dir));
+            if !odb.contains(&oid).map_err(std::io::Error::other)? {
+                return Err(std::io::Error::other(format!(
+                    "an operation that was never synced names {oid}, which is not stored: run \
+                     the command again"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Store {
@@ -85,7 +110,7 @@ impl Store {
             return Self::open_reading(alt_dir);
         }
         let mut store = Self::open(alt_dir)?;
-        if store.refs.unsettled() {
+        if store.unsettled()? {
             store.settle()?;
         }
         Ok(store)
@@ -97,14 +122,15 @@ impl Store {
     /// store is kept from being appended to meanwhile, so that a live
     /// writer's objects are all seen. Where the log's marker records no
     /// boundary, or every operation lies before it, there is nothing to
-    /// look at and no lock is taken.
+    /// look at and no lock is taken; nor where appends were left unsynced
+    /// past it and, as this store reads them, each names what is stored.
     ///
     /// What is cut is told by whoever runs the command
     /// ([`Self::warn_discarded`]), or with the failure when this fails.
     pub fn settle(&mut self) -> Res<()> {
         let settled = (|| -> Res<()> {
             self.refresh()?;
-            if !self.refs.unsettled() {
+            if !self.unsettled()? {
                 return Ok(());
             }
             let refs = &mut self.refs;
@@ -117,6 +143,30 @@ impl Store {
         settled.map_err(|error| self.after_discards(error))
     }
 
+    /// Whether a command that writes has operations to look at under the
+    /// locks ([`Self::settle`]): those past a boundary that holds, or,
+    /// past one that appends were left unsynced past, a ref transaction
+    /// whose objects this store does not find. Without the locks an object
+    /// a live writer stored may be missed: settling looks again. The
+    /// log's marker is read once.
+    fn unsettled(&self) -> Res<bool> {
+        let (stored, also) = (self.stored_unsettled(), prepared_blobs(&self.alt_dir));
+        self.refs.unsettled_by(|op| held(op, &also, &stored))
+    }
+
+    /// Whether an object is stored, where nothing has settled the object
+    /// store: it reads, and its record is not one a writer cuts off.
+    fn stored_unsettled(&self) -> impl Fn(&ObjectId) -> Res<bool> + '_ {
+        let gone = std::cell::OnceCell::new();
+        move |oid: &ObjectId| {
+            if gone.get().is_none() {
+                let _ = gone.set(self.odb.unconfirmed_objects()?);
+            }
+            let kept = gone.get().is_some_and(|gone| !gone.contains(oid));
+            Ok(kept && matches!(self.odb.get(oid), Ok(Some(_))))
+        }
+    }
+
     /// For a command that only reads: how many operations at the end of
     /// the log a command that writes would cut, and where the first of
     /// them starts.
@@ -124,14 +174,8 @@ impl Store {
         if self.refs.confirmed() {
             return Ok(None);
         }
-        // nothing has settled the object store: an object is stored when
-        // it reads and its record is not one a writer cuts off
-        let gone = self.odb.unconfirmed_objects()?;
-        let stored =
-            |oid: &ObjectId| !gone.contains(oid) && matches!(self.odb.get(oid), Ok(Some(_)));
-        let also = prepared_blobs(&self.alt_dir);
-        self.refs
-            .unconfirmed(|op| held(op, &also, &|oid| Ok(stored(oid))))
+        let (stored, also) = (self.stored_unsettled(), prepared_blobs(&self.alt_dir));
+        self.refs.unconfirmed(|op| held(op, &also, &stored))
     }
 }
 

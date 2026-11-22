@@ -116,14 +116,7 @@ pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, by: By<'_>, out: &mut W
     let json = args.json;
     // looked for before the store is opened, which may replace them
     let ignored = store.odb().unusable_index_runs().map_err(with_cause)?;
-    // a file that ends short of the records its marker says were synced
-    store.odb().check_synced().map_err(with_cause)?;
-    store
-        .refs_mut()
-        .oplog()
-        .check_synced()
-        .map_err(with_cause)?;
-    let ends = ends(store)?;
+    let (ends, left) = tails::ends(store)?;
     let odb = store.odb().check().map_err(with_cause)?;
     let refs = store.refs_mut().check().map_err(with_cause)?;
     let unconfirmed = store.unconfirmed()?;
@@ -135,7 +128,8 @@ pub fn run<W: Write>(store: &mut Store, args: &FsckArgs, by: By<'_>, out: &mut W
         odb: &odb,
         unconfirmed: named,
         dangling: &dangling,
-        settles: store.refs_mut().unsettled(),
+        left: &left,
+        settles: named > 0 || store.refs_mut().unsettled(),
     };
     let (mut notes, mut damage, tails) = findings(store.alt_dir(), &found);
     // nothing is lost with a torn index that a command which syncs left
@@ -220,6 +214,8 @@ struct Found<'a> {
     /// refs that point at what is not stored, objects below the refs
     /// that are not stored
     dangling: &'a [String],
+    /// for each of `ends`: from where appends were left unsynced in this boot
+    left: &'a [Option<u64>],
     /// whether a command that writes settles the object store whatever
     /// it writes ([`tails::cutter`])
     settles: bool,
@@ -236,7 +232,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
         inside.display().to_string()
     };
     let (mut notes, mut damage, mut tails) = (Vec::new(), Vec::new(), false);
-    for (path, passed, bound) in found.ends {
+    for ((path, passed, bound), left) in found.ends.iter().zip(found.left) {
         let (file, holds) = (name(path), passed.holds);
         let bytes = passed.len.saturating_sub(holds);
         match passed.whole_at {
@@ -250,9 +246,7 @@ fn findings(alt_dir: &Path, found: &Found) -> (Vec<String>, Vec<String>, bool) {
                 tails = true;
                 notes.push(tails::found(&file, holds, bytes, at));
             }
-            Some(at) => damage.push(format!(
-                "{file} reads up to byte {holds}, and a whole record begins past that, at byte {at}"
-            )),
+            Some(at) => damage.extend(tails::unread(&file, holds, at, *left)),
         }
     }
     for (file, bytes) in MAPS.iter().zip(found.odb.unconfirmed) {

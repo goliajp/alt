@@ -172,20 +172,20 @@ impl Marker {
 
     /// Whether a record that does not read at `at` is an append that never
     /// finished rather than damage; `last`: no whole record can follow it.
-    /// Past a boundary that holds it never finished, and before it is
-    /// damage. The file length an older alt recorded is such a boundary.
-    /// Where nothing is recorded, or unsynced appends followed in this boot
-    /// ([`crate::left`]), only the last record is taken for unfinished. A
-    /// marker that is gone or does not read, in a log that has had one,
-    /// makes every such record damage.
+    /// Past the boundary a marker records nothing was ever synced, whether
+    /// or not appends were left unsynced there: it never finished, and
+    /// before the boundary it is damage. The file length an older alt
+    /// recorded is such a boundary. Where nothing is recorded only the
+    /// last record is taken for unfinished, and a marker that is gone or
+    /// does not read, in a log that has had one, makes every such record
+    /// damage.
     pub fn unfinished(path: &Path, at: u64, last: bool) -> bool {
         match Self::read(path) {
-            Marker::Recorded(state) if state.flags & UNTRUSTED == 0 => at >= state.whole,
-            Marker::Recorded(state) if !crate::left::cached(path) => at >= state.whole,
+            Marker::Recorded(state) => at >= state.whole,
             // a length short of the header is not one an older alt
             // recorded: the marker is being replaced as it is read
             Marker::Legacy(eof) if eof >= HEADER => at >= eof,
-            Marker::Recorded(_) | Marker::Legacy(_) => last,
+            Marker::Legacy(_) => last,
             Marker::Unreadable | Marker::Absent => last && !bounded(path),
         }
     }
