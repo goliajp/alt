@@ -62,17 +62,14 @@ impl RecLog {
         Ok(())
     }
 
-    /// Whether a record that reads lies past an append that never
-    /// finished: a writer went on after records that were then lost, and
-    /// what it wrote goes with them when the log is cut there.
+    /// Whether more than an append that never finished lies past where
+    /// the log ends for this handle: room for a whole record. Records
+    /// that were written went there, read or not: a page of them was
+    /// lost, with or without records after it that still read, and they
+    /// go when the log is cut.
     pub fn whole_past_unfinished(&self) -> Result<bool, StoreError> {
-        if !self.unfinished {
-            return Ok(false);
-        }
-        let mut past = vec![0u8; (self.file.metadata()?.len() - self.len) as usize];
-        read_exact_at(&self.file, &mut past, self.len)?;
-        let mut records = past.chunks_exact(self.layout.rec_len);
-        Ok(records.any(|rec| self.layout.intact(rec)))
+        let past = self.file.metadata()?.len() - self.len;
+        Ok(self.unfinished && past >= self.layout.rec_len as u64)
     }
 
     /// For a writer that leaves its appends unsynced: moves a long enough

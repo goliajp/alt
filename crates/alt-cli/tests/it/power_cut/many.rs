@@ -21,6 +21,7 @@ use super::{VERIFIED, another_boot, checked, sound, writes};
 
 mod boot_runs;
 mod drop_lost;
+mod last_page;
 
 /// Records from which a writer that syncs folds a tail into a run.
 const RUN_FROM: usize = 256;

@@ -20,9 +20,9 @@ pub struct Discarded {
 }
 
 impl Odb {
-    /// Whether one of the logs that name content holds a record that
-    /// reads past an append that never finished: whole records go when
-    /// the log is cut there.
+    /// Whether one of the logs that name content holds room for a whole
+    /// record past where it ends for this handle: whole records go when
+    /// the log is cut there, which read or which a lost page held.
     pub(super) fn whole_past_unfinished(&mut self) -> Result<bool, OdbError> {
         Ok(self.blobs.map_log()?.whole_past_unfinished()?
             || self.tier1_mut()?.log_mut().whole_past_unfinished()?

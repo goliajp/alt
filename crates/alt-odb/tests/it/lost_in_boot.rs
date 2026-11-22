@@ -1,6 +1,6 @@
 //! A record of the blob map, the Tier 1 map or `map.alt` that does not
 //! read, in the boot it was left unsynced in, with records after it that
-//! do: a page of the file the kernel lost. To a writer that syncs the
+//! do or as the last of the log: a page of the file the kernel lost. To a writer that syncs the
 //! log ends there, as what another boot left does: it cuts the log at
 //! that record, with what names the content that went, and goes on. A
 //! record that was synced and does not read is damage: nothing is cut.
@@ -119,7 +119,38 @@ fn a_writer_that_syncs_cuts_a_log_the_running_boot_left_unsynced_at_a_record_tha
             let at = (synced[file] + ends[file]) / 2;
             let len = ((ends[file] - at) / 2).min(4096);
             cut_at(&base, &batch, file, (synced[file], at, len), &case);
+            // the last of what the batch appended, with nothing after it
+            let len = ((ends[file] - synced[file]) / 2).min(4096);
+            let last = (synced[file], ends[file] - len, len);
+            cut_at(&base, &batch, file, last, &format!("{case}, at its end"));
             reported(&base, file, synced[file] / 2, &case);
         }
+    }
+}
+
+/// The same of the pack, where the stretch that was lost holds the head
+/// of a record: the walk of the pack stops there and cannot go on to the
+/// records after it.
+#[test]
+fn a_writer_that_syncs_cuts_the_pack_the_running_boot_left_unsynced_where_the_head_of_a_record_went()
+ {
+    for batch in [300..336, 300..1200] {
+        let batch: Vec<u32> = batch.collect();
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let mut odb = open(&base);
+        put(&mut odb, 0..KEPT);
+        drop(odb);
+        let synced = lens(&base);
+        put_unsynced(&base, batch.iter().copied());
+        let ends = lens(&base);
+        let runs = boot_runs(&base).len();
+        let case = format!("{} with {runs} boot runs", FILES[0]);
+        // longer than any chunk is, in the middle of what the batch
+        // appended
+        let at = (synced[0] + ends[0]) / 2;
+        let len = ((ends[0] - at) / 2).min(400_000);
+        assert!(len > 300_000, "{case}: {len}");
+        cut_at(&base, &batch, 0, (synced[0], at, len), &case);
     }
 }

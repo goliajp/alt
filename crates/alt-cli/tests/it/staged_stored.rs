@@ -30,7 +30,7 @@ mod taken_out;
 
 /// Whether the note beside the index says that what it stages is stored,
 /// at some generation of the store.
-fn noted_stored(dir: &Path) -> bool {
+pub(super) fn noted_stored(dir: &Path) -> bool {
     let note = fs::read(dir.join(".alt/index.seen")).unwrap_or_default();
     note.len() == 128 && note[112..120] != [0; 8]
 }
