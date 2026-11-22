@@ -9,6 +9,8 @@ use alt_worktree::Sig;
 use super::{NativeRepo, Res, now_ms};
 
 mod date;
+#[cfg(test)]
+mod test_zones;
 
 /// The variables that name the author and the committer, and the zone a
 /// date they give without one is in.
@@ -240,7 +242,7 @@ mod tests {
 
     /// What a caller in UTC says, where `pairs` name no other zone.
     fn said(pairs: &[(&str, &str)]) -> Said {
-        let pairs = [pairs, &[("TZ", "UTC")]].concat();
+        let pairs = [pairs, &[("TZ", "")]].concat();
         Said::from_lookup(|key| {
             let pair = pairs.iter().find(|(name, _)| *name == key)?;
             Some(pair.1.to_owned())
@@ -249,6 +251,7 @@ mod tests {
 
     #[test]
     fn a_moment_given_no_date_is_in_the_zone_of_the_caller_then() {
+        let zones = test_zones::Zones::new();
         // 2005-01-07 and 2005-07-07, either side of summer time
         for (tz, instant, written) in [
             ("Asia/Tokyo", 1_105_135_993, "U <u@x> 1105135993 +0900"),
@@ -272,7 +275,8 @@ mod tests {
             ("", 1_120_774_393, "U <u@x> 1120774393 +0000"),
         ] {
             for role in [Role::Author, Role::Committer] {
-                let signature = resolve(&said(&[("TZ", tz)]), role, &settings(USER), instant);
+                let tz = zones.tz(tz);
+                let signature = resolve(&said(&[("TZ", &tz)]), role, &settings(USER), instant);
                 assert_eq!(signature.unwrap().line(), written, "{tz}");
             }
         }
@@ -426,10 +430,12 @@ mod tests {
             let error = line(&[("GIT_AUTHOR_DATE", blank)], Role::Author, USER).unwrap_err();
             assert_eq!(error, format!("invalid date format: {blank}"));
         }
+        let zones = test_zones::Zones::new();
+        let new_york = zones.tz("America/New_York");
         let zoned = [
             ("GIT_AUTHOR_DATE", "2005-04-07 22:13:13"),
             ("GIT_COMMITTER_DATE", "Thu Apr  7 22:13:13 EDT 2005"),
-            ("TZ", "America/New_York"),
+            ("TZ", &new_york),
         ];
         assert_eq!(
             line(&zoned, Role::Author, USER).unwrap(),

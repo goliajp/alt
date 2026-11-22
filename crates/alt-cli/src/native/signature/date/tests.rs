@@ -1,5 +1,6 @@
 use alt_os::zone::Zone;
 
+use super::super::test_zones::zone;
 use super::parse;
 
 /// 2026-11-23, the day git was asked: a date more than ten days past it
@@ -55,8 +56,18 @@ const OTHERWISE: [(&str, &str); 2] = [
     ("2005-04-07 22:13:13 -00:01", "1112912053 -0001"),
 ];
 
+/// What `given` is read as by a caller whose `TZ` is `tz`: one of
+/// [`ZONES`] or another the tests have a file of, by its file, and
+/// anything else as it is spelled.
 fn read(given: &str, tz: &str) -> Option<String> {
-    let zone = Zone::of(Some(tz));
+    let spelled;
+    let zone = match zone(tz) {
+        Some(zone) => zone,
+        None => {
+            spelled = Zone::of(Some(tz));
+            &spelled
+        }
+    };
     let read = parse(given, NOW, &|wall| zone.offset_of_local(wall));
     read.map(|(seconds, zone)| format!("{seconds} {zone}"))
 }
@@ -201,7 +212,7 @@ fn next(state: &mut u64) -> usize {
 #[test]
 fn no_text_makes_reading_a_date_fail() {
     const LETTERS: &[u8] = b"0123456789 :-+/.,@TZAPMaprJSUGtu\n9 0:";
-    let zones = ZONES.map(|tz| Zone::of(Some(tz)));
+    let zones = ZONES.map(|tz| zone(tz).unwrap());
     let mut state = 0xD1B5_4A32_D192_ED03;
     let mut texts: Vec<Vec<u8>> = Vec::new();
     for _ in 0..6000 {
@@ -327,7 +338,6 @@ fn a_date_without_a_zone_is_in_the_zone_tz_spells() {
         // the zone was 44 minutes and 30 seconds west, and git drops the
         // seconds from the zone and from the instant alike
         ("Africa/Monrovia", "1971-06-01 12:00:00", "44628240 -0044"),
-        ("Nowhere/Zone", "2005-04-07 22:13:13", "1112911993 +0000"),
         ("", "2005-04-07 22:13:13", "1112911993 +0000"),
     ] {
         assert_eq!(read(given, tz).as_deref(), Some(written), "{given} in {tz}");

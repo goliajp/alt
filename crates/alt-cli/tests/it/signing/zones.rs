@@ -46,6 +46,25 @@ const DATED: &[(&str, &str)] = &[
 /// A zone no date above is in, for the daemon.
 const ELSEWHERE: &str = "Pacific/Kiritimati";
 
+/// These tests set git beside alt in zones both find in the zone
+/// database of the machine, which has to be there.
+fn needs_the_zone_database() {
+    for name in [
+        "Asia/Tokyo",
+        "America/New_York",
+        "Asia/Kathmandu",
+        ELSEWHERE,
+    ] {
+        let file = Path::new("/usr/share/zoneinfo").join(name);
+        assert!(
+            file.is_file(),
+            "{} is missing: these tests compare with git in the zones of the system, \
+             which needs its zone database (the tzdata package) installed",
+            file.display()
+        );
+    }
+}
+
 fn daemon_of(root: &Path) -> String {
     let meta = std::fs::read_to_string(root.join(".alt/daemon.meta")).unwrap();
     meta.lines().next().unwrap().to_owned()
@@ -53,6 +72,7 @@ fn daemon_of(root: &Path) -> String {
 
 #[test]
 fn a_date_is_read_as_git_reads_it_in_the_zone_of_the_caller() {
+    needs_the_zone_database();
     let dir = alt_os::temp::tempdir().unwrap();
     let theirs = dir.path().join("git");
     std::fs::create_dir(&theirs).unwrap();
@@ -174,6 +194,7 @@ fn git_in(root: &Path, tz: Option<&str>, args: &[&str]) -> Output {
 /// daemon's.
 #[test]
 fn a_commit_made_now_is_in_the_zone_of_the_caller_as_git_writes_it() {
+    needs_the_zone_database();
     let dir = alt_os::temp::tempdir().unwrap();
     let theirs = dir.path().join("git");
     std::fs::create_dir(&theirs).unwrap();
