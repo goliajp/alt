@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: find the objects of a push recorded as synced when it has landed over an add that was not
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_left_unsynced.rs
