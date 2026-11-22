@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say how a tree that a ref names is reported, and what a command that syncs does about an unsynced record that does not read
+author-type: human
+author: doracawl
+touched: docs/recovery.md
