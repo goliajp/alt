@@ -163,3 +163,106 @@ fn a_daemon_without_meta_is_left_alone_and_the_command_runs_itself() {
     assert_eq!(meta(root.path()), None, "another daemon was started");
     alt_os::sys::kill(older, alt_os::sys::SIGTERM).unwrap();
 }
+
+/// The programs of two builds side by side, as they are after one of the
+/// two is replaced and the other is not.
+fn beside(dir: &Path, alt: &Path, altd: &Path) -> PathBuf {
+    std::fs::create_dir(dir).unwrap();
+    std::fs::copy(alt, dir.join("alt")).unwrap();
+    std::fs::copy(altd, dir.join("altd")).unwrap();
+    dir.join("alt")
+}
+
+fn committer(repo: &Path) -> String {
+    let new = Path::new(env!("CARGO_BIN_EXE_alt"));
+    let commit = ok(run(new, repo, &["cat-file", "-p", "HEAD"], false));
+    let line = commit.lines().find(|line| line.starts_with("committer "));
+    line.unwrap().rsplitn(3, ' ').last().unwrap().to_owned()
+}
+
+/// An `altd` from before the committer was the caller's to name writes
+/// the author for the committer, and one of them declares the markers:
+/// it is the `altd` beside this build's `alt` where `alt` alone was
+/// replaced. What it does not declare is that it names the two as the
+/// caller does, and for that it is stopped as any other daemon is.
+#[test]
+fn a_daemon_that_does_not_declare_whom_it_writes_by_is_stopped() {
+    use std::os::unix::fs::MetadataExt;
+
+    let root = alt_os::temp::tempdir().unwrap();
+    let older = served_by_the_older_daemon(root.path());
+    let altd = new_altd().canonicalize().unwrap();
+    let file = std::fs::metadata(&altd).unwrap();
+    let mtime = file.mtime() as u128 * 1_000_000_000 + file.mtime_nsec() as u128;
+    let claimed = format!(
+        "{older}\n{}\n{mtime}\n{}\nsynced-markers\n{}\n",
+        altd.display(),
+        file.len(),
+        alt_cli::daemon::locale_path()
+    );
+    std::fs::write(root.path().join(".alt/daemon.meta"), claimed).unwrap();
+
+    commit(root.path());
+    assert_served_by_this_builds_daemon(root.path(), older);
+    let declared = &meta(root.path()).unwrap()[4];
+    assert!(
+        declared.split(' ').any(|word| word == "caller-signing"),
+        "{declared}"
+    );
+    assert_eq!(
+        committer(root.path()),
+        "committer Test Committer <committer@test.invalid>"
+    );
+}
+
+/// An `alt` from before sends this build's daemon the author's name and
+/// address and nothing of the committer: the committer is the one the
+/// configuration names, and where it names none the commit is refused.
+/// Nobody is made up of the caller's login.
+#[test]
+fn this_builds_daemon_beside_the_older_alt_makes_no_committer_up() {
+    let root = alt_os::temp::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let new = Path::new(env!("CARGO_BIN_EXE_alt"));
+    let mixed = beside(&root.path().join("bin"), &old_alt(), &new_altd());
+    std::fs::create_dir(&repo).unwrap();
+    ok(run(new, &repo, &["init", "."], false));
+    std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+    ok(run(new, &repo, &["add", "."], false));
+    ok(run(new, &repo, &["commit", "-m", "base"], false));
+    let head = ok(run(new, &repo, &["rev-parse", "HEAD"], false));
+
+    std::fs::write(repo.join("b.txt"), "two\n").unwrap();
+    ok(run(&mixed, &repo, &["add", "."], true));
+    let unnamed = run(&mixed, &repo, &["commit", "-m", "second"], true);
+    let said = String::from_utf8_lossy(&unnamed.stderr);
+    let meta = meta(&repo).expect("this build's daemon wrote its meta");
+    assert_eq!(Path::new(&meta[1]), mixed.with_file_name("altd"));
+    let _stop = crate::scan_daemon::Stop(meta[0].parse().unwrap(), false);
+    assert!(!unnamed.status.success(), "the commit was made");
+    assert!(
+        said.contains("the committer's name and email are not set"),
+        "{said}"
+    );
+    assert_eq!(ok(run(new, &repo, &["rev-parse", "HEAD"], false)), head);
+
+    ok(run(
+        new,
+        &repo,
+        &["config", "user.name", "Configured"],
+        false,
+    ));
+    ok(run(
+        new,
+        &repo,
+        &["config", "user.email", "configured@test.invalid"],
+        false,
+    ));
+    ok(run(&mixed, &repo, &["commit", "-m", "second"], true));
+    assert_eq!(
+        committer(&repo),
+        "committer Configured <configured@test.invalid>"
+    );
+    let commit = ok(run(new, &repo, &["cat-file", "-p", "HEAD"], false));
+    assert!(commit.contains("\nauthor tester <t@e> "), "{commit}");
+}

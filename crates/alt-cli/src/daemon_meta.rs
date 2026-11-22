@@ -16,6 +16,15 @@ use std::path::Path;
 /// no write is given to such a daemon.
 pub const SYNCED_MARKERS: &str = "synced-markers";
 
+/// Declared by a daemon that takes the author and the committer of what
+/// it writes from the caller's variables and the configuration, each for
+/// itself, and makes nobody up. One that does not would write a committer
+/// the caller never named: no request is given to such a daemon.
+pub const CALLER_SIGNING: &str = "caller-signing";
+
+/// What this program needs a daemon to declare.
+const NEEDED: [&str; 2] = [SYNCED_MARKERS, CALLER_SIGNING];
+
 /// The mtime in nanoseconds and the size of the file at `path`.
 fn identity(path: &Path) -> Option<(u128, u64)> {
     let meta = std::fs::metadata(path).ok()?;
@@ -31,8 +40,9 @@ pub fn write(alt_dir: &Path) -> Option<()> {
     let (mtime, size) = identity(&altd)?;
     let pid = std::process::id();
     let content = format!(
-        "{pid}\n{}\n{mtime}\n{size}\n{SYNCED_MARKERS}\n{}\n",
+        "{pid}\n{}\n{mtime}\n{size}\n{}\n{}\n",
         altd.display(),
+        NEEDED.join(" "),
         crate::daemon::locale_path()
     );
     let path = alt_dir.join("daemon.meta");
@@ -71,11 +81,12 @@ pub fn read(alt_dir: &Path) -> Daemon {
         let mtime: u128 = lines.next()?.parse().ok()?;
         let size: u64 = lines.next()?.parse().ok()?;
         let declared = lines.next().unwrap_or("");
-        let markers = declared.split(' ').any(|word| word == SYNCED_MARKERS);
+        let declares = |needed: &&str| declared.split(' ').any(|word| word == *needed);
+        let declared = NEEDED.iter().all(declares);
         let locales = lines.next().unwrap_or("") == crate::daemon::locale_path();
-        Some((pid, path, (mtime, size), markers, locales))
+        Some((pid, path, (mtime, size), declared, locales))
     })();
-    let Some((pid, path, identity_then, markers, locales)) = parsed else {
+    let Some((pid, path, identity_then, declared, locales)) = parsed else {
         return Daemon::Unknown;
     };
     if alt_os::sys::kill(pid as i32, 0).is_err() {
@@ -86,7 +97,7 @@ pub fn read(alt_dir: &Path) -> Daemon {
         .map(|alt| alt.with_file_name("altd"))
         .filter(|altd| altd.display().to_string() == path)
         .and_then(|altd| identity(&altd));
-    match (markers && ours == Some(identity_then), locales) {
+    match (declared && ours == Some(identity_then), locales) {
         (true, true) => Daemon::Ours,
         (true, false) => Daemon::Elsewhere,
         (false, _) => Daemon::Other(pid),
