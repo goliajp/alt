@@ -40,6 +40,31 @@ impl Counts {
     fn table(&self, width: usize) -> usize {
         self.changes * (width + 1) + self.kinds * 6 + self.rest(width)
     }
+
+    /// Whether a table of these counts is no longer than the `left`
+    /// bytes it is to be read from: no count is believed past that.
+    fn fits(&self, width: usize, left: usize) -> bool {
+        let Counts {
+            ut,
+            standard,
+            leaps,
+            changes,
+            kinds,
+            letters,
+        } = *self;
+        let parts = [
+            (changes, width + 1),
+            (kinds, 6),
+            (letters, 1),
+            (leaps, width + 4),
+            (standard, 1),
+            (ut, 1),
+        ];
+        let length = parts.iter().try_fold(0usize, |length, (count, each)| {
+            length.checked_add(count.checked_mul(*each)?)
+        });
+        length.is_some_and(|length| length <= left)
+    }
 }
 
 /// The version and the counts of the table that follows.
@@ -53,17 +78,15 @@ fn header(from: &mut Reader) -> Option<(u8, Counts)> {
         *count = from.u32()? as usize;
     }
     let [ut, standard, leaps, changes, kinds, letters] = counts;
-    Some((
-        version,
-        Counts {
-            ut,
-            standard,
-            leaps,
-            changes,
-            kinds,
-            letters,
-        },
-    ))
+    let counts = Counts {
+        ut,
+        standard,
+        leaps,
+        changes,
+        kinds,
+        letters,
+    };
+    Some((version, counts))
 }
 
 pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
@@ -71,10 +94,12 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
     let (version, mut counts) = header(&mut from)?;
     let wide = version >= b'2';
     if wide {
+        counts.fits(4, from.0.len()).then_some(())?;
         from.take(counts.table(4))?;
         counts = header(&mut from)?.1;
     }
     let width = if wide { 8 } else { 4 };
+    counts.fits(width, from.0.len()).then_some(())?;
     let mut instants = Vec::with_capacity(counts.changes);
     for _ in 0..counts.changes {
         let instant = from.take(width)?;
@@ -203,5 +228,96 @@ mod tests {
         misruled.extend(table(b'2', 8, CHANGES, OFFSETS));
         misruled.extend(b"\nnot a rule\n");
         assert!(parse(&misruled).is_none());
+    }
+
+    /// Where the six counts of a header begin.
+    const COUNTS: usize = 20;
+
+    #[test]
+    fn a_count_greater_than_what_is_left_of_the_file_is_not_believed() {
+        let first = table(0, 4, CHANGES, OFFSETS);
+        let mut second = table(b'2', 4, &[(5, 0)], &[60]);
+        let later = second.len();
+        second.extend(table(b'2', 8, CHANGES, OFFSETS));
+        second.extend(b"\nJST-9\n");
+        assert!(parse(&first).is_some() && parse(&second).is_some());
+        for (file, header) in [(&first, 0), (&second, 0), (&second, later)] {
+            for field in 0..6 {
+                for count in [u32::MAX, u32::MAX / 2, 1 << 24, file.len() as u32] {
+                    let mut file = file.clone();
+                    let at = header + COUNTS + 4 * field;
+                    file[at..at + 4].copy_from_slice(&count.to_be_bytes());
+                    assert!(parse(&file).is_none(), "{field} {count}");
+                }
+            }
+        }
+    }
+
+    fn next(state: &mut u64) -> usize {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        (*state >> 11) as usize
+    }
+
+    /// Reads `bytes` and asks what was read: nothing it holds is more
+    /// than the file had.
+    fn tried(bytes: &[u8]) -> bool {
+        let Some(zone) = parse(bytes) else {
+            return false;
+        };
+        assert!(zone.changes.capacity() <= bytes.len());
+        for instant in [i64::MIN, -1 << 40, 0, 1_112_911_993, 1 << 40, i64::MAX] {
+            zone.offset_at(instant);
+        }
+        for wall in [i64::MIN, 0, 1_112_911_993, 4_102_444_799, i64::MAX] {
+            zone.offset_of_local(wall);
+        }
+        true
+    }
+
+    #[test]
+    fn no_bytes_make_reading_a_file_or_asking_what_was_read_fail() {
+        let mut state = 0x2545_F491_4F6C_DD1D;
+        let mut files = vec![table(0, 4, CHANGES, OFFSETS)];
+        let mut second = table(b'3', 4, &[(5, 0)], &[60]);
+        second.extend(table(b'3', 8, CHANGES, OFFSETS));
+        second.extend(b"\nEST5EDT,M3.2.0,M11.1.0\n");
+        files.push(second);
+        // a file of the system, which has some hundred changes
+        files.push(std::fs::read("/usr/share/zoneinfo/America/New_York").unwrap());
+        let (mut tries, mut read) = (0, 0);
+        for file in &files {
+            assert!(tried(file));
+            for length in 0..file.len() {
+                read += usize::from(tried(&file[..length]));
+                let mut changed = file.clone();
+                changed[length] = next(&mut state) as u8;
+                read += usize::from(tried(&changed));
+                changed[length] = [0, 0xFF, 0x7F, 0x80][length % 4];
+                read += usize::from(tried(&changed));
+                tries += 3;
+            }
+            for _ in 0..500 {
+                let mut changed = file.clone();
+                let field = COUNTS + 4 * (next(&mut state) % 6);
+                let count = (next(&mut state) as u32) >> (next(&mut state) % 32);
+                changed[field..field + 4].copy_from_slice(&count.to_be_bytes());
+                read += usize::from(tried(&changed));
+                tries += 1;
+            }
+        }
+        for _ in 0..4000 {
+            let length = next(&mut state) % 300;
+            let mut bytes: Vec<u8> = (0..length).map(|_| next(&mut state) as u8).collect();
+            if next(&mut state).is_multiple_of(2) && length >= 5 {
+                bytes[..5].copy_from_slice(b"TZif2");
+            }
+            read += usize::from(tried(&bytes));
+            tries += 1;
+        }
+        assert!(tries > 9000, "{tries}");
+        // most changes leave a file that reads: what was read was asked
+        assert!(read > 1000, "{read} of {tries}");
     }
 }

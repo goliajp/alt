@@ -65,10 +65,14 @@ impl Rule {
         let Some(summer) = &self.summer else {
             return self.standard;
         };
-        let start =
-            |year| summer.start.0.of(year) * DAY + summer.start.1 - i64::from(self.standard);
-        let end = |year| summer.end.0.of(year) * DAY + summer.end.1 - i64::from(summer.offset);
-        let (this, _, _) = civil_from_days(instant.div_euclid(DAY));
+        // wider than an instant is, for the years at either end of them
+        let at = |(day, time): (Day, i64), year, offset: i32| {
+            i128::from(day.of(year)) * i128::from(DAY) + i128::from(time) - i128::from(offset)
+        };
+        let start = |year| at(summer.start, year, self.standard);
+        let end = |year| at(summer.end, year, summer.offset);
+        let instant = i128::from(instant);
+        let (this, _, _) = civil_from_days((instant.div_euclid(DAY.into())) as i64);
         let lasts = (this - 1..=this + 1).any(|year| {
             let begun = start(year);
             // south of the equator it ends in the year after
@@ -133,7 +137,7 @@ impl Cursor<'_> {
         }
         let [minutes, seconds] = rest;
         (hours <= 167 && minutes < 60 && seconds < 60)
-            .then_some(sign * (hours * 3600 + minutes * 60 + seconds))
+            .then(|| sign * (hours * 3600 + minutes * 60 + seconds))
     }
 
     /// A day and the time on it a change is made at, which is two in the
@@ -316,5 +320,82 @@ mod tests {
             assert_eq!(always.offset_at(at(2005, month, 1, 0, 0)), -14_400);
             assert_eq!(always.offset_at(at(2005, month, 28, 23, 0)), -14_400);
         }
+    }
+
+    #[test]
+    fn a_number_too_great_to_count_with_is_refused() {
+        for text in [
+            "XXX9000000000000000000",
+            "XXX9223372036854775807",
+            "XXX-9223372036854775807",
+            "XXX2562047788015216",
+            "XXX1:9223372036854775807",
+            "XXX1:1:9223372036854775807",
+            "EST5EDT9223372036854775807",
+            "EST5EDT,M3.2.0/9223372036854775807,M11.1.0",
+            "EST5EDT,M3.2.0/-9223372036854775807,M11.1.0",
+            "EST5EDT,J9223372036854775807,J300",
+            "EST5EDT,9223372036854775807,300",
+            "EST5EDT,M9223372036854775807.2.0,M11.1.0",
+            "EST5EDT,M3.9223372036854775807.0,M11.1.0",
+            "EST5EDT,M3.2.9223372036854775807,M11.1.0",
+        ] {
+            assert_eq!(parse(text), None, "{text}");
+        }
+    }
+
+    /// A step of a generator that gives the same numbers every run.
+    fn next(state: &mut u64) -> usize {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        (*state >> 11) as usize
+    }
+
+    #[test]
+    fn no_text_makes_reading_a_rule_or_asking_it_fail() {
+        const LETTERS: &[u8] = b"ESTDMJXYZ<>+-,./:0123456789 9999";
+        const RULES: [&str; 6] = [
+            "JST-9",
+            "EST5EDT,M3.2.0,M11.1.0",
+            "AEST-10AEDT,M10.1.0,M4.1.0/3",
+            "<-03>3<-02>,M3.5.0/-2,M10.5.0/-1",
+            "XYZ5ABC4:30,J60/1,J300/3:30",
+            "EST5EDT,0/0,J365/25",
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15;
+        let mut texts = Vec::new();
+        for _ in 0..4000 {
+            let length = next(&mut state) % 40;
+            let made = (0..length).map(|_| LETTERS[next(&mut state) % LETTERS.len()]);
+            texts.push(made.collect::<Vec<u8>>());
+        }
+        for rule in RULES {
+            for at in 0..rule.len() {
+                texts.push(rule.as_bytes()[..at].to_vec());
+                for letter in LETTERS {
+                    let mut changed = rule.as_bytes().to_vec();
+                    changed[at] = *letter;
+                    texts.push(changed);
+                    let mut longer = rule.as_bytes().to_vec();
+                    longer.insert(at, *letter);
+                    texts.push(longer);
+                }
+            }
+        }
+        assert!(texts.len() > 10_000);
+        let mut read = 0;
+        for text in texts {
+            let text = String::from_utf8(text).unwrap();
+            let Some(rule) = parse(&text) else { continue };
+            read += 1;
+            for year in [1970, 2005, 2038, 2099] {
+                for month in 1..=12 {
+                    let offset = rule.offset_at(at(year, month, 15, 12, 0));
+                    assert!(offset.abs() <= 168 * 3600, "{text}");
+                }
+            }
+        }
+        assert!(read > 100, "{read} rules were read");
     }
 }

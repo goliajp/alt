@@ -4,6 +4,8 @@
 //! the whole process and cannot be a caller's while another thread asks
 //! for another's.
 
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 mod rule;
@@ -14,6 +16,12 @@ use rule::Rule;
 const ZONES: &str = "/usr/share/zoneinfo";
 const SYSTEM: &str = "/etc/localtime";
 const DAY: i64 = 86_400;
+
+/// No file of the zone database is longer than this. The code the
+/// database comes with takes at most 2000 changes, 256 kinds of local
+/// time, 50 letters and 50 leap seconds from a table, which with both
+/// tables of a file and its last line comes to less than 34 KiB.
+const LONGEST: u64 = 64 << 10;
 
 /// The days from the epoch to a day of the Gregorian calendar; `month`
 /// is 1 to 12.
@@ -98,8 +106,20 @@ impl Zone {
         named.or_else(spelled).unwrap_or_else(Self::utc)
     }
 
+    /// The zone the file at `path` is of. What `TZ` names may be a pipe,
+    /// a device or a file without end: only a plain file no longer than
+    /// [`LONGEST`] is read, and nothing else is waited on.
     fn read(path: &Path) -> Option<Self> {
-        tzif::parse(&std::fs::read(path).ok()?)
+        let plain = |file: &std::fs::Metadata| file.is_file() && file.len() <= LONGEST;
+        std::fs::metadata(path).ok().filter(plain)?;
+        // a pipe put there since is not waited on for its writer
+        let mut open = std::fs::File::options();
+        let file = open.read(true).custom_flags(crate::sys::O_NONBLOCK);
+        let file = file.open(path).ok()?;
+        file.metadata().ok().filter(plain)?;
+        let mut bytes = Vec::new();
+        file.take(LONGEST + 1).read_to_end(&mut bytes).ok()?;
+        (bytes.len() as u64 <= LONGEST).then(|| tzif::parse(&bytes))?
     }
 
     fn ruled(rule: Rule) -> Self {
@@ -126,9 +146,9 @@ impl Zone {
     /// zone has twice is the earlier of the two, and one it skips is read
     /// by the offset before the skip.
     pub fn offset_of_local(&self, wall: i64) -> i32 {
-        let before = self.offset_at(wall - DAY);
-        let after = self.offset_at(wall + DAY);
-        let holds = |offset: i32| self.offset_at(wall - i64::from(offset)) == offset;
+        let before = self.offset_at(wall.saturating_sub(DAY));
+        let after = self.offset_at(wall.saturating_add(DAY));
+        let holds = |offset: i32| self.offset_at(wall.saturating_sub(offset.into())) == offset;
         if !holds(before) && holds(after) {
             return after;
         }
@@ -248,5 +268,63 @@ mod tests {
         if let Some(named) = named {
             assert_eq!(system, named);
         }
+    }
+
+    /// A file of the first version with one kind of local time, an hour
+    /// east, and `length` bytes in all: what follows the table is not
+    /// looked at.
+    fn padded(length: usize) -> Vec<u8> {
+        let mut bytes = b"TZif".to_vec();
+        bytes.extend([0; 16]);
+        for count in [0u32, 0, 0, 0, 1, 1] {
+            bytes.extend(count.to_be_bytes());
+        }
+        bytes.extend(3600i32.to_be_bytes());
+        bytes.extend([0, 0, b'X']);
+        assert!(bytes.len() <= length);
+        bytes.resize(length, 0);
+        bytes
+    }
+
+    #[test]
+    fn what_tz_names_is_read_only_where_it_is_a_file_of_a_length_a_zone_has() {
+        let dir = crate::temp::tempdir().unwrap();
+        let at = |name: &str| dir.path().join(name).to_str().unwrap().to_owned();
+        let longest = LONGEST as usize;
+        std::fs::write(at("short"), padded(64)).unwrap();
+        std::fs::write(at("longest"), padded(longest)).unwrap();
+        std::fs::write(at("longer"), padded(longest + 1)).unwrap();
+        std::fs::write(at("huge"), padded(64)).unwrap();
+        let huge = std::fs::File::options().write(true).open(at("huge"));
+        huge.unwrap().set_len(1 << 40).unwrap();
+        let pipe = std::ffi::CString::new(at("pipe")).unwrap();
+        // SAFETY: the path is NUL-terminated and outlives the call
+        assert_eq!(unsafe { crate::sys::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+        std::os::unix::fs::symlink(at("pipe"), at("to-the-pipe")).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", at("to-zero")).unwrap();
+
+        for read in ["short", "longest"] {
+            let zone = Zone::of(Some(&at(read)));
+            assert_eq!(zone.offset_at(0), 3600, "{read}");
+            assert_eq!(Zone::of(Some(&format!(":{}", at(read)))), zone, "{read}");
+        }
+        let began = std::time::Instant::now();
+        let unread = [
+            "longer",
+            "huge",
+            "pipe",
+            "to-the-pipe",
+            "to-zero",
+            "",
+            "none",
+        ];
+        let unread = unread.map(at).into_iter();
+        let elsewhere = ["/dev/zero", "/dev/null", "/dev/urandom", "/", ZONES];
+        for named in unread.chain(elsewhere.map(str::to_owned)) {
+            assert_eq!(Zone::of(Some(&named)), Zone::utc(), "{named}");
+            assert_eq!(Zone::of(Some(&format!(":{named}"))), Zone::utc(), "{named}");
+        }
+        // nothing was read to its end or waited on
+        assert!(began.elapsed() < std::time::Duration::from_secs(20));
     }
 }
