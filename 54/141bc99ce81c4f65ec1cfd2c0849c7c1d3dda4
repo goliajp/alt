@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: read an object whose content went with unsynced records of the blob map or the tier 1 map as not stored
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut/unread.rs
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-odb/src/lib.rs
+touched: crates/alt-odb/src/odb/confirmed.rs
+touched: docs/recovery.md
