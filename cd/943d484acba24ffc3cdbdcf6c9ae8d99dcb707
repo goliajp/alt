@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: feat
+summary: complete the settings that name the author and the committer
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/complete.rs
