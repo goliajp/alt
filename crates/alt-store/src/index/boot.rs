@@ -354,4 +354,34 @@ mod tests {
         drop(store);
         all_found(&opened(dir, None).unwrap(), &ids);
     }
+
+    #[test]
+    fn a_handle_that_holds_a_boot_run_builds_a_run_of_the_chain_over_its_records_too() {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let dir = tmp.path();
+        let mut store = ChunkStore::open(dir).unwrap();
+        let mut ids = put(&mut store, 0..300);
+        let (start, end) = store.index_boot_run("boot").unwrap().unwrap();
+        drop(store);
+        let dir_name = "boot".to_owned();
+        let named = BootRun {
+            dir: dir_name,
+            start,
+            end,
+        };
+        // enough records past the boot run for a run of the chain, which
+        // begins where the chain ends: before what the boot run covers
+        let mut store = opened(dir, Some(&named)).unwrap();
+        ids.extend(put(&mut store, 300..600));
+        assert_eq!(store.boot_run(), Some((start, end)));
+        store.index_tail().unwrap();
+        assert_eq!(store.boot_run(), None);
+        let chain = store.run_chain();
+        assert_eq!(chain.len(), 1, "{chain:?}");
+        assert!(chain[0].0 == start && chain[0].1 > end, "{chain:?}");
+        assert!(!dir.join("chunks.idx/boot").exists());
+        all_found(&store, &ids);
+        drop(store);
+        all_found(&opened(dir, None).unwrap(), &ids);
+    }
 }

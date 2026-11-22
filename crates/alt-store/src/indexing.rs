@@ -95,8 +95,10 @@ impl ChunkStore {
             return Ok(());
         }
         // the runs on disk stop short of where this handle's tail begins
-        // (their directory was removed while it was open): read the packs
-        // again from where they stop now, then index
+        // (their directory was removed while it was open, or a boot run
+        // lies between): read the packs again from where the chain stops
+        // now, then index
+        self.tail = self.tail.clone().with_boot_run(None);
         self.reload_whole()?;
         self.index_from_tail(u64::MAX).map(drop)
     }
