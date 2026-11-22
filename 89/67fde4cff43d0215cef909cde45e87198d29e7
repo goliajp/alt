@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: ask again whether what a boot left unsynced is as written once a writer that syncs nothing let go of its boot runs
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/bound.rs
+touched: crates/alt-odb/tests/it/boot_runs_unread.rs
+touched: crates/alt-odb/tests/it/main.rs
