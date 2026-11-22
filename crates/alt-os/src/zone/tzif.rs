@@ -101,7 +101,8 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
     let (version, mut counts) = header(&mut from)?;
     let wide = version >= b'2';
     if wide {
-        counts.fits(4, from.0.len()).then_some(())?;
+        // nothing is given room for a table that is passed over, and one
+        // longer than the file is not there to pass over
         from.take(counts.table(4))?;
         counts = header(&mut from)?.1;
     }
