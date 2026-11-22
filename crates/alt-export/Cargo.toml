@@ -4,6 +4,7 @@ description = "alt export: rebuild a semantically equivalent .git from a native 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-git-codec.workspace = true

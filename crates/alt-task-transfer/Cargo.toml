@@ -4,6 +4,7 @@ description = "Explicit immutable task publication packages and received history
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-hash.workspace = true

@@ -3,6 +3,7 @@ name = "alt-server-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-byte-segment.workspace = true

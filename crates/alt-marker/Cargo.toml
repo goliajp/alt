@@ -4,6 +4,7 @@ description = "alt marker file: a small state kept in two checksummed slots, cha
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-hash.workspace = true

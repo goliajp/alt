@@ -4,6 +4,7 @@ description = "Immutable input identities for reproducible validation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-hash.workspace = true

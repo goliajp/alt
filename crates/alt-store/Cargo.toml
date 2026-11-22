@@ -4,6 +4,7 @@ description = "alt chunk store: append-only altpack files, zstd-compressed, BLAK
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-cdc.workspace = true

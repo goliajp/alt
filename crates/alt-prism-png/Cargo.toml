@@ -4,6 +4,7 @@ description = "PNG container prism: parse the chunk graph, inflate the concatena
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-deflate.workspace = true

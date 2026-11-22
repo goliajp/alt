@@ -4,6 +4,7 @@ description = "alt native ref store: transactional ref state replayed from the o
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-git-codec.workspace = true

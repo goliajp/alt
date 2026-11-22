@@ -4,6 +4,7 @@ description = "Deflate/zlib strip prism: inflate transparent compression, record
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-deflate.workspace = true

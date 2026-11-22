@@ -4,5 +4,6 @@ description = "Prism layer: encoding-aware reversible decomposition (Tier 1) wit
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]

@@ -4,6 +4,7 @@ description = "The operating system interface alt uses: random bytes, file mappi
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 

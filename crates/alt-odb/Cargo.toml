@@ -4,6 +4,7 @@ description = "alt native object database: canonical git object bytes in the chu
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-git-codec.workspace = true

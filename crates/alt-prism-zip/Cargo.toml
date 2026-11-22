@@ -4,6 +4,7 @@ description = "ZIP container prism: split a ZIP/OOXML/JAR/EPUB into its envelope
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-deflate.workspace = true

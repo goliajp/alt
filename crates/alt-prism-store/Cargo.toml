@@ -4,6 +4,7 @@ description = "Tier 1 storage layer: applies the prism pipeline over a blob stor
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-hash.workspace = true

@@ -4,6 +4,7 @@ description = "Working-tree status: scan the tree, flatten trees, and three-way 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-git-codec.workspace = true

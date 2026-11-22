@@ -4,6 +4,7 @@ description = "alt operation log: append-only, hash-chained op records with cras
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
 alt-hash.workspace = true
