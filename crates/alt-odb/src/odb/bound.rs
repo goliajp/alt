@@ -68,6 +68,9 @@ impl Odb {
         self.catch_up()?;
         let note = self.as_written(&marker, note)?;
         self.settle_boot_runs(&marker, note, notes.boot_runs)?;
+        // a boot run let go of just now covered records that are read
+        // only here
+        let note = self.as_written(&marker, note)?;
         self.bound(marker, note)?;
         Ok(true)
     }

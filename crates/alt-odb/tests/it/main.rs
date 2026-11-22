@@ -5,6 +5,7 @@ mod boot_runs;
 mod boot_runs_noted;
 #[cfg(target_os = "linux")]
 mod boot_runs_stuck;
+mod boot_runs_unread;
 mod cache_failure;
 mod compact_readers;
 mod confirmed;
