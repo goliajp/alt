@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: land a push over operations that were left unsynced, and give the log's lock up when what vouches for an op panics
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_left_unsynced.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/panic.rs
