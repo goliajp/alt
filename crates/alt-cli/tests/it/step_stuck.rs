@@ -22,6 +22,7 @@ pub(crate) fn limited(repo: &Path, args: &[&str], crash: Option<&str>) -> Output
     command
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env("GIT_CONFIG_NOSYSTEM", "1")

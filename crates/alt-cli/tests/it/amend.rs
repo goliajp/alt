@@ -11,6 +11,8 @@ fn alt_as(repo: &Path, who: &str, args: &[&str]) -> Output {
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", who)
         .env("GIT_AUTHOR_EMAIL", format!("{who}@e"))
+        .env("GIT_COMMITTER_NAME", who)
+        .env("GIT_COMMITTER_EMAIL", format!("{who}@e"))
         .args(args)
         .output()
         .unwrap()

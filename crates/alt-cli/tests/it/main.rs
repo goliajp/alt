@@ -133,6 +133,7 @@ mod scan_daemon_watches;
 mod scan_records;
 mod shell;
 mod show;
+mod signing;
 mod sink_barrier;
 mod staged_durability;
 mod staged_stored;
@@ -211,12 +212,27 @@ pub fn replace_file(path: &std::path::Path, bytes: impl AsRef<[u8]>) {
     std::fs::rename(new, path).unwrap();
 }
 
+/// Whom the commits of a test are by where it names nobody else.
+pub const TEST_SIGNING: [(&str, &str); 4] = [
+    ("GIT_AUTHOR_NAME", "Test Author"),
+    ("GIT_AUTHOR_EMAIL", "author@test.invalid"),
+    ("GIT_COMMITTER_NAME", "Test Committer"),
+    ("GIT_COMMITTER_EMAIL", "committer@test.invalid"),
+];
+
+/// Somebody for the commits a test makes in its own process.
+pub fn test_identity() -> alt_cli::native::Identity {
+    let named = TEST_SIGNING.map(|(key, value)| (key.to_owned(), value.to_owned()));
+    alt_cli::native::Identity::from_map(&named)
+}
+
 /// The `alt` binary under test, kept from the git configuration of the
 /// machine the tests run on, as the git they compare it with is. A test
 /// of that configuration gives the command a home of its own.
 pub fn alt_command() -> std::process::Command {
     let mut alt = std::process::Command::new(env!("CARGO_BIN_EXE_alt"));
     alt.env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null");
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .envs(TEST_SIGNING);
     alt
 }

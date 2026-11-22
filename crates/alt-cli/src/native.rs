@@ -63,6 +63,7 @@ mod requests;
 mod revert;
 mod sequence_editor;
 mod settings;
+mod signature;
 mod status;
 mod task;
 mod unconfirmed;
@@ -1437,8 +1438,7 @@ impl<'a> NativeRepo<'a> {
             ObjectKind::Tag => "tag",
         };
 
-        let when = (now_ms() / 1000) as i64;
-        let (tagger_name, tagger_email) = self.id.sig();
+        let tagger = self.committer()?;
         let msg = if message.ends_with('\n') {
             message.to_owned()
         } else {
@@ -1448,10 +1448,10 @@ impl<'a> NativeRepo<'a> {
             target,
             type_str,
             name,
-            tagger_name,
-            tagger_email,
-            when,
-            "+0000",
+            tagger.name(),
+            tagger.email(),
+            tagger.when(),
+            tagger.tz(),
             &msg,
         );
         let tag_oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Tag, &bytes);
@@ -1720,6 +1720,7 @@ impl<'a> NativeRepo<'a> {
         if bases == [ours] {
             return Ok(MergeOutcome::FastForward(theirs));
         }
+        let (author, committer) = (self.author()?, self.committer()?);
         let base_entries = self.base_entries(&bases)?;
         let ours_entries = self.commit_entries(ours)?;
         let theirs_entries = self.commit_entries(theirs)?;
@@ -1733,21 +1734,13 @@ impl<'a> NativeRepo<'a> {
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
         let algo = self.store.algo()?;
         let tree = write_tree(&mut self.store.odb, &entries, algo)?;
-        let when = (now_ms() / 1000) as i64;
-        let (name, email) = self.id.sig();
-        let sig = Sig {
-            name,
-            email,
-            when,
-            tz: "+0000",
-        };
         let msg = format!("Merge branch '{label}'\n");
         let commit = write_commit(
             &mut self.store.odb,
             tree,
             &[ours, theirs],
-            &sig,
-            &sig,
+            &author.sig(),
+            &committer.sig(),
             &msg,
             algo,
         )?;
@@ -3976,7 +3969,12 @@ mod tests {
 
     /// Opens an owning handle on `root`'s default (or named) workspace.
     fn open(root: &Path, ws: Option<&str>) -> OpenRepo {
-        OpenRepo::discover(root, ws, Identity::from_env()).unwrap()
+        let by = Identity::from_lookup(|key| match key {
+            "GIT_AUTHOR_NAME" | "GIT_COMMITTER_NAME" => Some("tester".to_owned()),
+            "GIT_AUTHOR_EMAIL" | "GIT_COMMITTER_EMAIL" => Some("t@e".to_owned()),
+            _ => std::env::var(key).ok(),
+        });
+        OpenRepo::discover(root, ws, by).unwrap()
     }
 
     /// The canonical wildcard refspec maps `refs/heads/<X>` →

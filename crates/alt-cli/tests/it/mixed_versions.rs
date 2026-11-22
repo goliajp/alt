@@ -32,6 +32,7 @@ pub(super) fn run(bin: &Path, repo: &Path, args: &[&str]) -> Output {
     Command::new(bin)
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .args(args)

@@ -10,6 +10,8 @@ fn alt(repo: &Path, args: &[&str]) -> Output {
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
         .args(args)
         .output()
         .unwrap()

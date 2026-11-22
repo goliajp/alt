@@ -26,6 +26,7 @@ impl NativeRepo<'_> {
         self.ensure_topic_branch_or_unborn("revert")?;
         self.ensure_no_merge_in_progress("revert")?;
         self.ensure_clean("revert")?;
+        self.ensure_signing()?;
         let repo = self.store.git_view()?;
         let todo = revs
             .iter()
@@ -45,6 +46,7 @@ impl NativeRepo<'_> {
         let state = self
             .revert_state()?
             .ok_or("revert --continue: no revert in progress")?;
+        self.ensure_signing()?;
         if let Some(current) = state.current {
             if self.index()?.entries.iter().any(|e| e.stage() > 0) {
                 return Err(
@@ -185,21 +187,14 @@ impl NativeRepo<'_> {
             return Err("revert: nothing to commit, the revert changes nothing".into());
         }
         let branch = self.head_branch()?;
-        let id = self.id.clone();
-        let (name, email) = id.sig();
-        let me = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
+        let (author, committer) = (self.author()?, self.committer()?);
         self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &[head],
-                author: &me,
-                committer: &me,
+                author: &author.sig(),
+                committer: &committer.sig(),
                 message: msg,
             },
             &branch,

@@ -33,6 +33,7 @@ impl NativeRepo<'_> {
         self.ensure_topic_branch_or_unborn("rebase")?;
         self.ensure_no_merge_in_progress("rebase")?;
         self.ensure_clean("rebase")?;
+        self.committer()?;
         let branch = self.head_branch()?;
         if !branch.starts_with("refs/heads/") {
             return Err("rebase: HEAD is not on a branch".into());
@@ -101,6 +102,7 @@ impl NativeRepo<'_> {
         let mut state = self
             .rebase_state()?
             .ok_or("rebase --continue: no rebase in progress")?;
+        self.committer()?;
         if let Some((action, commit)) = state.current {
             if self.index()?.entries.iter().any(|e| e.stage() > 0) {
                 return Err(
@@ -230,14 +232,7 @@ impl NativeRepo<'_> {
             (vec![head], theirs.author, message)
         };
         let author = parse_sig(&author_line)?;
-        let id = self.id.clone();
-        let (name, email) = id.sig();
-        let me = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
+        let me = self.committer()?;
         let scratch = self.scratch_ref();
         self.record_commit(
             NewCommit {
@@ -245,7 +240,7 @@ impl NativeRepo<'_> {
                 tree,
                 parents: &parents,
                 author: &author,
-                committer: &me,
+                committer: &me.sig(),
                 message: &message,
             },
             &scratch,

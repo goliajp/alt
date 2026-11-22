@@ -12,6 +12,7 @@ impl NativeRepo<'_> {
         let (picked, head) = self
             .stopped_cherry_pick()?
             .ok_or("cherry-pick --continue: no cherry-pick in progress")?;
+        let committer = self.committer()?;
         if self.index()?.entries.iter().any(|e| e.stage() > 0) {
             return Err(
                 "cherry-pick --continue: resolve the conflicts and `alt add` them first".into(),
@@ -34,14 +35,6 @@ impl NativeRepo<'_> {
         let source = alt_git_codec::Commit::parse(&source.data)?;
         let (author, message) = picked_identity(&source, picked)?;
         let branch = self.head_branch()?;
-        let id = self.id.clone();
-        let (name, email) = id.sig();
-        let committer = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
         self.clear_cherry_pick()?;
         let commit = self.record_commit(
             NewCommit {
@@ -49,7 +42,7 @@ impl NativeRepo<'_> {
                 tree,
                 parents: &[head],
                 author: &author,
-                committer: &committer,
+                committer: &committer.sig(),
                 message: &message,
             },
             &branch,

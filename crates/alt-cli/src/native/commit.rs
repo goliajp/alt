@@ -42,6 +42,11 @@ impl NativeRepo<'_> {
         if self.bisect_in_progress() {
             return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
         }
+        let committer = self.committer()?;
+        let author = match self.picked_author()? {
+            Some(_) => None,
+            None => Some(self.author()?),
+        };
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
         let head_tree = parent.map(|p| self.commit_tree(p)).transpose()?;
@@ -62,14 +67,8 @@ impl NativeRepo<'_> {
         }
         let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
 
-        let id = self.id.clone();
-        let (name, email) = id.sig();
-        let me = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
+        let me = committer.sig();
+        let mine = author.as_ref().map(|by| by.sig());
         let msg = with_newline(message);
         let picked = self.concluding()?;
         let commit = self.record_commit(
@@ -77,7 +76,7 @@ impl NativeRepo<'_> {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
-                author: picked.as_ref().unwrap_or(&me),
+                author: picked.as_ref().or(mine.as_ref()).unwrap_or(&me),
                 committer: &me,
                 message: &msg,
             },
@@ -104,6 +103,7 @@ impl NativeRepo<'_> {
         self.ensure_writable("commit --amend")?;
         self.ensure_topic_branch_or_unborn("commit --amend")?;
         self.ensure_no_merge_in_progress("commit --amend")?;
+        let committer = self.committer()?;
         let branch = self.head_branch()?;
         let old = self
             .store
@@ -137,21 +137,13 @@ impl NativeRepo<'_> {
         if !opts.no_verify {
             self.run_precommit()?;
         }
-        let id = self.id.clone();
-        let (name, email) = id.sig();
-        let me = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
                 author: &author,
-                committer: &me,
+                committer: &committer.sig(),
                 message: &msg,
             },
             &branch,

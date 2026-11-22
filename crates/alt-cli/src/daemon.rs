@@ -14,8 +14,14 @@ use std::path::PathBuf;
 /// The env vars a command may read; the client forwards exactly these so the
 /// daemon runs with the caller's identity/options, not its own.
 pub const FORWARDED_ENV: &[&str] = &[
+    // who the author and the committer are, and when
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+    "EMAIL",
     "USER",
     // structured principal: kind/id distinguish agent runs from human
     // logins, session correlates a multi-step agent run in the op log.

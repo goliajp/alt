@@ -37,6 +37,7 @@ pub fn zsh(cwd: &Path) -> Command {
             format!("{}:{path}", alt.parent().unwrap().display()),
         )
         .env("ALT_NO_DAEMON", "1")
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env("GIT_CONFIG_NOSYSTEM", "1")

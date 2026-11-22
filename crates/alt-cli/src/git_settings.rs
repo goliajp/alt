@@ -14,8 +14,8 @@ use alt_git_config::{Config, Entry, IncludeContext};
 mod applying;
 mod files;
 
-pub(crate) use applying::applying;
 pub use applying::forget;
+pub(crate) use applying::{Applying, applying};
 
 pub(crate) use files::{outer_attributes, read_if_file, user_attributes, user_excludes};
 

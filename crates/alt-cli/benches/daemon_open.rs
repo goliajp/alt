@@ -33,6 +33,8 @@ fn run(cwd: &Path, args: &[&str]) {
         .current_dir(cwd)
         .env("GIT_AUTHOR_NAME", "bench")
         .env("GIT_AUTHOR_EMAIL", "b@e")
+        .env("GIT_COMMITTER_NAME", "bench")
+        .env("GIT_COMMITTER_EMAIL", "b@e")
         .env("ALT_RELAXED_DURABILITY", "1") // setup speed only; not timed
         .args(args)
         .status()

@@ -74,8 +74,7 @@ impl NativeRepo<'_> {
         }
         // another writer flushes its objects before it moves the ref
         self.store.odb.refresh()?;
-        let (name, email) = self.id.sig();
-        let signature = format!("{name} <{email}> {} +0000", now_ms() / 1000);
+        let signature = self.committer()?.line();
         let algo = self.store.algo()?;
         let odb = std::cell::RefCell::new(&mut self.store.odb);
         let read = |id: ObjectId| -> meta::ReadResult {

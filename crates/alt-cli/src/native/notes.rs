@@ -90,6 +90,7 @@ impl NativeRepo<'_> {
     /// and the two are synced as one.
     fn note_change_with(&mut self, of: (ObjectId, Option<&[u8]>), note: &Meta) -> Res<RefChange> {
         let (target, unstored) = of;
+        let signature = self.committer()?.line();
         let parent = self.store.refs.resolve(meta::NOTES_REF)?;
         // another writer flushes its objects before it moves the ref, so
         // catching the odb up after reading the ref makes the tip readable;
@@ -99,8 +100,6 @@ impl NativeRepo<'_> {
         if let Some(bytes) = unstored {
             self.store.odb.put(target, ObjectKind::Commit, bytes)?;
         }
-        let (name, email) = self.id.sig();
-        let signature = format!("{name} <{email}> {} +0000", now_ms() / 1000);
         let algo = self.store.algo()?;
         let odb = std::cell::RefCell::new(&mut self.store.odb);
         let read = |id: ObjectId| -> meta::ReadResult {

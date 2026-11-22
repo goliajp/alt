@@ -103,8 +103,8 @@ impl Principal {
     }
 }
 
-/// Who is acting: the structured principal that names the op-log actor and the
-/// (separate) author identity for git commits. Built per request from the
+/// Who is acting: the structured principal that names the op-log actor and,
+/// apart from it, what the caller says of the author and the committer. Built per request from the
 /// caller's environment, not from process globals — so the daemon can serve
 /// concurrent callers with distinct identities without racing on `std::env`.
 ///
@@ -115,8 +115,8 @@ impl Principal {
 pub struct Identity {
     pub(super) principal: Principal,
     pub(super) user: String,
-    pub(super) author_name: String,
-    pub(super) author_email: String,
+    /// what the caller's environment says of the author and the committer
+    pub(super) said: super::signature::Said,
     /// Whom an agent acts for (`ALT_CONTROLLING`), recorded in commit
     /// metadata.
     pub(super) controlling: Option<String>,
@@ -157,16 +157,10 @@ impl Identity {
             .unwrap_or(PrincipalKind::Human);
         let id = get("ALT_PRINCIPAL_ID").unwrap_or_else(|| user.clone());
         let session = get("ALT_SESSION_ID");
-        let author_name = get("GIT_AUTHOR_NAME")
-            .or_else(|| get("USER"))
-            .unwrap_or_else(|| "alt".to_owned());
-        let author_email =
-            get("GIT_AUTHOR_EMAIL").unwrap_or_else(|| format!("{author_name}@localhost"));
         Self {
             principal: Principal { kind, id, session },
             user,
-            author_name,
-            author_email,
+            said: super::signature::Said::from_lookup(&get),
             controlling: get("ALT_CONTROLLING").filter(|v| !v.is_empty()),
             protected_override: get("ALT_PROTECTED_OVERRIDE").is_some(),
             execution_environment: [
@@ -202,8 +196,8 @@ impl Identity {
 
     pub fn binding(&self) -> alt_json::Value {
         alt_json::json!({
-            "actor": self.actor("request"), "author_name": self.author_name,
-            "author_email": self.author_email, "controlling": self.controlling,
+            "actor": self.actor("request"), "signing": self.said.binding(),
+            "controlling": self.controlling,
             "protected_override": self.protected_override, "environment":self.execution_environment,
         })
     }
@@ -213,10 +207,5 @@ impl Identity {
     /// `cli/<verb>@<user>` form for ops written by older alt.
     pub(super) fn actor(&self, verb: &str) -> String {
         self.principal.actor_string(&self.user, verb)
-    }
-
-    /// The commit author/committer identity (name, email).
-    pub(super) fn sig(&self) -> (&str, &str) {
-        (&self.author_name, &self.author_email)
     }
 }

@@ -32,6 +32,7 @@ fn shell(repo: &Path, redirect: &str, args: &str) -> Command {
         .env("ALT", env!("CARGO_BIN_EXE_alt"))
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e");
     command

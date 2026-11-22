@@ -107,6 +107,8 @@ impl Scene {
             .env("ALT_NO_DAEMON", "1")
             .env("GIT_AUTHOR_NAME", "json-test")
             .env("GIT_AUTHOR_EMAIL", "json@test")
+            .env("GIT_COMMITTER_NAME", "json-test")
+            .env("GIT_COMMITTER_EMAIL", "json@test")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .stdin(Stdio::null());
         for (key, value) in &self.env {

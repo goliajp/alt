@@ -31,6 +31,7 @@ impl NativeRepo<'_> {
             .resolve(&head_ref)?
             .ok_or("cannot cherry-pick before the first commit")?;
         self.ensure_clean("cherry-pick")?;
+        let committer = self.committer()?;
 
         let base_entries = self.commit_entries(target_parent)?;
         let ours_entries = self.commit_entries(head_oid)?;
@@ -84,20 +85,13 @@ impl NativeRepo<'_> {
         let old = index_entries(&self.index()?);
 
         let (author_sig, msg) = picked_identity(&target_commit, target_oid)?;
-        let (committer_name, committer_email) = self.id.sig();
-        let committer = Sig {
-            name: committer_name,
-            email: committer_email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
 
         let commit = write_commit(
             &mut self.store.odb,
             tree,
             &[head_oid],
             &author_sig,
-            &committer,
+            &committer.sig(),
             &msg,
             algo,
         )?;

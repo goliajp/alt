@@ -33,6 +33,7 @@ fn timed(cwd: &Path, cmd: &str, args: &[&str], no_daemon: bool) -> (Duration, Ou
     let t0 = Instant::now();
     let mut c = Command::new(cmd);
     c.current_dir(cwd)
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "bench")
         .env("GIT_AUTHOR_EMAIL", "bench@test")
         .env("GIT_CONFIG_NOSYSTEM", "1")

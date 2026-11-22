@@ -22,6 +22,8 @@ pub(crate) fn output(repo: &Path, args: &[&str], daemon: bool) -> Output {
         .current_dir(repo)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
+        .env("GIT_COMMITTER_NAME", "tester")
+        .env("GIT_COMMITTER_EMAIL", "t@e")
         .env("XDG_CONFIG_HOME", config)
         .args(args);
     match daemon {

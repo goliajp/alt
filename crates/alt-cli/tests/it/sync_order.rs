@@ -222,7 +222,7 @@ fn a_candidate_record_is_written_after_its_tree_is_synced() {
 #[test]
 fn the_index_of_a_stopped_merge_is_written_after_its_blobs_are_synced() {
     use super::unconfirmed::{alt, ok};
-    use alt_cli::native::{Identity, NativeRepo, resolve_workspace};
+    use alt_cli::native::{NativeRepo, resolve_workspace};
 
     let root = alt_os::temp::tempdir().unwrap();
     let repo = root.path();
@@ -244,7 +244,7 @@ fn the_index_of_a_stopped_merge_is_written_after_its_blobs_are_synced() {
     let (alt_dir, coord) = resolve_workspace(repo, None).unwrap();
     let mut store = Store::open(alt_dir).unwrap();
     store.set_defer_durability(true);
-    let mut merging = NativeRepo::attach(&mut store, coord, Identity::from_env(), None);
+    let mut merging = NativeRepo::attach(&mut store, coord, crate::test_identity(), None);
     let stopped = merging.merge("theirs", false, &mut Vec::new()).unwrap();
     assert!(stopped, "the merge did not stop on the conflict");
     let merged = std::fs::read_to_string(repo.join("each.txt")).unwrap();

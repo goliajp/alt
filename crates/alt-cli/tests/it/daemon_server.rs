@@ -73,6 +73,8 @@ impl Daemon {
             env: vec![
                 ("GIT_AUTHOR_NAME".into(), "tester".into()),
                 ("GIT_AUTHOR_EMAIL".into(), "t@e".into()),
+                ("GIT_COMMITTER_NAME".into(), "tester".into()),
+                ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
                 ("USER".into(), "tester".into()),
             ],
             id: None,
@@ -227,6 +229,8 @@ fn run_keyed(
         env: vec![
             ("GIT_AUTHOR_NAME".into(), author.into()),
             ("GIT_AUTHOR_EMAIL".into(), format!("{author}@e")),
+            ("GIT_COMMITTER_NAME".into(), "tester".into()),
+            ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
             ("USER".into(), author.into()),
         ],
         id,
@@ -447,6 +451,8 @@ fn daemon_routes_structured_principal_to_oplog_per_request() {
                 let env = vec![
                     ("GIT_AUTHOR_NAME".into(), agent_id.clone()),
                     ("GIT_AUTHOR_EMAIL".into(), format!("{agent_id}@e")),
+                    ("GIT_COMMITTER_NAME".into(), "tester".into()),
+                    ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
                     ("USER".into(), "tester".into()),
                     ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
                     ("ALT_PRINCIPAL_ID".into(), agent_id.clone()),
@@ -801,6 +807,8 @@ fn daemon_picks_up_policy_edits_on_the_next_request() {
     let env = vec![
         ("GIT_AUTHOR_NAME".into(), "rover".into()),
         ("GIT_AUTHOR_EMAIL".into(), "rover@e".into()),
+        ("GIT_COMMITTER_NAME".into(), "tester".into()),
+        ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
         ("USER".into(), "operator".into()),
         ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
         ("ALT_PRINCIPAL_ID".into(), "rover".into()),
@@ -846,6 +854,8 @@ fn daemon_enforces_capability_policy_for_restricted_agent() {
     let env = vec![
         ("GIT_AUTHOR_NAME".into(), "rover".into()),
         ("GIT_AUTHOR_EMAIL".into(), "rover@e".into()),
+        ("GIT_COMMITTER_NAME".into(), "tester".into()),
+        ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
         ("USER".into(), "operator".into()),
         ("ALT_PRINCIPAL_KIND".into(), "agent".into()),
         ("ALT_PRINCIPAL_ID".into(), "rover".into()),
@@ -925,6 +935,8 @@ fn lost_response_after_execution_replays_the_durable_bytes_after_restart() {
             env: vec![
                 ("GIT_AUTHOR_NAME".into(), "tester".into()),
                 ("GIT_AUTHOR_EMAIL".into(), "tester@e".into()),
+                ("GIT_COMMITTER_NAME".into(), "tester".into()),
+                ("GIT_COMMITTER_EMAIL".into(), "t@e".into()),
                 ("USER".into(), "tester".into()),
             ],
             id: Some(id),
@@ -1016,10 +1028,11 @@ fn protected_override_is_per_request_in_a_warm_daemon() {
             .map(str::to_owned)
             .to_vec(),
         cwd: root.path().to_owned(),
-        env: vec![
-            ("USER".into(), "tester".into()),
-            ("ALT_PROTECTED_OVERRIDE".into(), "1".into()),
-        ],
+        env: crate::TEST_SIGNING
+            .into_iter()
+            .chain([("USER", "tester"), ("ALT_PROTECTED_OVERRIDE", "1")])
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
         id: Some([90; 16]),
         drawn: false,
     };

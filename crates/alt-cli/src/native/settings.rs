@@ -117,14 +117,19 @@ impl NativeRepo<'_> {
     /// [`settings`](Self::settings), with the files they were read from or
     /// would be once those exist.
     fn settings_listed(&self) -> Res<(alt_git_config::Config, Vec<PathBuf>)> {
+        let read = self.applying()?;
+        Ok((read.config.clone(), read.files.clone()))
+    }
+
+    /// What [`settings`](Self::settings) are a copy of.
+    pub(super) fn applying(&self) -> Res<std::sync::Arc<crate::git_settings::Applying>> {
         let dir = self.store.alt_dir.join("git-import");
         let branch = || {
             let full = self.head_branch().ok()?;
             let short = full.strip_prefix("refs/heads/")?;
             Some(BString::from(short.as_bytes().to_vec()))
         };
-        let read = crate::git_settings::applying(&dir, branch)?;
-        Ok((read.config.clone(), read.files.clone()))
+        crate::git_settings::applying(&dir, branch)
     }
 }
 

@@ -30,6 +30,7 @@ fn run(bin: &Path, repo: &Path, args: &[&str], daemon: bool) -> Output {
     let mut command = Command::new(bin);
     command
         .current_dir(repo)
+        .envs(crate::TEST_SIGNING)
         .env("GIT_AUTHOR_NAME", "tester")
         .env("GIT_AUTHOR_EMAIL", "t@e")
         .env("USER", "tester")

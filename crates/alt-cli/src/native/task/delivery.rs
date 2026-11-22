@@ -348,21 +348,20 @@ impl NativeRepo<'_> {
             }
         }
         self.run_precommit()?;
-        let identity = self.id.clone();
-        let (name, email) = identity.sig();
-        let sig = Sig {
-            name,
-            email,
-            when: (now_ms() / 1000) as i64,
-            tz: "+0000",
-        };
+        let (author, committer) = (self.author()?, self.committer()?);
         let message = if review.commit_message.ends_with('\n') {
             review.commit_message.clone()
         } else {
             format!("{}\n", review.commit_message)
         };
         let tree = ObjectId::from_hex(candidate.tree.as_bytes())?;
-        let mut bytes = build_commit_bytes(tree, &[before_oid], &sig, &sig, &message);
+        let mut bytes = build_commit_bytes(
+            tree,
+            &[before_oid],
+            &author.sig(),
+            &committer.sig(),
+            &message,
+        );
         if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
             bytes = signed;
         }
