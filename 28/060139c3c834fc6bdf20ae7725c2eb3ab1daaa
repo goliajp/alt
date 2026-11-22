@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: leave the log unrecorded as synced over a push whose objects did not sync
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/tests/it/altd_server_unsynced_objects.rs
