@@ -147,6 +147,15 @@ impl Odb {
         Ok(gone)
     }
 
+    /// [`Self::unconfirmed_objects`] with the blob map and the Tier 1 map
+    /// opened first, as a writer has them: a record of theirs that does
+    /// not read takes the objects stored after it as well.
+    pub(crate) fn unconfirmed_objects_whole(&self) -> Result<HashSet<ObjectId>, OdbError> {
+        self.blobs.open_map()?;
+        self.tier1()?;
+        self.unconfirmed_objects()
+    }
+
     /// [`Self::get`] for whoever asks what the store holds. The blob map
     /// and the Tier 1 map may be opened after `map.alt` was held to what
     /// is stored, and end in a record that does not read: an object

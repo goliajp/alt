@@ -85,11 +85,11 @@ pub(super) fn sync_objects_first(refs: &mut RefStore, alt_dir: &Path) {
 /// no boundary is to take it in. A command that writes cuts it before it
 /// does anything else, so this one saw the objects go after that.
 fn confirm_left(alt_dir: &Path, left: &[Op]) -> std::io::Result<()> {
-    let mut odb = None;
+    let odb = NativeOdb::reading(alt_dir);
+    let stored = stored_unsettled(&odb);
     for op in left {
         for oid in alt_refs::named_objects(op).map_err(std::io::Error::other)? {
-            let odb = odb.get_or_insert_with(|| NativeOdb::reading(alt_dir));
-            if !odb.contains(&oid).map_err(std::io::Error::other)? {
+            if !stored(&oid).map_err(|e| std::io::Error::other(e.to_string()))? {
                 return Err(std::io::Error::other(format!(
                     "an operation that was never synced names {oid}, which is not stored: run \
                      the command again"
@@ -98,6 +98,15 @@ fn confirm_left(alt_dir: &Path, left: &[Op]) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Whether an object is stored in `odb`, which nothing has settled: it
+/// reads, and its record is not one a writer cuts off, whichever file of
+/// the store that record or one before it names content of. What a
+/// command that reads leaves out is what the next one that writes cuts.
+pub(super) fn stored_unsettled(odb: &NativeOdb) -> impl Fn(&ObjectId) -> Res<bool> + '_ {
+    let stored = odb.stored_past_cuts();
+    move |oid: &ObjectId| Ok(stored(oid)?)
 }
 
 impl Store {
@@ -154,17 +163,8 @@ impl Store {
         self.refs.unsettled_by(|op| held(op, &also, &stored))
     }
 
-    /// Whether an object is stored, where nothing has settled the object
-    /// store: it reads, and its record is not one a writer cuts off.
     fn stored_unsettled(&self) -> impl Fn(&ObjectId) -> Res<bool> + '_ {
-        let gone = std::cell::OnceCell::new();
-        move |oid: &ObjectId| {
-            if gone.get().is_none() {
-                let _ = gone.set(self.odb.unconfirmed_objects()?);
-            }
-            let kept = gone.get().is_some_and(|gone| !gone.contains(oid));
-            Ok(kept && matches!(self.odb.get(oid), Ok(Some(_))))
-        }
+        stored_unsettled(&self.odb)
     }
 
     /// The ref store and the object store together, for a ref transaction

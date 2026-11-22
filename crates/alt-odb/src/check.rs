@@ -140,6 +140,22 @@ impl NativeOdb {
     pub fn unconfirmed_objects(&self) -> Result<HashSet<ObjectId>, OdbError> {
         self.odb()?.unconfirmed_objects()
     }
+
+    /// Whether an object is stored, for whoever judges an operation by
+    /// what it names and holds no write lock: the object reads, and its
+    /// record is not one a writer cuts off, whichever file of the store
+    /// that record or one before it names content of. Every file is
+    /// opened on the first call, so that the answer is a writer's.
+    pub fn stored_past_cuts(&self) -> impl Fn(&ObjectId) -> Result<bool, OdbError> + '_ {
+        let gone = std::cell::OnceCell::new();
+        move |oid: &ObjectId| {
+            if gone.get().is_none() {
+                let _ = gone.set(self.odb()?.unconfirmed_objects_whole()?);
+            }
+            let kept = gone.get().is_some_and(|gone| !gone.contains(oid));
+            Ok(kept && matches!(self.get(oid), Ok(Some(_))))
+        }
+    }
 }
 
 impl NativeOdb {

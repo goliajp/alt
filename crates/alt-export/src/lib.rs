@@ -222,7 +222,9 @@ fn write_git(
     let algo = write_config(alt_dir, git_dir)?;
     let odb = NativeOdb::reading(alt_dir);
     // an object that does not read fails the export below
-    let refs = RefStore::open_confirmed(alt_dir, also, |oid| odb.contains(oid).unwrap_or(true))?;
+    let stored = odb.stored_past_cuts();
+    let refs = RefStore::open_confirmed(alt_dir, also, |oid| stored(oid).unwrap_or(true))?;
+    drop(stored);
     let mut unstored: HashSet<ObjectId> = refs
         .iter()
         .filter_map(|(_, target)| match target {
