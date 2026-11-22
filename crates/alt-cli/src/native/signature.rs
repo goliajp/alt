@@ -10,7 +10,8 @@ use super::{NativeRepo, Res, now_ms};
 
 mod date;
 
-/// The variables that name the author and the committer.
+/// The variables that name the author and the committer, and the zone a
+/// date they give without one is in.
 const SIGNING_ENV: &[&str] = &[
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
@@ -19,6 +20,7 @@ const SIGNING_ENV: &[&str] = &[
     "GIT_COMMITTER_EMAIL",
     "GIT_COMMITTER_DATE",
     "EMAIL",
+    "TZ",
 ];
 
 /// What the caller's environment says of the author and the committer,
@@ -175,8 +177,11 @@ fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signatur
         (name, email) => return Err(unknown(word, name.is_none(), email.is_none())),
     };
     let (when, tz) = match told("DATE").filter(|date| !date.trim().is_empty()) {
-        Some(date) => date::parse(date)
-            .ok_or_else(|| crate::git_settings::fatal(format!("invalid date format: {date}")))?,
+        Some(date) => {
+            let local = |wall| alt_os::zone::Zone::of(said.get("TZ")).offset_of_local(wall);
+            date::parse(date, now, &local)
+                .ok_or_else(|| crate::git_settings::fatal(format!("invalid date format: {date}")))?
+        }
         None => (now, "+0000".to_owned()),
     };
     Ok(Signature {
@@ -369,6 +374,19 @@ mod tests {
         );
         let unset = [("GIT_AUTHOR_DATE", "")];
         assert_eq!(line(&unset, Role::Author, USER).unwrap(), "U <u@x> 7 +0000");
+        let zoned = [
+            ("GIT_AUTHOR_DATE", "2005-04-07 22:13:13"),
+            ("GIT_COMMITTER_DATE", "Thu Apr  7 22:13:13 EDT 2005"),
+            ("TZ", "America/New_York"),
+        ];
+        assert_eq!(
+            line(&zoned, Role::Author, USER).unwrap(),
+            "U <u@x> 1112926393 -0400"
+        );
+        assert_eq!(
+            line(&zoned, Role::Committer, USER).unwrap(),
+            "U <u@x> 1112926393 -0400"
+        );
         let bad = [("GIT_AUTHOR_DATE", "yesterday")];
         let error = line(&bad, Role::Author, USER).unwrap_err();
         assert_eq!(error, "invalid date format: yesterday");

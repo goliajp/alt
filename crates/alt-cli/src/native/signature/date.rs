@@ -1,213 +1,310 @@
-//! The date `GIT_AUTHOR_DATE` or `GIT_COMMITTER_DATE` gives, in the three
-//! forms git documents for them: its own (`<seconds> <zone>`, with or
-//! without `@` before it), ISO 8601 and RFC 2822. A date that names no
-//! zone is read as UTC, the zone every date made here is written in.
+//! The date `GIT_AUTHOR_DATE` or `GIT_COMMITTER_DATE` gives, read by the
+//! rules git reads it by. The text is taken a token at a time, in any
+//! order: a word is a month, a day of the week, a zone by its name, `AM`
+//! or `PM`; a number is seconds since the epoch, a date, a time, a day, a
+//! year or a month by its shape and by what is already known; a sign
+//! before digits is a zone. Whatever is none of these is passed over. A
+//! date without a zone is in the caller's.
+//!
+//! Three things git lets through are refused: a time or a zone that is
+//! written as one and cannot be one (`25:13:13`, `24:00:00`, `+2400`,
+//! `-3`), and a day its month does not have, or none.
 
-/// The seconds since the epoch and the zone as `±hhmm`.
-pub(super) fn parse(text: &str) -> Option<(i64, String)> {
-    let text = text.trim();
-    raw(text).or_else(|| iso(text)).or_else(|| rfc2822(text))
+use alt_os::zone::{civil_from_days, days_from_civil, days_in_month};
+
+mod words;
+
+const DAY: i64 = 86_400;
+/// the last year git reads
+const LAST_YEAR: i64 = 2099;
+
+/// What has been read of a date so far.
+#[derive(Default)]
+struct Read {
+    year: Option<i64>,
+    month: Option<i64>,
+    day: Option<i64>,
+    hour: Option<i64>,
+    minute: Option<i64>,
+    second: Option<i64>,
+    /// minutes east of UTC
+    zone: Option<i64>,
+    /// the date and the time came of seconds since the epoch, which are
+    /// in no zone
+    absolute: bool,
+    refused: bool,
 }
 
-struct Cursor<'a>(&'a [u8]);
+fn digit_at(text: &[u8], at: usize) -> bool {
+    text.get(at).is_some_and(u8::is_ascii_digit)
+}
 
-impl Cursor<'_> {
-    fn eat(&mut self, byte: u8) -> bool {
-        let found = self.0.first() == Some(&byte);
-        if found {
-            self.0 = &self.0[1..];
+/// The number whose digits begin at `at` and where they end.
+fn digits(text: &[u8], at: usize) -> (i64, usize) {
+    let length = text[at..].iter().take_while(|b| b.is_ascii_digit()).count();
+    let end = at + length;
+    let number = std::str::from_utf8(&text[at..end]).ok();
+    let number = number.and_then(|digits| digits.parse().ok());
+    (number.unwrap_or(i64::MAX), end)
+}
+
+/// The seconds from the epoch to a time of a day in UTC, for the years
+/// git reads.
+fn seconds(year: i64, month: i64, day: i64, time: [Option<i64>; 3]) -> Option<i64> {
+    let [hour, minute, second] = time;
+    let day = days_from_civil(year, month, 1) + day - 1;
+    (1970..=LAST_YEAR)
+        .contains(&year)
+        .then_some(day * DAY + hour? * 3600 + minute? * 60 + second?)
+}
+
+impl Read {
+    fn nothing(&self) -> bool {
+        let Read {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            ..
+        } = self;
+        [year, month, day, hour, minute, second]
+            .iter()
+            .all(|part| part.is_none())
+    }
+
+    fn time(&self) -> [Option<i64>; 3] {
+        [self.hour, self.minute, self.second]
+    }
+
+    fn set_time(&mut self, hour: i64, minute: i64, second: i64) -> bool {
+        let is_one =
+            (0..=24).contains(&hour) && (0..60).contains(&minute) && (0..=60).contains(&second);
+        if is_one {
+            (self.hour, self.minute, self.second) = (Some(hour), Some(minute), Some(second));
         }
-        found
+        is_one
     }
 
-    /// A number of `least` digits or more, of which `most` are taken.
-    fn number(&mut self, least: usize, most: usize) -> Option<i64> {
-        let digits = self.0.iter().take_while(|b| b.is_ascii_digit());
-        let digits = digits.take(most).count();
-        if digits < least {
-            return None;
+    /// Takes a year of four digits or of two, a month and a day for the
+    /// date where they can be one; `year` is -1 where none was written.
+    /// With `not_after`, the date is not taken either where it lies more
+    /// than ten days past that instant, and one without a year is taken.
+    fn set_date(&mut self, year: i64, month: i64, day: i64, not_after: Option<i64>) -> bool {
+        if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+            return false;
         }
-        let (number, rest) = self.0.split_at(digits);
-        self.0 = rest;
-        std::str::from_utf8(number).ok()?.parse().ok()
-    }
-
-    fn spaces(&mut self) -> bool {
-        let spaces = self.0.iter().take_while(|b| **b == b' ').count();
-        self.0 = &self.0[spaces..];
-        spaces > 0
-    }
-
-    /// `hh:mm`, with `:ss` and a fraction of a second, which is dropped,
-    /// where they are given: the seconds of the day.
-    fn time(&mut self) -> Option<i64> {
-        let hour = self.number(2, 2)?;
-        let minute = self.eat(b':').then(|| self.number(2, 2))??;
-        let second = match self.eat(b':') {
-            true => self.number(2, 2)?,
-            false => 0,
+        if not_after.is_none() {
+            // git keeps these two of a date whose year it then refuses
+            (self.month, self.day) = (Some(month), Some(day));
+        }
+        let full = match (year, not_after) {
+            (-1, Some(now)) => civil_from_days(now.div_euclid(DAY)).0,
+            (1970..=LAST_YEAR, _) => year,
+            (71..=99, _) => 1900 + year,
+            (0..=37, _) => 2000 + year,
+            _ => return false,
         };
-        if self.eat(b'.') {
-            self.number(1, 18)?;
+        if let Some(now) = not_after
+            && seconds(full, month, day, self.time()).is_some_and(|then| now + 10 * DAY < then)
+        {
+            return false;
         }
-        (hour < 24 && minute < 60 && second <= 60).then_some(hour * 3600 + minute * 60 + second)
+        (self.month, self.day) = (Some(month), Some(day));
+        if year != -1 {
+            self.year = Some(full);
+        }
+        true
     }
 
-    /// What is left as a zone, `Z`, `±hhmm`, `±hh:mm` or `±hh`, or the one
-    /// for `absent` where nothing is: the seconds it is east of UTC by.
-    fn zone(mut self, absent: Option<i64>) -> Option<i64> {
-        if self.0.is_empty() {
-            return absent;
+    /// Two or three numbers with `between` between them, the first of
+    /// which is `first` and ends at `end`: a time or a date. How much of
+    /// `text` they are, or 0 where they are neither.
+    fn several(&mut self, first: i64, between: u8, text: &[u8], end: usize, now: i64) -> usize {
+        let (second, mut end) = digits(text, end + 1);
+        let mut third = -1;
+        if text.get(end) == Some(&between) && digit_at(text, end + 1) {
+            (third, end) = digits(text, end + 1);
         }
-        if self.0 == b"Z" {
-            return Some(0);
+        if between == b':' {
+            if first == 24 || !self.set_time(first, second, third.max(0)) {
+                self.refused = true;
+                return 0;
+            }
+            // a fraction of a second, which is dropped
+            let dated = self.year.is_some() && self.month.is_some() && self.day.is_some();
+            if dated && text.get(end) == Some(&b'.') && digit_at(text, end + 1) {
+                end = digits(text, end + 1).1;
+            }
+            return end;
         }
-        let sign = match self.0.first()? {
-            b'+' => 1,
-            b'-' => -1,
-            _ => return None,
-        };
-        self.0 = &self.0[1..];
-        let hours = self.number(2, 2)?;
-        let minutes = match !self.eat(b':') && self.0.is_empty() {
-            true => 0,
-            false => self.number(2, 2)?,
-        };
-        (self.0.is_empty() && hours < 24 && minutes < 60)
-            .then_some(sign * (hours * 3600 + minutes * 60))
+        let now = Some(now);
+        let dotted = between == b'.';
+        // year-month-day, year-day-month, month/day/year, day.month.year
+        // and month.day.year, in the order git tries them
+        let is_date = first > 70
+            && (self.set_date(first, second, third, None)
+                || self.set_date(first, third, second, None))
+            || !dotted && self.set_date(third, first, second, now)
+            || self.set_date(third, second, first, now)
+            || dotted && self.set_date(third, first, second, now);
+        if is_date { end } else { 0 }
+    }
+
+    /// The number `text` begins with: how much of `text` it is.
+    fn number(&mut self, text: &[u8], now: i64) -> usize {
+        let (number, end) = digits(text, 0);
+        if (100_000_000..i64::MAX).contains(&number) && self.nothing() {
+            let (year, month, day) = civil_from_days(number / DAY);
+            let of_day = number % DAY;
+            (self.year, self.month, self.day) = (Some(year), Some(month), Some(day));
+            self.set_time(of_day / 3600, of_day / 60 % 60, of_day % 60);
+            self.absolute = true;
+            return end;
+        }
+        let between = text.get(end).copied().unwrap_or(0);
+        if matches!(between, b':' | b'.' | b'/' | b'-') && digit_at(text, end + 1) {
+            let both = self.several(number, between, text, end, now);
+            if both > 0 {
+                return both;
+            }
+        }
+        let (high, middle, low) = (number / 10_000, number / 100 % 100, number % 100);
+        match end {
+            // the date or the time without anything between its parts
+            8 => {
+                self.set_date(high, middle, low, None);
+                return end;
+            }
+            6 => {
+                let timed = self.set_time(high, middle, low);
+                if timed && text.get(end) == Some(&b'.') && digit_at(text, end + 1) {
+                    return digits(text, end + 1).1;
+                }
+                return end;
+            }
+            _ => {}
+        }
+        // the hours, or the hours and the minutes, after a `T`
+        if self.hour.is_none() && self.minute == Some(0) && self.second == Some(0) {
+            let (hour, minute) = if end == 4 { (middle, low) } else { (number, 0) };
+            if matches!(end, 2 | 4) && self.set_time(hour, minute, 0) {
+                return end;
+            }
+            (self.minute, self.second) = (None, None);
+        }
+        if end == 4 {
+            if number <= 1400 && self.zone.is_none() {
+                self.zone = Some(middle * 60 + low);
+            } else if (1901..2100).contains(&number) {
+                self.year = Some(number);
+            }
+            return end;
+        }
+        if end > 2 {
+            return end;
+        }
+        // a day before a month or a year
+        if (1..32).contains(&number) && self.day.is_none() {
+            self.day = Some(number);
+        } else if end == 2 && self.year.is_none() && number < 10 && self.day.is_some() {
+            self.year = Some(2000 + number);
+        } else if end == 2 && self.year.is_none() && number >= 70 {
+            self.year = Some(1900 + number);
+        } else if (1..13).contains(&number) && self.month.is_none() {
+            self.month = Some(number);
+        }
+        end
+    }
+
+    /// The sign `text` begins with and the digits after it, `hh`, `hhmm`
+    /// or `hh:mm`: how much of `text` they are.
+    fn zone(&mut self, text: &[u8]) -> usize {
+        let (mut hours, mut end) = digits(text, 1);
+        let mut minutes = 0;
+        let mut shaped = true;
+        match end - 1 {
+            4 => (hours, minutes) = (hours / 100, hours % 100),
+            2 if text.get(end) == Some(&b':') => {
+                (minutes, end) = digits(text, end + 1);
+                shaped = end == 6;
+            }
+            2 => {}
+            _ => shaped = false,
+        }
+        if shaped && hours < 24 && minutes < 60 {
+            let east = hours * 60 + minutes;
+            self.zone = Some(if text[0] == b'-' { -east } else { east });
+        } else {
+            self.refused = true;
+        }
+        end
     }
 }
 
-fn written(seconds: i64, east: i64) -> Option<(i64, String)> {
+fn written(seconds: i64, east: i64) -> (i64, String) {
     let sign = if east < 0 { '-' } else { '+' };
-    let minutes = east.abs() / 60;
+    let minutes = east.abs();
     let zone = format!("{sign}{:02}{:02}", minutes / 60, minutes % 60);
-    (seconds >= 0).then_some((seconds, zone))
+    (seconds, zone)
 }
 
-/// Git's own form. Without the `@`, a number below nine digits is not
-/// taken for seconds, as git does not take it.
-fn raw(text: &str) -> Option<(i64, String)> {
-    let mut at = Cursor(text.as_bytes());
-    let marked = at.eat(b'@');
-    let seconds = at.number(1, 18)?;
-    if !marked && seconds < 100_000_000 {
-        return None;
-    }
-    at.spaces();
-    written(seconds, at.zone(Some(0))?)
-}
-
-/// The days from the epoch to a day of the Gregorian calendar.
-fn days(year: i64, month: i64, day: i64) -> Option<i64> {
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let length = match month {
-        2 if leap => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        1..=12 => 31,
+/// `@<seconds> <zone>` and nothing else, as a commit carries a date: the
+/// one form in which seconds of fewer than nine digits are read. The
+/// seconds, the sign of the zone and its four digits.
+fn of_commit(text: &[u8]) -> Option<(i64, i64, i64)> {
+    let text = text.strip_prefix(b"@")?;
+    let (seconds, end) = digits(text, 0);
+    let sign = match text.get(end..end + 2)? {
+        b" +" => 1,
+        b" -" => -1,
         _ => return None,
     };
-    if day < 1 || day > length {
+    let (zone, last) = digits(text, end + 2);
+    let ends = matches!(text.get(last), None | Some(b'\n'));
+    (end > 0 && seconds < i64::MAX && last == end + 6 && ends).then_some((seconds, sign, zone))
+}
+
+/// The seconds since the epoch and the zone as `±hhmm`. `now` is the
+/// instant a date far in the future is told by, and `local` gives the
+/// seconds the caller's zone is east of UTC by where its clock reads the
+/// seconds given, counted as in UTC.
+pub(super) fn parse(text: &str, now: i64, local: &dyn Fn(i64) -> i32) -> Option<(i64, String)> {
+    let text = text.as_bytes();
+    if let Some((seconds, sign, zone)) = of_commit(text) {
+        let (hours, minutes) = (zone / 100, zone % 100);
+        return (hours < 24 && minutes < 60)
+            .then(|| written(seconds, sign * (hours * 60 + minutes)));
+    }
+    let mut read = Read::default();
+    let mut at = 0;
+    while let Some(first) = text.get(at).filter(|byte| **byte != b'\n') {
+        let rest = &text[at..];
+        let taken = match first {
+            b'a'..=b'z' | b'A'..=b'Z' => read.word(rest),
+            b'0'..=b'9' => read.number(rest, now),
+            b'+' | b'-' if digit_at(rest, 1) => read.zone(rest),
+            _ => 0,
+        };
+        at += taken.max(1);
+    }
+    let (year, month, day) = (read.year?, read.month?, read.day?);
+    if read.refused || day > days_in_month(year, month) {
         return None;
     }
-    // the year begins in March, so that the leap day ends it
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let of_era = year.rem_euclid(400);
-    let of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
-    Some(era * 146_097 + day_of_era - 719_468)
-}
-
-fn at_zone(day: i64, time: i64, rest: Cursor) -> Option<(i64, String)> {
-    let east = rest.zone(Some(0))?;
-    written(day * 86_400 + time - east, east)
-}
-
-/// `YYYY-MM-DD`, a `T` or a space, the time, and a zone or none.
-fn iso(text: &str) -> Option<(i64, String)> {
-    let mut at = Cursor(text.as_bytes());
-    let year = at.number(4, 4)?;
-    let month = at.eat(b'-').then(|| at.number(2, 2))??;
-    let day = at.eat(b'-').then(|| at.number(2, 2))??;
-    if !at.eat(b'T') && !at.spaces() {
-        return None;
-    }
-    let time = at.time()?;
-    at.spaces();
-    at_zone(days(year, month, day)?, time, at)
-}
-
-/// `Thu, 07 Apr 2005 22:13:13 +0200`; the day of the week may be left
-/// out and is not checked against the date.
-fn rfc2822(text: &str) -> Option<(i64, String)> {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let text = match text.split_once(", ") {
-        Some((weekday, rest)) if weekday.len() == 3 => rest,
-        _ => text,
+    let wall = seconds(year, month, day, read.time())?;
+    let east = match read.zone {
+        Some(east) => east,
+        None => i64::from(local(wall)) / 60,
     };
-    let mut at = Cursor(text.as_bytes());
-    let day = at.number(1, 2)?;
-    at.spaces().then_some(())?;
-    let named = at.0.get(..3)?;
-    let month = MONTHS.iter().position(|m| m.as_bytes() == named)? as i64 + 1;
-    at.0 = &at.0[3..];
-    at.spaces().then_some(())?;
-    let year = at.number(4, 4)?;
-    at.spaces().then_some(())?;
-    let time = at.time()?;
-    at.spaces();
-    at_zone(days(year, month, day)?, time, at)
+    if read.absolute {
+        return Some(written(wall, east));
+    }
+    // 2099-12-31T23:59:59Z, past which git reads nothing
+    let last = days_from_civil(LAST_YEAR + 1, 1, 1) * DAY - 1;
+    (east * 60 <= wall && -east * 60 <= last - wall).then(|| written(wall - east * 60, east))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::parse;
-
-    /// Each date and what git 2.56.1 wrote for it, run in the zone UTC.
-    #[test]
-    fn dates_are_read_as_git_reads_them() {
-        for (given, seconds, zone) in [
-            ("1700000000 +0900", 1_700_000_000, "+0900"),
-            ("@1700000000 -0330", 1_700_000_000, "-0330"),
-            ("1700000000", 1_700_000_000, "+0000"),
-            ("100000000 +0000", 100_000_000, "+0000"),
-            ("2005-04-07T22:13:13+02:00", 1_112_904_793, "+0200"),
-            ("2005-04-07T22:13:13Z", 1_112_911_993, "+0000"),
-            ("2005-04-07 22:13:13 +0200", 1_112_904_793, "+0200"),
-            ("2005-04-07T22:13:13", 1_112_911_993, "+0000"),
-            ("Thu, 07 Apr 2005 22:13:13 +0200", 1_112_904_793, "+0200"),
-            ("2005-04-07T22:13:13.123+0200", 1_112_904_793, "+0200"),
-            ("2005-04-07T22:13:13+02", 1_112_904_793, "+0200"),
-            ("2005-04-07T22:13+0200", 1_112_904_780, "+0200"),
-        ] {
-            assert_eq!(parse(given), Some((seconds, zone.to_owned())), "{given}");
-        }
-        for refused in [
-            "2005-04-07",
-            "yesterday",
-            "garbage",
-            "99999999 +0000",
-            "12345 +0100",
-        ] {
-            assert_eq!(parse(refused), None, "{refused}");
-        }
-    }
-
-    #[test]
-    fn a_date_the_calendar_does_not_have_is_refused() {
-        assert_eq!(parse("2023-02-29T00:00:00Z"), None);
-        assert_eq!(
-            parse("2024-02-29T00:00:00Z"),
-            Some((1_709_164_800, "+0000".into()))
-        );
-        assert_eq!(parse("2005-13-01T00:00:00Z"), None);
-        assert_eq!(parse("2005-04-07T24:00:00Z"), None);
-        assert_eq!(parse("2005-04-07T22:13:13+0260"), None);
-        assert_eq!(parse("1969-12-31T23:59:59Z"), None);
-        assert_eq!(parse("1970-01-01T00:00:00Z"), Some((0, "+0000".into())));
-    }
-}
+mod tests;

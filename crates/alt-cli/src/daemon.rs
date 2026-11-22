@@ -22,6 +22,8 @@ pub const FORWARDED_ENV: &[&str] = &[
     "GIT_COMMITTER_EMAIL",
     "GIT_COMMITTER_DATE",
     "EMAIL",
+    // the zone a date given without one is in
+    "TZ",
     "USER",
     // structured principal: kind/id distinguish agent runs from human
     // logins, session correlates a multi-step agent run in the op log.

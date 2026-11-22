@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 /// The variables that name somebody; a test starts from none of them.
-const NAMING: [&str; 7] = [
+const NAMING: [&str; 8] = [
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
     "GIT_AUTHOR_DATE",
@@ -15,9 +15,11 @@ const NAMING: [&str; 7] = [
     "GIT_COMMITTER_EMAIL",
     "GIT_COMMITTER_DATE",
     "EMAIL",
+    "TZ",
 ];
 
 mod beside_git;
+mod zones;
 
 type Env<'a> = &'a [(&'a str, &'a str)];
 
@@ -29,7 +31,9 @@ fn alt(root: &Path, daemon: bool, env: Env, args: &[&str]) -> Output {
     alt.current_dir(root)
         .env("USER", "someone")
         .envs(env.iter().copied());
+    let idle = env.iter().any(|(name, _)| *name == "ALT_DAEMON_IDLE_MS");
     match daemon {
+        true if idle => &mut alt,
         true => alt.env("ALT_DAEMON_IDLE_MS", "1500"),
         false => alt.env("ALT_NO_DAEMON", "1"),
     };
