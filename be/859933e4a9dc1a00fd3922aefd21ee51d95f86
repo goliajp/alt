@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: cut the pack where the head of a record was lost in the boot it was left unsynced in, with no boot run over it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/power_cut.rs
+touched: crates/alt-cli/tests/it/power_cut/pack_head.rs
