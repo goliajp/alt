@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: sync what brings a step that was cut short to an end, whatever the command that finds it syncs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/recover.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/step_recovered_synced.rs
+touched: crates/alt-cli/tests/it/torn_index.rs
