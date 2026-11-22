@@ -37,7 +37,7 @@ fn two_sides() -> Bench {
 /// An add that is not synced, then a power cut that takes what it wrote
 /// and leaves the index file full of zeros: the index every command goes
 /// by, and the next that writes puts in place, is `index`.
-fn torn_after_an_add(bench: &Bench, index: &str, when: &str) {
+pub(super) fn torn_after_an_add(bench: &Bench, index: &str, when: &str) {
     let repo = bench.repo();
     bench.write("x.txt", "x\n");
     run(&repo, &["add", "x.txt"], 0);

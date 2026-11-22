@@ -250,7 +250,8 @@ impl NativeRepo<'_> {
         let mut later = Later::default();
         // past an operation that moved a ref of this workspace
         let mut passed = false;
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
+        let ops = self.store.refs.oplog().ops()?;
+        for (at, op) in ops.iter().enumerate().rev() {
             if let Some(stopped) = &stopped
                 && stopped.after == op.id.to_string()
             {
@@ -262,7 +263,7 @@ impl NativeRepo<'_> {
                     return Ok(None);
                 }
             }
-            match self.left_by(op, &identity, &mut later)? {
+            match self.left_by(op, &ops[at + 1..], &identity, &mut later)? {
                 Left::Nothing => {}
                 Left::Refs => passed = true,
                 Left::Index(snapshot, moved) => {
@@ -271,8 +272,7 @@ impl NativeRepo<'_> {
                         None => None,
                     };
                     if let Some(bytes) = whole {
-                        let from = Source::Operation(op.id);
-                        return Ok(Some(Restored::of(bytes, from)));
+                        return Ok(Some(Restored::of(bytes, Source::Operation(op.id))));
                     }
                     if passed || moved {
                         return Ok(None);

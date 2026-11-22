@@ -93,11 +93,12 @@ impl NativeRepo<'_> {
             instance,
         };
         let (mut since, mut later) = (Vec::new(), Later::default());
-        for op in self.store.refs.oplog().ops()?.iter().rev() {
+        let ops = self.store.refs.oplog().ops()?;
+        for (at, op) in ops.iter().enumerate().rev() {
             if stopped.after == op.id.to_string() {
                 return Ok(Some(since));
             }
-            match self.left_by(op, &identity, &mut later)? {
+            match self.left_by(op, &ops[at + 1..], &identity, &mut later)? {
                 Left::Nothing => {}
                 Left::Refs | Left::Index(_, true) => return Ok(None),
                 Left::Index(_, false) if op.payload.first() == Some(&PREPARE) => since.push(op.id),

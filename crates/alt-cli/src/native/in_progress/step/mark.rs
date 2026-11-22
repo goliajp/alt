@@ -52,7 +52,6 @@ pub(in crate::native) struct MarkSaid {
     pub(in crate::native) workspace: WorkspaceIdentity,
     /// the mark the step began with; none in that mark itself
     pub(in crate::native) begin: Option<String>,
-    pub(in crate::native) with_effect: bool,
     pub(in crate::native) gives_up: bool,
 }
 
@@ -61,7 +60,6 @@ pub(in crate::native) fn mark_said(op: &alt_oplog::Op) -> Res<MarkSaid> {
     Ok(MarkSaid {
         workspace: mark.workspace,
         begin: mark.begin,
-        with_effect: mark.with_effect,
         gives_up: mark.gives_up,
     })
 }

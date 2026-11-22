@@ -31,9 +31,6 @@ pub(super) enum Left {
 pub(super) struct Later {
     /// the records that close a prepared change
     closed: HashMap<String, u8>,
-    /// a checkout or a ref transaction of the workspace came after the
-    /// mark looked at, with no other mark between
-    effected: bool,
     /// the mark a step that was given up began with, until it is reached
     given_up: Option<String>,
     /// what the step found, by the earliest of its checkouts so far, and
@@ -42,10 +39,15 @@ pub(super) struct Later {
 }
 
 impl Later {
+    /// A record that closes the change `prepared`.
+    fn closes(&mut self, prepared: String, kind: u8) -> Left {
+        self.closed.insert(prepared, kind);
+        Left::Nothing
+    }
+
     /// A checkout of the workspace, alone or with a ref transaction: what
     /// it says, kept for the mark where its step was given up.
     fn checkout(&mut self, id: &str, intent: CheckoutIntent, moved: bool) -> Left {
-        self.effected = true;
         if self.given_up.is_some() {
             self.found = (Some(intent.index_before), self.found.1 || moved);
             return Left::Nothing;
@@ -60,7 +62,6 @@ impl Later {
     /// A ref transaction of the workspace that says what it did to the
     /// index: nothing, or nothing that is recorded.
     fn refs(&mut self, known: bool) -> Left {
-        self.effected = true;
         match (self.given_up.is_some(), known) {
             (true, _) => {
                 self.found.1 = true;
@@ -71,13 +72,11 @@ impl Later {
         }
     }
 
-    /// A mark of a step of the workspace. One that gives the step up
-    /// holds at once or with the record that came next; the mark the step
+    /// A mark of a step of the workspace: whether it `gave_up` the step,
+    /// which one that says so and came to hold did. The mark the step
     /// began with then says what the step found.
-    fn mark(&mut self, id: &str, mark: in_progress::MarkSaid) -> Left {
-        let effected = std::mem::take(&mut self.effected);
-        let held = !mark.with_effect || effected;
-        if mark.gives_up && held && self.given_up.is_none() {
+    fn mark(&mut self, id: &str, mark: in_progress::MarkSaid, gave_up: bool) -> Left {
+        if gave_up && self.given_up.is_none() {
             self.given_up = mark.begin;
             return Left::Nothing;
         }
@@ -95,25 +94,22 @@ impl Later {
 
 impl NativeRepo<'_> {
     /// What `op` says of the index of the workspace `identity`. Walked
-    /// from the end of the log: `later` gathers what the records after it
-    /// said.
+    /// from the end of the log: `after` are the records after it, and
+    /// `later` gathers what they said.
     pub(super) fn left_by(
         &self,
         op: &alt_oplog::Op,
+        after: &[alt_oplog::Op],
         identity: &WorkspaceIdentity,
         later: &mut Later,
     ) -> Res<Left> {
         let id = op.id.to_string();
         Ok(match op.payload.first() {
             Some(&kind @ (COMPLETE | ABANDON)) => {
-                let done: Completion = decode(&op.payload, kind)?;
-                later.closed.insert(done.prepared, kind);
-                Left::Nothing
+                later.closes(decode::<Completion>(&op.payload, kind)?.prepared, kind)
             }
-            Some(&COMPLETE_CHECKOUT) => {
-                let done: CheckoutDone = decode(&op.payload, COMPLETE_CHECKOUT)?;
-                later.closed.insert(done.prepared, COMPLETE_CHECKOUT);
-                Left::Nothing
+            Some(&kind @ COMPLETE_CHECKOUT) => {
+                later.closes(decode::<CheckoutDone>(&op.payload, kind)?.prepared, kind)
             }
             Some(&PREPARE) => {
                 let intent: IndexIntent = decode(&op.payload, PREPARE)?;
@@ -136,10 +132,11 @@ impl NativeRepo<'_> {
             }
             Some(&in_progress::STEP_MARK) => {
                 let mark = in_progress::mark_said(op)?;
-                match mark.workspace == *identity {
-                    true => later.mark(&id, mark),
-                    false => Left::Nothing,
+                if mark.workspace != *identity {
+                    return Ok(Left::Nothing);
                 }
+                let gave_up = mark.gives_up && self.mark_held(op, after)?;
+                later.mark(&id, mark, gave_up)
             }
             Some(&alt_refs::PAYLOAD_REF_TX) => {
                 let Some(context) = alt_refs::parse_tx(&op.payload)?.and_then(|tx| tx.context)

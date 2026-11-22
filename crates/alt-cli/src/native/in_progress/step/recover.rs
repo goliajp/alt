@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use super::super::super::checkout_recovery::{CheckoutIntent, PREPARE_CHECKOUT};
 use super::super::super::recovery::{RefContext, decode};
 use super::super::super::*;
-use super::mark::{StateText, StepMark};
+use super::mark::StepMark;
 use super::{STATE_FILES, STEP, STEP_MARK, StepRecord, net_checkout, net_refs, state_changes};
 
 /// What the log tells of a step after its mark.
@@ -42,16 +42,12 @@ pub(super) struct Told {
     /// those of them the step was given up after: what they had written
     /// is put back and they are not gone on with
     given_up: Vec<alt_oplog::Op>,
-    /// the mark that waits gives the step up
-    gives_up: bool,
     /// the step was given up: it ends as it began
     undone: bool,
     /// how many of the checkouts are from before it was
     pub(super) own: Option<usize>,
     /// what state files became
     pub(super) state: BTreeMap<String, Option<String>>,
-    /// what they become if the next record is the one it holds with
-    waiting: Vec<StateText>,
     /// the guard of the step, where no record closes it
     pub(super) guard: Option<OpId>,
     /// a record of the workspace that is not the step's own came after
@@ -62,22 +58,16 @@ pub(super) struct Told {
 }
 
 impl Told {
-    /// A mark tells what state files become, with the next record or at
-    /// once. What an earlier mark waited with has not come to hold.
-    fn mark(&mut self, mark: StepMark) {
-        (self.waiting, self.gives_up) = (mark.state, mark.gives_up);
-        if !mark.with_effect {
-            self.effect();
+    /// A mark tells what state files become where it came to `hold`, and
+    /// nothing where it did not. One that gives the step up and holds:
+    /// from then on no checkout from before it is unfinished.
+    fn mark(&mut self, mark: StepMark, held: bool) {
+        if !held {
+            return;
         }
-    }
-
-    /// A ref transaction or the intent of a checkout is the next record.
-    /// A mark that gives the step up holds as any other does: from then
-    /// on no checkout from before it is unfinished.
-    fn effect(&mut self) {
-        let held = std::mem::take(&mut self.waiting).into_iter();
-        self.state.extend(held.map(|f| (f.name, f.text)));
-        if std::mem::take(&mut self.gives_up) {
+        self.state
+            .extend(mark.state.into_iter().map(|f| (f.name, f.text)));
+        if mark.gives_up {
             self.given_up.append(&mut self.unfinished);
             self.undone = true;
             self.own.get_or_insert(self.checkouts.len());
@@ -172,8 +162,9 @@ impl NativeRepo<'_> {
         let mut told = Told::default();
         // the command the step is of, or the one that gives it up
         let mut request = mark.request_id.clone();
-        told.mark(decode(&begun.payload, STEP_MARK)?);
-        for op in after {
+        let held = self.mark_held(begun, after)?;
+        told.mark(decode(&begun.payload, STEP_MARK)?, held);
+        for (at, op) in after.iter().enumerate() {
             let (workspace, complete, _) = self.operation_info(op)?;
             if workspace.as_ref() != Some(&mark.workspace) {
                 continue;
@@ -182,7 +173,7 @@ impl NativeRepo<'_> {
             if kind == Some(&STEP_MARK) {
                 let later: StepMark = decode(&op.payload, STEP_MARK)?;
                 request = later.request_id.clone();
-                told.mark(later);
+                told.mark(later, self.mark_held(op, &after[at + 1..])?);
                 continue;
             }
             if requests::operation_request(op)? != request {
@@ -199,11 +190,9 @@ impl NativeRepo<'_> {
                         told.guard = (!complete).then_some(op.id);
                         continue;
                     }
-                    told.effect();
                     told.checkouts.push(intent);
                 }
                 Some(&alt_refs::PAYLOAD_REF_TX) => {
-                    told.effect();
                     let tx = alt_refs::parse_tx(&op.payload)?.ok_or("not a ref operation")?;
                     let context = tx.context.ok_or("missing recovery scope")?;
                     let context: RefContext = alt_json::from_slice(&context)?;
@@ -288,6 +277,7 @@ impl NativeRepo<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::mark::StateText;
     use super::*;
 
     fn file(name: &str, text: Option<&str>) -> Vec<StateText> {
@@ -315,26 +305,20 @@ mod tests {
     }
 
     #[test]
-    fn a_mark_holds_with_the_record_that_comes_next_or_not_at_all() {
+    fn a_mark_tells_of_the_state_files_and_of_giving_up_once_it_holds_and_not_before() {
         let mut told = Told::default();
         // cut short between the mark and the record it holds with
-        told.mark(mark(file("MERGE_HEAD", Some("a")), true, false));
+        told.mark(mark(file("MERGE_HEAD", Some("a")), true, false), false);
         assert!(told.state.is_empty());
-        // a mark after it takes its place
-        told.mark(mark(file("REVERT_STATE", Some("b")), true, false));
-        told.effect();
+        told.mark(mark(file("REVERT_STATE", Some("b")), true, false), true);
         assert_eq!(told.state.len(), 1);
         assert_eq!(told.state["REVERT_STATE"].as_deref(), Some("b"));
-        // one that holds at once needs no record
-        told.mark(mark(file("REVERT_STATE", None), false, false));
+        told.mark(mark(file("REVERT_STATE", None), false, false), true);
         assert_eq!(told.state["REVERT_STATE"], None);
-        // a record with no mark before it changes no state file
-        told.effect();
-        assert_eq!(told.state.len(), 1);
         // a step is given up once the mark that says so holds, not before
-        told.mark(mark(Vec::new(), true, true));
+        told.mark(mark(Vec::new(), true, true), false);
         assert!(!told.undone);
-        told.effect();
+        told.mark(mark(Vec::new(), true, true), true);
         assert!(told.undone);
     }
 }
