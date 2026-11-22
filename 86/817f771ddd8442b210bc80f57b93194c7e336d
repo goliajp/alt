@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: refuse one command after another over a step that cannot be ended or whose state file is not as the log says, with the log noted as read no further
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/mixed_versions/step_mark.rs
+touched: crates/alt-cli/tests/it/step_stuck.rs
