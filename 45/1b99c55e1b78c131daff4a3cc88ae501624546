@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: read a zone only from a plain file of a zone's length and believe no count past the file
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/zone.rs
+touched: crates/alt-os/src/zone/rule.rs
+touched: crates/alt-os/src/zone/tzif.rs
