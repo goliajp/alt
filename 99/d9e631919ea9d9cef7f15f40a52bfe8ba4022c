@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: test
+summary: read zones from files of the tests' own, and see what room a file is given
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/zone.rs
+touched: crates/alt-os/src/zone/testdata/Africa_Monrovia
+touched: crates/alt-os/src/zone/testdata/America_New_York
+touched: crates/alt-os/src/zone/testdata/America_Sao_Paulo
+touched: crates/alt-os/src/zone/testdata/Asia_Kathmandu
+touched: crates/alt-os/src/zone/testdata/Asia_Tokyo
+touched: crates/alt-os/src/zone/testdata/Australia_Lord_Howe
+touched: crates/alt-os/src/zone/testdata/Europe_Dublin
+touched: crates/alt-os/src/zone/tzif.rs
