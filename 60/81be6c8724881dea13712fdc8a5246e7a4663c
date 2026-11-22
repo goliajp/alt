@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say of a read of a staged blob that went only what holds before the tail is cut
+author-type: human
+author: doracawl
+touched: docs/recovery.md
