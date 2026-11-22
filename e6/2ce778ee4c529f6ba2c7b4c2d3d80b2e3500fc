@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: read dates in zones from files of the tests' own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/signature.rs
+touched: crates/alt-cli/src/native/signature/date/tests.rs
+touched: crates/alt-cli/src/native/signature/test_zones.rs
+touched: crates/alt-cli/tests/it/signing/zones.rs
