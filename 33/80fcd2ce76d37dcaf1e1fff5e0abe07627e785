@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: take the notes of a step back by the committer who wrote them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/step/notes.rs
+touched: crates/alt-cli/tests/it/step_notes.rs
