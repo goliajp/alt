@@ -1,0 +1,19 @@
+schema: alt-meta/1
+type: fix
+summary: take what the operation log holds past where it was synced to for never synced in the boot it was written in as after another, and have the check say so of every file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/fsck.rs
+touched: crates/alt-cli/src/fsck/tails.rs
+touched: crates/alt-cli/src/native/unconfirmed.rs
+touched: crates/alt-cli/tests/it/log_tails.rs
+touched: crates/alt-cli/tests/it/power_cut/unread.rs
+touched: crates/alt-odb/src/check.rs
+touched: crates/alt-oplog/src/left.rs
+touched: crates/alt-oplog/src/settle.rs
+touched: crates/alt-oplog/src/since.rs
+touched: crates/alt-oplog/src/synced.rs
+touched: crates/alt-oplog/src/tail.rs
+touched: crates/alt-oplog/tests/it/left_unsynced.rs
+touched: crates/alt-refs/src/settle.rs
+touched: docs/recovery.md
