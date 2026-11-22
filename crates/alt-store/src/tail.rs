@@ -20,6 +20,11 @@ pub enum Basis {
     /// records were synced whole up to this length: a record that does not
     /// read before it is damage, one at or past it never finished
     Boundary(u64),
+    /// the same, and what lies at or past this length was left unsynced
+    /// in the running boot, whose cache holds it as it was written: no
+    /// record there has to be looked into to be taken for whole. One
+    /// that does not read there never finished all the same, or was lost
+    Cached(u64),
     /// nothing is recorded, as in a store an older program wrote: only a
     /// record no whole record can follow is taken for an unfinished one
     LastOnly,
@@ -187,7 +192,7 @@ impl Tail {
     /// record can follow it.
     pub(crate) fn unfinished(&self, seq: u32, len: u64, at: u64, last: bool) -> bool {
         match self.basis(seq, len) {
-            Basis::Boundary(synced) => at >= synced,
+            Basis::Boundary(synced) | Basis::Cached(synced) => at >= synced,
             Basis::LastOnly => last,
             Basis::Unknown => false,
         }

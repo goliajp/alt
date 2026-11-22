@@ -75,9 +75,11 @@ impl StoreCheckpoint {
     }
 }
 
-/// Says from which byte on the blob map's records are not known to have
-/// been synced; `None` when nothing tells.
-pub type Unsynced = std::sync::Arc<dyn Fn() -> Option<u64> + Send + Sync>;
+/// Says from which byte on the blob map's records are to be looked at as
+/// not known to have been synced, told whether the active pack ends, for
+/// the handle, in a record that does not read; `None` when nothing tells
+/// or none is to be.
+pub type Unsynced = std::sync::Arc<dyn Fn(bool) -> Option<u64> + Send + Sync>;
 
 /// Content-addressed byte-stream storage: CDC chunking + manifest trees
 /// over a [`ChunkStore`].

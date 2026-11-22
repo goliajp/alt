@@ -161,8 +161,8 @@ impl NativeOdb {
     /// For each of the four append files, in the order of
     /// [`Self::passed`]: the byte from which on its records are not known
     /// to have been synced, where the marker records a boundary that
-    /// holds. A record that does not read at or past it was never
-    /// confirmed; without a boundary nothing tells it from damage.
+    /// holds, for a check. A record that does not read at or past it was
+    /// never confirmed; without a boundary nothing tells it from damage.
     pub fn unsynced_from(&self) -> Result<[Option<u64>; 4], OdbError> {
         let odb = self.odb()?;
         let (marker, cached) = odb.marker();
@@ -171,8 +171,8 @@ impl NativeOdb {
         let logs = [Log::Pack, Log::Blobmap, Log::Tier1, Log::Map];
         Ok(logs.map(|log| {
             let file = (log, seq, pack_len);
-            match crate::unsynced::basis(&marker, cached, file, || true) {
-                Basis::Boundary(at) => Some(at),
+            match crate::unsynced::basis(&marker, (cached, true), file, || true) {
+                Basis::Boundary(at) | Basis::Cached(at) => Some(at),
                 Basis::LastOnly | Basis::Unknown => None,
             }
         }))

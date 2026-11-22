@@ -15,6 +15,12 @@ impl BlobStore {
         Ok((self.chunks.unfinished(), self.map()?.unfinished()))
     }
 
+    /// The same of the active pack, and of the blob map where this
+    /// handle has opened it.
+    pub fn unfinished_as_opened(&self) -> bool {
+        self.chunks.unfinished() || self.map.get().is_some_and(|map| map.unfinished())
+    }
+
     /// The file of the blob map.
     pub fn map_path(&self) -> std::path::PathBuf {
         self.dir.join("manifests").join("blobmap")

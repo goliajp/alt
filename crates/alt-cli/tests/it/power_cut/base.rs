@@ -110,10 +110,16 @@ impl Base {
         cuts.into_iter().map(Some).chain([None]).collect()
     }
 
-    /// A copy of the repository as the power cut left it.
-    pub fn left(&self, name: &str, cuts: &[(usize, Option<u64>)]) -> PathBuf {
+    /// A copy of the repository in the boot of its adds: nothing cut.
+    pub fn in_its_boot(&self, name: &str) -> PathBuf {
         let dir = self.tmp.path().join(name);
         copy_tree(&self.tmp.path().join("base"), &dir);
+        dir
+    }
+
+    /// A copy of the repository as the power cut left it.
+    pub fn left(&self, name: &str, cuts: &[(usize, Option<u64>)]) -> PathBuf {
+        let dir = self.in_its_boot(name);
         let alt_dir = dir.join(".alt");
         another_boot(&alt_dir);
         for (file, at) in cuts {

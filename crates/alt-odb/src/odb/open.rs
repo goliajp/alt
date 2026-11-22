@@ -83,24 +83,25 @@ fn open_lock(alt_dir: &Path, read_only: bool) -> std::io::Result<File> {
 /// no longer than `synced` says is not looked up in the marker.
 fn tail(
     durable: &Path,
-    read_only: bool,
+    mode: &Mode,
     log: Log,
     synced: Option<Lens>,
     left: &Noted,
     boot_run: Option<BootRun>,
 ) -> Tail {
     let (read, lowered, left) = (durable.to_owned(), durable.to_owned(), left.clone());
+    // a check reads every record itself and builds no index
+    let (read_only, check) = (mode.read_only, !mode.index);
     let tail = Tail::judged_by(move |seq, len| {
         let bounded = || {
             File::open(read.with_file_name("odb.lock")).is_ok_and(|lock| Head::read(&lock).bounded)
         };
         let marker = Marker::read(&read);
-        // a writer that syncs takes no record of a log past the marker's
-        // boundary for written as it is: one that does not read there is
-        // passed over, for `Odb::settle` to cut the log at
-        let as_written = matches!(log, Log::Pack) || read_only || alt_store::relaxed_durability();
-        let cached = as_written && unsynced::cached(&marker, *left.lock().unwrap());
-        unsynced::basis(&marker, cached, (log, seq, len), bounded)
+        // a record past the marker's boundary that does not read is
+        // passed over, for `Odb::settle` to cut the log at, whichever
+        // boot left it there
+        let cached = unsynced::cached(&marker, *left.lock().unwrap());
+        unsynced::basis(&marker, (cached, check), (log, seq, len), bounded)
     })
     .before_cut(move |seq, at| synced::lower_eof(&lowered, log, seq, at))
     // what a dead writer left unfinished is cut by `Odb::settle`
@@ -183,7 +184,7 @@ impl Odb {
         let boot_runs = mode.index.then(held).flatten();
         let tail = |log: Log| {
             let boot_run = boot_runs.and_then(|(runs, boot)| runs.of(log, boot));
-            tail(&durable_path, mode.read_only, log, synced, &noted, boot_run)
+            tail(&durable_path, &mode, log, synced, &noted, boot_run)
         };
         // without a note every file is longer than what is known synced
         let confirmed = mode.index.then(|| synced.unwrap_or(Lens::NONE));

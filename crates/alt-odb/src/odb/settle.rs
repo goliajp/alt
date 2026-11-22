@@ -129,9 +129,7 @@ impl Odb {
     /// looked at are those past the boundaries of `by`, which are those
     /// of `marker` or before them. Without `by` the records past the
     /// boundaries were left unsynced in the running boot and are as
-    /// written: they are looked at only where a file ends in an append
-    /// that never finished, and one of them that names nothing is damage
-    /// like any other.
+    /// written, every file read to its end: none is looked at.
     pub(super) fn settle(&mut self, marker: &Marker, by: Option<&Marker>) -> Result<(), OdbError> {
         let (pack_torn, blobmap_torn) = self.blobs.unfinished()?;
         let torn = [
@@ -246,10 +244,13 @@ impl Odb {
 
     /// From which byte on the records of each naming log a handle that
     /// does not hold the write lock has to look at them: those not known
-    /// synced, unless they were left unsynced in the running boot.
-    pub(super) fn unlooked_from(&self) -> Option<[u64; 3]> {
+    /// synced, unless they were left unsynced in the running boot and
+    /// are as written. They are not where a file below them is `torn`:
+    /// it ends in a record that does not read, and what they name may
+    /// lie past it.
+    pub(super) fn unlooked_from(&self, torn: bool) -> Option<[u64; 3]> {
         let (marker, cached) = self.marker();
-        unsynced_from(&marker).filter(|_| !cached)
+        unsynced_from(&marker).filter(|_| torn || !cached)
     }
 
     /// For a reader, which changes nothing: from which byte on the blob
@@ -259,7 +260,7 @@ impl Odb {
     pub(crate) fn unconfirmed(&self) -> Result<[u64; 3], OdbError> {
         let holds = self.holds()?;
         let ends = [holds.blobmap, holds.tier1, holds.map];
-        let Some(bounds) = self.unlooked_from() else {
+        let Some(bounds) = self.unlooked_from(self.torn_below(2)) else {
             return Ok(ends);
         };
         // a log the marker has no word of is not looked at

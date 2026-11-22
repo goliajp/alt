@@ -1,8 +1,8 @@
 //! Appends that were left unsynced, by the boot they were made in: in the
-//! running boot they are as they were written, and to a writer that
-//! syncs nothing a record that names content which is not stored is
-//! damage; after another boot it is what a power cut leaves, and is cut
-//! with what it names. A writer that syncs cuts it in either.
+//! running boot they are as they were written, and nobody looks at them;
+//! after another boot they are what a power cut leaves. A record among
+//! them that does not read, or names content which does not, was never
+//! synced in either: every writer cuts it with what it names.
 
 use std::fs;
 use std::os::unix::fs::FileExt;
@@ -56,8 +56,11 @@ fn appends_left_unsynced_in_another_boot_are_cut_where_they_name_content_that_ne
     }
 }
 
+/// Where a file ends in a record that does not read, what the running
+/// boot left unsynced is not as it was written: a writer that syncs
+/// nothing looks at it as at what another boot left.
 #[test]
-fn in_the_boot_appends_were_left_unsynced_in_a_record_naming_nothing_is_refused_by_a_writer_that_syncs_nothing()
+fn in_the_boot_appends_were_left_unsynced_in_a_writer_that_syncs_nothing_cuts_them_at_a_record_that_does_not_read()
  {
     for (file, class) in CASES {
         for fault in [Fault::Torn, Fault::Zeroed] {
@@ -69,16 +72,8 @@ fn in_the_boot_appends_were_left_unsynced_in_a_record_naming_nothing_is_refused_
             left_unsynced(tmp.path(), kept, true);
             damage(tmp.path(), file, fault, kept);
             reader_is_sound(tmp.path(), victim, &case);
-            let before = snapshot(tmp.path());
-            let refused = {
-                let _unsynced = alt_os::durability::leave_unsynced(true);
-                try_put(tmp.path(), victim + 3).err()
-            };
-            assert!(
-                matches!(refused, Some(OdbError::Dangling { .. })),
-                "{case}: {refused:?}"
-            );
-            assert_eq!(snapshot(tmp.path()), before, "{case}");
+            let _unsynced = alt_os::durability::leave_unsynced(true);
+            recovered(tmp.path(), victim, &case);
         }
     }
 }

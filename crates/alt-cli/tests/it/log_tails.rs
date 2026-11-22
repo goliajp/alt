@@ -158,8 +158,13 @@ fn an_unfinished_record_in_a_repository_without_markers_is_cut_like_an_older_alt
     }
 }
 
+/// A record that does not read in what unsynced commits wrote, in the
+/// boot they were made in: the check tells of it as damage, and no
+/// command that only reads cuts anything or shows the commits whose
+/// objects lie past it.
 #[test]
-fn damage_in_what_unsynced_commits_wrote_is_reported_and_nothing_is_cut() {
+fn a_record_that_does_not_read_in_what_unsynced_commits_wrote_is_told_by_the_check_and_nothing_is_cut()
+ {
     let tmp = alt_os::temp::tempdir().unwrap();
     repo(tmp.path());
     let alt_dir = tmp.path().join(".alt");
@@ -185,8 +190,12 @@ fn damage_in_what_unsynced_commits_wrote_is_reported_and_nothing_is_cut() {
         let out = alt(tmp.path(), false, args);
         assert!(!out.status.success(), "alt {args:?}");
         let said = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert!(
+        assert!(!said.contains("panicked"), "alt {args:?}: {said}");
+        // past where the file was synced to, nothing but the check takes
+        // a record that does not read for damage
+        assert_eq!(
             said.contains("map.alt record corrupt"),
+            args == ["fsck"],
             "alt {args:?}: {said}"
         );
     }

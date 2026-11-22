@@ -35,11 +35,11 @@ pub(super) fn confirm_blob_map(
     left: Option<Left>,
 ) {
     let durable = durable.to_owned();
-    let unsynced = move || {
+    let unsynced = move |torn: bool| {
         let marker = Marker::read(&durable);
         let cached = unsynced::cached(&marker, left);
         unsynced_from(&marker)
-            .filter(|_| !cached)
+            .filter(|_| torn || !cached)
             .map(|from| from[0])
     };
     blobs.pass_over_unsynced_map(noted.blobmap, Arc::new(unsynced));
@@ -47,10 +47,19 @@ pub(super) fn confirm_blob_map(
 
 impl Odb {
     /// Where the records of naming log `log` that are not known synced
-    /// begin, when that is before `end`.
+    /// and are to be looked at begin, when that is before `end`.
     fn unsynced_before(&self, log: usize, end: u64) -> Option<u64> {
-        let from = self.unlooked_from()?[log];
+        let from = self.unlooked_from(self.torn_below(log))?[log];
         (from < end).then_some(from)
+    }
+
+    /// Whether a file whose content naming log `log` names ends, for
+    /// this handle, in a record that does not read: the pack, the blob
+    /// map and, below `map.alt`, the Tier 1 map, each where this handle
+    /// has opened it.
+    pub(super) fn torn_below(&self, log: usize) -> bool {
+        let tier1 = || self.tier1.get().is_some_and(Tier1Map::unfinished);
+        self.blobs.unfinished_as_opened() || (log == 2 && tier1())
     }
 
     /// Whether `id` is stored as a chunk or named by the blob map.

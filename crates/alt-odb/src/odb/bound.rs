@@ -66,9 +66,30 @@ impl Odb {
             return Ok(false);
         }
         self.catch_up()?;
+        let note = self.as_written(&marker, note)?;
         self.settle_boot_runs(&marker, note, notes.boot_runs)?;
         self.bound(marker, note)?;
         Ok(true)
+    }
+
+    /// The `note` of appends left unsynced, for a writer that leaves its
+    /// own so and has read the files to their ends: none where the note
+    /// is of the running boot and a file ends in a record that does not
+    /// read. What that boot left is then not as it was written: this
+    /// writer reads the pack as one that syncs does, and from here on
+    /// goes as after another boot, looking at every record past the
+    /// boundaries and syncing what it keeps.
+    fn as_written(
+        &mut self,
+        marker: &Marker,
+        note: Option<Left>,
+    ) -> Result<Option<Left>, OdbError> {
+        let cached = alt_store::relaxed_durability() && unsynced::cached(marker, note);
+        if !cached || !self.ends_unread()? {
+            return Ok(note);
+        }
+        self.look()?;
+        Ok(None)
     }
 
     /// Opens the store again in place of what this handle holds of it,

@@ -44,9 +44,16 @@ impl Odb {
     /// pack ends at the first record that does not hold what it names.
     /// The records are listed and taken out by the same reading: one
     /// that names a chunk past that record is lost to both.
-    fn look(&mut self) -> Result<(), OdbError> {
+    pub(super) fn look(&mut self) -> Result<(), OdbError> {
         *self.left.lock().unwrap() = None;
         Ok(self.blobs.look_again()?)
+    }
+
+    /// Whether one of the four files ends, for this handle, in a record
+    /// that does not read.
+    pub(super) fn ends_unread(&self) -> Result<bool, OdbError> {
+        let (pack, blobmap) = self.blobs.unfinished()?;
+        Ok(pack || blobmap || self.tier1()?.unfinished() || self.map.unfinished())
     }
 
     /// With the write lock held, the files read to their ends and the
@@ -150,8 +157,7 @@ impl Odb {
     /// store has moved since. An append that never finished is cut off
     /// first. The store is then one a writer goes on from.
     fn drop_lost(&mut self, lost: &Lost) -> Result<bool, OdbError> {
-        let (pack_torn, blobmap_torn) = self.blobs.unfinished()?;
-        if pack_torn || blobmap_torn || self.tier1()?.unfinished() || self.map.unfinished() {
+        if self.ends_unread()? {
             self.cut_back(self.holds()?, false)?;
         }
         // records that were left unsynced come to lie where records were

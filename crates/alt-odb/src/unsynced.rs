@@ -4,7 +4,10 @@
 //! ([`crate::synced::distrust`]). What it appended is in the kernel's
 //! cache until the machine goes down: for as long as the boot is the same
 //! every record past the marker's boundaries is as it was written, and
-//! nobody has to look at it. After another boot any of the four files may
+//! nobody has to look at it. That is why none is looked at, and not what
+//! says a record is damaged: one past the boundaries that does not read
+//! was never synced, in this boot as after another, and is passed over
+//! and cut off as any such record is. After another boot any of the four files may
 //! end anywhere past its boundary, each on its own: a record that names
 //! content can be there without the content.
 //!
@@ -114,17 +117,22 @@ pub(crate) fn cached(marker: &Marker, note: Option<Left>) -> bool {
 }
 
 /// What `marker` tells about `log` not reading to its end
-/// ([`Marker::basis`]); where the records past its boundaries are
-/// `cached`, only the last one can be an append that never finished.
+/// ([`Marker::basis`]). The records past its boundaries were never
+/// synced, `cached` or not: to a command, one of them that does not read
+/// is no damage, and where they are `cached` those that read are not
+/// looked into. A `check` says what is wrong with the store and changes
+/// nothing: where they are `cached` and one that is not the last does
+/// not read, the cache lost what it held, and that is told as damage.
 pub(crate) fn basis(
     marker: &Marker,
-    cached: bool,
+    (cached, check): (bool, bool),
     (log, seq, len): (Log, u32, u64),
     bounded: impl Fn() -> bool,
 ) -> Basis {
-    match marker.recorded() {
-        Some(_) if cached => Basis::LastOnly,
-        _ => marker.basis(log, seq, len, bounded),
+    match marker.basis(log, seq, len, bounded) {
+        Basis::Boundary(_) if cached && check => Basis::LastOnly,
+        Basis::Boundary(synced) if cached => Basis::Cached(synced),
+        basis => basis,
     }
 }
 

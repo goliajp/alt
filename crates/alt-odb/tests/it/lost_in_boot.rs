@@ -154,3 +154,93 @@ fn a_writer_that_syncs_cuts_the_pack_the_running_boot_left_unsynced_where_the_he
         cut_at(&base, &batch, 0, (synced[0], at, len), &case);
     }
 }
+
+/// Where the record of the pack begins that is the first at or past
+/// `from`, walked from `synced`, where a record begins.
+fn pack_record(dir: &Path, synced: u64, from: u64) -> u64 {
+    let pack = fs::read(dir.join(FILES[0])).unwrap();
+    let mut at = synced as usize;
+    while (at as u64) < from {
+        let stored = u32::from_le_bytes(pack[at + 37..at + 41].try_into().unwrap());
+        at += 41 + stored as usize;
+    }
+    at as u64
+}
+
+/// The head of the pack record at `at` no longer reads, and by the
+/// length it names a whole record follows it at once.
+fn spoil_head(dir: &Path, at: u64) {
+    let pack = fs::OpenOptions::new().write(true).open(dir.join(FILES[0]));
+    let pack = pack.unwrap();
+    pack.write_all_at(&[0xff], at + 32).unwrap();
+    pack.write_all_at(&[0; 4], at + 37).unwrap();
+}
+
+/// The same where the head of a record does not read and names a length
+/// by which whole records follow it: no handle takes that for damage. One
+/// that reads holds the pack up to that record, and a writer cuts it
+/// there, whether it syncs or leaves its own appends unsynced.
+#[test]
+fn a_pack_record_whose_head_does_not_read_in_the_boot_it_was_left_unsynced_in_is_no_damage() {
+    let batch: Vec<u32> = (300..336).collect();
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let base = tmp.path().join("base");
+    let mut odb = open(&base);
+    put(&mut odb, 0..KEPT);
+    drop(odb);
+    let synced = lens(&base);
+    put_unsynced(&base, batch.iter().copied());
+    let ends = lens(&base);
+    assert_eq!(boot_runs(&base).len(), 0);
+    let at = pack_record(&base, synced[0], (synced[0] + ends[0]) / 2);
+    assert!(at > synced[0] && at + 82 < ends[0], "{at} of {ends:?}");
+    let spoiled = |name: &str| {
+        let dir = base.with_file_name(name);
+        copy(&base, &dir);
+        spoil_head(&dir, at);
+        dir
+    };
+
+    // one that reads changes nothing and holds what was synced, and of
+    // the batch only what reads
+    let dir = spoiled("read");
+    let before = snapshot(&dir);
+    let reader = reading(&dir);
+    for n in 0..KEPT {
+        reads(&reader, n);
+    }
+    let stored = |n: &&u32| reader.contains(&object(**n).0).unwrap();
+    let kept: Vec<u32> = batch.iter().filter(stored).copied().collect();
+    assert!(!kept.is_empty() && kept.len() < batch.len(), "{kept:?}");
+    for n in kept {
+        reads(&reader, n);
+    }
+    drop(reader);
+    assert_eq!(snapshot(&dir), before);
+
+    // a writer that syncs, and one that does not
+    for unsynced in [false, true] {
+        let case = format!("unsynced {unsynced}");
+        let dir = spoiled(&format!("write-{unsynced}"));
+        let generation = open(&dir).generation();
+        let _unsynced = alt_os::durability::leave_unsynced(unsynced);
+        let mut writer = try_put(&dir, 5001).unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        let cut = writer.take_discarded();
+        let cut_there = |cut: &alt_odb::Discarded| cut.file.ends_with(FILES[0]) && cut.from == at;
+        assert!(cut.iter().any(cut_there), "{case}: {cut:?}");
+        drop(writer);
+        assert_ne!(open(&dir).generation(), generation, "{case}");
+        let mut odb = open(&dir);
+        for n in (0..KEPT).chain([5001]) {
+            reads(&odb, n);
+        }
+        // what went is taken again
+        put(&mut odb, 300..336);
+        drop(odb);
+        let odb = open(&dir);
+        for n in 300..336 {
+            reads(&odb, n);
+        }
+        odb.check().unwrap_or_else(|e| panic!("{case}: {e:?}"));
+    }
+}

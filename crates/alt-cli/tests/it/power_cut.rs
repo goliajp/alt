@@ -18,6 +18,7 @@ mod many;
 mod mixed_versions;
 mod pack_head;
 mod refs_first;
+mod unread;
 
 use base::{ADDED, Base, CUT};
 

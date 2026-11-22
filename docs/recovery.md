@@ -754,12 +754,20 @@ store, and ends with the first command of this alt that writes.
 
 What `alt add` leaves unsynced, and commits made with
 `ALT_RELAXED_DURABILITY` set, are not synced, and what was recorded is marked
-as no longer holding until a command that syncs writes: in between, too, only
-the last record of a file can be an unfinished one, and a power cut can lose
-such adds and commits whole or in part.
+as no longer holding until a command that syncs writes: in between, a power
+cut can lose such adds and commits whole or in part.
 
 Until the machine goes down, what was left unsynced is in the kernel's cache
-as it was written, and no command looks at it again. alt notes in `odb.lock`
+as it was written, and no command looks at it again. Nothing past the point a
+file was synced to was ever confirmed, though: a record there that does not
+read, in the boot it was written in as after another, is not damage to a
+command. One that only reads passes over it and what follows it in the file.
+The first command that stores an object, an `alt add` among them, or the next
+`alt commit`, cuts the file at that record with the records that name what
+went, and syncs what is left; `alt status`, `alt fsck` and `alt commit` then
+name the staged files to add again. Until that cut, `alt fsck`, which changes
+nothing, reports such a record in the boot it was written in as damage: the
+kernel lost what it held. alt notes in `odb.lock`
 which boot the unsynced records were written in. After another boot each of
 the store's files may end anywhere past the point it was synced to, each on
 its own, so a record that names an object can be there without the object's

@@ -94,7 +94,7 @@ impl BlobStore {
     fn pass_over_unsynced(&self, map: &mut BlobMap) -> Result<(), StoreError> {
         let end = map.appended_len();
         let from = match &self.map_synced {
-            Some((noted, unsynced)) if end > *noted => unsynced(),
+            Some((noted, unsynced)) if end > *noted => unsynced(self.chunks.unfinished()),
             _ => None,
         };
         let Some(from) = from.filter(|from| *from < end) else {
