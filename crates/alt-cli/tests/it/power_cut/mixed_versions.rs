@@ -12,6 +12,7 @@ use super::another_boot;
 
 #[cfg(target_os = "linux")]
 mod cut_short;
+mod first_add;
 mod head_lost;
 #[cfg(target_os = "linux")]
 mod held;

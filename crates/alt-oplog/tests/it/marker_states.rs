@@ -18,7 +18,7 @@ use alt_oplog::OpLog;
 use super::marker::{distrust, recorded};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum State {
+pub(super) enum State {
     Recorded,
     Untrusted,
     Older,
@@ -32,7 +32,7 @@ enum State {
 
 /// The ways a marker file does not read.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Form {
+pub(super) enum Form {
     Empty,
     /// shorter than the length an older alt keeps
     Short,
@@ -40,7 +40,7 @@ enum Form {
     NoSlot,
 }
 
-const FORMS: [Form; 3] = [Form::Empty, Form::Short, Form::NoSlot];
+pub(super) const FORMS: [Form; 3] = [Form::Empty, Form::Short, Form::NoSlot];
 
 fn unreadable(marker: &Path, form: Form) {
     let mut data = fs::read(marker).unwrap();
@@ -56,7 +56,7 @@ fn unreadable(marker: &Path, form: Form) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Fault {
+pub(super) enum Fault {
     None,
     Unfinished,
     /// a byte of a synced record, whole records after it
@@ -66,7 +66,7 @@ enum Fault {
 }
 
 /// Ten synced ops under `state` with `fault` in the log.
-fn log(dir: &Path, state: State, fault: Fault) {
+pub(super) fn log(dir: &Path, state: State, fault: Fault) {
     let path = dir.join("log");
     let mut log = OpLog::open(dir).unwrap();
     let mut starts = Vec::new();
@@ -109,7 +109,7 @@ fn lost(state: State) -> bool {
     matches!(state, State::Removed | State::Unreadable(_))
 }
 
-fn states() -> Vec<State> {
+pub(super) fn states() -> Vec<State> {
     let mut states = vec![
         State::Recorded,
         State::Untrusted,
@@ -122,7 +122,7 @@ fn states() -> Vec<State> {
     states
 }
 
-fn snapshot(dir: &Path) -> Vec<Option<Vec<u8>>> {
+pub(super) fn snapshot(dir: &Path) -> Vec<Option<Vec<u8>>> {
     ["log", "durable", "sync.lock"]
         .iter()
         .map(|name| fs::read(dir.join(name)).ok())

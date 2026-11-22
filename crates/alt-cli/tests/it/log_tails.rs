@@ -9,6 +9,7 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::process::Output;
 
+mod first_add;
 mod went_since;
 
 fn alt(repo: &Path, relaxed: bool, args: &[&str]) -> Output {

@@ -38,11 +38,12 @@ impl OpLog {
             return self.bound(&marker, self.len_bytes);
         };
         let upto = self.len_bytes;
-        // what was appended since the last boundary that held, or all of
-        // it where none is recorded
+        // what was appended since the last boundary that held: where none
+        // is recorded there is no such op, all the log holds is taken for
+        // synced
         let held = match marker.recorded() {
             Some(state) => state.whole,
-            None => marker.unsynced_from().unwrap_or(0),
+            None => marker.unsynced_from().unwrap_or(upto),
         };
         let left = match self.first_unheld(held, |_| Ok::<_, OpLogError>(false))? {
             // the ops this handle read last hold them, unless they began
@@ -66,26 +67,49 @@ impl OpLog {
     /// marker was removed, or appends were left unsynced — gets one at
     /// `upto` before anything is appended; what the ops before `upto`
     /// name is synced. Where fsyncs are skipped the marker is made to say
-    /// so instead.
+    /// so instead, once it records a boundary ([`Self::bound_unsynced`]).
     fn bound(&mut self, marker: &Marker, upto: u64) -> Result<(), OpLogError> {
         synced::lost(marker, self.len_bytes)?;
         self.generation = marker.generation();
         if relaxed_durability() {
-            // read to its end under the lock, the log holds what the
-            // disk does: what follows is left unsynced in this boot
-            let said = marker.recorded().is_some() && !marker.trusted();
-            if !said || !crate::left::cached(&self.durable_path) {
-                crate::left::note(&self.durable_path)?;
-            }
-            if !said {
-                synced::distrust(&self.durable_path)?;
-            }
+            self.bound_unsynced(marker, upto)?;
         } else if !marker.trusted() {
             self.file.sync_all()?;
             synced::establish(&self.durable_path, upto)?;
             if let Some(note) = &self.note {
                 note.raise(upto);
             }
+        }
+        Ok(())
+    }
+
+    /// [`Self::bound`] for a writer that leaves its appends unsynced: the
+    /// marker is made to say that such appends follow its boundary. A
+    /// marker that records none in this format is given one first, or
+    /// everything the log holds would count as never synced: the file
+    /// length an older alt recorded, which that alt synced, or else all
+    /// the log holds up to `upto`, synced here. Nothing told the records
+    /// of such a log apart before, and one of them that does not read
+    /// stays damage.
+    fn bound_unsynced(&mut self, marker: &Marker, upto: u64) -> Result<(), OpLogError> {
+        // read to its end under the lock, the log holds what the disk
+        // does: what follows is left unsynced in this boot
+        let said = marker.recorded().is_some() && !marker.trusted();
+        if marker.recorded().is_none() {
+            let whole = match marker.unsynced_from() {
+                Some(synced) => synced.min(upto),
+                None => {
+                    self.file.sync_all()?;
+                    upto
+                }
+            };
+            synced::establish(&self.durable_path, whole)?;
+        }
+        if !said || !crate::left::cached(&self.durable_path) {
+            crate::left::note(&self.durable_path)?;
+        }
+        if !said {
+            synced::distrust(&self.durable_path)?;
         }
         Ok(())
     }

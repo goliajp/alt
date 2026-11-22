@@ -4,6 +4,7 @@ mod left_unsynced;
 mod lost;
 mod marker;
 mod marker_states;
+mod marker_unsynced;
 mod note;
 mod oplog_lifecycle;
 mod panic;
