@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: list a sealed pack in its idx, and every chunk for a compaction or an export, from what the packs hold and not from a boot run of the chunk index
+author-type: human
+author: doracawl
+touched: crates/alt-store/src/bulk.rs
+touched: crates/alt-store/src/index.rs
+touched: crates/alt-store/src/index/boot.rs
+touched: crates/alt-store/src/lib.rs
+touched: crates/alt-store/src/runs.rs
+touched: crates/alt-store/src/runs/boot.rs
