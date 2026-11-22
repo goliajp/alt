@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: read a date as git reads it, in the zone of the caller where it names none
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon.rs
+touched: crates/alt-cli/src/native/signature.rs
+touched: crates/alt-cli/src/native/signature/date.rs
+touched: crates/alt-cli/src/native/signature/date/git_dates.tsv
+touched: crates/alt-cli/src/native/signature/date/tests.rs
+touched: crates/alt-cli/src/native/signature/date/words.rs
+touched: crates/alt-cli/tests/it/signing.rs
+touched: crates/alt-cli/tests/it/signing/zones.rs
