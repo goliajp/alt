@@ -10,37 +10,39 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::boot_runs::{all_read, boot_runs, put_unsynced, reading, store};
-use super::rewind_interrupted::{open, put, reads};
+use std::os::unix::fs::FileExt;
 
-/// Puts a file that cannot be removed into `dir`: one the file system
-/// holds as immutable, or, where this user may not make it so, one in a
-/// directory nothing can be taken out of. Returns the file and what
-/// makes it removable again.
-fn stuck(dir: &Path) -> (PathBuf, impl FnOnce()) {
-    let file = dir.join(".nfs0001");
-    fs::write(&file, b"mapped elsewhere").unwrap();
+use super::rewind_interrupted::{FILES, lens, open, put, reads};
+
+/// Makes `file` one that cannot be removed: the file system holds it as
+/// immutable, or, where this user may not make it so, nothing can be
+/// taken out of its directory. Returns what makes it removable again.
+fn held_fast(file: &Path) -> impl FnOnce() + use<> {
     let flag = |flag: &str| {
-        let set = Command::new("chattr").arg(flag).arg(&file).output();
+        let set = Command::new("chattr").arg(flag).arg(file).output();
         set.is_ok_and(|set| set.status.success())
     };
     let immutable = flag("+i");
-    let mode = |mode| fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+    let dir = file.parent().unwrap().to_owned();
     if !immutable {
-        mode(0o555);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
     }
-    assert!(fs::remove_file(&file).is_err(), "the file can be removed");
-    let (dir, held) = (dir.to_owned(), file.clone());
-    let free = move || match immutable {
-        true => assert!(
-            Command::new("chattr")
-                .arg("-i")
-                .arg(&held)
-                .status()
-                .unwrap()
-                .success()
-        ),
+    assert!(fs::remove_file(file).is_err(), "the file can be removed");
+    let file = file.to_owned();
+    move || match immutable {
+        true => {
+            let freed = Command::new("chattr").arg("-i").arg(&file).status();
+            assert!(freed.unwrap().success());
+        }
         false => fs::set_permissions(dir, fs::Permissions::from_mode(0o755)).unwrap(),
-    };
+    }
+}
+
+/// Puts a file that cannot be removed into `dir`.
+fn stuck(dir: &Path) -> (PathBuf, impl FnOnce() + use<>) {
+    let file = dir.join(".nfs0001");
+    fs::write(&file, b"mapped elsewhere").unwrap();
+    let free = held_fast(&file);
     (file, free)
 }
 
@@ -97,5 +99,39 @@ fn a_directory_of_boot_runs_that_cannot_be_removed_stops_no_writer_and_is_looked
     put(&mut writer, 5001..5002);
     drop(writer);
     assert_eq!(boot_runs(dir), Vec::<PathBuf>::new());
+    open(dir).check().unwrap();
+}
+
+#[test]
+fn a_boot_run_of_the_chunk_index_that_cannot_be_removed_is_not_looked_in_by_the_writer_that_syncs()
+{
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let synced = store(dir);
+    let ends = lens(dir);
+    let runs = boot_runs(dir);
+    let of_chunks = |run: &&PathBuf| run.starts_with(dir.join("store/chunks.idx"));
+    let run = runs.iter().find(of_chunks).unwrap();
+    let free = held_fast(run);
+    // a page of the pack the batch appended is lost in its boot
+    let at = (synced[0] + ends[0]) / 2;
+    let at = at - at % 4096;
+    let pack = fs::OpenOptions::new().write(true).open(dir.join(FILES[0]));
+    pack.unwrap().write_all_at(&[0u8; 4096], at).unwrap();
+    // the run stays where it is, as it was written; the writer that
+    // syncs walks the pack all the same, and cuts it at the record the
+    // page lies in
+    let mut writer = open(dir);
+    put(&mut writer, 1503..1504);
+    drop(writer);
+    assert!(run.exists());
+    let after = lens(dir);
+    assert!(after[0] > at && after[0] < at + 4096 + 400, "{after:?}");
+    let reader = reading(dir);
+    for n in (0..30).chain([1503]) {
+        reads(&reader, n);
+    }
+    drop(reader);
+    free();
     open(dir).check().unwrap();
 }

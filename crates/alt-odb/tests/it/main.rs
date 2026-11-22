@@ -2,6 +2,7 @@
 
 mod abbrev;
 mod boot_runs;
+mod boot_runs_noted;
 #[cfg(target_os = "linux")]
 mod boot_runs_stuck;
 mod cache_failure;

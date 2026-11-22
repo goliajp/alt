@@ -35,6 +35,9 @@ impl Odb {
     /// `moved`: whole records are cut, which a writer that wrote them must
     /// not record as synced afterwards.
     pub(super) fn cut_back(&mut self, after: Lens, moved: bool) -> Result<(), OdbError> {
+        if moved {
+            self.end_boot_runs()?;
+        }
         let (pack, blobmap) = self.blobs.file_lens()?;
         let files = [
             (self.blobs.active_pack_path(), after.pack, pack),

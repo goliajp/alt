@@ -136,6 +136,7 @@ impl Odb {
     }
 
     fn rewind_locked(&mut self, ckpt: OdbCheckpoint) -> Result<(), OdbError> {
+        self.end_boot_runs()?;
         self.blobs.check_rewind(ckpt.blobs)?;
         self.tier1()?.check_rewind(ckpt.tier1_len)?;
         self.map.check_rewind(ckpt.map_len)?;

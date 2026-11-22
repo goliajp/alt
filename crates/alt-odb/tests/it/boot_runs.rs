@@ -191,8 +191,10 @@ fn boot_runs_are_not_looked_in_once_records_were_taken_out_of_the_store() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let dir = tmp.path();
     store(dir);
-    // a batch that is rolled back: its records are cut off, past what
-    // the boot runs cover
+    let (kept, lock) = (boot_runs(dir), dir.join("odb.lock"));
+    let kept: Vec<_> = kept.into_iter().map(|run| (fs::read(&run), run)).collect();
+    let note = fs::read(&lock).unwrap();
+    // a batch that is rolled back: the runs go with what is cut off
     {
         let _unsynced = alt_os::durability::leave_unsynced(true);
         let mut odb = open(dir);
@@ -200,6 +202,13 @@ fn boot_runs_are_not_looked_in_once_records_were_taken_out_of_the_store() {
         put(&mut odb, 1500..1510);
         odb.rewind(before).unwrap();
     }
+    // had the runs stayed: they are of a generation the store has left
+    for (bytes, run) in kept {
+        fs::create_dir_all(run.parent().unwrap()).unwrap();
+        fs::write(run, bytes.unwrap()).unwrap();
+    }
+    let lock = fs::OpenOptions::new().write(true).open(lock).unwrap();
+    lock.write_all_at(&note[1312..1392], 1312).unwrap();
     let runs = spoil(dir);
     assert_eq!(runs.len(), 3);
     let reader = reading(dir);
@@ -239,7 +248,7 @@ fn a_removal_of_lost_records_takes_the_boot_runs_away() {
 }
 
 #[test]
-fn boot_runs_over_records_that_were_cut_off_are_taken_away_by_the_next_writer() {
+fn boot_runs_over_records_that_were_cut_off_are_taken_away_by_the_batch_that_cuts_them() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let dir = tmp.path();
     let mut odb = open(dir);
@@ -258,7 +267,7 @@ fn boot_runs_over_records_that_were_cut_off_are_taken_away_by_the_next_writer() 
         assert_eq!(boot_runs(dir).len(), 3);
         odb.rewind(before).unwrap();
     }
-    assert_eq!(boot_runs(dir).len(), 3, "nobody has written since");
+    assert_eq!(boot_runs(dir), Vec::<PathBuf>::new());
     let reader = reading(dir);
     for n in 0..30 {
         reads(&reader, n);

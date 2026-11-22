@@ -15,31 +15,49 @@ impl Odb {
     /// said then. A writer that syncs looks in no boot run: it reads the
     /// records as they are on disk, and indexes them once they are
     /// synced. Boot runs that do not hold, and those of a store about to
-    /// be synced, are taken away.
+    /// be synced, are taken away, and this handle looks in none of them:
+    /// the runs it holds are then the ones noted, or none.
     pub(in crate::odb) fn settle_boot_runs(
         &mut self,
         marker: &Marker,
         left: Option<Left>,
         noted: Option<BootRuns>,
     ) -> Result<(), OdbError> {
-        if !alt_store::relaxed_durability() {
-            self.blobs.chunks_mut().drop_boot_run()?;
-            self.blobs.map_log()?.drop_boot_run()?;
-            self.tier1_mut()?.log_mut().drop_boot_run()?;
-            self.map.log_mut().drop_boot_run()?;
-        }
-        let Some(runs) = noted else {
-            return Ok(());
+        // a run that is noted and not held here is gone, or was written
+        // after this handle read the store; one that is held here and
+        // not noted had its file taken away by another writer. Where the
+        // batch is left unsynced the runs are written anew
+        let held = match noted {
+            Some(runs) if alt_store::relaxed_durability() => {
+                boot_runs::held(marker, left, noted).is_some() && runs.runs == self.boot_runs()?
+            }
+            _ => false,
         };
-        // a run that is noted and not held here was dropped just now, is
-        // gone, or was written after this handle read the store: where
-        // the batch is left unsynced it is written anew
-        let held =
-            boot_runs::held(marker, left, noted).is_some() && runs.runs == self.boot_runs()?;
         if !held {
+            self.drop_boot_runs()?;
+        }
+        if !held && noted.is_some() {
             boot_runs::forget(&self.alt_dir, &self.lock)?;
         }
         Ok(())
+    }
+
+    /// No longer looks in any boot run: the records they covered are
+    /// read.
+    fn drop_boot_runs(&mut self) -> Result<(), OdbError> {
+        self.blobs.chunks_mut().drop_boot_run()?;
+        self.blobs.map_log()?.drop_boot_run()?;
+        self.tier1_mut()?.log_mut().drop_boot_run()?;
+        Ok(self.map.log_mut().drop_boot_run()?)
+    }
+
+    /// Before records are taken out of the store, which moves its
+    /// generation: the boot runs are of the generation they were written
+    /// under, so this handle looks in them no longer, and the note and
+    /// the files go. What is noted afterwards is written afterwards.
+    pub(in crate::odb) fn end_boot_runs(&mut self) -> Result<(), OdbError> {
+        self.drop_boot_runs()?;
+        Ok(boot_runs::forget(&self.alt_dir, &self.lock)?)
     }
 
     /// The log range of the boot run this handle holds of each log, as
