@@ -59,20 +59,23 @@ pub(super) fn remove_dir(path: &Path) -> Result<(), StoreError> {
 }
 
 /// Removes every directory of boot runs under the index directory `dir`
-/// but the one named `keep`. The caller holds the log's write lock.
+/// but the one named `keep`. The caller holds the log's write lock. One
+/// that cannot be removed does not keep the others: the first failure is
+/// returned once all were tried.
 pub fn remove_boot_runs(dir: &Path, keep: Option<&str>) -> Result<(), StoreError> {
     let listing = match fs::read_dir(dir) {
         Ok(listing) => listing,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e.into()),
     };
+    let mut removed = Ok(());
     for entry in listing {
         let entry = entry?;
         if entry.file_type()?.is_dir() && entry.file_name().to_str() != keep {
-            remove_dir(&entry.path())?;
+            removed = removed.and(remove_dir(&entry.path()));
         }
     }
-    Ok(())
+    removed
 }
 
 impl Runs {
@@ -177,11 +180,13 @@ impl Runs {
         let run = Run::load(path, start, end)?.ok_or(CORRUPT)?;
         self.drop_boot_run();
         self.runs.push(run);
-        remove_boot_runs(&self.dir, Some(dir))?;
+        // what is left over is opened by nobody: a file that does not
+        // go now is tried again when the run is next written
+        let _ = remove_boot_runs(&self.dir, Some(dir));
         for entry in fs::read_dir(&sub)? {
             let other = entry?.path();
             if self.boot().is_some_and(|run| run.path != other) {
-                fs::remove_file(other)?;
+                let _ = fs::remove_file(other);
             }
         }
         Ok(())

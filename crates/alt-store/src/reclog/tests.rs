@@ -203,3 +203,30 @@ fn a_boot_run_is_written_anew_with_what_was_appended_and_goes_once_the_chain_gro
     assert_eq!(log.boot_run(), None);
     assert!(log.contains(&key(many)).unwrap());
 }
+
+#[test]
+fn what_cannot_be_removed_beside_a_boot_run_does_not_keep_the_run_from_being_written() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    let boot_dir = dir.path().join("log.idx").join("b");
+    let (mut log, _) = RecLog::open(&path, LAYOUT).unwrap();
+    let many = super::INDEX_AT + 20;
+    for n in 0..many {
+        log.append(&numbered(n)).unwrap();
+    }
+    let first = log.index_boot_run("b").unwrap().unwrap();
+    // an entry that does not go the way a file does
+    std::fs::create_dir(boot_dir.join("held")).unwrap();
+    for n in many..2 * many {
+        log.append(&numbered(n)).unwrap();
+    }
+    let second = log.index_boot_run("b").unwrap().unwrap();
+    assert_eq!((second.0, second.1), (first.0, log.appended_len()));
+    assert!(boot_dir.join("held").exists());
+    drop(log);
+    let log = open_with_boot_run(&path, Some(second));
+    assert_eq!(log.boot_run(), Some(second));
+    for n in 0..2 * many {
+        assert!(log.contains(&key(n)).unwrap(), "record {n}");
+    }
+}

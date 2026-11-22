@@ -83,8 +83,8 @@ impl Runs {
                 removed = true;
             } else if entry.file_type()?.is_dir() {
                 // a boot run begins where the chain ended before this
-                // run was written
-                super::boot::remove_dir(&path)?;
+                // run was written: nobody opens it, whether it goes or not
+                let _ = super::boot::remove_dir(&path);
             }
         }
         if removed {

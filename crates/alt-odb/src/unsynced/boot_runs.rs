@@ -28,6 +28,9 @@
 //! another record has come to lie. The writer that finds the note not
 //! holding takes it and the files away, and so does every writer that
 //! syncs: the records are then indexed by the runs every opener reads.
+//! The note goes first. A file is opened only by the name a note gives
+//! it, and noted only once it is written, so what is left of a directory
+//! that could not be removed is looked in by nobody.
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -108,7 +111,10 @@ pub(crate) fn note(lock: &File, runs: &BootRuns) {
 }
 
 /// Takes the note away, and the boot runs of every log under `alt_dir`.
-/// The caller holds the write lock.
+/// The caller holds the write lock. With the note gone nobody opens the
+/// files, so one that cannot be removed stays without harm: a network
+/// file system keeps a removed file another process still maps in its
+/// directory. Whoever takes boot runs away next tries again.
 pub(crate) fn forget(alt_dir: &Path, lock: &File) -> std::io::Result<()> {
     lock.write_all_at(&[0u8; LEN], AT as u64)?;
     let logs = LOGS.map(|log| {
@@ -120,7 +126,7 @@ pub(crate) fn forget(alt_dir: &Path, lock: &File) -> std::io::Result<()> {
         .into_iter()
         .chain([alt_dir.join("store/chunks.idx").into()])
     {
-        alt_store::runs::remove_boot_runs(Path::new(&idx), None).map_err(std::io::Error::other)?;
+        let _ = alt_store::runs::remove_boot_runs(Path::new(&idx), None);
     }
     Ok(())
 }

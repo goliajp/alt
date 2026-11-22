@@ -2,6 +2,8 @@
 
 mod abbrev;
 mod boot_runs;
+#[cfg(target_os = "linux")]
+mod boot_runs_stuck;
 mod cache_failure;
 mod compact_readers;
 mod confirmed;
