@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: name the company as the copyright holder
+author-type: human
+author: doracawl
+touched: LICENSE-MIT
