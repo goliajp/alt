@@ -94,14 +94,20 @@ impl Zone {
     /// without a colon before the name, else the POSIX rule it spells.
     /// What names neither is UTC, as it is to the C library.
     pub fn of(tz: Option<&str>) -> Self {
+        Self::found(tz, Path::new(SYSTEM), Path::new(ZONES))
+    }
+
+    /// [`Self::of`], with the file of the system's zone at `system` and
+    /// the files of the zone database under `zones`.
+    fn found(tz: Option<&str>, system: &Path, zones: &Path) -> Self {
         let Some(tz) = tz else {
-            return Self::read(Path::new(SYSTEM)).unwrap_or_else(Self::utc);
+            return Self::read(system).unwrap_or_else(Self::utc);
         };
         let name = tz.strip_prefix(':').unwrap_or(tz);
         if name.is_empty() {
             return Self::utc();
         }
-        let named = Self::read(&Path::new(ZONES).join(name));
+        let named = Self::read(&zones.join(name));
         let spelled = || Some(Self::ruled(rule::parse(name)?));
         named.or_else(spelled).unwrap_or_else(Self::utc)
     }
@@ -212,62 +218,90 @@ mod tests {
         assert_eq!(back.offset_of_local(change + 3600), 0);
     }
 
-    #[test]
-    fn tz_names_a_file_or_spells_a_rule_and_anything_else_is_utc() {
-        assert_eq!(Zone::of(Some("")), Zone::utc());
-        assert_eq!(Zone::of(Some(":")), Zone::utc());
-        assert_eq!(Zone::of(Some("Nowhere/Zone")), Zone::utc());
-        let spelled = Zone::of(Some("JST-9"));
-        assert_eq!(spelled.offset_at(0), 9 * 3600);
-        assert_eq!(Zone::of(Some(":<+0330>-3:30")).offset_at(0), 12_600);
+    /// Files of the zone database, as tzdata 2026f compiles them with
+    /// every change listed to 2037 and the rule for the years after in
+    /// the last line.
+    const TOKYO: &[u8] = include_bytes!("zone/testdata/Asia_Tokyo");
+    const NEW_YORK: &[u8] = include_bytes!("zone/testdata/America_New_York");
+    const SAO_PAULO: &[u8] = include_bytes!("zone/testdata/America_Sao_Paulo");
+    const DUBLIN: &[u8] = include_bytes!("zone/testdata/Europe_Dublin");
+    const KATHMANDU: &[u8] = include_bytes!("zone/testdata/Asia_Kathmandu");
+    const LORD_HOWE: &[u8] = include_bytes!("zone/testdata/Australia_Lord_Howe");
+    const MONROVIA: &[u8] = include_bytes!("zone/testdata/Africa_Monrovia");
+
+    /// A zone database with the one file `Asia/Tokyo`, and beside it the
+    /// file of a system in New York.
+    fn database() -> (crate::temp::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let dir = crate::temp::tempdir().unwrap();
+        let (system, zones) = (dir.path().join("localtime"), dir.path().join("zones"));
+        std::fs::create_dir_all(zones.join("Asia")).unwrap();
+        std::fs::write(zones.join("Asia/Tokyo"), TOKYO).unwrap();
+        std::fs::write(&system, NEW_YORK).unwrap();
+        (dir, system, zones)
     }
 
-    /// Each zone file is that of the system: what git wrote under glibc
-    /// with `TZ` set so, for a date without a zone in each season.
+    #[test]
+    fn tz_names_a_file_or_spells_a_rule_and_anything_else_is_utc() {
+        let (dir, system, zones) = database();
+        let found = |tz: Option<&str>| Zone::found(tz, &system, &zones);
+        let tokyo = tzif::parse(TOKYO).unwrap();
+        let by_path = zones.join("Asia/Tokyo").to_str().unwrap().to_owned();
+        let after_a_colon = format!(":{by_path}");
+        for named in ["Asia/Tokyo", ":Asia/Tokyo", &by_path, &after_a_colon] {
+            assert_eq!(found(Some(named)), tokyo, "{named}");
+        }
+        for nothing in ["", ":", "Nowhere/Zone", ":Nowhere/Zone", "Asia", "Asia/"] {
+            assert_eq!(found(Some(nothing)), Zone::utc(), "{nothing}");
+        }
+        assert_eq!(found(Some("JST-9")).offset_at(0), 9 * 3600);
+        assert_eq!(found(Some(":<+0330>-3:30")).offset_at(0), 12_600);
+        // a file stands before a rule of its name
+        std::fs::write(zones.join("JST-9"), NEW_YORK).unwrap();
+        assert_eq!(found(Some("JST-9")), tzif::parse(NEW_YORK).unwrap());
+        drop(dir);
+    }
+
+    #[test]
+    fn the_zone_of_the_system_is_read_where_tz_is_not_set() {
+        let (dir, system, zones) = database();
+        let new_york = tzif::parse(NEW_YORK).unwrap();
+        assert_eq!(Zone::found(None, &system, &zones), new_york);
+        // one that has no such file, or one that is no zone, is in UTC
+        std::fs::write(&system, b"not a zone").unwrap();
+        assert_eq!(Zone::found(None, &system, &zones), Zone::utc());
+        std::fs::remove_file(&system).unwrap();
+        assert_eq!(Zone::found(None, &system, &zones), Zone::utc());
+        drop(dir);
+    }
+
+    /// What git wrote under glibc with `TZ` naming each zone, for a date
+    /// without a zone in each season.
     #[test]
     fn the_files_of_the_zone_database_are_read() {
         let april = days_from_civil(2005, 4, 7) * DAY + 22 * 3600;
         let january = days_from_civil(2005, 1, 7) * DAY + 22 * 3600;
-        for (tz, in_april, in_january) in [
-            ("Asia/Tokyo", 9 * 3600, 9 * 3600),
-            (":Asia/Tokyo", 9 * 3600, 9 * 3600),
-            ("/usr/share/zoneinfo/Asia/Tokyo", 9 * 3600, 9 * 3600),
-            (":/usr/share/zoneinfo/Asia/Tokyo", 9 * 3600, 9 * 3600),
-            ("America/New_York", -4 * 3600, -5 * 3600),
-            ("EST5EDT", -4 * 3600, -5 * 3600),
-            ("America/Sao_Paulo", -3 * 3600, -2 * 3600),
-            ("Europe/Dublin", 3600, 0),
-            ("Asia/Kathmandu", 20_700, 20_700),
-            ("Australia/Lord_Howe", 37_800, 39_600),
-            ("UTC", 0, 0),
+        for (name, file, in_april, in_january) in [
+            ("Asia/Tokyo", TOKYO, 9 * 3600, 9 * 3600),
+            ("America/New_York", NEW_YORK, -4 * 3600, -5 * 3600),
+            ("America/Sao_Paulo", SAO_PAULO, -3 * 3600, -2 * 3600),
+            ("Europe/Dublin", DUBLIN, 3600, 0),
+            ("Asia/Kathmandu", KATHMANDU, 20_700, 20_700),
+            ("Australia/Lord_Howe", LORD_HOWE, 37_800, 39_600),
         ] {
-            let zone = Zone::of(Some(tz));
-            assert_eq!(zone.offset_of_local(april), in_april, "{tz}");
-            assert_eq!(zone.offset_of_local(january), in_january, "{tz}");
+            let zone = tzif::parse(file).expect(name);
+            assert_eq!(zone.offset_of_local(april), in_april, "{name}");
+            assert_eq!(zone.offset_of_local(january), in_january, "{name}");
         }
         // past the last change a file lists, by the rule that ends it
-        let new_york = Zone::of(Some("America/New_York"));
+        let new_york = tzif::parse(NEW_YORK).unwrap();
         let summer = days_from_civil(2090, 7, 1) * DAY + 12 * 3600;
         let winter = days_from_civil(2090, 1, 1) * DAY + 12 * 3600;
         assert_eq!(new_york.offset_of_local(summer), -4 * 3600);
         assert_eq!(new_york.offset_of_local(winter), -5 * 3600);
         // and before the zone kept whole minutes
-        let monrovia = Zone::of(Some("Africa/Monrovia"));
+        let monrovia = tzif::parse(MONROVIA).unwrap();
         let noon = days_from_civil(1971, 6, 1) * DAY + 12 * 3600;
         assert_eq!(monrovia.offset_of_local(noon), -2670);
-    }
-
-    #[test]
-    fn the_zone_of_the_system_is_read_where_tz_is_not_set() {
-        let system = Zone::of(None);
-        let named = std::fs::read_link(SYSTEM).ok().and_then(|target| {
-            let target = target.to_str()?.to_owned();
-            let name = target.split_once("zoneinfo/")?.1.to_owned();
-            Some(Zone::of(Some(&name)))
-        });
-        if let Some(named) = named {
-            assert_eq!(system, named);
-        }
     }
 
     /// A file of the first version with one kind of local time, an hour
@@ -319,7 +353,7 @@ mod tests {
             "none",
         ];
         let unread = unread.map(at).into_iter();
-        let elsewhere = ["/dev/zero", "/dev/null", "/dev/urandom", "/", ZONES];
+        let elsewhere = ["/dev/zero", "/dev/null", "/dev/urandom", "/"];
         for named in unread.chain(elsewhere.map(str::to_owned)) {
             assert_eq!(Zone::of(Some(&named)), Zone::utc(), "{named}");
             assert_eq!(Zone::of(Some(&format!(":{named}"))), Zone::utc(), "{named}");

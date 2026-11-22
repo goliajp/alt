@@ -89,6 +89,13 @@ fn header(from: &mut Reader) -> Option<(u8, Counts)> {
     Some((version, counts))
 }
 
+/// Room for the `count` things a table says it has of some kind.
+fn room<T>(count: usize) -> Vec<T> {
+    #[cfg(test)]
+    tests::ASKED.with(|asked| asked.set(asked.get().max(count)));
+    Vec::with_capacity(count)
+}
+
 pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
     let mut from = Reader(bytes);
     let (version, mut counts) = header(&mut from)?;
@@ -100,7 +107,7 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
     }
     let width = if wide { 8 } else { 4 };
     counts.fits(width, from.0.len()).then_some(())?;
-    let mut instants = Vec::with_capacity(counts.changes);
+    let mut instants = room(counts.changes);
     for _ in 0..counts.changes {
         let instant = from.take(width)?;
         instants.push(match wide {
@@ -109,7 +116,7 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
         });
     }
     let kind_of = from.take(counts.changes)?;
-    let mut offsets = Vec::with_capacity(counts.kinds);
+    let mut offsets = room(counts.kinds);
     for _ in 0..counts.kinds {
         // the offset, whether it is summer time, and where its name is
         let kind = from.take(6)?;
@@ -127,7 +134,7 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
         }
         false => None,
     };
-    let mut changes = Vec::with_capacity(instants.len());
+    let mut changes = room(instants.len());
     for (instant, kind) in instants.into_iter().zip(kind_of) {
         changes.push((instant, *offsets.get(usize::from(*kind))?));
     }
@@ -144,6 +151,22 @@ pub(super) fn parse(bytes: &[u8]) -> Option<Zone> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// the most things room was asked for at once since it was last
+        /// set to nothing
+        pub(super) static ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// What `bytes` are read as. Read or not, room was asked for no more
+    /// things than the file has bytes.
+    fn parse(bytes: &[u8]) -> Option<Zone> {
+        ASKED.set(0);
+        let read = super::parse(bytes);
+        let asked = ASKED.get();
+        assert!(asked <= bytes.len(), "room for {asked} of {}", bytes.len());
+        read
+    }
 
     /// A table of `changes`, each an instant and the index of its kind,
     /// and of `offsets`, one for each kind, with instants `width` bytes.
@@ -249,6 +272,48 @@ mod tests {
                     file[at..at + 4].copy_from_slice(&count.to_be_bytes());
                     assert!(parse(&file).is_none(), "{field} {count}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn counts_fit_only_what_is_left_of_a_file() {
+        let counts = |[ut, standard, leaps, changes, kinds, letters]: [usize; 6]| Counts {
+            ut,
+            standard,
+            leaps,
+            changes,
+            kinds,
+            letters,
+        };
+        // a table of each thing alone, by what one of it takes
+        let each = |width| [1, 1, width + 4, width + 1, 6, 1];
+        for width in [4, 8] {
+            assert!(counts([0; 6]).fits(width, 0));
+            for (field, takes) in each(width).into_iter().enumerate() {
+                for count in [1, 7, 100, u32::MAX as usize] {
+                    let mut alone = [0; 6];
+                    alone[field] = count;
+                    let length = count * takes;
+                    assert!(counts(alone).fits(width, length), "{field}");
+                    assert!(!counts(alone).fits(width, length - 1), "{field}");
+                    // and beside two of every other
+                    let mut beside = [2; 6];
+                    beside[field] = count;
+                    let others = each(width).iter().sum::<usize>() * 2 - takes * 2;
+                    assert!(counts(beside).fits(width, others + length), "{field}");
+                    assert!(!counts(beside).fits(width, others + length - 1), "{field}");
+                }
+                // a sum or a product past what can be counted fits nothing
+                let mut alone = [0; 6];
+                alone[field] = usize::MAX;
+                assert_eq!(counts(alone).fits(width, usize::MAX), takes == 1, "{field}");
+                let mut beside = [1; 6];
+                beside[field] = usize::MAX / takes;
+                assert!(!counts(beside).fits(width, usize::MAX), "{field}");
+            }
+            for count in [usize::MAX / 2, usize::MAX] {
+                assert!(!counts([count; 6]).fits(width, usize::MAX), "{count}");
             }
         }
     }
@@ -385,8 +450,14 @@ mod tests {
         second.extend(table(b'3', 8, CHANGES, OFFSETS));
         second.extend(b"\nEST5EDT,M3.2.0,M11.1.0\n");
         files.push(second);
-        // a file of the system, which has some hundred changes
-        files.push(std::fs::read("/usr/share/zoneinfo/America/New_York").unwrap());
+        // a file with some hundred changes, as a zone that has had
+        // summer time for a century has
+        let many = (0..300).map(|n| (n * 15_778_800 - (1 << 31), n as u8 % 2));
+        let many: Vec<(i64, u8)> = many.collect();
+        let mut long = table(b'2', 4, &[], &[0]);
+        long.extend(table(b'2', 8, &many, OFFSETS));
+        long.extend(b"\nEST5EDT,M3.2.0,M11.1.0\n");
+        files.push(long);
         let (mut tries, mut read) = (0, 0);
         for file in &files {
             assert!(tried(file));
@@ -419,7 +490,7 @@ mod tests {
 
     /// Of a hundred files, how many at the least are read: of those with
     /// a byte or a count changed, and of those made part by part.
-    const CHANGED_READ: usize = 30;
+    const CHANGED_READ: usize = 15;
     const MADE_READ: usize = 15;
 
     #[test]
