@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a zone that is none beside a zone by name, and read past the last year as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/signature/date.rs
+touched: crates/alt-cli/src/native/signature/date/git_dates.tsv
+touched: crates/alt-cli/src/native/signature/date/tests.rs
+touched: crates/alt-cli/tests/it/signing/zones.rs
