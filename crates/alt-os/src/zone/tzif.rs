@@ -276,6 +276,107 @@ mod tests {
         true
     }
 
+    /// Where the second header of a file of a later version begins.
+    fn second_header(file: &[u8]) -> Option<usize> {
+        let (version, counts) = header(&mut Reader(file))?;
+        (version >= b'2').then(|| 44 + counts.table(4))
+    }
+
+    fn one_of<T: Copy>(of: &[T], state: &mut u64) -> T {
+        of[next(state) % of.len()]
+    }
+
+    /// A table with a header, of few things of each kind so that the
+    /// file is long enough for its counts: instants in their order or
+    /// not, at either end of what an instant can be, kinds of local time
+    /// the table has or does not have, offsets at either end of theirs.
+    /// One time in eight a count of the header is not that of the table.
+    fn made_table(state: &mut u64, version: u8, width: usize) -> Vec<u8> {
+        let changes = next(state) % 7;
+        let kinds = match next(state) % 8 {
+            0 => 0,
+            _ => 1 + next(state) % 4,
+        };
+        let [letters, leaps, standard, ut] = [7, 3, 4, 4].map(|most| next(state) % most);
+        let mut counts = [ut, standard, leaps, changes, kinds, letters];
+        if next(state).is_multiple_of(8) {
+            counts[next(state) % 6] = one_of(&[0, 1, 2, 5, 40, 1 << 20, u32::MAX as usize], state);
+        }
+        let mut bytes = b"TZif".to_vec();
+        bytes.push(version);
+        bytes.extend([0; 15]);
+        for count in counts {
+            bytes.extend((count as u32).to_be_bytes());
+        }
+        let ordered = !next(state).is_multiple_of(4);
+        let mut instant = one_of(&[i64::MIN, -(1 << 40), -5, 0, 1_112_911_993], state);
+        for _ in 0..changes {
+            match width {
+                8 => bytes.extend(instant.to_be_bytes()),
+                _ => bytes.extend((instant as i32).to_be_bytes()),
+            }
+            instant = match ordered {
+                true => instant.saturating_add(1 + (next(state) % (1 << 30)) as i64),
+                false => one_of(&[i64::MIN, 0, i64::MAX, next(state) as i64], state),
+            };
+            if ordered && next(state).is_multiple_of(16) {
+                instant = i64::MAX;
+            }
+        }
+        for _ in 0..changes {
+            let has = !next(state).is_multiple_of(8) && kinds > 0;
+            bytes.push(if has {
+                (next(state) % kinds) as u8
+            } else {
+                0xFF
+            });
+        }
+        for _ in 0..kinds {
+            let offset = one_of(
+                &[i32::MIN, i32::MAX, 0, 3600, -18_000, next(state) as i32],
+                state,
+            );
+            bytes.extend(offset.to_be_bytes());
+            bytes.extend([next(state) as u8, next(state) as u8]);
+        }
+        let rest = letters + leaps * (width + 4) + standard + ut;
+        bytes.extend((0..rest).map(|_| one_of(&[0, b'X', next(state) as u8], state)));
+        bytes
+    }
+
+    /// A file of a version there is, with one table or two as the
+    /// version has, and after two a last line that is a rule, is none,
+    /// lacks an end, or holds what no rule does.
+    fn made(state: &mut u64) -> Vec<u8> {
+        let version = one_of(&[0, b'2', b'2', b'3', b'4'], state);
+        let mut bytes = made_table(state, version, 4);
+        if version == 0 {
+            return bytes;
+        }
+        bytes.extend(made_table(state, version, 8));
+        let lines: [&[u8]; 12] = [
+            b"\n\n",
+            b"\nJST-9\n",
+            b"\nEST5EDT,M3.2.0,M11.1.0\n",
+            b"\nAEST-10AEDT,M10.1.0,M4.1.0/3\n",
+            b"\n<-03>3<-02>,M3.5.0/-2,M10.5.0/-1\n",
+            b"\nXYZ5ABC,J60/1,300\n",
+            b"\nJST-9",
+            b"",
+            b"\nJST\0-9\n",
+            b"\nXXX99999999999999999999999999\n",
+            b"\nEST5EDT,M3.2.0/9223372036854775807,M11.1.0\n",
+            b"\n\xFF\xFE\n\n",
+        ];
+        // the lines that are a rule or none are the likelier
+        let line = match next(state) % 4 {
+            0 => one_of(&lines, state),
+            _ => one_of(&lines[..6], state),
+        };
+        bytes.extend(line);
+        bytes
+    }
+
     #[test]
     fn no_bytes_make_reading_a_file_or_asking_what_was_read_fail() {
         let mut state = 0x2545_F491_4F6C_DD1D;
@@ -298,26 +399,43 @@ mod tests {
                 read += usize::from(tried(&changed));
                 tries += 3;
             }
-            for _ in 0..500 {
-                let mut changed = file.clone();
-                let field = COUNTS + 4 * (next(&mut state) % 6);
-                let count = (next(&mut state) as u32) >> (next(&mut state) % 32);
-                changed[field..field + 4].copy_from_slice(&count.to_be_bytes());
-                read += usize::from(tried(&changed));
-                tries += 1;
+            // a count of either header is made another
+            let headers = [Some(0), second_header(file)];
+            for header in headers.into_iter().flatten() {
+                for _ in 0..500 {
+                    let mut changed = file.clone();
+                    let field = header + COUNTS + 4 * (next(&mut state) % 6);
+                    let count = (next(&mut state) as u32) >> (next(&mut state) % 32);
+                    changed[field..field + 4].copy_from_slice(&count.to_be_bytes());
+                    read += usize::from(tried(&changed));
+                    tries += 1;
+                }
             }
-        }
-        for _ in 0..4000 {
-            let length = next(&mut state) % 300;
-            let mut bytes: Vec<u8> = (0..length).map(|_| next(&mut state) as u8).collect();
-            if next(&mut state).is_multiple_of(2) && length >= 5 {
-                bytes[..5].copy_from_slice(b"TZif2");
-            }
-            read += usize::from(tried(&bytes));
-            tries += 1;
         }
         assert!(tries > 9000, "{tries}");
-        // most changes leave a file that reads: what was read was asked
-        assert!(read > 1000, "{read} of {tries}");
+        // a change of one byte leaves most files to be read and asked
+        assert!(read * 100 >= tries * CHANGED_READ, "{read} of {tries}");
+    }
+
+    /// Of a hundred files, how many at the least are read: of those with
+    /// a byte or a count changed, and of those made part by part.
+    const CHANGED_READ: usize = 30;
+    const MADE_READ: usize = 15;
+
+    #[test]
+    fn no_file_made_part_by_part_makes_reading_it_fail() {
+        let mut state = 0x9E37_79B9_7F4A_7C15;
+        let (tries, mut read) = (8000, 0);
+        let mut ruled = 0;
+        for _ in 0..tries {
+            let file = made(&mut state);
+            read += usize::from(tried(&file));
+            ruled += usize::from(parse(&file).is_some_and(|zone| zone.rule.is_some()));
+            // and the same cut short, or with something after it
+            tried(&file[..next(&mut state) % (file.len() + 1)]);
+            tried(&[&file[..], &[0, b'\n', 0xFF][..next(&mut state) % 4]].concat());
+        }
+        assert!(read * 100 >= tries * MADE_READ, "{read} of {tries}");
+        assert!(ruled * 100 >= tries * MADE_READ / 2, "{ruled} of {tries}");
     }
 }

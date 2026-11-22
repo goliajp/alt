@@ -355,13 +355,17 @@ mod tests {
     #[test]
     fn no_text_makes_reading_a_rule_or_asking_it_fail() {
         const LETTERS: &[u8] = b"ESTDMJXYZ<>+-,./:0123456789 9999";
-        const RULES: [&str; 6] = [
+        const RULES: [&str; 10] = [
             "JST-9",
             "EST5EDT,M3.2.0,M11.1.0",
             "AEST-10AEDT,M10.1.0,M4.1.0/3",
             "<-03>3<-02>,M3.5.0/-2,M10.5.0/-1",
             "XYZ5ABC4:30,J60/1,J300/3:30",
             "EST5EDT,0/0,J365/25",
+            "XYZ5ABC,59,299",
+            "<+13>-13<+14>,M9.5.0/2:45,M4.1.0/3:45",
+            "ABC3DEF,J300/1,J60",
+            "ABC-11:30DEF,300/-24,60/167",
         ];
         let mut state = 0x9E37_79B9_7F4A_7C15;
         let mut texts = Vec::new();
@@ -383,19 +387,35 @@ mod tests {
                 }
             }
         }
-        assert!(texts.len() > 10_000);
-        let mut read = 0;
-        for text in texts {
+        let (made, changed) = (4000, texts.len() - 4000);
+        assert!(changed > 10_000, "{changed}");
+        let (mut read, mut summers) = (0, 0);
+        for (number, text) in texts.into_iter().enumerate() {
             let text = String::from_utf8(text).unwrap();
             let Some(rule) = parse(&text) else { continue };
-            read += 1;
+            read += usize::from(number >= made);
+            let mut offsets = std::collections::BTreeSet::new();
             for year in [1970, 2005, 2038, 2099] {
                 for month in 1..=12 {
-                    let offset = rule.offset_at(at(year, month, 15, 12, 0));
-                    assert!(offset.abs() <= 168 * 3600, "{text}");
+                    offsets.insert(rule.offset_at(at(year, month, 15, 12, 0)));
+                    // and as long before the epoch
+                    offsets.insert(rule.offset_at(-at(year, month, 15, 12, 0)));
                 }
             }
+            for instant in [i64::MIN, i64::MIN + 1, -1, 0, i64::MAX - 1, i64::MAX] {
+                offsets.insert(rule.offset_at(instant));
+            }
+            assert!(offsets.iter().all(|o| o.abs() <= 168 * 3600), "{text}");
+            summers += usize::from(offsets.len() > 1);
         }
-        assert!(read > 100, "{read} rules were read");
+        // of the rules with one letter changed, cut short or made longer
+        assert!(read * 100 >= changed * CHANGED_READ, "{read} of {changed}");
+        assert!(
+            summers * 100 >= changed * CHANGED_READ / 2,
+            "{summers} of {changed}"
+        );
     }
+
+    /// Of a hundred changed rules, how many at the least are read.
+    const CHANGED_READ: usize = 10;
 }
