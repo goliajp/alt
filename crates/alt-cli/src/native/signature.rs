@@ -183,7 +183,7 @@ fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signatur
         (Some(name), Some(email)) => (name, email),
         (name, email) => return Err(unknown(word, name.is_none(), email.is_none())),
     };
-    let (when, tz) = match told("DATE").filter(|date| !date.trim().is_empty()) {
+    let (when, tz) = match told("DATE").filter(|date| !date.is_empty()) {
         Some(date) => {
             let local = |wall| alt_os::zone::Zone::of(said.get("TZ")).offset_of_local(wall);
             date::parse(date, now, &local)
@@ -421,6 +421,11 @@ mod tests {
         );
         let unset = [("GIT_AUTHOR_DATE", "")];
         assert_eq!(line(&unset, Role::Author, USER).unwrap(), "U <u@x> 7 +0000");
+        // blanks are a date that cannot be read, as they are to git
+        for blank in [" ", "\t", " \n"] {
+            let error = line(&[("GIT_AUTHOR_DATE", blank)], Role::Author, USER).unwrap_err();
+            assert_eq!(error, format!("invalid date format: {blank}"));
+        }
         let zoned = [
             ("GIT_AUTHOR_DATE", "2005-04-07 22:13:13"),
             ("GIT_COMMITTER_DATE", "Thu Apr  7 22:13:13 EDT 2005"),

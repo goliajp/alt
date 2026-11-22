@@ -7,9 +7,12 @@
 //! date without a zone is in the caller's, as a moment that is given no
 //! date at all is written in the caller's zone.
 //!
-//! Three things git lets through are refused: a time or a zone that is
-//! written as one and cannot be one (`25:13:13`, `24:00:00`, `+2400`,
-//! `-3`), and a day its month does not have, or none.
+//! Three things git lets through are refused: a time written as one that
+//! cannot be one (`25:13:13`, `24:30:00`; `24:00:00` is the next day's
+//! first moment), a zone written as one that cannot be one (`+2400`,
+//! `-3`) where the date has no other, and a day its month does not have,
+//! or none. And a zone of `-0001` is that zone, where git takes it for
+//! no zone.
 
 use alt_os::zone::{civil_from_days, days_from_civil, days_in_month};
 
@@ -33,7 +36,10 @@ struct Read {
     /// the date and the time came of seconds since the epoch, which are
     /// in no zone
     absolute: bool,
+    /// a time was written that cannot be one
     refused: bool,
+    /// a zone was written that cannot be one
+    unshaped: bool,
 }
 
 fn digit_at(text: &[u8], at: usize) -> bool {
@@ -53,10 +59,11 @@ fn digits(text: &[u8], at: usize) -> (i64, usize) {
 /// git reads.
 fn seconds(year: i64, month: i64, day: i64, time: [Option<i64>; 3]) -> Option<i64> {
     let [hour, minute, second] = time;
+    if !(1970..=LAST_YEAR).contains(&year) {
+        return None;
+    }
     let day = days_from_civil(year, month, 1) + day - 1;
-    (1970..=LAST_YEAR)
-        .contains(&year)
-        .then_some(day * DAY + hour? * 3600 + minute? * 60 + second?)
+    Some(day * DAY + hour? * 3600 + minute? * 60 + second?)
 }
 
 impl Read {
@@ -80,8 +87,12 @@ impl Read {
     }
 
     fn set_time(&mut self, hour: i64, minute: i64, second: i64) -> bool {
-        let is_one =
-            (0..=24).contains(&hour) && (0..60).contains(&minute) && (0..=60).contains(&second);
+        // the day ends at 24:00:00 and has no later time
+        let is_one = match hour {
+            0..24 => (0..60).contains(&minute) && (0..=60).contains(&second),
+            24 => minute == 0 && second == 0,
+            _ => false,
+        };
         if is_one {
             (self.hour, self.minute, self.second) = (Some(hour), Some(minute), Some(second));
         }
@@ -129,7 +140,7 @@ impl Read {
             (third, end) = digits(text, end + 1);
         }
         if between == b':' {
-            if first == 24 || !self.set_time(first, second, third.max(0)) {
+            if !self.set_time(first, second, third.max(0)) {
                 self.refused = true;
                 return 0;
             }
@@ -238,7 +249,7 @@ impl Read {
             let east = hours * 60 + minutes;
             self.zone = Some(if text[0] == b'-' { -east } else { east });
         } else {
-            self.refused = true;
+            self.unshaped = true;
         }
         end
     }
@@ -295,7 +306,8 @@ pub(super) fn parse(text: &str, now: i64, local: &dyn Fn(i64) -> i32) -> Option<
         at += taken.max(1);
     }
     let (year, month, day) = (read.year?, read.month?, read.day?);
-    if read.refused || day > days_in_month(year, month) {
+    let unzoned = read.unshaped && read.zone.is_none();
+    if read.refused || unzoned || day > days_in_month(year, month) {
         return None;
     }
     let wall = seconds(year, month, day, read.time())?;
@@ -308,7 +320,9 @@ pub(super) fn parse(text: &str, now: i64, local: &dyn Fn(i64) -> i32) -> Option<
     }
     // 2099-12-31T23:59:59Z, past which git reads nothing
     let last = days_from_civil(LAST_YEAR + 1, 1, 1) * DAY - 1;
-    (east * 60 <= wall && -east * 60 <= last - wall).then(|| written(wall - east * 60, east))
+    let before_the_first = east > 0 && east * 60 > wall;
+    let past_the_last = east < 0 && -east * 60 > last - wall;
+    (!before_the_first && !past_the_last).then(|| written(wall - east * 60, east))
 }
 
 #[cfg(test)]

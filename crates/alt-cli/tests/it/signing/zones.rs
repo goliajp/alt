@@ -31,6 +31,16 @@ const DATED: &[(&str, &str)] = &[
     ("Asia/Tokyo", "1112904793 +0200"),
     ("Asia/Tokyo", "1112904793"),
     ("Asia/Tokyo", "Thu, 07 Apr 2005 22:13:13 GMT"),
+    // the end of a day, and a zone that is none beside one that is
+    ("Asia/Tokyo", "2005-04-07 24:00:00"),
+    ("Asia/Tokyo", "2005-04-07 22:13:13 +0200 (UTC+2)"),
+    ("Asia/Tokyo", "2005-04-07 22:13:13 JST-9"),
+    // what is no file of a zone is UTC, and is not read to an end it
+    // does not have
+    ("/dev/zero", "2005-04-07 22:13:13"),
+    (":/dev/zero", "2005-04-07 22:13:13"),
+    ("/dev/null", "2005-04-07 22:13:13"),
+    ("/usr/share/zoneinfo", "2005-04-07 22:13:13"),
 ];
 
 /// A zone no date above is in, for the daemon.
@@ -86,7 +96,7 @@ fn a_date_that_is_none_is_refused_as_git_refuses_it() {
     let ours = dir.path().join("alt");
     std::fs::create_dir(&ours).unwrap();
     init(&ours);
-    for date in ["2005-04-07", "yesterday", "2 weeks ago", "12345 +0100"] {
+    for date in ["2005-04-07", "yesterday", "2 weeks ago", "12345 +0100", " "] {
         let mut env = LATER[..4].to_vec();
         env.push(("GIT_AUTHOR_DATE", date));
         let made = ["commit", "-q", "--allow-empty", "-m", "made"];
@@ -146,13 +156,19 @@ fn a_commit_made_now_is_in_the_zone_of_the_caller_as_git_writes_it() {
     let daemon = daemon_of(&served);
     let _stop = crate::scan_daemon::Stop(daemon.parse().unwrap(), false);
 
-    for tz in [
+    for (number, tz) in [
         Some("Asia/Tokyo"),
         Some("America/New_York"),
         Some("UTC"),
         Some("Asia/Kathmandu"),
+        Some("/dev/zero"),
+        Some(":/dev/zero"),
+        Some("/dev/null"),
         None,
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let made = ["commit", "-q", "--allow-empty", "-m", "made"];
         ok(git_in(&theirs, tz, &made));
         let lines = git_lines(&theirs, "commit", "HEAD");
@@ -167,7 +183,7 @@ fn a_commit_made_now_is_in_the_zone_of_the_caller_as_git_writes_it() {
             // the notes commit and a tag are the committer's
             let notes = alt_lines(root, "refs/notes/alt/meta");
             assert_eq!(zones_of(&notes), expected, "{told}");
-            let name = format!("at-{}-{daemon}", tz.unwrap_or("none").replace('/', "-"));
+            let name = format!("at-{number}-{daemon}");
             ok(alt(
                 root,
                 daemon,
