@@ -438,11 +438,12 @@ older alt reads the repository as before, and the files whose blobs went are
 added again with `alt add`; `alt commit` refuses a tree that names a blob
 which is not stored until they are.
 
-An object that a commit names is another matter: it is part of history, and
-taking its record out does not bring it back. With such an object in the
-list, `--yes` changes nothing and says so. Fetch the object from another copy
-of the repository if there is one. `alt fsck --drop-lost --yes --committed`
-takes the records out all the same; the commits stay as they are and name
+An object that a commit names, or a tag or a tree that a ref leads to without
+a commit, is another matter: it is part of what the refs keep, and taking its
+record out does not bring it back. With such an object in the list, `--yes`
+changes nothing and says so. Fetch the object from another copy of the
+repository if there is one. `alt fsck --drop-lost --yes --committed` takes
+the records out all the same; what names the objects stays as it is and names
 objects that are not stored, which `alt fsck` reports until the objects are
 stored again. A lost blob whose file is still in the working tree comes back
 with `alt add` of that file, or of the tree it is in: the ids of the objects

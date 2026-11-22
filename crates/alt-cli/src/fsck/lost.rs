@@ -87,11 +87,12 @@ pub(super) fn run<W: Write>(
     }
     if !committed.is_empty() && !args.committed {
         return Err(format!(
-            "fsck: {} object(s) that commits name go with these records, and nothing was \
-             changed. Taking the records out does not bring the objects back: fetch them from \
-             another copy of the repository if there is one. `alt fsck --drop-lost --yes \
-             --committed` takes the records out all the same; the commits listed above then \
-             stay as they are and name objects that are not stored",
+            "fsck: {} object(s) that a commit, a tag or a tree a ref leads to names go with \
+             these records, and nothing was changed. Taking the records out does not bring the \
+             objects back: fetch them from another copy of the repository if there is one. \
+             `alt fsck --drop-lost --yes --committed` takes the records out all the same; what \
+             is listed above as naming them then stays as it is and names objects that are not \
+             stored",
             committed.len()
         )
         .into());

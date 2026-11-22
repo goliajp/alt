@@ -54,6 +54,9 @@ fn a_lost_blob_below_a_tree_that_a_tag_or_a_ref_names_goes_only_with_committed()
         assert!(listed.contains(&line), "tagged {tagged}: {listed}");
         let said = text(&refused.stderr);
         assert!(said.contains("--committed"), "tagged {tagged}: {said}");
+        // no commit names the blob
+        let named = "1 object(s) that a commit, a tag or a tree a ref leads to names";
+        assert!(said.contains(named), "tagged {tagged}: {said}");
         assert_eq!(lens(&alt_dir), before, "tagged {tagged}");
         assert!(!alt_dir.join("objects.lost").exists(), "tagged {tagged}");
         let taken = ok(run(
