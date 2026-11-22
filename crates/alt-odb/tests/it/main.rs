@@ -26,6 +26,7 @@ mod merge_readers;
 mod moved;
 mod odb_index;
 mod odb_lifecycle;
+mod pack_regrown;
 mod rewind_interrupted;
 mod second_handle;
 mod synced_marker;

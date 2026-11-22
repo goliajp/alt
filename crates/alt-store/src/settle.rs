@@ -28,6 +28,15 @@ impl ChunkStore {
         self.active.torn
     }
 
+    /// Whether more than an append that never finished can lie past
+    /// where the active pack ends for this handle: room for a record.
+    /// Records that were written went there, read or not, and a handle
+    /// that read them holds them in its index when the pack is cut.
+    pub fn whole_past_unfinished(&self) -> Result<bool, StoreError> {
+        let past = self.pack_file_len()?.saturating_sub(self.active.len);
+        Ok(self.active.torn && past >= REC_HEADER_LEN as u64)
+    }
+
     pub(crate) fn active_file(&self) -> &std::fs::File {
         &self.active.read
     }
