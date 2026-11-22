@@ -53,6 +53,7 @@ mod fsck;
 mod fsck_lost;
 mod fsck_reach;
 mod fsck_tails;
+mod fsck_trees;
 mod fsync_by_branch;
 mod gitlink;
 mod gitlink_said;

@@ -10,7 +10,7 @@ use alt_refs::{RefChange, RefStore, RefTarget};
 use super::staged_durability::repo;
 use super::unconfirmed::{alt, ok, stderr};
 
-fn oid_of(kind: ObjectKind, data: &[u8]) -> ObjectId {
+pub(super) fn oid_of(kind: ObjectKind, data: &[u8]) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, kind, data)
 }
 
@@ -59,7 +59,7 @@ fn an_older_commit_names(dir: &Path, entry: &[u8], parents: &[ObjectId]) -> Obje
 
 /// What `alt fsck` fails with, after `fsck --no-connectivity` passed and
 /// both left every file under `.alt` as it was.
-fn missing(dir: &Path) -> String {
+pub(super) fn missing(dir: &Path) -> String {
     let before = files(&dir.join(".alt"));
     let records = ok(alt(dir, &["fsck", "--no-connectivity"]));
     assert!(records.ends_with("every record verified\n"), "{records}");

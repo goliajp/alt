@@ -43,6 +43,10 @@ impl Link {
     }
 }
 
+/// What a tree is walked for: `commit` and the commit it is the tree of,
+/// or `tree` and the tree itself where a ref or a tag leads to it.
+type Top = (&'static str, ObjectId);
+
 /// A walk from refs through tags, commits and trees that stops at every
 /// object `wanted` picks. An object is looked at once, however many
 /// commits and trees name it.
@@ -131,15 +135,18 @@ impl Walk<'_> {
                         self.tree(tree, oid, from)?;
                     }
                 }
-                ObjectKind::Tree | ObjectKind::Blob => {}
+                // a tree a ref or a tag names, as `v2.6.11-tree` of Linux
+                ObjectKind::Tree => self.trees(oid, ("tree", oid), from)?,
+                ObjectKind::Blob => {}
             }
         }
         Ok(())
     }
 
-    /// Where the tree of `commit` has the entry `name` of the directory
-    /// `dir`, or with no name that directory itself.
-    fn at(&self, commit: ObjectId, from: &str, mut dir: usize, name: &[u8]) -> String {
+    /// Where the tree walked for `top`, a commit or the tree itself, has
+    /// the entry `name` of the directory `dir`, or with no name that
+    /// directory itself.
+    fn at(&self, top: Top, from: &str, mut dir: usize, name: &[u8]) -> String {
         let mut path = vec![name];
         while dir != 0 {
             let (parent, within) = &self.dirs[dir];
@@ -151,21 +158,28 @@ impl Walk<'_> {
         }
         path.reverse();
         let path = alt_bytes::BString::from(path.concat());
-        format!("commit {commit}, reached from {from}, names it at {path}")
+        let (kind, top) = top;
+        format!("{kind} {top}, reached from {from}, names it at {path}")
     }
 
     /// Walks the tree `root` of `commit`, which the ref `from` leads to.
     fn tree(&mut self, root: ObjectId, commit: ObjectId, from: &str) -> Res<()> {
+        let top = ("commit", commit);
+        match self.enter(root, "tree", true, |walk| walk.at(top, from, 0, b""))? {
+            true => self.trees(root, top, from),
+            false => Ok(()),
+        }
+    }
+
+    /// Walks the tree `root`, entered already, and the trees below it.
+    fn trees(&mut self, root: ObjectId, top: Top, from: &str) -> Res<()> {
         let algo = self.store.algo()?;
         self.dirs.clear();
         self.names.clear();
         self.dirs.push((0, 0..0));
-        if !self.enter(root, "tree", true, |walk| walk.at(commit, from, 0, b""))? {
-            return Ok(());
-        }
         let mut trees = vec![(root, 0)];
         while let Some((tree, dir)) = trees.pop() {
-            let by = |walk: &Self| walk.at(commit, from, dir, b"");
+            let by = |walk: &Self| walk.at(top, from, dir, b"");
             let Some(object) = self.read(tree, "tree", by)? else {
                 continue;
             };
@@ -176,9 +190,9 @@ impl Walk<'_> {
                 }
                 let oid = ObjectId::from_bytes(algo, oid).map_err(|e| e.to_string())?;
                 if !mode.is_tree() {
-                    self.enter(oid, "blob", false, |walk| walk.at(commit, from, dir, name))?;
+                    self.enter(oid, "blob", false, |walk| walk.at(top, from, dir, name))?;
                 } else if self.enter(oid, "tree", true, |walk| {
-                    walk.at(commit, from, dir, name) + "/"
+                    walk.at(top, from, dir, name) + "/"
                 })? {
                     let start = self.names.len();
                     self.names.extend_from_slice(name);
@@ -195,12 +209,13 @@ impl Store {
     /// The objects `wanted` picks among those the refs lead to, as the
     /// refs were before the last `dropped` operations of the log: what a
     /// ref points at, what a tag names, the parents and the tree of a
-    /// commit, the entries of its trees. Nothing below a picked object
-    /// is looked at. `wanted` is asked of each object once, and told
-    /// whether the walk reads the object next; of an object it reads
-    /// and the store does not hold it is asked again, told that it does
-    /// not. With `verified` the walk hashes nothing it reads: every
-    /// record of the store was verified before.
+    /// commit, the entries of its trees and of a tree a ref or a tag
+    /// names. Nothing below a picked object is looked at. `wanted` is
+    /// asked of each object once, and told whether the walk reads the
+    /// object next; of an object it reads and the store does not hold it
+    /// is asked again, told that it does not. With `verified` the walk
+    /// hashes nothing it reads: every record of the store was verified
+    /// before.
     pub(crate) fn reaching(
         &self,
         dropped: usize,

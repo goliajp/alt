@@ -17,6 +17,7 @@ mod head_lost;
 mod held;
 #[cfg(target_os = "linux")]
 mod synced_first;
+mod tree_lost;
 
 fn ok(out: std::process::Output) -> String {
     let said = String::from_utf8_lossy(&out.stderr).into_owned();
