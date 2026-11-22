@@ -12,10 +12,14 @@ mod paths;
 const COMMITS: usize = 100;
 
 /// The settings alt reads, as a user writes their names.
-const KNOWN_KEYS: [&str; 10] = [
+const KNOWN_KEYS: [&str; 16] = [
     "advice.addEmbeddedRepo",
     "advice.addEmptyPathspec",
     "advice.addIgnoredFile",
+    "author.email",
+    "author.name",
+    "committer.email",
+    "committer.name",
     "core.attributesFile",
     "core.autocrlf",
     "core.eol",
@@ -23,6 +27,8 @@ const KNOWN_KEYS: [&str; 10] = [
     "core.quotePath",
     "status.relativePaths",
     "status.showUntrackedFiles",
+    "user.email",
+    "user.name",
 ];
 
 impl NativeRepo<'_> {
