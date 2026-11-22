@@ -34,7 +34,7 @@ const DATED: &[(&str, &str)] = &[
     // the end of a day, and a zone that is none beside one that is
     ("Asia/Tokyo", "2005-04-07 24:00:00"),
     ("Asia/Tokyo", "2005-04-07 22:13:13 +0200 (UTC+2)"),
-    ("Asia/Tokyo", "2005-04-07 22:13:13 JST-9"),
+    ("Asia/Tokyo", "2005-04-07 22:13:13 -3 +0900"),
     // what is no file of a zone is UTC, and is not read to an end it
     // does not have
     ("/dev/zero", "2005-04-07 22:13:13"),
@@ -112,6 +112,38 @@ fn a_date_that_is_none_is_refused_as_git_refuses_it() {
             assert!(said.contains(&refusal), "{said}");
             assert_eq!(state(&ours), before, "{date}");
         }
+    }
+}
+
+/// Either date is read: a committer's that is none ends the command as
+/// the author's does, whatever the author's is.
+#[test]
+fn a_committer_date_of_blanks_is_refused_as_git_refuses_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let theirs = dir.path().join("git");
+    std::fs::create_dir(&theirs).unwrap();
+    ok(git(&theirs, &[], &["init", "-q", "-b", "main", "."]));
+    let ours = dir.path().join("alt");
+    std::fs::create_dir(&ours).unwrap();
+    init(&ours);
+    let mut env = LATER[..4].to_vec();
+    env.push(("GIT_AUTHOR_DATE", "1700000000 +0900"));
+    env.push(("GIT_COMMITTER_DATE", " "));
+    let refusal = "fatal: invalid date format:  ";
+    let by_git = git(
+        &theirs,
+        &env,
+        &["commit", "-q", "--allow-empty", "-m", "made"],
+    );
+    let said = String::from_utf8_lossy(&by_git.stderr);
+    assert!(!by_git.status.success() && said.contains(refusal), "{said}");
+    for daemon in [false, true] {
+        let before = state(&ours);
+        let by_alt = commit(&ours, daemon, &env);
+        let said = String::from_utf8_lossy(&by_alt.stderr);
+        assert_eq!(by_alt.status.code(), Some(128), "{said}");
+        assert!(said.contains(refusal), "{said}");
+        assert_eq!(state(&ours), before, "daemon {daemon}");
     }
 }
 

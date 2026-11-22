@@ -10,9 +10,9 @@
 //! Three things git lets through are refused: a time written as one that
 //! cannot be one (`25:13:13`, `24:30:00`; `24:00:00` is the next day's
 //! first moment), a zone written as one that cannot be one (`+2400`,
-//! `-3`) where the date has no other, and a day its month does not have,
-//! or none. And a zone of `-0001` is that zone, where git takes it for
-//! no zone.
+//! `-3`) where the date has none in numbers beside it, so that `GMT+9`
+//! is not read as GMT, and a day its month does not have, or none. And a
+//! zone of `-0001` is that zone, where git takes it for no zone.
 
 use alt_os::zone::{civil_from_days, days_from_civil, days_in_month};
 
@@ -40,6 +40,8 @@ struct Read {
     refused: bool,
     /// a zone was written that cannot be one
     unshaped: bool,
+    /// the zone was written in numbers, not by a name
+    numbered: bool,
 }
 
 fn digit_at(text: &[u8], at: usize) -> bool {
@@ -209,6 +211,7 @@ impl Read {
         if end == 4 {
             if number <= 1400 && self.zone.is_none() {
                 self.zone = Some(middle * 60 + low);
+                self.numbered = true;
             } else if (1901..2100).contains(&number) {
                 self.year = Some(number);
             }
@@ -248,6 +251,7 @@ impl Read {
         if shaped && hours < 24 && minutes < 60 {
             let east = hours * 60 + minutes;
             self.zone = Some(if text[0] == b'-' { -east } else { east });
+            self.numbered = true;
         } else {
             self.unshaped = true;
         }
@@ -306,7 +310,8 @@ pub(super) fn parse(text: &str, now: i64, local: &dyn Fn(i64) -> i32) -> Option<
         at += taken.max(1);
     }
     let (year, month, day) = (read.year?, read.month?, read.day?);
-    let unzoned = read.unshaped && read.zone.is_none();
+    // a sign and digits beside the name of a zone may be meant to move it
+    let unzoned = read.unshaped && !read.numbered;
     if read.refused || unzoned || day > days_in_month(year, month) {
         return None;
     }
@@ -321,7 +326,9 @@ pub(super) fn parse(text: &str, now: i64, local: &dyn Fn(i64) -> i32) -> Option<
     // 2099-12-31T23:59:59Z, past which git reads nothing
     let last = days_from_civil(LAST_YEAR + 1, 1, 1) * DAY - 1;
     let before_the_first = east > 0 && east * 60 > wall;
-    let past_the_last = east < 0 && -east * 60 > last - wall;
+    // git refuses a time west of UTC that ends past the last, and none
+    // that is past it before its zone is counted in
+    let past_the_last = east < 0 && wall <= last && -east * 60 > last - wall;
     (!before_the_first && !past_the_last).then(|| written(wall - east * 60, east))
 }
 

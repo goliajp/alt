@@ -16,14 +16,16 @@ const GIT: &str = include_str!("git_dates.tsv");
 
 /// The dates of [`GIT`] git reads and this does not: a time that cannot
 /// be one, which git takes for other numbers or counts on into the next
-/// day, a zone that cannot be one beside no zone that can, which git
-/// passes over, and a day the month does not have or no day, which git
-/// counts on from the month's first.
-const STRICTER: [&str; 15] = [
+/// day; a zone that cannot be one beside no zone in numbers, which git
+/// passes over, so that it reads `GMT+9` as GMT; and a day the month does
+/// not have or no day, which git counts on from the month's first.
+const STRICTER: [&str; 25] = [
     "2005-04-07 25:13:13 +0200",
     "2005-04-07 24:30:00 +0000",
     "2005-04-07 24:00:01 +0000",
+    "2005-04-07 24:00:60 +0000",
     "2005-04-07T2430 +0000",
+    "2005-04-07T2401 +0000",
     "243000 20050407 +0000",
     "2005-04-07 22:13:13 +2400",
     "2005-04-07T22:13:13+0260",
@@ -32,6 +34,14 @@ const STRICTER: [&str; 15] = [
     "2005-04-07T22:13:13+020",
     "2005-04-07 22:13:13 -3",
     "@1700000000 +9999",
+    "2005-04-07 22:13:13 GMT+9",
+    "2005-04-07 22:13:13 UTC+9",
+    "2005-04-07 22:13:13 JST-9",
+    "2005-04-07T22:13:13Z-3",
+    "2005-04-07 22:13:13 +2400 UTC",
+    "2005-04-07 22:13:13 UTC +2400",
+    "2005-04-07 22:13:13 +2400 EST",
+    "2005-04-07 22:13:13 EST +2400",
     "2005-02-30 22:13:13 +0200",
     "2005-04-31 22:13:13 +0200",
     "Apr 2005 22:13:13 +0000",
@@ -74,9 +84,82 @@ fn dates_are_read_as_git_reads_them() {
             read_by_both += usize::from(both);
         }
     }
-    assert_eq!(rows().count(), 199);
-    let apart = 32 + STRICTER.len() + OTHERWISE.len();
-    assert_eq!(read_by_both, (199 - apart) * ZONES.len());
+    assert_eq!(rows().count(), 218);
+    // the dates git refuses, in each zone it refuses them in
+    let refused = rows().flat_map(|(_, written)| written);
+    assert_eq!(refused.filter(|written| *written == "ERR").count(), 103);
+    let apart = 103 + (STRICTER.len() + OTHERWISE.len()) * ZONES.len();
+    assert_eq!(read_by_both, 218 * ZONES.len() - apart);
+}
+
+/// A zone that cannot be one is passed over beside one in numbers, as
+/// git passes it over, and not beside a zone by name alone.
+#[test]
+fn a_zone_that_is_none_is_passed_over_only_beside_one_in_numbers() {
+    for (given, written) in [
+        ("2005-04-07 22:13:13 +0200 (UTC+2)", "1112904793 +0200"),
+        ("2005-04-07 22:13:13 +0200 foo-123", "1112904793 +0200"),
+        ("2005-04-07 22:13:13 0200 -3", "1112904793 +0200"),
+        ("2005-04-07 22:13:13 +0900 +9", "1112879593 +0900"),
+        ("2005-04-07 22:13:13 -3 +0900", "1112879593 +0900"),
+        ("2005-04-07 22:13:13 +0900 -3", "1112879593 +0900"),
+        ("2005-04-07 22:13:13 JST +0900 -3", "1112879593 +0900"),
+    ] {
+        assert_eq!(read(given, "UTC").as_deref(), Some(written), "{given}");
+    }
+    for given in [
+        "GMT+9",
+        "UTC+9",
+        "JST-9",
+        "Z-3",
+        "+2400 EST",
+        "EST +2400",
+        "-3 Z",
+    ] {
+        let given = format!("2005-04-07 22:13:13 {given}");
+        assert_eq!(read(&given, "UTC"), None, "{given}");
+    }
+}
+
+/// What git wrote for each: the last second it reads is the last of
+/// 2099 where the time is, and a time west of UTC that ends past it is
+/// refused, though none is that has passed it before its zone is counted.
+#[test]
+fn the_last_moment_read_is_the_end_of_the_last_year_where_the_time_is() {
+    for (given, tz, written) in [
+        ("2099-12-31 22:59:59 -0100", "UTC", Some("4102444799 -0100")),
+        ("2099-12-31 23:00:00 -0100", "UTC", None),
+        ("2099-12-31 23:59:59 -0100", "UTC", None),
+        ("2099-12-31 23:59:60 -0100", "UTC", Some("4102448400 -0100")),
+        ("2099-12-31 24:00:00 -0100", "UTC", Some("4102448400 -0100")),
+        ("2099-12-31 24:00:00 +0100", "UTC", Some("4102441200 +0100")),
+        (
+            "2099-12-31 18:59:59",
+            "America/New_York",
+            Some("4102444799 -0500"),
+        ),
+        ("2099-12-31 19:00:00", "America/New_York", None),
+        ("2099-12-31 23:59:59", "America/New_York", None),
+        (
+            "2099-12-31 24:00:00",
+            "America/New_York",
+            Some("4102462800 -0500"),
+        ),
+        (
+            "2099-12-31 23:59:59",
+            "Asia/Tokyo",
+            Some("4102412399 +0900"),
+        ),
+        ("1970-01-01 09:00:00", "Asia/Tokyo", Some("0 +0900")),
+        ("1970-01-01 08:59:59", "Asia/Tokyo", None),
+        (
+            "1970-01-01 00:00:00",
+            "America/New_York",
+            Some("18000 -0500"),
+        ),
+    ] {
+        assert_eq!(read(given, tz).as_deref(), written, "{given} in {tz}");
+    }
 }
 
 /// What git wrote for each: midnight written as the end of a day is the
@@ -169,7 +252,11 @@ fn no_text_makes_reading_a_date_fail() {
         let digits = digits.len() == 4 && digits.bytes().all(|b| b.is_ascii_digit());
         assert!(digits && matches!(sign, "+" | "-"), "{text:?}: {zone}");
     }
-    assert!(dated > 2000, "{dated} dates were read");
+    assert!(
+        dated * 100 >= texts.len() * 10,
+        "{dated} of {}",
+        texts.len()
+    );
 }
 
 #[test]
