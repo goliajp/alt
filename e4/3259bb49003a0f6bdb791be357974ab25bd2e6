@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: give each read of the marker a pipe of its own, so that no answer is written to a reader that has gone
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/lock_order.rs
