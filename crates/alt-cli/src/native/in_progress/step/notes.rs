@@ -50,6 +50,21 @@ impl NativeRepo<'_> {
         Ok(notes)
     }
 
+    /// The committer of the notes commit `written`, at this moment: who
+    /// takes back what a step wrote to the notes is who wrote it, so that
+    /// a step can be undone by a caller nothing names.
+    fn writer_of(&self, written: ObjectId) -> Res<String> {
+        let commit = self.store.odb.get(&written)?;
+        let commit = commit.ok_or("a notes commit of the step is missing from the store")?;
+        let commit = alt_git_codec::Commit::parse(&commit.data)?;
+        let line = commit.committer().map(|line| line.to_string());
+        let who = line
+            .as_deref()
+            .and_then(|line| Some(&line[..=line.rfind('>')?]));
+        let who = who.ok_or("a notes commit of the step names no committer")?;
+        Ok(format!("{who} {} +0000", now_ms() / 1000))
+    }
+
     /// The change of the notes ref that takes back those among `changes`
     /// a step made to it one after another; none where it made none, or
     /// none of its notes is left.
@@ -74,7 +89,8 @@ impl NativeRepo<'_> {
         }
         // another writer flushes its objects before it moves the ref
         self.store.odb.refresh()?;
-        let signature = self.committer()?.line();
+        let written = made.iter().rev().find_map(|(_, new)| *new);
+        let signature = self.writer_of(written.ok_or("the step left no notes commit")?)?;
         let algo = self.store.algo()?;
         let odb = std::cell::RefCell::new(&mut self.store.odb);
         let read = |id: ObjectId| -> meta::ReadResult {
