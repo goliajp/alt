@@ -6,7 +6,7 @@ use crate::step_crash::bench::{Bench, alt, copy, restore, run, said};
 /// The command killed the first time it passes `point`, in the workspace
 /// kept as `fixture`. The points it passes whole, and the operation that
 /// waits.
-fn killed_at(bench: &Bench, command: &[&str], point: &str) -> (String, String) {
+pub(crate) fn killed_at(bench: &Bench, command: &[&str], point: &str) -> (String, String) {
     let repo = bench.repo();
     let list = bench.kept("points");
     let _ = std::fs::remove_file(&list);

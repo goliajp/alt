@@ -14,6 +14,7 @@ use super::unconfirmed::{alt, alt_command, ok, stderr};
 
 mod mixed_versions;
 mod states;
+mod steps;
 mod stops;
 
 const INDEX: &str = ".alt/index";

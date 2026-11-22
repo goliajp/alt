@@ -21,14 +21,14 @@
 //! the stop and holds nothing the stop staged ([`stopped`]): a command
 //! that writes is refused, but for an add of the whole working tree.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::*;
 
 mod left_by;
 mod seen;
 mod stopped;
-use left_by::{Left, left_by};
+use left_by::{Later, Left};
 pub(in crate::native) use seen::{FromFile, note_stored};
 use stopped::stopped_at;
 
@@ -247,7 +247,7 @@ impl NativeRepo<'_> {
             false => HashSet::new(),
         };
         let stopped = stopped_at(&self.index_path);
-        let mut closed = HashMap::new();
+        let mut later = Later::default();
         // past an operation that moved a ref of this workspace
         let mut passed = false;
         for op in self.store.refs.oplog().ops()?.iter().rev() {
@@ -262,7 +262,7 @@ impl NativeRepo<'_> {
                     return Ok(None);
                 }
             }
-            match left_by(op, &identity, &mut closed)? {
+            match self.left_by(op, &identity, &mut later)? {
                 Left::Nothing => {}
                 Left::Refs => passed = true,
                 Left::Index(snapshot, moved) => {

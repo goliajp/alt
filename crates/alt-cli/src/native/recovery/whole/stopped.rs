@@ -14,10 +14,7 @@
 //! either: it writes the files that differ from the index, and by an
 //! index from before the stop it would leave what the stop wrote.
 
-use std::collections::HashMap;
-
 use super::*;
-use checkout_recovery::PREPARE_CHECKOUT;
 
 /// The index a merge that stopped left, kept beside the index: no
 /// operation records it.
@@ -95,18 +92,17 @@ impl NativeRepo<'_> {
             name: self.workspace.clone(),
             instance,
         };
-        let (mut since, mut closed) = (Vec::new(), HashMap::new());
+        let (mut since, mut later) = (Vec::new(), Later::default());
         for op in self.store.refs.oplog().ops()?.iter().rev() {
             if stopped.after == op.id.to_string() {
                 return Ok(Some(since));
             }
-            match left_by(op, &identity, &mut closed)? {
+            match self.left_by(op, &identity, &mut later)? {
                 Left::Nothing => {}
                 Left::Refs | Left::Index(_, true) => return Ok(None),
-                Left::Index(_, false) if op.payload.first() == Some(&PREPARE_CHECKOUT) => {
-                    return Ok(None);
-                }
-                Left::Index(_, false) => since.push(op.id),
+                Left::Index(_, false) if op.payload.first() == Some(&PREPARE) => since.push(op.id),
+                // a checkout, or what a step that was given up found
+                Left::Index(_, false) => return Ok(None),
             }
         }
         Ok(None)
