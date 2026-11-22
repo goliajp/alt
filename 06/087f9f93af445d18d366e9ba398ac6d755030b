@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: give no request to a daemon that does not declare whom it writes by
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/daemon_meta.rs
+touched: crates/alt-cli/tests/it/old_daemon.rs
