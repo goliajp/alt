@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: move the store to another generation when records are cut off the pack alone
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb/cut.rs
+touched: crates/alt-odb/tests/it/main.rs
+touched: crates/alt-odb/tests/it/pack_regrown.rs
+touched: crates/alt-store/src/settle.rs
