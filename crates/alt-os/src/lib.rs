@@ -14,6 +14,7 @@
 //!   the workspace calls
 //! - [`temp`]: temporary files and directories
 //! - [`users`]: the users the system knows
+//! - [`zone`]: the time zone a caller is in
 //!
 //! Constant values and structure layouts are written out for four targets:
 //! Linux with glibc and macOS, each on x86_64 and aarch64.
@@ -37,3 +38,4 @@ pub mod stdio;
 pub mod sys;
 pub mod temp;
 pub mod users;
+pub mod zone;
