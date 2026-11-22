@@ -14,6 +14,8 @@ use super::unconfirmed::{alt, alt_command, ok, stderr};
 
 mod mixed_versions;
 mod states;
+// the points to be killed at are in a debug build only
+#[cfg(debug_assertions)]
 mod steps;
 mod stops;
 

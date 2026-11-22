@@ -137,6 +137,8 @@ mod step_given_up;
 mod step_left;
 #[cfg(debug_assertions)]
 mod step_notes;
+#[cfg(debug_assertions)]
+mod step_recovered_synced;
 mod step_refused;
 #[cfg(debug_assertions)]
 mod step_stuck;

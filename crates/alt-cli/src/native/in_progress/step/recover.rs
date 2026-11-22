@@ -221,7 +221,10 @@ impl NativeRepo<'_> {
     }
 
     /// Brings a step of this workspace that was cut short to an end;
-    /// `asked` by `alt operation recover`.
+    /// `asked` by `alt operation recover`. What that writes is synced as
+    /// the command of the step would have synced it, whatever the command
+    /// that finds the step syncs: once the record that closes the step is
+    /// on disk, the state files are as the log says.
     pub(in crate::native) fn recover_open_step(&mut self, asked: bool) -> Res<()> {
         // the step this command is itself in the middle of is not cut short
         let in_step = |tracked: &super::Tracked| tracked.begin.is_some();
@@ -231,14 +234,26 @@ impl NativeRepo<'_> {
         let Some((begun, mark, false)) = self.last_step_mark()? else {
             return Ok(());
         };
-        let mut step = closing(&begun, &mark);
-        let told = self.told_after(&begun, &mark)?;
+        let left = alt_os::durability::unsynced();
+        let _synced = alt_os::durability::leave_unsynced(false);
+        self.end_open_step(&begun, &mark, asked)?;
+        // nothing waits for a sync once a command that leaves its writes
+        // unsynced has ended
+        match left {
+            true => self.store.sink()?.fsync_all(),
+            false => Ok(()),
+        }
+    }
+
+    fn end_open_step(&mut self, begun: &alt_oplog::Op, mark: &StepMark, asked: bool) -> Res<()> {
+        let mut step = closing(begun, mark);
+        let told = self.told_after(begun, mark)?;
         let before: Vec<Option<String>> = mark.before.iter().map(|f| f.text.clone()).collect();
         if before.len() != STATE_FILES.len() {
             return Err("corrupt step mark".into());
         }
         if told.foreign {
-            return self.leave_as_it_is(&begun, &told, &before, step, asked);
+            return self.leave_as_it_is(begun, &told, &before, step, asked);
         }
         // the log is synced before a file is put as it says, and the state
         // files are put so before a checkout is finished, as the command
@@ -252,7 +267,7 @@ impl NativeRepo<'_> {
         }
         for op in &told.unfinished {
             self.finish_prepared(op, true)
-                .map_err(|e| stuck(&begun, &*e))?;
+                .map_err(|e| stuck(begun, &*e))?;
         }
         for op in &told.given_up {
             self.record_checkout_done("recover", op.id)?;
