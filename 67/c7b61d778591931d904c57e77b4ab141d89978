@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: give whoever syncs what ops name the ops from the boundary on before a commit appends, also those somebody vouched for
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/tests/it/v2_cut_ends.rs
