@@ -81,6 +81,10 @@ impl RefStore {
     /// Reads one ref by exact name (`HEAD`, `refs/heads/main`, …) without
     /// following symrefs.
     pub fn read(&self, name: &str) -> Result<Option<RefTarget>, RefError> {
+        // a name that leads out of the directory names no ref
+        if name.split('/').any(|step| matches!(step, "" | "." | "..")) {
+            return Ok(None);
+        }
         match &self.backend {
             // in reftable repos the on-disk HEAD file is a compat dummy
             // (`refs/heads/.invalid`); every ref lives in the tables

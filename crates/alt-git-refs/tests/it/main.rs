@@ -1,5 +1,6 @@
 //! Single integration-test binary for alt-git-refs.
 
 mod refs_interop;
+mod refs_names;
 mod refs_reftable;
 mod refs_write;
