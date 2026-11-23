@@ -17,7 +17,7 @@ fn status(args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-fn repository(root: &Path) {
+pub(crate) fn repository(root: &Path) {
     fs::create_dir_all(root).unwrap();
     ok(alt(root, &["init", "."]));
     fs::write(root.join("seed.txt"), "seed\n").unwrap();

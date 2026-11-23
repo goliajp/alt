@@ -3,12 +3,14 @@
 //!
 //! The objects go into the pack one at a time, and the response is sent
 //! from a file: what a fetch takes in memory is its largest object, not
-//! the repository. Whoever may read a repository may ask for all of it.
+//! the repository. Whoever may read a repository may ask for all that its
+//! refs reach, and for nothing else that is in its store.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use alt_git_codec::{ObjectId, ObjectKind};
+use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
 use alt_repo::Repository;
 use alt_wire::fetch::{FetchRequest, encode_fetch_response_packfile};
 
@@ -77,11 +79,86 @@ fn read(repo: &Repository, oid: &ObjectId) -> Res<alt_git_codec::RawObject> {
     Ok(read.ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?)
 }
 
+/// The first object `req` wants that no ref of `repo` reaches. An object
+/// that is in the store and under no ref is one of a push that was
+/// refused, or of a branch that was deleted: it is not served.
+///
+/// What a clone and a fetch ask for are the objects the refs point at,
+/// and those are told without a walk. The objects a partial clone left
+/// out are asked for one by one, and are looked for from the refs down.
+fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
+    let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
+    let mut seen: HashSet<ObjectId> = tips.iter().copied().collect();
+    let mut sought: HashSet<ObjectId> = req.wants.iter().copied().collect();
+    sought.retain(|want| !seen.contains(want));
+    let algo = repo.algo()?;
+    let mut ahead = tips;
+    while let Some(oid) = ahead.pop() {
+        if sought.is_empty() {
+            break;
+        }
+        let Some(object) = repo.read_object(&oid)? else {
+            continue;
+        };
+        let mut under = Vec::new();
+        match object.kind {
+            ObjectKind::Commit => {
+                let commit = Commit::parse(&object.data)?;
+                under.extend(commit.tree());
+                under.extend(commit.parents());
+            }
+            ObjectKind::Tag => under.extend(Tag::parse(&object.data)?.object()),
+            ObjectKind::Tree => {
+                for entry in Tree::parse(&object.data, algo)?.entries {
+                    match entry.mode.object_kind() {
+                        ObjectKind::Tree => under.push(entry.oid),
+                        // a file is not read to know that it is reached
+                        ObjectKind::Blob => drop(sought.remove(&entry.oid)),
+                        _ => {}
+                    }
+                }
+            }
+            ObjectKind::Blob => {}
+        }
+        for oid in under {
+            if seen.insert(oid) {
+                sought.remove(&oid);
+                ahead.push(oid);
+            }
+        }
+    }
+    Ok(req.wants.iter().find(|want| sought.contains(want)).copied())
+}
+
 /// The response to `req`, in a file that has no name any more: the
 /// want/have closure of the request, less what its filter leaves out, as
 /// a pack in side-band frames. The pack is the wire payload and is not
-/// kept.
+/// kept. A request for what no ref reaches is answered as `git
+/// upload-pack` answers a want it does not serve.
 pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
+    let dir = alt_os::temp::tempdir()?;
+    let path = dir.path().join("response");
+    let mut framed = BufWriter::new(File::create(&path)?);
+    match unreached(repo, req)? {
+        Some(oid) => {
+            let refusal = format!("ERR upload-pack: not our ref {oid}");
+            alt_wire::pkt::write_data(&mut framed, refusal.as_bytes())?;
+        }
+        None => pack(repo, req, dir.path(), &mut framed)?,
+    }
+    framed.flush()?;
+    drop(framed);
+    Ok(File::open(&path)?)
+}
+
+/// The objects `req` asks for, as a pack written under `dir` and framed
+/// into `framed`.
+fn pack(
+    repo: &Repository,
+    req: &FetchRequest,
+    dir: &std::path::Path,
+    framed: &mut impl Write,
+) -> Res<()> {
     let outgoing = repo.reachable_objects(&req.wants, &req.haves)?;
     let filter = parse_filter_spec(req.filter.as_deref());
     // only a limit on the size of blobs has an object read to tell
@@ -97,24 +174,17 @@ pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
             going.push((*oid, *kind));
         }
     }
-    let dir = alt_os::temp::tempdir()?;
-    let path = dir.path().join("response");
-    let mut framed = BufWriter::new(File::create(&path)?);
     if going.is_empty() {
-        encode_fetch_response_packfile(&mut framed, &[])?;
-    } else {
-        let count = u32::try_from(going.len())
-            .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
-        let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo()?, count)?;
-        for (oid, kind) in going {
-            writer.add(oid, kind, &read(repo, &oid)?.data)?;
-        }
-        let pack = File::open(writer.finish()?.pack_path)?;
-        // the file is this request's own and is not written to again
-        let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
-        encode_fetch_response_packfile(&mut framed, &pack)?;
+        return Ok(encode_fetch_response_packfile(framed, &[])?);
     }
-    framed.flush()?;
-    drop(framed);
-    Ok(File::open(&path)?)
+    let count =
+        u32::try_from(going.len()).map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
+    let mut writer = alt_git_pack::PackWriter::create(dir, repo.algo()?, count)?;
+    for (oid, kind) in going {
+        writer.add(oid, kind, &read(repo, &oid)?.data)?;
+    }
+    let pack = File::open(writer.finish()?.pack_path)?;
+    // the file is this request's own and is not written to again
+    let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
+    Ok(encode_fetch_response_packfile(framed, &pack)?)
 }
