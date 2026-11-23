@@ -182,7 +182,9 @@ mod cloud_browser;
 mod cloud_login;
 pub use cloud_login::CloudLoginClaim;
 
+mod client_credentials;
 mod device_login;
+pub use client_credentials::*;
 pub use device_login::*;
 
 pub use change_repair::RepairTaskClaim;

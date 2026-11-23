@@ -120,9 +120,10 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         .revoke_client_credential(&credential, &digest)
         .unwrap();
     assert!(restarted.authenticate(&token).is_err());
+    // the code was exchanged above: it is no code any more, revoked token or not
     assert!(matches!(
         restarted.poll_device_authorization(&device).unwrap(),
-        DevicePoll::Waiting(DeviceError::AccessDenied)
+        DevicePoll::Waiting(DeviceError::InvalidGrant)
     ));
     assert_eq!(
         f.client()
@@ -325,4 +326,69 @@ fn everybody_being_busy_refuses_an_address_for_its_own_attempts_alone() {
     // and whoever has attempted little is let in still
     begin(&mut f, "203.0.113.6").unwrap();
     begin(&mut f, "198.51.101.2").unwrap();
+}
+
+/// An approved code is exchanged once. Eight devices that hold the same code ask
+/// at the same moment: one is given the token, the others are told the code is
+/// none, and so is whoever asks afterwards. A code whose token was revoked before
+/// it was exchanged stays refused, and is not used up by being asked for.
+#[test]
+#[ignore = "requires isolated PostgreSQL; an approved device code exchanged once"]
+fn an_approved_device_code_is_exchanged_for_its_token_once() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    let peer = "127.0.0.1".parse().unwrap();
+    let approved = |f: &mut Fixture, device: &str, code: &str| {
+        let token = alt_browser_auth::token();
+        let digest = alt_server_store::cloud_credential_digest(&token).unwrap();
+        f.store
+            .begin_device_authorization(&origin(), device, code, &digest, peer)
+            .unwrap();
+        f.store
+            .decide_device_authorization(&parent, &origin(), code, true, &token, None)
+            .unwrap();
+        digest
+    };
+
+    let device = "c".repeat(64);
+    approved(&mut f, &device, "CCCC-2345");
+    let start = std::sync::Barrier::new(8);
+    let told: Vec<DevicePoll> = std::thread::scope(|scope| {
+        let asking: Vec<_> = (0..8)
+            .map(|_| {
+                let mut store = f.reopen();
+                let (start, device) = (&start, &device);
+                scope.spawn(move || {
+                    start.wait();
+                    store.poll_device_authorization(device).unwrap()
+                })
+            })
+            .collect();
+        asking.into_iter().map(|one| one.join().unwrap()).collect()
+    });
+    let given = told
+        .iter()
+        .filter(|poll| matches!(poll, DevicePoll::Ready { .. }));
+    assert_eq!(given.count(), 1);
+    let none = |poll: &&DevicePoll| matches!(poll, DevicePoll::Waiting(DeviceError::InvalidGrant));
+    assert_eq!(told.iter().filter(none).count(), 7);
+    assert!(matches!(
+        f.store.poll_device_authorization(&device).unwrap(),
+        DevicePoll::Waiting(DeviceError::InvalidGrant)
+    ));
+
+    let device = "d".repeat(64);
+    let digest = approved(&mut f, &device, "DDDD-2345");
+    f.store.revoke_client_credential(&parent, &digest).unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            f.store.poll_device_authorization(&device).unwrap(),
+            DevicePoll::Waiting(DeviceError::AccessDenied)
+        ));
+    }
 }

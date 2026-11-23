@@ -365,9 +365,10 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     assert_eq!(issued.status(), 200);
     let issued: alt_json::Value = crate::database::json::body(issued);
     let cli_token = issued["access_token"].as_str().unwrap();
+    // the code was exchanged: asked for again, it is no code
     let repeated: alt_json::Value =
         crate::database::json::body(form_call("/oauth/token", &polling));
-    assert_eq!(issued["access_token"], repeated["access_token"]);
+    assert_eq!(repeated["error"], "invalid_grant");
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 200);
     let cookie_as_cli = origin
         .set_cookie(cli_token, 3600)
@@ -400,7 +401,7 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
     assert_eq!(revoked.status(), 200);
     assert_eq!(server.command("GET", "/v1/capabilities", cli_token).0, 403);
     let refused: alt_json::Value = crate::database::json::body(form_call("/oauth/token", &polling));
-    assert_eq!(refused["error"], "access_denied");
+    assert_eq!(refused["error"], "invalid_grant");
     // A remote exchange with an indeterminate result is never replayed.
     let start = agent
         .get(&format!("{}/web/login/start", server.url))

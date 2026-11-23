@@ -20,15 +20,7 @@ pub enum DevicePoll {
     Waiting(DeviceError),
     Ready { expires_at_unix_ms: u64 },
 }
-#[derive(alt_json::ToJson)]
-pub struct ClientCredential {
-    pub id: String,
-    pub client_id: String,
-    pub created_at_unix_ms: u64,
-    pub expires_at_unix_ms: u64,
-    pub current: bool,
-}
-fn human(row: &Row) -> Result<()> {
+pub(crate) fn human(row: &Row) -> Result<()> {
     let attribution: Attribution = row.get::<_, Jsonb>("attribution").read()?;
     if attribution.kind != ActorKind::Human {
         return Err(Error::Unauthorized);
@@ -221,6 +213,9 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(result)
     }
+    /// What the device that holds a code is told. An approved code is exchanged
+    /// for its token once, and is gone with that: the row is locked while it is
+    /// looked at, so of two that ask together one finds it and the other does not.
     pub fn poll_device_authorization(&mut self, device_digest: &str) -> Result<DevicePoll> {
         crate::bytes::check_digest(device_digest)?;
         let mut tx = self.client.transaction()?;
@@ -247,7 +242,13 @@ impl Store {
                 if row.get::<_, bool>("revoked") || expires <= time {
                     return Ok(DevicePoll::Waiting(DeviceError::AccessDenied));
                 }
-                tx.commit()?;
+                // the code is good for the token once: whoever has it afterwards,
+                // or asks at the same moment, is given nothing for it
+                tx.execute(
+                    "DELETE FROM alt_device_authorizations WHERE device_digest=$1",
+                    &[&device_digest],
+                )?;
+                tx.commit().map_err(|_| Error::OutcomeUnknown)?;
                 Ok(DevicePoll::Ready {
                     expires_at_unix_ms: expires,
                 })
@@ -268,39 +269,5 @@ impl Store {
             }
             _ => Err(Error::Integrity("device authorization state")),
         }
-    }
-    pub fn client_credentials(&mut self, credential: &Credential) -> Result<Vec<ClientCredential>> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = credential_row(&mut tx, &self.spec, credential)?;
-        human(&current)?;
-        let actor: String = current.get("actor_id");
-        let time = integer(now(&mut tx)?)?;
-        let rows = tx.query("SELECT c.token_digest,c.expires_at,m.client_id,m.created_at FROM alt_credentials c JOIN alt_client_credentials m USING(token_digest) WHERE c.actor_id=$1 AND NOT c.revoked AND c.expires_at>$2 ORDER BY m.created_at,c.token_digest LIMIT 100", &[&actor,&time])?;
-        let result = rows
-            .iter()
-            .map(|row| {
-                Ok(ClientCredential {
-                    id: row.get("token_digest"),
-                    client_id: row.get("client_id"),
-                    created_at_unix_ms: unsigned(row.get("created_at"))?,
-                    expires_at_unix_ms: unsigned(row.get("expires_at"))?,
-                    current: row.get::<_, String>("token_digest") == credential.digest,
-                })
-            })
-            .collect::<Result<_>>()?;
-        tx.commit()?;
-        Ok(result)
-    }
-    pub fn revoke_client_credential(&mut self, credential: &Credential, id: &str) -> Result<()> {
-        crate::bytes::check_digest(id)?;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = credential_row(&mut tx, &self.spec, credential)?;
-        human(&current)?;
-        let actor: String = current.get("actor_id");
-        if tx.execute("UPDATE alt_credentials c SET revoked=true FROM alt_client_credentials m WHERE c.token_digest=m.token_digest AND c.actor_id=$1 AND c.token_digest=$2", &[&actor,&id])? != 1 {return Err(Error::Unauthorized);}
-        crate::browser::audit(&mut tx, &actor, "client.revoke", id)?;
-        tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
 }
