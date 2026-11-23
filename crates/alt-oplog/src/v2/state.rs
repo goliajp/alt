@@ -28,6 +28,9 @@ pub struct State {
     /// where the last frame starts that says nothing is appended after it
     /// by whoever does not know it, or zero
     pub required: u64,
+    /// where the last checkpoint starts that says the log was cut before
+    /// it, or zero: the frames from there on are of `generation`
+    pub cut: u64,
     /// where the last checkpoint starts that holds the whole table of
     /// workspaces, or zero
     pub base: u64,
@@ -54,6 +57,7 @@ impl State {
             linked: 0,
             migrated: 0,
             required: 0,
+            cut: 0,
             base: 0,
             changed: Vec::new(),
             workspaces: Vec::new(),
@@ -86,6 +90,7 @@ impl State {
             linked: checkpoint.linked,
             migrated: checkpoint.migrated,
             required: checkpoint.required,
+            cut: checkpoint.cut,
             workspaces: checkpoint.workspaces,
         }
     }
@@ -121,6 +126,7 @@ impl State {
             linked: self.linked,
             migrated: self.migrated,
             required: self.required,
+            cut: self.cut,
             workspaces: match whole {
                 true => self.workspaces.clone(),
                 false => self.changes(),
@@ -170,6 +176,9 @@ impl State {
                 }
                 self.generation = generation;
                 self.checkpoint = at;
+                if view.ext.cut.is_some() {
+                    self.cut = at;
+                }
             }
             KIND_OP => {
                 let Some(op) = view.op.filter(|_| view.body.len() >= 32) else {

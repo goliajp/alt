@@ -183,10 +183,13 @@ fn a_torn_tail_is_passed_over_and_cut_off_by_the_next_append_which_says_so() {
         let (all, state) = frames(dir.path());
         let said = all.iter().find(|frame| frame.0 == whole).unwrap();
         let bytes = torn - whole;
-        assert_eq!(
-            (said.2, said.3),
-            (KIND_CHECKPOINT, Some(Cut { bytes, ops: 0 }))
-        );
+        let cut = Cut {
+            bytes,
+            ops: 0,
+            after: 0,
+            generation: 0,
+        };
+        assert_eq!((said.2, said.3), (KIND_CHECKPOINT, Some(cut)));
         assert_eq!((state.generation, state.seq), (1, 3));
         OpLog::open(dir.path()).unwrap().verify().unwrap();
     }

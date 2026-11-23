@@ -1,6 +1,6 @@
 //! The handle on a version 2 log.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use crate::lock::{lock_shared, unlock};
 use crate::read::read_at;
 use crate::v2::block::{FILE_HEADER_LEN, FileHeader, Layout};
+use crate::v2::cuts::Cuts;
 use crate::v2::open::{Loaded, Source, load};
 use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::sink::Deferred;
@@ -40,6 +41,9 @@ pub(crate) struct Log {
     pub(super) began_linked: u64,
     /// the whole chain, read on first use when `ops` is not all of it
     pub(super) full: OnceLock<Vec<Op>>,
+    /// the cuts the log tells of, read on first use for the log as it
+    /// was then cut
+    pub(super) cuts: RefCell<Cuts>,
     /// up to where this handle knows the log synced
     pub(super) synced: u64,
     /// An op whose frame starts before this needs no vouching for: it is
@@ -97,6 +101,7 @@ impl Log {
             began: FILE_HEADER_LEN as u64,
             began_linked: 0,
             full: OnceLock::new(),
+            cuts: RefCell::default(),
             synced: 0,
             judged: Cell::new(0),
             hidden: None,

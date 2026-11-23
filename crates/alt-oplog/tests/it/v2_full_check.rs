@@ -71,7 +71,11 @@ fn the_full_check_holds_a_block_header_to_the_checkpoint_before_it_and_its_frame
 
 /// The log `whole` with the last frame `pick` chooses changed by
 /// `change`, its checksum holding.
-fn rewritten(whole: &[u8], pick: impl Fn(&Laid) -> bool, change: impl Fn(&mut Laid)) -> Vec<u8> {
+pub fn rewritten(
+    whole: &[u8],
+    pick: impl Fn(&Laid) -> bool,
+    change: impl Fn(&mut Laid),
+) -> Vec<u8> {
     let (layout, frames) = laid(whole);
     let frame = frames.iter().rev().find(|frame| pick(frame)).unwrap();
     let mut other = Laid::of(frame);

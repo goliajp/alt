@@ -10,11 +10,18 @@ pub struct OdbBounds {
 }
 
 /// Bytes that were cut off the end of the log before the frame that says
-/// so, and how many ops among them read.
+/// so, and how many ops among them read. The frame also tells under which
+/// generation the frames before it were written, back to the frame that
+/// says the same of an earlier cut: a frame from before a cut reads under
+/// its own generation, and a reader finds that from the last cut back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cut {
     pub bytes: u64,
     pub ops: u32,
+    /// where the frame of the cut before this one starts, or zero
+    pub after: u64,
+    /// the generation of the frames between that one and this
+    pub generation: u32,
 }
 
 /// The part an op has in a step.
@@ -74,9 +81,11 @@ impl Ext {
             item(&mut out, 4, &at.to_le_bytes());
         }
         if let Some(cut) = &self.cut {
-            let mut content = [0u8; 12];
+            let mut content = [0u8; 24];
             content[..8].copy_from_slice(&cut.bytes.to_le_bytes());
-            content[8..].copy_from_slice(&cut.ops.to_le_bytes());
+            content[8..12].copy_from_slice(&cut.ops.to_le_bytes());
+            content[12..20].copy_from_slice(&cut.after.to_le_bytes());
+            content[20..].copy_from_slice(&cut.generation.to_le_bytes());
             item(&mut out, 5, &content);
         }
         if let Some(sum) = &self.index_after {
@@ -114,10 +123,15 @@ impl Ext {
                 (2, 8) => ext.inverse_of = Some(word(content, 0)),
                 (3, 16) => ext.request = Some(content.try_into().unwrap()),
                 (4, 8) => ext.linked = Some(word(content, 0)),
-                (5, 12) => {
-                    let ops = u32::from_le_bytes(content[8..].try_into().unwrap());
-                    let bytes = word(content, 0);
-                    ext.cut = Some(Cut { bytes, ops });
+                (5, 24) => {
+                    let part =
+                        |at: usize| u32::from_le_bytes(content[at..at + 4].try_into().unwrap());
+                    ext.cut = Some(Cut {
+                        bytes: word(content, 0),
+                        ops: part(8),
+                        after: word(content, 12),
+                        generation: part(20),
+                    });
                 }
                 (6, 20) => ext.index_after = Some(content.try_into().unwrap()),
                 (7, 9) => {

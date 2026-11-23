@@ -4,9 +4,8 @@
 
 use std::borrow::Cow;
 
-use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, FILE_HEADER_LEN};
+use crate::v2::block::{BLOCK_HEADER_LEN, FILE_HEADER_LEN};
 use crate::v2::frame::{HEADER_LEN, KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT, View, len_of};
-use crate::v2::locate::checkpoint_at;
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
 use crate::v2::scan::{Stop, read_frame};
@@ -15,48 +14,6 @@ use crate::v2::stream::{read_claimed, walk_file};
 use crate::{Anchor, Op, OpLogError};
 
 impl Log {
-    /// The generation the frame at `at` was written under, in a log that
-    /// was cut. The headers of its block and of the next one tell when
-    /// the log was not cut in between; otherwise the frames of the block
-    /// do, read from its first one on. `None` where they do not read.
-    fn generation_at(&self, at: u64) -> Result<Option<u32>, OpLogError> {
-        let source = self.source();
-        let mut read = |at: u64, len: usize| source.at(at, len);
-        let (block, limit) = (self.layout.block, self.state.end);
-        let start = at / block * block;
-        let header = |at: u64| -> std::io::Result<Option<BlockHeader>> {
-            let bytes = source.at(at, BLOCK_HEADER_LEN)?;
-            Ok(self.layout.decode_header(&bytes, at))
-        };
-        let (low, mut state) = match start {
-            0 => (0, State::empty()),
-            _ => {
-                let Some(opened) = header(start)? else {
-                    return Ok(None);
-                };
-                let first = start + opened.first as u64;
-                let Some(first) = checkpoint_at(&self.layout, limit, first, &mut read)? else {
-                    return Ok(None);
-                };
-                (opened.generation, first.state)
-            }
-        };
-        let next = start + block;
-        let high = match next + BLOCK_HEADER_LEN as u64 <= limit {
-            true => header(next)?.map(|header| header.generation),
-            false => Some(self.state.generation),
-        };
-        if high == Some(low) || state.last == at {
-            return Ok(Some(state.generation.max(low)));
-        }
-        if state.end > at {
-            return Ok(None);
-        }
-        let each = &mut |_: u64, _: u64, _: &View| Ok(());
-        walk_file(&mut read, &self.layout, &mut state, at, false, each)?;
-        Ok((state.end == at).then_some(state.generation))
-    }
-
     /// The op whose frame starts at `at`, with the frame it names as the
     /// ref transaction before it: `None` where no op frame reads there. A
     /// frame from before a cut reads under an earlier generation.
@@ -84,11 +41,9 @@ impl Log {
         let Some((bytes, _)) = self.layout.lift(&data, at, at, len) else {
             return Ok(None);
         };
-        let latest = self.state.generation;
-        let mut view = read_frame(&self.layout, &bytes, latest);
+        let mut view = read_frame(&self.layout, &bytes, self.state.generation);
         if view.is_none()
-            && latest != 0
-            && let Some(earlier) = self.generation_at(at)?
+            && let Some(earlier) = self.generation_before_cut(at)?
         {
             view = read_frame(&self.layout, &bytes, earlier);
         }

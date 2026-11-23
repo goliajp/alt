@@ -10,6 +10,7 @@
 //! [before where the ops may be of the kinds a version 1 log held u64]
 //! [the last frame that says nothing is appended after it by whoever does
 //!  not know it u64, or zero]
+//! [the last frame that says the log was cut before it u64, or zero]
 //! [the checkpoint whose table its rows are changes to u64, or zero]
 //! [rows u32], each a workspace
 //!   [id 8][its last op's frame u64][its last op that can be undone u64]
@@ -38,7 +39,7 @@ pub const WORKSPACE_LEN: usize = 8 + 8 + 8 + 8 + 20 + 8;
 /// where the generation lies in the body
 const GENERATION_AT: usize = 17;
 /// where the checkpoint it names for its table does
-const BASE_AT: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 8;
+const BASE_AT: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 8 + 8;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Workspace {
@@ -64,6 +65,8 @@ pub struct Checkpoint {
     pub linked: u64,
     pub migrated: u64,
     pub required: u64,
+    /// the last checkpoint that says the log was cut before it, or zero
+    pub cut: u64,
     /// the checkpoint that holds the table the rows are changes to, or
     /// zero where they are the whole table
     pub base: u64,
@@ -144,6 +147,7 @@ impl Checkpoint {
             && self.synced <= at
             && self.migrated <= at
             && self.required < at
+            && self.cut < at
             && self.base < at
             && self.linked_at <= self.head_at
             && self.linked <= self.seq
@@ -164,7 +168,10 @@ impl Checkpoint {
         }
         out.extend_from_slice(&self.odb.generation.to_le_bytes());
         let words = [self.linked_at, self.linked, self.migrated];
-        for word in words.into_iter().chain([self.required, self.base]) {
+        for word in words
+            .into_iter()
+            .chain([self.required, self.cut, self.base])
+        {
             out.extend_from_slice(&word.to_le_bytes());
         }
         out.extend_from_slice(&(self.workspaces.len() as u32).to_le_bytes());
@@ -204,6 +211,7 @@ impl Checkpoint {
         checkpoint.linked = read.word()?;
         checkpoint.migrated = read.word()?;
         checkpoint.required = read.word()?;
+        checkpoint.cut = read.word()?;
         checkpoint.base = read.word()?;
         let count = read.part()? as usize;
         if read.0.len() != count.checked_mul(WORKSPACE_LEN)? {

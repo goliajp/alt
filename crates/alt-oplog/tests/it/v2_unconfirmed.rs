@@ -65,7 +65,13 @@ fn a_writer_cuts_from_the_first_op_another_boot_left_that_names_what_is_not_stor
     let last = all.last().unwrap();
     let bytes = len - found.at;
     assert_eq!((last.0, last.2), (found.at, KIND_CHECKPOINT));
-    assert_eq!(last.3, Some(Cut { bytes, ops: 2 }));
+    let first = Cut {
+        bytes,
+        ops: 2,
+        after: 0,
+        generation: 0,
+    };
+    assert_eq!(last.3, Some(first));
     assert_eq!((state.generation, state.seq), (1, 4));
 
     // nothing more to look at, by this handle or the next of this boot

@@ -72,7 +72,10 @@ impl Full {
                     generation: said.generation,
                     ..state.checkpoint(said.boot, view.head.synced, said.base == 0)
                 });
-                if said.is_none() || said != derived {
+                // a cut names the one before it and what was written since
+                let before = (state.cut, state.generation);
+                let cut = view.ext.cut.map(|cut| (cut.after, cut.generation));
+                if said.is_none() || said != derived || cut.is_some_and(|cut| cut != before) {
                     return Err(OpLogError::Format(
                         "an oplog checkpoint disagrees with the frames before it",
                     ));

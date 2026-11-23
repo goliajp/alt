@@ -97,7 +97,7 @@ const IN_HEAD: [fn(&mut Head, u64); 4] = [
     |head, to| head.seq = to,
 ];
 
-const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 13] = [
+const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 14] = [
     |said, to| said.generation = to as u32,
     |said, to| said.seq = to,
     |said, to| said.head_at = to,
@@ -111,6 +111,7 @@ const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 13] = [
     |said, to| said.workspaces[0].undoable = to,
     |said, to| said.workspaces[0].index_at = to,
     |said, to| said.workspaces[0].step = to,
+    |said, to| said.cut = to,
 ];
 
 /// Every log that differs from `whole` in one number of one frame.
@@ -298,15 +299,16 @@ fn a_frame_is_looked_up_at_no_more_cost_under_a_checkpoint_of_the_last_generatio
     let log = OpLog::open(dir.path()).unwrap();
     assert_eq!(log.state().unwrap().generation, u32::MAX);
     assert!(log.recent().is_empty());
-    // every op is read instead, which finds the damage
-    let opened = OpLog::open_at(dir.path(), Some(anchors[1]));
-    assert!(matches!(
-        opened,
-        Err(OpLogError::Format("oplog record corrupt"))
-    ));
-    // a frame that does read is found under the generation of its block
-    let log = OpLog::open_at(dir.path(), Some(anchors[3])).unwrap();
-    assert!(log.anchored() && log.recent().is_empty());
+    // every op is read instead, which finds the damage. So it is for a
+    // frame that does read: no cut tells of an earlier generation, and
+    // it is not looked for under one after another
+    for anchor in [anchors[1], anchors[3]] {
+        let opened = OpLog::open_at(dir.path(), Some(anchor));
+        assert!(matches!(
+            opened,
+            Err(OpLogError::Format("oplog record corrupt"))
+        ));
+    }
 }
 
 #[test]

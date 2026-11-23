@@ -10,10 +10,10 @@ use alt_oplog::{Meta, Op, OpLog};
 use super::v2_bounds::stage;
 use super::v2_log::{boot, file_len, grow, new_log};
 
-type Given = Arc<Mutex<Vec<Op>>>;
+pub type Given = Arc<Mutex<Vec<Op>>>;
 
 /// Has `log` give the ops of its syncs to the list returned.
-fn collecting(log: &mut OpLog) -> Given {
+pub fn collecting(log: &mut OpLog) -> Given {
     let given = Given::default();
     let seen = given.clone();
     log.sync_named_with(Arc::new(move |ops| {
@@ -27,7 +27,7 @@ fn collecting(log: &mut OpLog) -> Given {
 /// changes the index of each of `workspaces` workspaces, a ref
 /// transaction after every fifth, and a second op of the first workspace.
 /// Returns the payloads of the ops a sync has to see to.
-fn staged_by_another(dir: &Path, workspaces: u8) -> Vec<Vec<u8>> {
+pub fn staged_by_another(dir: &Path, workspaces: u8) -> Vec<Vec<u8>> {
     let _unsynced = alt_os::durability::leave_unsynced(true);
     let mut other = OpLog::open(dir).unwrap();
     let mut named = Vec::new();

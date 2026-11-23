@@ -11,7 +11,7 @@ use alt_oplog::{Op, OpLog, OpLogError};
 use super::v2_bounds::stage;
 use super::v2_log::{boot, frames, grow, new_log};
 
-fn but_gone(op: &Op) -> Result<bool, OpLogError> {
+pub fn but_gone(op: &Op) -> Result<bool, OpLogError> {
     Ok(op.payload != b"gone")
 }
 
@@ -49,7 +49,7 @@ fn told_after_a_writer_came(bytes: &[u8]) -> Vec<Cut> {
     told(dir.path())
 }
 
-fn told(dir: &Path) -> Vec<Cut> {
+pub fn told(dir: &Path) -> Vec<Cut> {
     let (all, _) = frames(dir);
     all.iter().filter_map(|frame| frame.3).collect()
 }
@@ -64,6 +64,8 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
     let whole = Cut {
         bytes: all,
         ops: 41,
+        after: 0,
+        generation: 0,
     };
 
     // nothing of the cut reached the disk: the ops are looked at again
@@ -90,9 +92,12 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
         said,
         [
             whole,
+            // which names the cut before it and the generation since
             Cut {
                 bytes: rest,
-                ops: 0
+                ops: 0,
+                after: at as u64,
+                generation: 1,
             }
         ]
     );

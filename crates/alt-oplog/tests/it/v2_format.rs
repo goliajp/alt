@@ -20,7 +20,12 @@ fn full_ext() -> Ext {
         inverse_of: Some(77),
         request: Some([3; 16]),
         linked: Some(0),
-        cut: Some(Cut { bytes: 5, ops: 2 }),
+        cut: Some(Cut {
+            bytes: 5,
+            ops: 2,
+            after: 640,
+            generation: 3,
+        }),
         index_after: Some([8; 20]),
         step: Some(Step::Within(640)),
         retired: true,
@@ -98,6 +103,7 @@ fn a_checkpoint_and_a_receipt_read_back_as_they_were_written() {
         linked: 3,
         migrated: 64,
         required: 200,
+        cut: 250,
         base: 0,
         workspaces: vec![workspace(1), workspace(2)],
     };

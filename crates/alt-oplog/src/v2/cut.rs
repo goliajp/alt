@@ -200,6 +200,8 @@ impl Log {
         let cut = Cut {
             bytes: discarded.to - discarded.from,
             ops: discarded.ops.len() as u32,
+            after: self.state.cut,
+            generation: self.state.generation,
         };
         let mut state = self.state.clone();
         state.generation = generation;

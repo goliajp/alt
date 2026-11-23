@@ -203,6 +203,8 @@ fn frames_written_before_a_cut_do_not_read_where_others_were_appended_after_it()
     let cut = Cut {
         bytes: cut_off.len() as u64,
         ops: 2,
+        after: 0,
+        generation: 0,
     };
     let from = image.state.clone();
     let added = image
