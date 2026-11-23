@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: test
+summary: keep the tests of holes and of the note beside the log in files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_holes.rs
+touched: crates/alt-oplog/tests/it/v2_image.rs
+touched: crates/alt-oplog/tests/it/v2_log.rs
+touched: crates/alt-oplog/tests/it/v2_note_fields.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_scan.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_synced.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
