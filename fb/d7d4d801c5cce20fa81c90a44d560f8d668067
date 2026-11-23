@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: keep the ref logs of a git repository on import and write the logs of a store on export
+author-type: human
+author: doracawl
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-export/src/logs.rs
+touched: crates/alt-import/src/kept.rs
+touched: crates/alt-import/src/lib.rs
