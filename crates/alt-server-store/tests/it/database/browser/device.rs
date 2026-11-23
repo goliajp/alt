@@ -218,3 +218,57 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .unwrap();
     assert!(f.store.authenticate(&tokens[2]).is_err());
 }
+
+/// how many attempts the row of `key` has counted in its minute
+fn attempts(f: &Fixture, key: &str) -> i32 {
+    f.client()
+        .query_one(
+            "SELECT attempts FROM alt_login_budgets WHERE key=$1",
+            &[&key],
+        )
+        .unwrap()
+        .get(0)
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL; a network past its budget and the budget every network shares"]
+fn an_attempt_refused_for_its_network_takes_nothing_from_what_every_network_shares() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    let mut begun = 0;
+    let mut begin = |f: &mut Fixture, network: &str| {
+        begun += 1;
+        let token = alt_browser_auth::token();
+        f.store.begin_device_authorization(
+            &origin(),
+            &format!("{begun:064x}"),
+            &format!("AAAA-222{}", begun + 1),
+            &alt_server_store::cloud_credential_digest(&token).unwrap(),
+            network.parse().unwrap(),
+        )
+    };
+    let spent = |f: &Fixture, network: &str| {
+        let key = format!("network:{}", alt_browser_auth::digest(network));
+        let set = "UPDATE alt_login_budgets SET attempts=100 WHERE key=$1";
+        assert_eq!(f.client().execute(set, &[&key]).unwrap(), 1, "{network}");
+    };
+
+    begin(&mut f, "192.0.2.1").unwrap();
+    spent(&f, "192.0.2.1");
+    let shared = attempts(&f, "global");
+    for _ in 0..3 {
+        assert!(matches!(
+            begin(&mut f, "192.0.2.1"),
+            Err(alt_server_store::Error::Precondition(_))
+        ));
+    }
+    assert_eq!(attempts(&f, "global"), shared);
+    begin(&mut f, "192.0.2.2").unwrap();
+    assert_eq!(attempts(&f, "global"), shared + 1);
+
+    // the addresses of one /64 are one network, those of the next /64 another
+    begin(&mut f, "2001:db8::1").unwrap();
+    spent(&f, "2001:db8::");
+    assert!(begin(&mut f, "2001:db8::2").is_err());
+    begin(&mut f, "2001:db8:0:1::2").unwrap();
+}

@@ -86,11 +86,7 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         crate::browser::binding(&mut tx, origin)?;
-        let admission = crate::browser::login_budget(&mut tx, device_digest, network);
-        if admission.is_err() {
-            tx.commit()?;
-            return admission.map(|()| 0);
-        }
+        crate::browser::login_budget(&mut tx, device_digest, network)?;
         let time = now(&mut tx)?;
         let expires = time.saturating_add(DEVICE_LIFETIME_MS);
         tx.execute(
@@ -118,12 +114,7 @@ impl Store {
         human(&parent)?;
         browser(&mut tx, self.spec.deployment_mode, credential)?;
         let actor: String = parent.get("actor_id");
-        let admission =
-            crate::browser::login_budget(&mut tx, &format!("device-consent:{actor}"), network);
-        if admission.is_err() {
-            tx.commit()?;
-            return admission.and(Err(Error::Unauthorized));
-        }
+        crate::browser::login_budget(&mut tx, &format!("device-consent:{actor}"), network)?;
         let time = integer(now(&mut tx)?)?;
         let row = tx.query_opt(
             "SELECT * FROM alt_device_authorizations WHERE user_digest=$1 AND expires_at>$2",

@@ -44,11 +44,7 @@ impl Store {
         if self.spec.deployment_mode != DeploymentMode::Cloud {
             return Err(Error::Unauthorized);
         }
-        let admission = crate::browser::login_budget(&mut tx, id, peer);
-        if admission.is_err() {
-            tx.commit()?;
-            return admission;
-        }
+        crate::browser::login_budget(&mut tx, id, peer)?;
         let time = now(&mut tx)?;
         tx.execute(
             "DELETE FROM alt_cloud_logins WHERE expires_at<=$1",

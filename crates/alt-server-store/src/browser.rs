@@ -320,12 +320,22 @@ pub(crate) fn check_credential(
     if let Some(row)=tx.query_opt("SELECT s.account_generation,a.generation,s.expires_at FROM alt_web_sessions s JOIN alt_web_accounts a ON a.actor_id=s.actor_id WHERE s.token_digest=$1 FOR SHARE OF s,a", &[&credential.digest])? && (row.get::<_,i64>(0)!=row.get::<_,i64>(1)||row.get::<_,i64>(2)<=time) {return Err(Error::Unauthorized);}
     Ok(())
 }
+/// Where this refuses, the caller lets go of its transaction: committed, the attempt
+/// would still count against what every network and login share.
 pub(crate) fn login_budget(
     tx: &mut Transaction<'_>,
     login: &str,
     network: std::net::IpAddr,
 ) -> Result<()> {
     let time = integer(now(tx)?)?;
+    // a host is given a whole /64, so every address of one counts as the same network
+    let network = match network {
+        std::net::IpAddr::V6(address) if address.to_ipv4_mapped().is_none() => {
+            let prefix = u128::from(address) >> 64 << 64;
+            std::net::IpAddr::V6(prefix.into())
+        }
+        other => other,
+    };
     // A single stable global row serializes admission and bounds the number of
     // attacker-chosen keys written in each minute. Stale keys are removed here.
     let rows = [
