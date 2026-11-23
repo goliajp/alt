@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::super::tree_edit::{self, TreeEdit};
 use super::super::*;
+use super::among::{Among, StashPush};
 use super::{ENTRIES, Stashing, TOP};
 
 /// What a stash has to put away.
@@ -25,14 +26,8 @@ impl Unsaved {
 }
 
 impl NativeRepo<'_> {
-    /// `alt stash [push] [-m <message>] [-u]`, as git has it.
-    pub fn stash_push(
-        &mut self,
-        message: Option<&str>,
-        untracked: bool,
-        said: Stashing,
-        out: &mut impl Write,
-    ) -> Res<()> {
+    /// `alt stash [push] [-m <message>] [-u] [[--] <paths>]`, as git has it.
+    pub fn stash_push(&mut self, push: StashPush, said: Stashing, out: &mut impl Write) -> Res<()> {
         let branch = self.head_branch()?;
         let head = self
             .store
@@ -41,7 +36,11 @@ impl NativeRepo<'_> {
             .ok_or_else(|| said::refused("You do not have the initial commit yet\n", 1))?;
         let index = self.index()?;
         self.ensure_stashable(&index)?;
-        let unsaved = self.unsaved(untracked)?;
+        let among = self.among(push.paths)?;
+        if !push.untracked {
+            among.ensure_known(index.entries.iter().map(|entry| &entry.path))?;
+        }
+        let unsaved = self.unsaved(push.untracked, &among)?;
         if unsaved.nothing() {
             if said.json {
                 use crate::json::Json;
@@ -54,12 +53,12 @@ impl NativeRepo<'_> {
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         let at = self.store.odb.abbrev()?.of(&head)?;
         let on = format!("{short}: {at} {}", self.subject_of(head)?);
-        let subject = match message {
+        let subject = match push.message {
             Some(message) => format!("On {short}: {message}"),
             None => format!("WIP on {on}"),
         };
-        let commit = self.stash_commits(head, &index, &unsaved, &on, &subject)?;
-        self.put_away(head, &index, commit, &unsaved.loose)?;
+        let commit = self.stash_commits(head, &index, &unsaved, &among, &on, &subject)?;
+        self.put_away(head, &index, commit, &unsaved.loose, &among)?;
         if said.json {
             use crate::json::Json;
             let fields = vec![
@@ -73,9 +72,9 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// What the working tree has that is not committed; the untracked
-    /// files among it where `untracked`.
-    fn unsaved(&self, untracked: bool) -> Res<Unsaved> {
+    /// What the working tree has at the paths `among` that is not
+    /// committed; the untracked files among it where `untracked`.
+    fn unsaved(&self, untracked: bool, among: &Among) -> Res<Unsaved> {
         if untracked {
             self.ensure_exclude_files()?;
         }
@@ -85,18 +84,15 @@ impl NativeRepo<'_> {
         };
         let state = self.tree_state(mode)?;
         // a directory with a repository of its own in it is one path
-        let is_file = |path: &&BString| !path.ends_with(b"/");
+        let is_file = |path: &&BString| !path.ends_with(b"/") && among.has(path);
+        let delta = &state.delta;
+        let changed = delta.changed.iter().filter(|file| among.has(&file.path));
+        let deleted = delta.deleted.iter().filter(|path| among.has(path));
         Ok(Unsaved {
-            changed: state.delta.changed.clone(),
-            deleted: state.delta.deleted.clone(),
-            loose: state
-                .delta
-                .untracked
-                .iter()
-                .filter(is_file)
-                .cloned()
-                .collect(),
-            staged: !state.staged.is_empty(),
+            changed: changed.cloned().collect(),
+            deleted: deleted.cloned().collect(),
+            loose: delta.untracked.iter().filter(is_file).cloned().collect(),
+            staged: state.staged.iter().any(|staged| among.has(&staged.path)),
         })
     }
 
@@ -109,6 +105,7 @@ impl NativeRepo<'_> {
         head: ObjectId,
         index: &Index,
         unsaved: &Unsaved,
+        among: &Among,
         on: &str,
         subject: &str,
     ) -> Res<ObjectId> {
@@ -116,7 +113,7 @@ impl NativeRepo<'_> {
         let index_tree = self.store_tree(&staged)?;
         let index_commit = self.stash_commit(index_tree, &[head], &format!("index on {on}\n"))?;
         let mut parents = vec![head, index_commit];
-        let work = self.tracked_as_found(head, index, staged, unsaved)?;
+        let work = self.tracked_as_found(head, index, staged, unsaved, among)?;
         if !unsaved.loose.is_empty() {
             let (mut entries, modes) = (Vec::new(), self.staged_modes()?);
             for path in &unsaved.loose {
@@ -154,6 +151,7 @@ impl NativeRepo<'_> {
         index: &Index,
         staged: Vec<WorkEntry>,
         unsaved: &Unsaved,
+        among: &Among,
     ) -> Res<Vec<WorkEntry>> {
         let mut work: BTreeMap<BString, WorkEntry> =
             staged.into_iter().map(|e| (e.path.clone(), e)).collect();
@@ -176,7 +174,7 @@ impl NativeRepo<'_> {
         // as it is in the tree
         let modes = self.staged_modes()?;
         let mut lost: Vec<&BString> = in_head.into_iter().collect();
-        lost.retain(|path| !work.contains_key(*path));
+        lost.retain(|path| !work.contains_key(*path) && among.has(path));
         lost.sort();
         for path in lost {
             let Ok(meta) = std::fs::symlink_metadata(self.abs(path)?) else {
@@ -190,8 +188,9 @@ impl NativeRepo<'_> {
         Ok(work.into_values().collect())
     }
 
-    /// Puts `commit` on the stack and brings the index and the files to
-    /// what `head` has, the untracked files `loose` gone, as one operation.
+    /// Puts `commit` on the stack and brings the index and the files at
+    /// the paths `among` to what `head` has, the untracked files `loose`
+    /// gone, as one operation.
     /// The stack is the repository's: where another workspace put an
     /// entry on it meanwhile, this one goes on top of that.
     fn put_away(
@@ -200,11 +199,20 @@ impl NativeRepo<'_> {
         index: &Index,
         commit: ObjectId,
         loose: &[BString],
+        among: &Among,
     ) -> Res<()> {
         let target = self.commit_entries(head)?;
         let wanted: BTreeMap<&BString, &WorkEntry> =
             target.iter().map(|entry| (&entry.path, entry)).collect();
-        let off = self.paths_off(index, &target)?;
+        let mut off = self.paths_off(index, &target)?;
+        off.retain(|path| among.has(path));
+        // the paths that are not put away stay staged as they are
+        let mut left = tree_edit::fresh(&target);
+        if !among.all() {
+            left.retain(|entry| among.has(&entry.path));
+            let kept = index.entries.iter().filter(|entry| !among.has(&entry.path));
+            left.extend(kept.cloned());
+        }
         loop {
             let latest = self.stash_entries().first().map(|entry| entry.number + 1);
             let refs = [
@@ -220,7 +228,7 @@ impl NativeRepo<'_> {
                 },
             ];
             let mut edit = TreeEdit {
-                index: tree_edit::fresh(&target),
+                index: left.clone(),
                 files: Vec::new(),
             };
             for path in &off {

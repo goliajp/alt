@@ -159,6 +159,7 @@ mod staged_stored;
 mod stash;
 mod stash_concurrent;
 mod stash_matrix;
+mod stash_paths;
 mod stash_roundtrip;
 mod status_json;
 mod status_labels;

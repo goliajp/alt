@@ -10,8 +10,11 @@
 
 use super::*;
 
+mod among;
 mod apply;
 mod save;
+
+pub use among::StashPush;
 
 use alt_export::stash::{ENTRIES, TOP, entry_number};
 

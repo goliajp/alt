@@ -78,7 +78,7 @@ mod sequence_editor;
 mod settings;
 mod signature;
 mod stash;
-pub use stash::Stashing;
+pub use stash::{StashPush, Stashing};
 mod status;
 mod switch;
 mod task;

@@ -1549,10 +1549,11 @@ Options:
 ### alt stash
 Put away what is not committed, and bring it back
 
-Usage: alt stash [OPTIONS] [WORDS]...
+Usage: alt stash [OPTIONS] [WORDS]... [-- <PATHS>...]
 
 Arguments:
-  [WORDS]...  What to do: push (the default), list, show, apply, pop, drop or clear; then the entry it is done to, as `stash@{1}` or `1`, the latest where none is named
+  [WORDS]...       What to do: push (the default), list, show, apply, pop, drop or clear; then the entry it is done to, as `stash@{1}` or `1`, the latest where none is named, or after push the paths to put away
+  [-- <PATHS>...]  With push: the paths to put away and no other
 
 Options:
   -m, --message <MESSAGE>      With push: the message of the entry

@@ -187,9 +187,12 @@ pub struct Mv {
 pub struct Stash {
     /// What to do: push (the default), list, show, apply, pop, drop or clear;
     /// then the entry it is done to, as `stash@{1}` or `1`, the latest
-    /// where none is named
+    /// where none is named, or after push the paths to put away
     #[arg(hint = none)]
     pub words: Vec<String>,
+    /// With push: the paths to put away and no other
+    #[arg(last = true, hint = "path-tracked")]
+    pub paths: Vec<String>,
     /// With push: the message of the entry
     #[arg(short = 'm', long, hint = none)]
     pub message: Option<String>,
