@@ -156,19 +156,22 @@ impl Log {
         Ok(())
     }
 
-    /// With the lock held: reads the log to its end and, for a writer
-    /// that syncs, sees to it that every frame it holds was vouched for
-    /// before it appends after them. Frames another boot left unsynced
-    /// that nobody has looked at since are given to whoever syncs what
-    /// ops name, with the lock given up, and the log is then recorded as
-    /// synced up to where it ended before that.
+    /// With the lock held: reads the log to its end and sees to the
+    /// frames another boot left unsynced that nobody has looked at since,
+    /// before a frame is appended after them. A writer that syncs gives
+    /// them to whoever syncs what ops name, with the lock given up, and
+    /// the log is then recorded as synced up to where it ended before
+    /// that. One that does not notes that they are left to be looked at.
     pub(super) fn catch_up_bounded(&mut self) -> Result<(), OpLogError> {
         self.catch_up()?;
         self.check_synced()?;
-        if relaxed_durability() || self.judged.get() >= self.state.end {
+        if self.judged.get() >= self.state.end || self.vouched_since()? {
             return Ok(());
         }
         self.may_write()?;
+        if relaxed_durability() {
+            return self.note_left();
+        }
         let upto = self.state.end;
         if let Some(sync) = self.named.clone() {
             let left = self.named_from(self.judged.get())?;

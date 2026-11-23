@@ -109,6 +109,43 @@ impl Log {
         })
     }
 
+    /// Whether somebody of this boot has vouched since this handle read
+    /// the log for every frame that was in it then: what was appended
+    /// after is of this boot, and there is nothing left to look at.
+    pub(super) fn vouched_since(&mut self) -> Result<bool, OpLogError> {
+        let generation = self.state.generation;
+        let vouched = |tail: Tail| !tail.pending && tail.generation == generation;
+        let judged = self
+            .tail()
+            .filter(|tail| vouched(*tail))
+            .map(|tail| tail.judged);
+        if judged.is_none_or(|judged| judged < self.seen) {
+            return Ok(false);
+        }
+        self.judged.set(u64::MAX);
+        Ok(true)
+    }
+
+    /// Notes in `tail`, for a writer that appends without a look, that
+    /// ops another boot left are still to be looked at: a checkpoint
+    /// written after them in this boot says nothing of that.
+    pub(super) fn note_left(&mut self) -> Result<(), OpLogError> {
+        if self.left_noted {
+            return Ok(());
+        }
+        let (generation, synced) = (self.state.generation, self.synced);
+        let judged = self.judged.get();
+        Tail::update(&self.dir, self.boot, |tail| {
+            tail.generation = generation;
+            tail.raise(synced, None);
+            if !tail.pending {
+                (tail.pending, tail.judged, tail.hidden) = (true, judged, 0);
+            }
+        })?;
+        self.left_noted = true;
+        Ok(())
+    }
+
     pub fn unconfirmed_past<E: From<OpLogError>>(
         &self,
         held: impl FnMut(&Op, bool) -> Result<bool, E>,

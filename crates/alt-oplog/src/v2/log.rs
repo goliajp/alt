@@ -51,6 +51,8 @@ pub(crate) struct Log {
     pub(super) hidden: Option<u64>,
     /// how long the file was when this handle last read it as an open does
     pub(super) seen: u64,
+    /// this handle noted that ops are left to be looked at
+    pub(super) left_noted: bool,
     pub(super) defer: bool,
     pub(super) write_count: u64,
     pub(super) unsynced: bool,
@@ -96,6 +98,7 @@ impl Log {
             judged: Cell::new(0),
             hidden: None,
             seen: 0,
+            left_noted: false,
             defer: false,
             write_count: 0,
             unsynced: false,

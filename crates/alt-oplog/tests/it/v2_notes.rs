@@ -4,9 +4,11 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use alt_oplog::{Meta, Op, OpLog, OpLogError};
 
+use super::v2_bounds::stage;
 use super::v2_fields::tail;
 use super::v2_log::{boot, file_len, grow, new_log};
 
@@ -155,4 +157,72 @@ fn a_note_that_ops_are_left_from_before_the_boundary_has_those_past_it_looked_at
     assert_eq!(cut.unwrap().unwrap().at, synced);
     assert_eq!(asked, [b"left"]);
     assert_eq!(log.len(), 2);
+}
+
+#[test]
+fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_appends() {
+    let linked = Meta {
+        linked: true,
+        ..Meta::default()
+    };
+    for stored in [false, true] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let synced = left_by_boot_1(dir.path(), &linked);
+        // a command that only stages appends without looking, over blocks
+        let mut staging = OpLog::open(dir.path()).unwrap();
+        assert!(staging.unsettled());
+        stage(&mut staging, 40);
+        assert!(staging.unsettled(), "it looked at nothing");
+        drop(staging);
+        let len = file_len(dir.path());
+        assert!(len > 2 * 4096);
+
+        // a handle that begins at a checkpoint this boot wrote
+        let mut log = OpLog::open(dir.path()).unwrap();
+        assert!(log.recent().len() < 20 && log.unsettled());
+        assert_eq!(log.left_unsynced_from(), None);
+        let given = Arc::new(Mutex::new(Vec::new()));
+        let seen = given.clone();
+        log.sync_named_with(Arc::new(move |ops| {
+            let mut seen = seen.lock().unwrap();
+            seen.extend(ops.iter().map(|op| op.payload.clone()));
+            match stored {
+                true => Ok(()),
+                false => Err(std::io::Error::other("what it names is not there")),
+            }
+        }));
+        // a writer that syncs has what was left seen to before it appends
+        let appended = log.append("c", 1, b"committed");
+        assert_eq!(given.lock().unwrap()[0], b"left");
+        if stored {
+            appended.unwrap();
+            assert_eq!(alt_oplog::bounded_in(dir.path()), Some(len));
+            assert!(!OpLog::open(dir.path()).unwrap().unsettled());
+            continue;
+        }
+        assert!(matches!(appended, Err(OpLogError::Io(_))));
+        assert_eq!(file_len(dir.path()), len);
+        assert_eq!(log.bounded_to(), Some(synced));
+        // and a writer that looks cuts the op and all that was appended after
+        let mut writer = OpLog::open(dir.path()).unwrap();
+        assert!(writer.unsettled());
+        assert_eq!(writer.settle(but_left).unwrap().unwrap().ops, 41);
+        assert_eq!(writer.len(), 2);
+        assert!(!OpLog::open(dir.path()).unwrap().unsettled());
+    }
+}
+
+#[test]
+fn a_writer_that_syncs_nothing_notes_nothing_where_the_ops_were_vouched_for_since_it_opened() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    left_by_boot_1(dir.path(), &Meta::default());
+    let mut staging = OpLog::open(dir.path()).unwrap();
+    assert!(staging.unsettled());
+    let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert_eq!(reader.unconfirmed(vouched).unwrap(), None);
+    let before = noted(dir.path());
+    stage(&mut staging, 40);
+    assert_eq!(noted(dir.path()), before);
+    assert!(!staging.unsettled());
+    assert!(!OpLog::open(dir.path()).unwrap().unsettled());
 }
