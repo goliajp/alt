@@ -81,6 +81,8 @@ mod imp {
                 | Cmd::Restore(_)
                 | Cmd::Checkout(_)
                 | Cmd::Reset(_)
+                | Cmd::Rm(_)
+                | Cmd::Mv(_)
                 | Cmd::Merge { .. }
                 | Cmd::Flow { .. }
                 | Cmd::Undo { .. }

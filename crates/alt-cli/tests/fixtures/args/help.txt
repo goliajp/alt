@@ -24,6 +24,8 @@ Commands:
   restore      Restore files of the working tree, entries of the index, or both
   checkout     Switch branches, or restore files of the working tree
   reset        Move the current branch to a commit, or reset index entries
+  rm           Remove files from the index and the working tree
+  mv           Move or rename a file or a directory
   show         Show a commit: header + per-file unified diff against its first parent
   blame        Line-by-line origin attribution for one file (`git blame`-style)
   meta         Show or change the metadata recorded with a commit (kept in git notes under refs/notes/alt/meta; the commit itself never changes)
@@ -1491,6 +1493,42 @@ Options:
       --mixed                  Move the branch and reset the index; the files stay (the default)
       --hard                   Move the branch and reset the index and the files
   -q, --quiet                  Say nothing of what is left unstaged or where HEAD is
+      --json                   Emit a structured JSON result instead of the human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt rm
+Remove files from the index and the working tree
+
+Usage: alt rm [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Files to remove; a directory only with -r
+
+Options:
+      --cached                 Remove the index entries and leave the files
+  -r                           Remove what lies beneath a directory given
+  -f, --force                  Remove a file whose changes are nowhere else as well
+      --ignore-unmatch         Pass over a path that names no file of the index
+  -n, --dry-run                Say what would be removed and remove nothing
+  -q, --quiet                  Do not say what is removed
+      --json                   Emit a structured JSON result instead of the human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt mv
+Move or rename a file or a directory
+
+Usage: alt mv [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  The file or directory to rename and its new name, or what to move and the directory to move it into
+
+Options:
+  -f, --force                  Write over a file at the new name
+  -k                           Pass over a source that cannot be moved
+  -n, --dry-run                Say what would be renamed and rename nothing
+  -v, --verbose                Say each rename
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository

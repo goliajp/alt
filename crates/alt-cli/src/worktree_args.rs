@@ -127,3 +127,54 @@ pub struct Reset {
     #[arg(long)]
     pub json: bool,
 }
+
+#[derive(alt_args::Args)]
+pub struct Rm {
+    /// Files to remove; a directory only with -r
+    #[arg(hint = "path-tracked")]
+    pub paths: Vec<String>,
+    /// Remove the index entries and leave the files
+    #[arg(long)]
+    pub cached: bool,
+    /// Remove what lies beneath a directory given
+    #[arg(short = 'r')]
+    pub recursive: bool,
+    /// Remove a file whose changes are nowhere else as well
+    #[arg(short = 'f', long = "force")]
+    pub forced: bool,
+    /// Pass over a path that names no file of the index
+    #[arg(long = "ignore-unmatch")]
+    pub ignore_unmatch: bool,
+    /// Say what would be removed and remove nothing
+    #[arg(short = 'n', long = "dry-run")]
+    pub dry_run: bool,
+    /// Do not say what is removed
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+    /// Emit a structured JSON result instead of the human lines
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(alt_args::Args)]
+pub struct Mv {
+    /// The file or directory to rename and its new name, or what to move
+    /// and the directory to move it into
+    #[arg(hint = "path-tracked")]
+    pub paths: Vec<String>,
+    /// Write over a file at the new name
+    #[arg(short = 'f', long = "force")]
+    pub forced: bool,
+    /// Pass over a source that cannot be moved
+    #[arg(short = 'k')]
+    pub skip_errors: bool,
+    /// Say what would be renamed and rename nothing
+    #[arg(short = 'n', long = "dry-run")]
+    pub dry_run: bool,
+    /// Say each rename
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
+    /// Emit a structured JSON result instead of the human lines
+    #[arg(long)]
+    pub json: bool,
+}

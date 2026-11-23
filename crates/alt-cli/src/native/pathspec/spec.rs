@@ -229,7 +229,7 @@ impl Spec {
 
     /// Whether every name this names is the path or lies beneath it,
     /// byte for byte.
-    pub(super) fn is_plain(&self) -> bool {
+    pub fn is_plain(&self) -> bool {
         !self.fold_case && self.plain_len() == self.path.len()
     }
 

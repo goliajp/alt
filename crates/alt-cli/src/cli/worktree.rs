@@ -4,7 +4,7 @@
 use std::io::Write;
 
 use super::{Command, Res};
-use crate::native::{NativeRepo, ResetMode, Restore, Said};
+use crate::native::{Mv, NativeRepo, ResetMode, Restore, Rm, Said};
 use crate::worktree_args;
 
 pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
@@ -12,6 +12,8 @@ pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Restore(args) => restore(repo, args, out)?,
         Command::Checkout(args) => checkout(repo, args, out)?,
         Command::Reset(args) => reset(repo, args, out)?,
+        Command::Rm(args) => rm(repo, args, out)?,
+        Command::Mv(args) => mv(repo, args, out)?,
         _ => return Err("not a native command".into()),
     }
     Ok(0)
@@ -146,4 +148,56 @@ fn reset<W: Write>(repo: &mut NativeRepo, args: &worktree_args::Reset, out: &mut
         return Err(fatal(&format!("Cannot do {mode} reset with paths.")));
     }
     repo.reset_paths(rev, paths, said, out)
+}
+
+fn rm<W: Write>(repo: &mut NativeRepo, args: &worktree_args::Rm, out: &mut W) -> Res<()> {
+    if args.paths.is_empty() {
+        return Err(fatal("No pathspec was given. Which files should I remove?"));
+    }
+    let how = Rm {
+        cached: args.cached,
+        recursive: args.recursive,
+        force: args.forced,
+        ignore_unmatch: args.ignore_unmatch,
+        dry_run: args.dry_run,
+    };
+    let removed = repo.rm(&args.paths, how)?;
+    if args.json {
+        return report(&removed, true, out);
+    }
+    for path in removed.iter().filter(|_| !args.quiet) {
+        out.write_all(b"rm '")?;
+        out.write_all(path)?;
+        out.write_all(b"'\n")?;
+    }
+    Ok(())
+}
+
+fn mv<W: Write>(repo: &mut NativeRepo, args: &worktree_args::Mv, out: &mut W) -> Res<()> {
+    let Some((destination, sources)) = args.paths.split_last().filter(|(_, s)| !s.is_empty())
+    else {
+        let usage = "usage: alt mv [-v] [-f] [-n] [-k] <source>... <destination>";
+        return Err(crate::machine::Failure::usage(usage).into());
+    };
+    let how = Mv {
+        force: args.forced,
+        skip_errors: args.skip_errors,
+        dry_run: args.dry_run,
+    };
+    let renamed = repo.mv(sources, destination, how)?;
+    if args.json {
+        use crate::json::Json;
+        let pair = |r: &crate::native::Renamed| {
+            Json::Object(vec![("from", Json::str(&r.from)), ("to", Json::str(&r.to))])
+        };
+        let renamed = Json::Array(renamed.iter().map(pair).collect());
+        return Ok(crate::json::emit(out, vec![("renamed", renamed)])?);
+    }
+    for r in renamed.iter().filter(|_| args.dry_run) {
+        writeln!(out, "Checking rename of '{}' to '{}'", r.from, r.to)?;
+    }
+    for r in renamed.iter().filter(|_| args.verbose || args.dry_run) {
+        writeln!(out, "Renaming {} to {}", r.from, r.to)?;
+    }
+    Ok(())
 }

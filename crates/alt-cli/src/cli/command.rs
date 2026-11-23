@@ -176,6 +176,10 @@ pub enum Command {
     Checkout(worktree_args::Checkout),
     /// Move the current branch to a commit, or reset index entries
     Reset(worktree_args::Reset),
+    /// Remove files from the index and the working tree
+    Rm(worktree_args::Rm),
+    /// Move or rename a file or a directory
+    Mv(worktree_args::Mv),
     /// Show a commit: header + per-file unified diff against its first parent
     Show {
         /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.

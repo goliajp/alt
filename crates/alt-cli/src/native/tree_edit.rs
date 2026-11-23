@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use super::checkout_recovery::{CheckoutIntent, FileChange};
+use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::canonical_index;
 
@@ -13,8 +13,19 @@ use recovery::canonical_index;
 pub(super) struct TreeEdit {
     /// the whole index to come, every stage of every path
     pub(super) index: Vec<IndexEntry>,
-    /// the paths written: with the file of an entry, or with none
-    pub(super) files: Vec<(BString, Option<WorkEntry>)>,
+    /// what is put at each path written
+    pub(super) files: Vec<(BString, Put)>,
+}
+
+/// What an edit puts at a path of the working tree.
+pub(super) enum Put {
+    /// the file an entry is checked out as
+    Entry(WorkEntry),
+    /// a file as it was found elsewhere in the tree, whatever the index
+    /// has for it
+    Found(FileState),
+    /// nothing: the file that is there is removed
+    Nothing,
 }
 
 impl TreeEdit {
@@ -36,7 +47,8 @@ impl TreeEdit {
     /// Has the file at `path` written as `entry` is checked out, or
     /// removed where there is none.
     pub(super) fn write(&mut self, path: &BString, entry: Option<&WorkEntry>) {
-        self.files.push((path.clone(), entry.cloned()));
+        let put = entry.map_or(Put::Nothing, |entry| Put::Entry(entry.clone()));
+        self.files.push((path.clone(), put));
     }
 }
 
@@ -88,16 +100,17 @@ impl NativeRepo<'_> {
         let among: HashSet<&[u8]> = edit.files.iter().map(|(p, _)| p.as_slice()).collect();
         let mut changes = Vec::new();
         let mut planned = HashMap::new();
-        for (path, entry) in &edit.files {
-            let after = match entry {
-                Some(entry) => {
+        for (path, put) in &edit.files {
+            let after = match put {
+                Put::Entry(entry) => {
                     let state = self.target_state(entry, &attrs)?;
                     planned.insert(path.to_vec(), (state.mode, state.contents.clone()));
                     Some(state)
                 }
-                None => None,
+                Put::Found(state) => Some(state.clone()),
+                Put::Nothing => None,
             };
-            let gitlink = entry.as_ref().is_some_and(|e| e.mode == 0o160000);
+            let gitlink = after.as_ref().is_some_and(|state| state.mode == 0o160000);
             let before = self.observed(path, true, gitlink, &|p| among.contains(p))?;
             if before != after {
                 touched.insert(path.clone());
