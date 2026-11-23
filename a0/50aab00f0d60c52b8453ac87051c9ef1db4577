@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: let the objects of a push inflate to what the histories there are inflate to
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/tests/it/altd_server_pack_limits.rs
