@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: read a log anew in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/reread.rs
