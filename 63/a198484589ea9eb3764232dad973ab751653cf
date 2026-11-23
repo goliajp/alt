@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: perf
+summary: keep the commits read while pushes are looked at, and sync no pack of a push
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/kept.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
