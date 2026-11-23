@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: have a reset to a commit make the branch that has none yet
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/reset.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/reset_unborn.rs
