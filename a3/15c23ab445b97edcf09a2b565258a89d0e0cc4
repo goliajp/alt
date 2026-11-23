@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: have a sign-in wait for one of the places that hash passwords, one from an address at a time
+author-type: human
+author: doracawl
+touched: crates/alt-browser-auth/tests/it/main.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/hashers.rs
+touched: crates/alt-server/src/http/web/admission.rs
