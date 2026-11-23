@@ -39,13 +39,12 @@ pub(super) enum Action {
 
 pub(super) fn action_from_request(method: &Method, path: &str, query: &str) -> Option<Action> {
     if method == &Method::Get && path.ends_with("/info/refs") {
-        if query.contains("service=git-upload-pack") {
-            return Some(Action::Read);
-        }
-        if query.contains("service=git-receive-pack") {
-            return Some(Action::Write);
-        }
-        return None;
+        // the service as the handler reads it, not any text of the query
+        return match super::parse_query(query, "service") {
+            Some("git-upload-pack") => Some(Action::Read),
+            Some("git-receive-pack") => Some(Action::Write),
+            _ => None,
+        };
     }
     if method == &Method::Post && path.ends_with("/git-upload-pack") {
         return Some(Action::Read);
@@ -158,12 +157,15 @@ pub(super) fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOut
         Ok(t) => t,
         Err(e) => return AuthOutcome::Reject(format!("server users file unreadable: {e}")),
     };
-    let Some(entry) = table.get(user) else {
-        return AuthOutcome::Reject("unknown user".into());
+    // one answer for a user that is not known and for a token that is not
+    // theirs: which names there are is not told
+    let known = table.get(user);
+    let theirs = known.filter(|entry| {
+        constant_time_eq_ignore_ascii_case(entry.token_hash.as_bytes(), token_hex.as_bytes())
+    });
+    let Some(entry) = theirs else {
+        return AuthOutcome::Reject("bad credentials".into());
     };
-    if !constant_time_eq_ignore_ascii_case(entry.token_hash.as_bytes(), token_hex.as_bytes()) {
-        return AuthOutcome::Reject("bad token".into());
-    }
     // a 2-column users line (no ACL) is the "trusted user"
     // shape: every repo + every action allowed. A 3-column line scopes
     // the user, and the dispatcher then asks `acl_allows` per request.
@@ -207,6 +209,18 @@ fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The service a request for refs is held to is the one it is
+    /// answered for: the first `service` of the query.
+    #[test]
+    fn the_refs_of_a_service_are_held_to_the_rule_of_that_service() {
+        let of = |query| action_from_request(&Method::Get, "/a/info/refs", query);
+        assert_eq!(of("service=git-upload-pack"), Some(Action::Read));
+        assert_eq!(of("service=git-receive-pack"), Some(Action::Write));
+        let both = "service=git-receive-pack&x=service=git-upload-pack";
+        assert_eq!(of(both), Some(Action::Write));
+        assert_eq!(of("x=service=git-upload-pack"), None);
+    }
 
     /// constant-time compare basic correctness on the
     /// values it actually sees in production: 64-char BLAKE3 hex

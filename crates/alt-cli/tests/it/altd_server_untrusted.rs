@@ -214,3 +214,42 @@ fn a_clone_takes_the_memory_of_its_largest_objects_not_of_the_repository() {
     assert_eq!(fs::metadata(into.join("39.bin")).unwrap().len(), 1 << 20);
     assert!(most < 24 << 20, "{} MiB", most >> 20);
 }
+
+/// A repository whose store another process has locked is opened by the
+/// first request for it, which waits: a request for another repository
+/// of the root is answered meanwhile.
+#[test]
+fn a_repository_that_waits_to_be_opened_keeps_no_other_waiting() {
+    use alt_os::sys::{LOCK_EX, LOCK_UN, flock};
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    repository(&root.join("locked"));
+    repository(&root.join("free"));
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+    let url = |name: &str| format!("http://{}/{name}/git-upload-pack", server.addr);
+    let post = |name: &str| {
+        let mut ls_refs = pkt("command=ls-refs\n");
+        ls_refs.extend_from_slice(b"00010000");
+        let sent = tmp.path().join(format!("{name}.request"));
+        fs::write(&sent, ls_refs).unwrap();
+        status(&[
+            "-X",
+            "POST",
+            "--data-binary",
+            &format!("@{}", sent.display()),
+            &url(name),
+        ])
+    };
+    let held = fs::File::open(root.join("locked/.alt/odb.lock")).unwrap();
+    flock(&held, LOCK_EX).unwrap();
+    std::thread::scope(|scope| {
+        let waits = scope.spawn(|| post("locked"));
+        let (done, answered) = std::sync::mpsc::channel();
+        scope.spawn(move || done.send(post("free")));
+        // the time limit is for a wait that ends only with the lock
+        let free = answered.recv_timeout(std::time::Duration::from_secs(60));
+        flock(&held, LOCK_UN).unwrap();
+        assert_eq!(free.expect("the other repository waits as well"), "200");
+        assert_eq!(waits.join().unwrap(), "200");
+    });
+}

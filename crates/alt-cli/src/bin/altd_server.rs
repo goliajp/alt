@@ -562,22 +562,27 @@ fn resolve_repo(
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
                 None => (trimmed, ""),
             };
-            let mut cache_g = cache.take();
-            if let Some(h) = cache_g.get(name) {
+            if let Some(h) = cache.take().get(name) {
                 return Ok((h.clone(), rest.to_owned(), name.to_owned()));
             }
+            // opened with the cache let go of: an open that waits for a
+            // lock of this repository keeps no request for another waiting
             let repo_path = readers::named(root, name)?;
             // Probe once: surfaces "not a repo" errors right at cache
             // insertion rather than on every request.
             Repository::discover(&repo_path)?;
             let alt_dir = repo_path.join(".alt");
-            let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
-                Some(open_write_coordinator(alt_dir)?)
-            } else {
-                None
+            let writer = match alt_dir.is_dir() {
+                true => Some(open_write_coordinator(alt_dir)?),
+                false => None,
             };
-            let handle = RepoHandle::new(repo_path, writer, &readers::none());
-            cache_g.insert(name.to_owned(), handle.clone());
+            // the first to have opened it is the one every request uses
+            let opened = RepoHandle::new(repo_path, writer, &readers::none());
+            let handle = cache
+                .take()
+                .entry(name.to_owned())
+                .or_insert(opened)
+                .clone();
             Ok((handle, rest.to_owned(), name.to_owned()))
         }
     }
