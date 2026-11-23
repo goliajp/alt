@@ -63,7 +63,7 @@ impl NativeRepo<'_> {
         Ok(self.stopped_cherry_pick()?.is_some())
     }
 
-    pub(super) fn clear_cherry_pick(&self) -> Res<()> {
+    pub(in crate::native) fn clear_cherry_pick(&self) -> Res<()> {
         self.plan_state("CHERRY_PICK_HEAD", None)
     }
 

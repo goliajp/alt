@@ -81,7 +81,12 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
         let validate = matches!(cmd, Commit { validate: true, .. });
         if matches!(
             cmd,
-            Merge { .. } | CherryPick { .. } | Revert { .. } | Rebase { .. } | Commit { .. }
+            Merge { .. }
+                | CherryPick { .. }
+                | Revert { .. }
+                | Rebase { .. }
+                | Commit { .. }
+                | Command::Reset(_)
         ) && !validate
         {
             repo.begin_step(several_records(cmd))?;

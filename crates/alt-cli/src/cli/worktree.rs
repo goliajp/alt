@@ -4,13 +4,14 @@
 use std::io::Write;
 
 use super::{Command, Res};
-use crate::native::{NativeRepo, Restore};
+use crate::native::{NativeRepo, ResetMode, Restore, Said};
 use crate::worktree_args;
 
 pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     match cmd {
         Command::Restore(args) => restore(repo, args, out)?,
         Command::Checkout(args) => checkout(repo, args, out)?,
+        Command::Reset(args) => reset(repo, args, out)?,
         _ => return Err("not a native command".into()),
     }
     Ok(0)
@@ -70,7 +71,7 @@ fn checkout<W: Write>(
 ) -> Res<()> {
     let side = side(args.ours, args.theirs);
     let names = &args.names;
-    if side.is_some() && names.is_empty() {
+    if side.is_some() && names.is_empty() && args.paths.is_empty() {
         return Err(fatal("'--ours/--theirs' needs the paths to check out"));
     }
     if args.create {
@@ -79,17 +80,26 @@ fn checkout<W: Write>(
         };
         return repo.switch(name, true, args.json, out);
     }
-    if let ([name], None) = (&names[..], side)
+    if let ([name], None, true) = (&names[..], side, args.paths.is_empty())
         && repo.store_refs_get(&format!("refs/heads/{name}")).is_some()
     {
         return repo.switch(name, false, args.json, out);
     }
-    if names.is_empty() {
+    if names.is_empty() && args.paths.is_empty() {
         return Err(fatal("you must specify a branch or path(s) to check out"));
     }
-    let source = match side {
-        None if names.len() > 1 && repo.names_commit(&names[0])? => Some(names[0].as_str()),
-        _ => None,
+    // after `--` there are only paths, and one name before it is a revision
+    let (source, paths) = match (&names[..], side, args.paths.is_empty()) {
+        ([], _, false) => (None, &args.paths[..]),
+        ([rev], None, false) => (Some(rev.as_str()), &args.paths[..]),
+        (_, _, false) => {
+            let usage = "only one revision may come before `--`";
+            return Err(crate::machine::Failure::usage(usage).into());
+        }
+        ([rev, paths @ ..], None, true) if !paths.is_empty() && repo.names_commit(rev)? => {
+            (Some(rev.as_str()), paths)
+        }
+        (names, _, true) => (None, names),
     };
     let how = Restore {
         staged: source.is_some(),
@@ -98,7 +108,42 @@ fn checkout<W: Write>(
         side,
         overlay: true,
     };
-    let paths = &names[usize::from(source.is_some())..];
     let touched = repo.restore(paths, &how)?;
     report(&touched, args.json, out)
+}
+
+/// `alt reset`: to a commit where no path is given, else the index
+/// entries of the paths. A name before `--` is the commit; without `--`
+/// the first name is the commit where it names one.
+fn reset<W: Write>(repo: &mut NativeRepo, args: &worktree_args::Reset, out: &mut W) -> Res<()> {
+    let names = &args.names;
+    let (rev, paths) = match (&names[..], args.paths.is_empty()) {
+        ([], _) => (None, &args.paths[..]),
+        ([rev], false) => (Some(rev.as_str()), &args.paths[..]),
+        (_, false) => {
+            let usage = "only one revision may come before `--`";
+            return Err(crate::machine::Failure::usage(usage).into());
+        }
+        ([rev, paths @ ..], true) if repo.names_commit(rev)? => (Some(rev.as_str()), paths),
+        ([first, ..], true) if repo.names_path(first)? => (None, &names[..]),
+        // what is neither is said to be no revision
+        ([rev, ..], true) => (Some(rev.as_str()), &names[..0]),
+    };
+    let mode = match (args.soft, args.hard) {
+        (true, _) => ResetMode::Soft,
+        (false, true) => ResetMode::Hard,
+        (false, false) => ResetMode::Mixed,
+    };
+    let said = Said {
+        quiet: args.quiet,
+        json: args.json,
+    };
+    if paths.is_empty() {
+        return repo.reset(rev, mode, said, out);
+    }
+    if mode != ResetMode::Mixed {
+        let mode = if args.soft { "soft" } else { "hard" };
+        return Err(fatal(&format!("Cannot do {mode} reset with paths.")));
+    }
+    repo.reset_paths(rev, paths, said, out)
 }

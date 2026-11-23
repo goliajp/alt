@@ -174,6 +174,8 @@ pub enum Command {
     Restore(worktree_args::Restore),
     /// Switch branches, or restore files of the working tree
     Checkout(worktree_args::Checkout),
+    /// Move the current branch to a commit, or reset index entries
+    Reset(worktree_args::Reset),
     /// Show a commit: header + per-file unified diff against its first parent
     Show {
         /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.

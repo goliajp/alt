@@ -25,6 +25,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Switch { .. }
             | Command::Restore(_)
             | Command::Checkout(_)
+            | Command::Reset(_)
             | Command::Diff { .. }
             | Command::Merge { .. }
             | Command::Flow { .. }

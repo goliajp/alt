@@ -23,6 +23,7 @@ Commands:
   switch       Switch branches, materializing the target tree into the work tree
   restore      Restore files of the working tree, entries of the index, or both
   checkout     Switch branches, or restore files of the working tree
+  reset        Move the current branch to a commit, or reset index entries
   show         Show a commit: header + per-file unified diff against its first parent
   blame        Line-by-line origin attribution for one file (`git blame`-style)
   meta         Show or change the metadata recorded with a commit (kept in git notes under refs/notes/alt/meta; the commit itself never changes)
@@ -1462,16 +1463,35 @@ Options:
 ### alt checkout
 Switch branches, or restore files of the working tree
 
-Usage: alt checkout [OPTIONS] [NAMES]...
+Usage: alt checkout [OPTIONS] [NAMES]... [-- <PATHS>...]
 
 Arguments:
-  [NAMES]...  A branch to switch to, or paths to restore from the index; a revision before the paths restores them from it, index and files
+  [NAMES]...       A branch to switch to, or paths to restore from the index; a revision before the paths restores them from it, index and files
+  [-- <PATHS>...]  Paths to restore, where a name before them could be taken for a branch or a revision
 
 Options:
   -b                           Create the branch named before switching to it
       --ours                   For a path in conflict, check out the file of the current branch
       --theirs                 For a path in conflict, check out the file of the branch merged in
       --json                   Emit a structured JSON result instead of the human line
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt reset
+Move the current branch to a commit, or reset index entries
+
+Usage: alt reset [OPTIONS] [NAMES]... [-- <PATHS>...]
+
+Arguments:
+  [NAMES]...       The commit to reset to, HEAD where none is given, and paths: with paths, their index entries are reset and nothing else
+  [-- <PATHS>...]  Paths, where a name before them could be taken for a revision
+
+Options:
+      --soft                   Move the branch and leave the index and the files as they are
+      --mixed                  Move the branch and reset the index; the files stay (the default)
+      --hard                   Move the branch and reset the index and the files
+  -q, --quiet                  Say nothing of what is left unstaged or where HEAD is
+      --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help

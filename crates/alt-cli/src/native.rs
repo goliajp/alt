@@ -62,6 +62,8 @@ mod recovery;
 mod remotes;
 pub use recovery::{export_git, prepared_blobs};
 mod requests;
+mod reset;
+pub use reset::{ResetMode, Said};
 mod restore;
 pub use restore::Restore;
 mod revert;

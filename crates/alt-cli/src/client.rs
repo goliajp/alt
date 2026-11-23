@@ -80,6 +80,7 @@ mod imp {
                 | Cmd::Switch { .. }
                 | Cmd::Restore(_)
                 | Cmd::Checkout(_)
+                | Cmd::Reset(_)
                 | Cmd::Merge { .. }
                 | Cmd::Flow { .. }
                 | Cmd::Undo { .. }

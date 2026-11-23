@@ -84,6 +84,10 @@ pub struct Checkout {
     /// revision before the paths restores them from it, index and files
     #[arg(hint = "path-tracked")]
     pub names: Vec<String>,
+    /// Paths to restore, where a name before them could be taken for
+    /// a branch or a revision
+    #[arg(last = true, hint = "path-tracked")]
+    pub paths: Vec<String>,
     /// Create the branch named before switching to it
     #[arg(short = 'b')]
     pub create: bool,
@@ -94,6 +98,32 @@ pub struct Checkout {
     #[arg(long)]
     pub theirs: bool,
     /// Emit a structured JSON result instead of the human line
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(alt_args::Args)]
+pub struct Reset {
+    /// The commit to reset to, HEAD where none is given, and paths: with
+    /// paths, their index entries are reset and nothing else
+    #[arg(hint = "rev")]
+    pub names: Vec<String>,
+    /// Paths, where a name before them could be taken for a revision
+    #[arg(last = true, hint = "path-tracked")]
+    pub paths: Vec<String>,
+    /// Move the branch and leave the index and the files as they are
+    #[arg(long, conflicts_with_all = ["mixed", "hard"])]
+    pub soft: bool,
+    /// Move the branch and reset the index; the files stay (the default)
+    #[arg(long, conflicts_with = "hard")]
+    pub mixed: bool,
+    /// Move the branch and reset the index and the files
+    #[arg(long)]
+    pub hard: bool,
+    /// Say nothing of what is left unstaged or where HEAD is
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+    /// Emit a structured JSON result instead of the human lines
     #[arg(long)]
     pub json: bool,
 }

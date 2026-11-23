@@ -122,6 +122,7 @@ mod recovery_checked;
 mod remote;
 mod replay_refused;
 mod request_operations;
+mod reset;
 mod restore;
 mod revert;
 mod scan_cache;

@@ -175,4 +175,11 @@ impl NativeRepo<'_> {
     pub fn names_commit(&self, rev: &str) -> Res<bool> {
         Ok(self.commit_named(rev)?.is_some())
     }
+
+    /// Whether `given` names a file that is there or a path of the index.
+    pub fn names_path(&self, given: &str) -> Res<bool> {
+        let spec = pathspec::Spec::parse(&self.root, &self.prefix, given)?;
+        let there = self.root.join(&spec.path).symlink_metadata().is_ok();
+        Ok(there || self.index()?.entries.iter().any(|e| spec.matches(&e.path)))
+    }
 }
