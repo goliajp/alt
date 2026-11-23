@@ -110,11 +110,11 @@ mod imp {
                 | Cmd::RevParse { .. }
                 | Cmd::Complete(_)
                 | Cmd::Prompt(_)
-                | Cmd::Branch {
+                | Cmd::Branch(crate::branch_args::Branch {
                     name: None,
                     delete: None,
                     ..
-                }
+                })
         )
     }
 

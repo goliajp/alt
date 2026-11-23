@@ -23,6 +23,7 @@ use http_auth::{build_transport, http_auth};
 mod add;
 mod ahead_behind;
 mod bisect;
+mod branch;
 mod checkout_files;
 mod checkout_plan;
 mod checkout_recovery;
@@ -81,6 +82,7 @@ mod stash;
 pub use stash::{StashPush, Stashing};
 mod status;
 mod switch;
+pub use switch::Create;
 mod task;
 mod tree_edit;
 mod unconfirmed;
@@ -1145,126 +1147,6 @@ impl<'a> NativeRepo<'a> {
             Some(RefTarget::Oid(_)) => Err("detached HEAD is not supported yet".into()),
             None => Ok("refs/heads/main".to_owned()),
         }
-    }
-
-    /// `alt branch`: list branches (no args), create one at HEAD (`name`),
-    /// or delete one (`delete`).
-    pub fn branch(
-        &mut self,
-        name: Option<String>,
-        delete: Option<String>,
-        remotes: bool,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
-        match (name, delete) {
-            (_, Some(target)) if remotes => self.delete_ref(&format!("refs/remotes/{target}"), out),
-            (_, Some(target)) => self.delete_branch(&target, out),
-            (Some(new), None) => self.create_branch(&new, out),
-            (None, None) => self.list_branches(json, out),
-        }
-    }
-
-    fn list_branches(&self, json: bool, out: &mut impl Write) -> Res<()> {
-        let current = self.head_branch()?;
-        if json {
-            return self.list_branches_json(&current, out);
-        }
-        for (name, _) in self.store.refs.iter() {
-            if let Some(short) = name.strip_prefix("refs/heads/") {
-                let mark = if name == current { "* " } else { "  " };
-                writeln!(out, "{mark}{short}")?;
-            }
-        }
-        Ok(())
-    }
-
-    /// `branch --json`: `{schema_version, current, branches:[{name,current,oid}]}`
-    /// — every local branch with its tip oid and which one HEAD is on.
-    fn list_branches_json(&self, current: &str, out: &mut impl Write) -> Res<()> {
-        use crate::json::Json;
-        let mut branches = Vec::new();
-        for (name, _) in self.store.refs.iter() {
-            if let Some(short) = name.strip_prefix("refs/heads/") {
-                let oid = match self.store.refs.resolve(name)? {
-                    Some(o) => Json::str(o.to_string()),
-                    None => Json::Null,
-                };
-                branches.push(Json::Object(vec![
-                    ("name", Json::str(short)),
-                    ("current", Json::Bool(name == current)),
-                    ("oid", oid),
-                ]));
-            }
-        }
-        let short = current.strip_prefix("refs/heads/").unwrap_or(current);
-        let doc = Json::Object(vec![
-            ("schema_version", Json::Num(1)),
-            ("current", Json::str(short)),
-            ("branches", Json::Array(branches)),
-        ]);
-        doc.write(out)?;
-        out.write_all(b"\n")?;
-        Ok(())
-    }
-
-    fn create_branch(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
-        check_branch_name(name)?;
-        let full = format!("refs/heads/{name}");
-        if self.store.refs.get(&full).is_some() {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!("a branch named '{name}' already exists"),
-            )
-            .into());
-        }
-        let commit = self
-            .store
-            .refs
-            .resolve(&self.head_branch()?)?
-            .ok_or("cannot create a branch before the first commit")?;
-        self.commit_refs_only(
-            "branch",
-            &[RefChange {
-                name: full,
-                old: None,
-                new: Some(RefTarget::Oid(commit)),
-            }],
-        )?;
-        writeln!(out, "branch '{name}' created at {commit}")?;
-        Ok(())
-    }
-
-    fn delete_branch(&mut self, name: &str, out: &mut impl Write) -> Res<()> {
-        let full = format!("refs/heads/{name}");
-        if full == self.head_branch()? {
-            return Err(format!("cannot delete branch '{name}': it is the current branch").into());
-        }
-        self.delete_ref(&full, out)
-    }
-
-    /// Deletes `full` (a branch or remote-tracking ref) in one undoable op.
-    fn delete_ref(&mut self, full: &str, out: &mut impl Write) -> Res<()> {
-        let short = full
-            .strip_prefix("refs/heads/")
-            .or_else(|| full.strip_prefix("refs/remotes/"))
-            .unwrap_or(full);
-        let old = self
-            .store
-            .refs
-            .get(full)
-            .cloned()
-            .ok_or_else(|| format!("branch '{short}' not found"))?;
-        self.commit_refs_only(
-            "branch",
-            &[RefChange {
-                name: full.to_owned(),
-                old: Some(old),
-                new: None,
-            }],
-        )?;
-        writeln!(out, "deleted branch '{short}'")?;
-        Ok(())
     }
 
     /// `alt tag [-d <name>] [<name> [<rev>]] [-a] [-m <msg>] [--json]`.
@@ -3370,7 +3252,7 @@ mod tests {
         repo.add(&[".".to_owned()], false, &mut sink).unwrap();
         repo.commit("first", Default::default(), false, &mut sink)
             .unwrap();
-        repo.branch(Some("feat".to_owned()), None, false, false, &mut sink)
+        repo.branch(Some("feat".to_owned()), None, None, false, false, &mut sink)
             .unwrap();
 
         // a second workspace on `feat`, in its own working tree outside the repo

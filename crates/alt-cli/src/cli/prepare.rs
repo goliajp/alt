@@ -56,7 +56,7 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
         Add { args } => !args.renormalize,
         Commit { validate, .. } => !validate,
         Diff(args) => args.cached,
-        Switch { create, .. } => !create,
+        Switch(args) => !args.create || args.start.is_some(),
         // a sequence under way is ended or gone on with all the same
         Rebase { upstream, .. } => upstream.is_some(),
         Revert { revs, .. } => !revs.is_empty(),

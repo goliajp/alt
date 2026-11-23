@@ -14,6 +14,7 @@ macro_rules! crash_point {
 pub mod added_commits;
 pub mod auth;
 pub mod blame;
+pub mod branch_args;
 pub mod charset;
 pub mod ci;
 pub mod ci_cmd;

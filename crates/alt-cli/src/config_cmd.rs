@@ -52,6 +52,13 @@ pub fn run(
 }
 
 fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> Res<()> {
+    set(repo, key, value)?;
+    writeln!(out, "set {key} = {value}")?;
+    Ok(())
+}
+
+/// Sets `key` to `value` in the store's own file.
+pub(crate) fn set(repo: &Repository, key: &str, value: &str) -> Res<()> {
     let (section, subsection, name) = split_key(key)?;
     let path = config_path(repo);
     let mut entries = current_entries(&path)?;
@@ -75,9 +82,23 @@ fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> R
             origin: None,
         });
     }
-    write_entries(&path, &entries)?;
-    writeln!(out, "set {key} = {value}")?;
-    Ok(())
+    write_entries(&path, &entries)
+}
+
+/// Takes what the store's own file sets in `[<section> "<subsection>"]`
+/// out of it.
+pub(crate) fn drop_section(repo: &Repository, section: &str, subsection: &str) -> Res<()> {
+    let path = config_path(repo);
+    let mut entries = current_entries(&path)?;
+    let before = entries.len();
+    let within = |e: &Entry| {
+        e.section == section && entry_subsection_bytes(e) == Some(subsection.as_bytes())
+    };
+    entries.retain(|e| !within(e));
+    if entries.len() == before {
+        return Ok(());
+    }
+    write_entries(&path, &entries)
 }
 
 fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {

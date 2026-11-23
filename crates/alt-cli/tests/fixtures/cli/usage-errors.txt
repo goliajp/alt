@@ -6,7 +6,7 @@ $ [repo] alt commit -m base
 exit 0
 $ [repo] alt switch --does-not-exist --json
 exit 2
-err| {"error":{"details":{},"kind":"usage","message":"error: unexpected argument '--does-not-exist' found\n\n  tip: to pass '--does-not-exist' as a value, use '-- --does-not-exist'\n\nUsage: alt switch [OPTIONS] <NAME>\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+err| {"error":{"details":{},"kind":"usage","message":"error: unexpected argument '--does-not-exist' found\n\n  tip: to pass '--does-not-exist' as a value, use '-- --does-not-exist'\n\nUsage: alt switch [OPTIONS] <NAME> [START]\n\nFor more information, try '--help'.\n","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
 $ [repo] alt --request-id bad add . --json
 exit 2
 err| {"error":{"details":{},"kind":"usage","message":"request id must be 32 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":"bad","retryable":false},"schema_version":1}

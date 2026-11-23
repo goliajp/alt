@@ -4,7 +4,7 @@ use alt_args::Subcommand;
 
 use super::vcs::parse_key_value;
 use super::*;
-use crate::{log_cmd, sequence_args, worktree_args};
+use crate::{branch_args, log_cmd, sequence_args, worktree_args};
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -141,32 +141,9 @@ pub enum Command {
         args: worktree_args::Status,
     },
     /// List, create, or delete branches
-    Branch {
-        /// Branch name to create (omit to list branches)
-        #[arg(hint = none)]
-        name: Option<String>,
-        /// Delete the named branch
-        #[arg(short = 'd', hint = "branch-delete")]
-        delete: Option<String>,
-        /// With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
-        #[arg(short = 'r', long = "remotes", requires = "delete")]
-        remotes: bool,
-        /// Emit the branch list as a stable JSON object
-        #[arg(long)]
-        json: bool,
-    },
+    Branch(branch_args::Branch),
     /// Switch branches, materializing the target tree into the work tree
-    Switch {
-        /// Branch to switch to
-        #[arg(hint = "branch")]
-        name: String,
-        /// Create the branch before switching
-        #[arg(short = 'c')]
-        create: bool,
-        /// Emit a structured JSON result instead of the human line
-        #[arg(long)]
-        json: bool,
-    },
+    Switch(branch_args::Switch),
     /// Restore files of the working tree, entries of the index, or both
     Restore(worktree_args::Restore),
     /// Switch branches, or restore files of the working tree

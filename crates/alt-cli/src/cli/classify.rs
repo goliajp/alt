@@ -142,11 +142,11 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Complete(_)
             | Command::Prompt(_)
             | Command::Commit { validate: true, .. }
-            | Command::Branch {
+            | Command::Branch(crate::branch_args::Branch {
                 name: None,
                 delete: None,
                 ..
-            }
+            })
             | Command::Tag(crate::sequence_args::Tag {
                 name: None,
                 delete: None,

@@ -1431,10 +1431,11 @@ Options:
 ### alt branch
 List, create, or delete branches
 
-Usage: alt branch [OPTIONS] [NAME]
+Usage: alt branch [OPTIONS] [NAME] [START]
 
 Arguments:
-  [NAME]  Branch name to create (omit to list branches)
+  [NAME]   Branch name to create (omit to list branches)
+  [START]  Where the new branch starts: a branch, a tag or a commit (HEAD where none is given)
 
 Options:
   -d <DELETE>                  Delete the named branch
@@ -1446,10 +1447,11 @@ Options:
 ### alt switch
 Switch branches, materializing the target tree into the work tree
 
-Usage: alt switch [OPTIONS] <NAME>
+Usage: alt switch [OPTIONS] <NAME> [START]
 
 Arguments:
-  <NAME>  Branch to switch to
+  <NAME>   Branch to switch to
+  [START]  With -c, where the new branch starts: a branch, a tag or a commit (the current commit where none is given)
 
 Options:
   -c                           Create the branch before switching

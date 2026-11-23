@@ -75,12 +75,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
         Command::Complete(args) => repo.complete(args, out)?,
         Command::Prompt(args) => repo.prompt(args, out)?,
         Command::Status { args } => repo.status(args.untracked(), args.json, out)?,
-        Command::Branch {
-            name,
-            delete,
-            remotes,
-            json,
-        } => repo.branch(name.clone(), delete.clone(), *remotes, *json, out)?,
+        Command::Branch(_) => return super::worktree::run(repo, cmd, out),
         Command::Tag(tag) => repo.tag(
             tag.name.clone(),
             tag.rev.clone(),
@@ -90,7 +85,6 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             tag.json,
             out,
         )?,
-        Command::Switch { name, create, json } => repo.switch_command(name, *create, *json, out)?,
         Command::Diff(args) => repo.diff(&args.request(), out)?,
         Command::Meta { op } => match op {
             MetaOp::Show { rev, json } => repo.meta_show(rev, *json, out)?,

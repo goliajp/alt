@@ -4,12 +4,25 @@
 use std::io::Write;
 
 use super::{Command, Res};
-use crate::native::{Mv, NativeRepo, ResetMode, Restore, Rm, Said};
+use crate::native::{Create, Mv, NativeRepo, ResetMode, Restore, Rm, Said};
 use crate::rev_or_path::Words;
 use crate::worktree_args;
 
 pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     match cmd {
+        Command::Branch(args) => {
+            let (name, start, delete) =
+                (args.name.clone(), args.start.clone(), args.delete.clone());
+            repo.branch(name, start, delete, args.remotes, args.json, out)?
+        }
+        Command::Switch(args) => {
+            let start = args.start.as_deref();
+            if start.is_some() && !args.create {
+                return Err(fatal("only one reference expected"));
+            }
+            let create = args.create.then_some(Create { start });
+            repo.switch_command(&args.name, create, args.json, out)?
+        }
         Command::Restore(args) => restore(repo, args, out)?,
         Command::Checkout(args) => checkout(repo, args, out)?,
         Command::Reset(args) => reset(repo, args, out)?,
@@ -96,6 +109,32 @@ fn checkout_source<'a>(
     })
 }
 
+/// `alt checkout -b <name> [<start>]`: the branch made, at the commit
+/// `start` names where one is given, and switched to.
+fn checkout_new<W: Write>(
+    repo: &mut NativeRepo,
+    args: &worktree_args::Checkout,
+    out: &mut W,
+) -> Res<()> {
+    let words: Vec<&String> = args.names.iter().chain(&args.paths).collect();
+    let (name, start) = match words[..] {
+        [] => return Err(crate::machine::Failure::usage("-b takes a branch name").into()),
+        [name] => (name, None),
+        [name, start] => (name, Some(start.as_str())),
+        [name, ..] => {
+            let said = "Cannot update paths and switch to branch";
+            return Err(fatal(&format!("{said} '{name}' at the same time.")));
+        }
+    };
+    if let Some(start) = start
+        && !repo.names_commit(start)?
+    {
+        let whose = format!("a branch '{name}' cannot be created from it");
+        return Err(fatal(&format!("'{start}' is not a commit and {whose}")));
+    }
+    repo.switch(name, Some(Create { start }), args.json, out)
+}
+
 /// `alt checkout`: a branch switched to where one name is given that is a
 /// branch, else the path form, which restores the paths from the index, or
 /// index and files from the revision named before them.
@@ -110,21 +149,18 @@ fn checkout<W: Write>(
         return Err(fatal("'--ours/--theirs' needs the paths to check out"));
     }
     if args.create {
-        let [name] = &names[..] else {
-            return Err(crate::machine::Failure::usage("-b takes one branch name").into());
-        };
-        return repo.switch(name, true, args.json, out);
+        return checkout_new(repo, args, out);
     }
     if let ([name], None, true) = (&names[..], side, args.paths.is_empty()) {
         if repo.store_refs_get(&format!("refs/heads/{name}")).is_some() {
-            return repo.switch(name, false, args.json, out);
+            return repo.switch(name, None, args.json, out);
         }
         // before `--` the name is no path: what is no branch is refused
         if args.dashed {
             if !repo.names_commit(name)? {
                 return Err(invalid_reference(name));
             }
-            return repo.switch(name, false, args.json, out);
+            return repo.switch(name, None, args.json, out);
         }
     }
     if names.is_empty() && args.paths.is_empty() {
