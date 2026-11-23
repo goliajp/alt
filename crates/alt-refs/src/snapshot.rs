@@ -23,6 +23,17 @@
 //! longer than the note says does not read the log's marker. Version 2
 //! files (no note) and version 1 files (op id and refs only) are still
 //! read; a version 1 file costs one full replay.
+//!
+//! Version 4 is the snapshot of a version 2 log, which says itself how far
+//! it is synced: in place of the note the file holds the boot it was
+//! written in and how far the log was known synced then, and the checksum
+//! is over all of it. Its op may lie past that boundary, where the frames
+//! are in the kernel's cache for as long as that boot runs and no longer.
+//!
+//! ```text
+//! [magic "ALTS"][version u8, 4][boot 16][synced u64]
+//! [op id 32][frame start u64][frame end u64][op count u64] ...
+//! ```
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -40,6 +51,10 @@ const MAGIC: [u8; 4] = *b"ALTS";
 const VERSION_OP_ONLY: u8 = 1;
 const VERSION_NO_NOTE: u8 = 2;
 const VERSION: u8 = 3;
+const VERSION_FRAMED: u8 = 4;
+/// where the anchor begins in a version 4 file: after the boot and the
+/// boundary
+const FRAMED_AT: usize = 5 + 16 + 8;
 const NOTE_AT: usize = 5;
 const NOTE_END: usize = NOTE_AT + alt_oplog::NOTE_LEN;
 /// op id, record start, record end, op count
@@ -70,6 +85,8 @@ pub struct Snapshot {
     pub len: u64,
     /// how far the file notes the log as synced; absent before version 3
     pub synced: Option<u64>,
+    /// the boot a version 4 file was written in
+    pub boot: Option<[u8; 16]>,
 }
 
 fn encode_target(buf: &mut Vec<u8>, target: &RefTarget) {
@@ -91,18 +108,29 @@ fn encode_target(buf: &mut Vec<u8>, target: &RefTarget) {
 }
 
 /// The bytes of a snapshot of `count` refs (in name order) that notes the
-/// log as synced up to `synced`.
+/// log as synced up to `synced`: of a version 2 log when `boot` is the
+/// boot it is written in.
 fn encode<'a>(
     at: &Anchor,
     synced: u64,
+    boot: Option<[u8; 16]>,
     count: usize,
     refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
 ) -> Vec<u8> {
     let blocks = count.div_ceil(BLOCK);
     let mut buf = Vec::new();
     buf.extend_from_slice(&MAGIC);
-    buf.push(VERSION);
-    buf.extend_from_slice(&alt_oplog::encode_note(synced));
+    match boot {
+        Some(boot) => {
+            buf.push(VERSION_FRAMED);
+            buf.extend_from_slice(&boot);
+            buf.extend_from_slice(&synced.to_le_bytes());
+        }
+        None => {
+            buf.push(VERSION);
+            buf.extend_from_slice(&alt_oplog::encode_note(synced));
+        }
+    }
     buf.extend_from_slice(&at.op.0);
     buf.extend_from_slice(&at.start.to_le_bytes());
     buf.extend_from_slice(&at.end.to_le_bytes());
@@ -121,7 +149,9 @@ fn encode<'a>(
         buf.extend_from_slice(name.as_bytes());
         encode_target(&mut buf, target);
     }
-    let check: [u8; 8] = alt_hash::blake3::hash(&buf[NOTE_END..]).as_bytes()[..8]
+    // the note of a version 3 file is changed in place and checks itself
+    let checked = if boot.is_some() { 0 } else { NOTE_END };
+    let check: [u8; 8] = alt_hash::blake3::hash(&buf[checked..]).as_bytes()[..8]
         .try_into()
         .unwrap();
     buf.extend_from_slice(&check);
@@ -129,17 +159,19 @@ fn encode<'a>(
 }
 
 /// Writes the snapshot of `count` refs (in name order), with the note
-/// that the log is synced up to `synced`, and returns its size. No fsync:
+/// that the log is synced up to `synced`, and returns its size; that of a
+/// version 2 log when `boot` is the boot it is written in. No fsync:
 /// a snapshot lost or torn in a crash fails its checksum and is rebuilt
 /// from the log.
 pub fn write<'a>(
     path: &Path,
     at: &Anchor,
     synced: u64,
+    boot: Option<[u8; 16]>,
     count: usize,
     refs: impl Iterator<Item = (&'a str, &'a RefTarget)>,
 ) -> Result<u64, RefError> {
-    let buf = encode(at, synced, count, refs);
+    let buf = encode(at, synced, boot, count, refs);
 
     // readers refresh the snapshot too, any number at once, in one process
     // or in several that may share process ids: each writes a file no one
@@ -269,7 +301,12 @@ pub fn read(path: &Path) -> Option<Snapshot> {
     // the note is changed in place: it carries its own checksum
     let (from, synced) = match version {
         VERSION => (NOTE_END, alt_oplog::parse_note(map.get(NOTE_AT..NOTE_END)?)),
+        VERSION_FRAMED => (0, field(&map, 21)),
         _ => (0, None),
+    };
+    let boot = match version {
+        VERSION_FRAMED => Some(map.get(5..21)?.try_into().ok()?),
+        _ => None,
     };
     let checked = map.get(from..body_len)?;
     if alt_hash::blake3::hash(checked).as_bytes()[..8] != map[body_len..] {
@@ -284,12 +321,15 @@ pub fn read(path: &Path) -> Option<Snapshot> {
             refs: refs_op_only(body)?,
             len,
             synced,
+            boot,
         });
     }
-    if version != VERSION && version != VERSION_NO_NOTE {
-        return None;
-    }
-    let at = if version == VERSION { NOTE_END } else { 5 };
+    let at = match version {
+        VERSION => NOTE_END,
+        VERSION_FRAMED => FRAMED_AT,
+        VERSION_NO_NOTE => 5,
+        _ => return None,
+    };
     let (anchor, table, count) = anchored(body, at)?;
     let refs = Base::new(map, table, count, body_len);
     Some(Snapshot {
@@ -298,6 +338,7 @@ pub fn read(path: &Path) -> Option<Snapshot> {
         refs: Refs::from_base(refs),
         len,
         synced,
+        boot,
     })
 }
 
@@ -340,7 +381,7 @@ mod tests {
                             count: round + 1,
                         };
                         let listed = refs.iter().map(|(name, target)| (name.as_str(), target));
-                        write(&path, &anchor, round, refs.len(), listed)
+                        write(&path, &anchor, round, None, refs.len(), listed)
                             .unwrap_or_else(|e| panic!("writer {writer} round {round}: {e:?}"));
                     }
                 })

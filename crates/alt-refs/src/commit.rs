@@ -81,7 +81,7 @@ impl RefStore {
         // the append lock, fold in any ops they committed since (so `refs` is
         // the true current state), then CAS-validate this transaction against
         // it. A rejected transaction aborts with nothing written.
-        self.append_op(actor, timestamp_ms, |refs| {
+        self.append_op(actor, timestamp_ms, true, |refs| {
             // Policy gate first: a CapabilityDenied here aborts the
             // append (no oplog row, no idempotency update) — denial
             // costs nothing observable.

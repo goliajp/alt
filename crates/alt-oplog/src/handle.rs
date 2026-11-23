@@ -207,10 +207,12 @@ impl OpLog {
         on!(self, log => log.anchored())
     }
 
-    /// The ops this handle replayed on open and since: those after the
-    /// anchor it was opened at, or all of them without one. Of a version 2
-    /// log opened at an anchor that lies before where the read began,
-    /// only the ref transactions among the ops in between.
+    /// The ops this handle replayed on open and since. Of a version 1 log
+    /// those after the anchor it was opened at, or all of them without
+    /// one. A version 2 log is read from its last checkpoint on: its ops
+    /// from there on or after the anchor, whichever comes later, and of
+    /// the ops between an anchor and that checkpoint only the ref
+    /// transactions; without an anchor, [`Self::ops`] has the ones before.
     pub fn recent(&self) -> &[Op] {
         on!(self, log => log.recent())
     }

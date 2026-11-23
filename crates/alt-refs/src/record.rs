@@ -28,7 +28,7 @@ impl RefStore {
         if payload.first() == Some(&PAYLOAD_REF_TX) {
             return Err(RefError::ReservedPayload(PAYLOAD_REF_TX));
         }
-        let op_id = self.append_op(actor, timestamp_ms, |_| Ok(payload.to_vec()))?;
+        let op_id = self.append_op(actor, timestamp_ms, false, |_| Ok(payload.to_vec()))?;
         self.applied = self.oplog.recent().len();
         self.note_op()?;
         Ok(op_id)

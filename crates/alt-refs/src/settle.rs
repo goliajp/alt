@@ -57,6 +57,13 @@ impl RefStore {
         self.oplog.sync_named_with(sync);
     }
 
+    /// Whether the log is one of version 2, whose frames carry what this
+    /// store reads of a version 1 log from its marker and the snapshot's
+    /// note.
+    pub(crate) fn framed(&self) -> bool {
+        self.oplog.format() == 2
+    }
+
     /// Whether the log is no longer than it was known synced when this
     /// store was opened: nothing is read to tell.
     pub(crate) fn known_synced(&self) -> bool {
@@ -82,7 +89,11 @@ impl RefStore {
     /// a writer to look at ([`Self::settle`]). Reads the marker, unless
     /// the snapshot's note already said there are none, and takes no lock.
     pub fn unsettled(&self) -> bool {
-        !self.known_synced() && self.oplog.unsettled()
+        // a version 2 log may hold more than this store read of it
+        match self.framed() {
+            true => self.oplog.unsettled(),
+            false => !self.known_synced() && self.oplog.unsettled(),
+        }
     }
 
     /// [`Self::unsettled`] for a writer that can tell whether what an op
@@ -93,7 +104,7 @@ impl RefStore {
         &self,
         mut held: impl FnMut(&Op) -> Result<bool, E>,
     ) -> Result<bool, E> {
-        if self.known_synced() {
+        if !self.framed() && self.known_synced() {
             return Ok(false);
         }
         self.oplog
@@ -158,7 +169,8 @@ impl RefStore {
     }
 
     /// Appends the op `build` makes of the refs as they are under the
-    /// log's lock, the ops of other writers folded in. When ops this store
+    /// log's lock, the ops of other writers folded in; `linked` for a ref
+    /// transaction. When ops this store
     /// held were cut meanwhile by another writer, the log is read again and
     /// the op built on the refs it then tells of. A store that leaves its
     /// fsyncs to a sink does not go on: ops it appended itself may be among
@@ -167,11 +179,19 @@ impl RefStore {
         &mut self,
         actor: &str,
         timestamp_ms: u64,
+        linked: bool,
         build: impl Fn(&Refs) -> Result<Vec<u8>, RefError>,
     ) -> Result<OpId, RefError> {
+        // a ref transaction names the one before it, where the log has a
+        // place for that
+        let meta = alt_oplog::Meta {
+            linked,
+            ..alt_oplog::Meta::default()
+        };
         loop {
             let (refs, applied, by_key) = (&mut self.refs, &mut self.applied, &mut self.by_key);
-            let appended = self.oplog.append_checked(actor, timestamp_ms, |ops| {
+            let log = &mut self.oplog;
+            let appended = log.append_checked_with(actor, timestamp_ms, &meta, |ops| {
                 fold_new(refs, applied, by_key, ops)?;
                 build(refs)
             });

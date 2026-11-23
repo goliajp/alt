@@ -93,12 +93,26 @@ fn wait_for_growth(log: &Path, beyond: u64, deadline: Duration) {
 #[test]
 fn kill_dash_nine_leaves_state_transactional() {
     let dir = alt_os::temp::tempdir().unwrap();
-    let log = dir.path().join("oplog/log");
+    killed_over_and_over(dir.path());
+}
+
+#[test]
+fn kill_dash_nine_leaves_state_transactional_in_a_version_2_log() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    alt_oplog::v2::create_with(&dir.path().join("oplog"), 12).unwrap();
+    killed_over_and_over(dir.path());
+    let store = RefStore::open(dir.path()).unwrap();
+    assert_eq!(store.oplog().format(), 2);
+    store.check().unwrap();
+}
+
+fn killed_over_and_over(dir: &Path) {
+    let log = dir.join("oplog/log");
     let deadline = Duration::from_secs(30);
 
     for round in 0..5 {
         let size_before = std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
-        let mut child = spawn_child(dir.path());
+        let mut child = spawn_child(dir);
         // let it commit a few transactions, then kill at an arbitrary point
         wait_for_growth(&log, size_before + 200 + round * 37, deadline);
         child.kill().unwrap();
@@ -106,7 +120,7 @@ fn kill_dash_nine_leaves_state_transactional() {
 
         // recovery: open must succeed (replay re-proves every tx) and the
         // ref must equal exactly the last durable transaction
-        let store = RefStore::open(dir.path()).unwrap();
+        let store = RefStore::open(dir).unwrap();
         let txs = store
             .oplog()
             .ops()

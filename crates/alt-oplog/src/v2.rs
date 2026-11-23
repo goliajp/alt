@@ -117,9 +117,10 @@ pub fn in_boot(boot: Option<[u8; 16]>) {
     BOOT.set(boot);
 }
 
-/// The boot a handle opened now runs in; `None` where the kernel tells
-/// none, and nothing a boot left in its cache is then taken on trust.
-pub(crate) fn running_boot() -> Option<[u8; 16]> {
+/// The boot a handle opened now on this thread runs in; `None` where the
+/// kernel tells none, and nothing a boot left in its cache is then taken
+/// on trust.
+pub fn running_boot() -> Option<[u8; 16]> {
     BOOT.get().or_else(alt_os::boot::id)
 }
 

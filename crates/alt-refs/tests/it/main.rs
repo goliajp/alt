@@ -8,3 +8,4 @@ mod recorded;
 mod refs_lifecycle;
 mod synced_note;
 mod unconfirmed;
+mod v2;
