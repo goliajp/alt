@@ -1,7 +1,7 @@
 use super::*;
 use alt_remote_protocol::delegation::{AgentScope, DelegationRequest};
 
-fn request() -> DelegationRequest {
+pub(super) fn request() -> DelegationRequest {
     let mut grant = grants().remove(0);
     grant.refs = RefSelector::Exact("refs/heads/main".into());
     grant.delete = false;

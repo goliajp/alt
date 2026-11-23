@@ -1,10 +1,12 @@
 //! The statements a Git view is read with.
 
 /// Whether the caller may read the repository, as a condition of each read of its
-/// references: asked by anyone else, the statement does not look at them.
+/// references: asked by anyone else, the statement does not look at them. Nor does
+/// it for a token that is revoked or has run out, nor for one of an agent, whose view
+/// is opened another way.
 macro_rules! readable {
     () => {
-        "EXISTS(SELECT 1 FROM alt_grants g JOIN alt_credentials c ON c.actor_id=g.actor_id WHERE c.token_digest=$1 AND g.repository=$2 AND g.can_read)"
+        "EXISTS(SELECT 1 FROM alt_grants g JOIN alt_credentials c ON c.actor_id=g.actor_id WHERE c.token_digest=$1 AND g.repository=$2 AND g.can_read AND NOT c.revoked AND c.expires_at>floor(extract(epoch FROM clock_timestamp())*1000)::bigint AND NOT EXISTS(SELECT 1 FROM alt_delegations d WHERE d.token_digest=c.token_digest))"
     };
 }
 /// One statement per way of reading the references, so the plain reads carry no

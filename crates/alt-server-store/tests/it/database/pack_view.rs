@@ -154,3 +154,46 @@ fn the_references_are_not_read_for_a_caller_who_may_not_read_the_repository() {
     });
     assert_eq!(refused, 0);
 }
+
+/// A token of an agent takes the path that locks the repository's row. There too a
+/// repository the token has no grant on, and any repository once the token is
+/// revoked, has none of its references read.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_references_are_not_read_for_an_agent_that_may_not_read_the_repository() {
+    let mut f = Fixture::new();
+    let oid = "1".repeat(40);
+    f.client()
+        .batch_execute(&format!(
+            "INSERT INTO alt_refs(repository,name,oid) VALUES('repository','refs/heads/main','{oid}');
+             INSERT INTO alt_repositories(id,recovery_epoch,object_format,quota_bytes) VALUES('other',1,'sha1',0);
+             INSERT INTO alt_refs(repository,name,oid) VALUES('other','refs/heads/elsewhere','{oid}')"
+        ))
+        .unwrap();
+    let request = super::delegation::request();
+    let agent = request.access_token.clone();
+    f.store.issue_agent(&f.credential, &request).unwrap();
+
+    let read = reference_scans(&f, |store| {
+        let (_, view) = store
+            .git_open(&agent, "repository", RefFilter::All)
+            .unwrap();
+        assert_eq!(view.refs.len(), 1);
+    });
+    assert!(read >= 1, "{read} scans reported");
+    let elsewhere = reference_scans(&f, |store| {
+        assert!(store.git_open(&agent, "other", RefFilter::All).is_err());
+    });
+    assert_eq!(elsewhere, 0);
+    f.client()
+        .batch_execute("UPDATE alt_credentials SET revoked=true WHERE token_digest IN (SELECT token_digest FROM alt_delegations)")
+        .unwrap();
+    let revoked = reference_scans(&f, |store| {
+        assert!(
+            store
+                .git_open(&agent, "repository", RefFilter::All)
+                .is_err()
+        );
+    });
+    assert_eq!(revoked, 0);
+}

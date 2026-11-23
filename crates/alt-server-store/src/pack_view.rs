@@ -4,7 +4,7 @@
 use crate::Jsonb;
 use crate::{
     Credential, Error, Refs, Result, Store,
-    store::{authorize, instance, integer, snapshot, unsigned},
+    store::{instance, integer, snapshot, unsigned},
 };
 use alt_pack_segment::SegmentSet;
 use alt_remote_protocol::Scope;
@@ -248,8 +248,10 @@ impl Store {
         // nothing durable is written here; row locks alone need no synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
+        // the references are read for a caller who may read them, and for no other
+        let authority = crate::store::repository_authority(&mut tx, &self.spec, repository)?;
+        let auth = authority.authorize(&mut tx, &self.spec, credential)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
-        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         let row = tx.query_one(
             "SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1",
             &[&repository],
