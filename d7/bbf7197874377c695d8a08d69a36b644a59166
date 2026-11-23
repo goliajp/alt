@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: resolve the deltas of a pack in an order that holds few bases, and count each base made again
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
