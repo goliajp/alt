@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: say in the log what a cut takes and sync that before the file is made shorter
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/salvage.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cuts.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
