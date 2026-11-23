@@ -148,3 +148,77 @@ fn a_note_that_ops_are_left_stands_when_what_was_never_finished_is_cut_after_it(
     assert!(log.unsettled());
     still_left(dir.path(), at, 40);
 }
+
+fn but_later(op: &Op) -> Result<bool, OpLogError> {
+    Ok(op.payload != b"later")
+}
+
+/// In boot 1 two synced ops and two ref transactions that are not,
+/// `left` and `later`; in a later boot a reader that vouches for the
+/// first and not for the second, and notes so. With `cut_after`, what was
+/// never finished is cut off the log after them in a boot between.
+/// Returns where `later` starts.
+fn left_and_later_looked_at(dir: &Path, cut_after: bool) -> u64 {
+    boot(1);
+    let mut log = new_log(dir);
+    grow(&mut log, "a", 2);
+    let linked = Meta {
+        linked: true,
+        ..Meta::default()
+    };
+    log.append_with("a", 3, b"left", &linked).unwrap();
+    log.append_with("a", 4, b"later", &linked).unwrap();
+    let at = log.anchor().unwrap().start;
+    drop(log);
+    boot(2);
+    if cut_after {
+        tear(dir);
+        OpLog::open(dir).unwrap().refresh().unwrap();
+        boot(3);
+    }
+    let reader = OpLog::open_read_only(dir, None).unwrap();
+    assert_eq!(reader.unconfirmed(but_later).unwrap().unwrap().at, at);
+    at
+}
+
+#[test]
+fn a_commit_has_the_ops_seen_to_that_somebody_vouched_for_and_nobody_synced() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    left_and_later_looked_at(dir.path(), false);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.len(), 3, "the log ends before the op not vouched for");
+    let given = Arc::new(Mutex::new(Vec::new()));
+    let seen = given.clone();
+    log.sync_named_with(Arc::new(move |ops| {
+        let mut seen = seen.lock().unwrap();
+        seen.extend(ops.iter().map(|op| op.payload.clone()));
+        Ok(())
+    }));
+    log.append("c", 5, b"committed").unwrap();
+    // that an op's content is there does not say it is synced
+    assert_eq!(*given.lock().unwrap(), [&b"left"[..], b"later"]);
+    assert_eq!(
+        alt_oplog::bounded_in(dir.path()),
+        Some(log.anchor().unwrap().start)
+    );
+}
+
+#[test]
+fn a_look_at_a_log_a_reader_ended_early_is_no_look_at_what_lies_past_that_end() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    // the log was cut since: the note is of another generation than
+    // the log has where the reader ended it, and says nothing but that
+    let at = left_and_later_looked_at(dir.path(), true);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert!(log.len() == 3 && log.unsettled());
+    let mut asked = 0;
+    let found = log.unconfirmed(|_| {
+        asked += 1;
+        Ok::<_, OpLogError>(true)
+    });
+    assert_eq!((found.unwrap(), asked), (None, 1));
+    assert!(log.unsettled());
+    // as a writer it reads on, and has that op to look at
+    let cut = log.settle(but_later).unwrap().unwrap();
+    assert_eq!((cut.at, cut.ops, log.len()), (at, 1, 3));
+}

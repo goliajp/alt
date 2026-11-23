@@ -219,7 +219,9 @@ impl Log {
         }
         let upto = self.state.end;
         if let Some(sync) = self.named.clone() {
-            let left = self.named_from(self.judged.get())?;
+            // from the boundary on: an op somebody vouched for is one
+            // whose content is there, not one whose content is synced
+            let left = self.named_from(self.synced)?;
             let _ = unlock(&self.file);
             let synced = sync(&left);
             lock_exclusive(&self.file)?;
