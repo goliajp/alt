@@ -19,11 +19,12 @@ macro_rules! receipt_sql {
         "jsonb_set(q.result->'receipt','{body,publication}',q.publication)"
     };
 }
-/// The event outbox row `o` stands for, which is what its audit record holds. It is
-/// null when the request the row names is not there.
+/// The event outbox row `o` stands for, which is what its audit record holds. The
+/// publication is read from the request the row names, and from the audit record
+/// once that request was kept its time and removed.
 macro_rules! outbox_event_sql {
     () => {
-        "CASE WHEN o.event ? 'request' THEN (SELECT jsonb_build_object('kind',o.event->'kind','receipt',jsonb_set(o.event->'receipt','{body,publication}',q.publication)) FROM alt_requests q WHERE q.repository=o.repository AND q.epoch=(o.event#>>'{request,scope,recovery_epoch}')::bigint AND q.actor_id=o.event#>>'{request,actor_id}' AND q.request_id=o.event#>>'{request,request_id}') ELSE o.event END"
+        "CASE WHEN o.event ? 'request' THEN COALESCE((SELECT jsonb_build_object('kind',o.event->'kind','receipt',jsonb_set(o.event->'receipt','{body,publication}',q.publication)) FROM alt_requests q WHERE q.repository=o.repository AND q.epoch=(o.event#>>'{request,scope,recovery_epoch}')::bigint AND q.actor_id=o.event#>>'{request,actor_id}' AND q.request_id=o.event#>>'{request,request_id}'),(SELECT a.event FROM alt_audit a WHERE a.repository=o.repository AND a.sequence=o.sequence)) ELSE o.event END"
     };
 }
 pub(crate) use {outbox_event_sql, receipt_sql, state_sql};

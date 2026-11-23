@@ -152,6 +152,12 @@ fn a_schema_18_repository_is_settled_into_its_pack_segments() {
         .unwrap();
     let exported = export.envelope().catalog.blobs.clone();
     drop(export);
+    // and an upload in flight, which is nobody's published object yet
+    let flying = on_branch(
+        commit_with_file("old-flying", b"still uploading", None),
+        "refs/heads/flying",
+    );
+    flying.upload(&mut f.store, &f.credential);
 
     as_schema_18(&f);
     keep_in_content_store(&f, &scope, &git_items(&native), "ref:refs/heads/main");
@@ -171,12 +177,6 @@ fn a_schema_18_repository_is_settled_into_its_pack_segments() {
         &raw,
     );
     keep_in_content_store(&f, &scope, &[(&loose, &raw)], &bundle);
-    // and an upload in flight, which is nobody's published object yet
-    let flying = on_branch(
-        commit_with_file("old-flying", b"still uploading", None),
-        "refs/heads/flying",
-    );
-    flying.upload(&mut f.store, &f.credential);
 
     let before = numbers(&f);
     assert_eq!((before.0, before.1, before.2), (12, 4, 11));

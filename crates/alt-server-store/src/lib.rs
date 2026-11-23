@@ -24,9 +24,13 @@ mod refs;
 pub use refs::Refs;
 mod registration;
 mod requests;
+mod retention;
 pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
+pub use retention::{
+    CREDENTIAL_RETENTION_MS, REQUEST_RETENTION_MS, Removed, RequestsSeen, SESSION_RETENTION_MS,
+};
 mod schema;
 pub use schema::{LZ4_REQUIRED, OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_backup_schema};
 mod schema_v19;
@@ -155,7 +159,7 @@ pub use tasks::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 21;
+pub const SCHEMA_VERSION: u32 = 22;
 
 mod change_channel;
 mod link_history;

@@ -95,11 +95,14 @@ fn reused_http_connections_recheck_current_state_and_discard_closed_backends() {
     let path = "/v1/repositories/repository";
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 200);
     client
-        .execute("UPDATE alt_credentials SET revoked=true", &[])
+        .execute("UPDATE alt_credentials SET revoked=true,revoked_at=0", &[])
         .unwrap();
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 403);
     client
-        .execute("UPDATE alt_credentials SET revoked=false", &[])
+        .execute(
+            "UPDATE alt_credentials SET revoked=false,revoked_at=NULL",
+            &[],
+        )
         .unwrap();
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 200);
 

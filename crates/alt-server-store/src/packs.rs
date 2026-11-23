@@ -326,7 +326,7 @@ impl Store {
             &documents,
         )?;
         tx.execute(
-            "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
+            "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes,settled_at) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0,floor(extract(epoch FROM clock_timestamp())*1000)::bigint)",
             &[
                 repository,
                 &integer(publication.key.scope.recovery_epoch)?,

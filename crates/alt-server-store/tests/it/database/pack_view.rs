@@ -186,7 +186,7 @@ fn the_references_are_not_read_for_an_agent_that_may_not_read_the_repository() {
     });
     assert_eq!(elsewhere, 0);
     f.client()
-        .batch_execute("UPDATE alt_credentials SET revoked=true WHERE token_digest IN (SELECT token_digest FROM alt_delegations)")
+        .batch_execute("UPDATE alt_credentials SET revoked=true,revoked_at=0 WHERE token_digest IN (SELECT token_digest FROM alt_delegations)")
         .unwrap();
     let revoked = reference_scans(&f, |store| {
         assert!(

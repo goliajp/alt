@@ -43,7 +43,7 @@ impl Store {
         let current = credential_row(&mut tx, &self.spec, credential)?;
         human(&current)?;
         let actor: String = current.get("actor_id");
-        if tx.execute("UPDATE alt_credentials c SET revoked=true FROM alt_client_credentials m WHERE c.token_digest=m.token_digest AND c.actor_id=$1 AND c.token_digest=$2", &[&actor,&id])? != 1 {return Err(Error::Unauthorized);}
+        if tx.execute("UPDATE alt_credentials c SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) FROM alt_client_credentials m WHERE c.token_digest=m.token_digest AND c.actor_id=$1 AND c.token_digest=$2", &[&actor,&id])? != 1 {return Err(Error::Unauthorized);}
         crate::browser::audit(&mut tx, &actor, "client.revoke", id)?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }

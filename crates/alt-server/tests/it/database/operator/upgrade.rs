@@ -2,12 +2,30 @@
 //! restoring its backup under the new version. Schema 18 kept published Git objects
 //! in the content store; schema 19 kept the publication of a committed request in
 //! its stored result and in its outbox event as well; schema 20 checked a foreign
-//! key for every ref.
+//! key for every ref; schema 21 did not record when a request or a credential ended.
 use super::maintenance::{encryption_key, prepare, publish};
 use super::*;
 
+/// makes the database the schema 21 one it stands in for
+fn as_schema_21(db: &OperatorDb) {
+    Client::connect(&db.dsn)
+        .unwrap()
+        .batch_execute(
+            "DELETE FROM alt_schema WHERE version=22;
+             ALTER TABLE alt_requests DROP CONSTRAINT IF EXISTS alt_requests_settled_at;
+             DROP INDEX IF EXISTS alt_requests_settled;
+             DROP INDEX IF EXISTS alt_requests_open;
+             ALTER TABLE alt_requests DROP COLUMN IF EXISTS settled_at;
+             ALTER TABLE alt_credentials DROP CONSTRAINT IF EXISTS alt_credentials_revoked_at;
+             ALTER TABLE alt_credentials DROP COLUMN IF EXISTS revoked_at;
+             DROP INDEX IF EXISTS alt_segments_request;
+             CREATE INDEX IF NOT EXISTS alt_segments_owner ON alt_segments(repository,epoch,actor_id,request_id) WHERE state='uploading'",
+        )
+        .unwrap();
+}
 /// makes the database the schema 20 one it stands in for
 fn as_schema_20(db: &OperatorDb) {
+    as_schema_21(db);
     Client::connect(&db.dsn)
         .unwrap()
         .batch_execute(
@@ -187,9 +205,9 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "18", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(shape(&source.dsn), (21, 0, 0, 3, true));
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(shape(&source.dsn), (22, 0, 0, 3, true));
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -226,8 +244,8 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(shape(&target.dsn), (21, 0, 0, 3, true));
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(shape(&target.dsn), (22, 0, 0, 3, true));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
     assert_eq!(target.ok(&["health"])["ready"], true);
 }
 
@@ -269,8 +287,8 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "19", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -312,7 +330,120 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(target.ok(&["health"])["ready"], true);
+    assert_eq!(
+        delivered_receipt(&target, target.config.to_str().unwrap()),
+        receipt
+    );
+}
+
+/// How many requests have the moment they ended and how many credentials the
+/// moment they were revoked; nothing where the database records neither.
+fn moments(dsn: &str) -> Option<(i64, i64)> {
+    let mut client = Client::connect(dsn).unwrap();
+    let recorded: bool = client
+        .query_one(
+            "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='alt_requests' AND column_name='settled_at')",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    recorded.then(|| {
+        let row = client
+            .query_one(
+                "SELECT (SELECT count(*) FROM alt_requests WHERE settled_at IS NOT NULL),(SELECT count(*) FROM alt_credentials WHERE revoked_at IS NOT NULL)",
+                &[],
+            )
+            .unwrap();
+        (row.get(0), row.get(1))
+    })
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL, age and real operator subprocesses; exercised by closing gate"]
+fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
+    let source = OperatorDb::new();
+    let (mut store, admin, _) = prepare(&source);
+    let token = alt_server::operator::read_token(std::path::Path::new(&admin)).unwrap();
+    let p = publish(&mut store, &token);
+    let key = p.publication.key.clone();
+    drop(store);
+    let config = source.config.to_str().unwrap().to_owned();
+    let (before, receipt) = observed(&source, &config, &admin, &key);
+    let trust = source.ok(&["health"])["receipt_public_key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    as_schema_21(&source);
+    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(moments(&source.dsn), None);
+    assert!(!source.run(&["health"]).status.success());
+
+    let offsite = alt_os::temp::tempdir().unwrap();
+    let (identity, recipient) = encryption_key(offsite.path());
+    let backup = source.path("backup");
+    let created = source.ok(&[
+        "backup",
+        "--schema",
+        "21",
+        "--recipient",
+        &recipient,
+        "--output",
+        &backup,
+    ]);
+    assert_eq!(created["backup_created"], true);
+
+    // in place
+    let next = source.path("next.json");
+    let migrated = source.ok(&["migrate", "--from-schema", "21", "--output-config", &next]);
+    assert_eq!(migrated["migrated"], true);
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(moments(&source.dsn), Some((1, 0)));
+    let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
+        .arg("--config")
+        .arg(&next)
+        .env("ALT_OPERATOR_DATABASE", &source.dsn)
+        .arg("health")
+        .output()
+        .unwrap();
+    assert!(
+        upgraded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&upgraded.stderr)
+    );
+    assert_eq!(
+        observed(&source, &next, &admin, &key),
+        (before, receipt.clone())
+    );
+
+    // from the backup taken before the upgrade
+    let target = OperatorDb::new();
+    let mut config: alt_json::Value =
+        alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
+    config["instance"]["runtime_generation"] = alt_json::json!(10);
+    std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
+    let restored = target.ok(&[
+        "restore",
+        "--input",
+        &backup,
+        "--identity",
+        &identity,
+        "--trusted-receipt-key",
+        &trust,
+        "--maximum-bytes",
+        "100000000",
+        "--source-fenced",
+    ]);
+    assert_eq!(restored["restored"], true);
+    assert_eq!(
+        restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
+        p.commit.to_string()
+    );
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    // the restore revoked every credential of the source, at its own moment
+    assert_eq!(moments(&target.dsn).map(|(requests, _)| requests), Some(1));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
         delivered_receipt(&target, target.config.to_str().unwrap()),
@@ -358,8 +489,8 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "20", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     assert!(!refs_foreign_key(&source.dsn));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
@@ -401,7 +532,7 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
     assert!(!refs_foreign_key(&target.dsn));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
@@ -425,7 +556,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!migrated.status.success());
     assert!(
         String::from_utf8_lossy(&migrated.stderr).contains(
-            "this release upgrades from schema 18, 19 and 20 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
+            "this release upgrades from schema 18, 19, 20 and 21 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
         ),
         "{}",
         String::from_utf8_lossy(&migrated.stderr)
@@ -447,7 +578,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!created.status.success());
     assert!(
         String::from_utf8_lossy(&created.stderr)
-            .contains("this release backs up and restores schema 18, 19, 20 and 21 only"),
+            .contains("this release backs up and restores schema 18, 19, 20, 21 and 22 only"),
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );

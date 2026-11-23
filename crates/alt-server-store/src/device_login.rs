@@ -58,7 +58,7 @@ impl Store {
         let digest = token_digest(token);
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let row=tx.query_opt("UPDATE alt_credentials c SET revoked=true WHERE c.token_digest=$1 AND NOT c.revoked AND (EXISTS(SELECT 1 FROM alt_client_credentials m WHERE m.token_digest=c.token_digest) OR EXISTS(SELECT 1 FROM alt_delegations d WHERE d.token_digest=c.token_digest)) RETURNING c.actor_id", &[&digest])?;
+        let row=tx.query_opt("UPDATE alt_credentials c SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE c.token_digest=$1 AND NOT c.revoked AND (EXISTS(SELECT 1 FROM alt_client_credentials m WHERE m.token_digest=c.token_digest) OR EXISTS(SELECT 1 FROM alt_delegations d WHERE d.token_digest=c.token_digest)) RETURNING c.actor_id", &[&digest])?;
         if let Some(row) = row {
             crate::browser::audit(&mut tx, &row.get::<_, String>(0), "client.revoke", &digest)?;
         }

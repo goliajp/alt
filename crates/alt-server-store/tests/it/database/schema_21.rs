@@ -6,6 +6,7 @@ const FOREIGN_KEY: &str = "alt_refs_repository_fkey";
 
 /// makes the database the schema 20 one it stands in for; harmless on one that is
 pub(super) fn as_schema_20(f: &Fixture) {
+    super::schema_22::as_schema_21(f);
     f.client()
         .batch_execute(&format!(
             "DELETE FROM alt_schema WHERE version=21;
@@ -82,7 +83,7 @@ fn an_older_instance_loses_the_foreign_key_and_keeps_its_refs() {
         assert!(f.store.check_connection().is_err());
 
         super::schema_20::migrate(&mut f, from).unwrap();
-        assert_eq!(version(&f), (21, 2), "from schema {from}");
+        assert_eq!(version(&f), (22, 2), "from schema {from}");
         assert_eq!(foreign_keys(&f), Vec::<String>::new());
         assert_eq!(refs(&f), before);
         f.store.check_connection().unwrap();

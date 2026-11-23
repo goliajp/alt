@@ -422,7 +422,7 @@ impl Store {
         require_admin(&mut tx, &self.spec, admin)?;
         let actor: String = credential_row(&mut tx, &self.spec, admin)?.get("actor_id");
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1",
             &[&token_digest(token)],
         )?;
         crate::browser::audit_details(

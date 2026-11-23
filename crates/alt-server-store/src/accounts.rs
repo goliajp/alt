@@ -66,7 +66,7 @@ impl Store {
         )?;
         if !repeated {
             tx.execute(
-                "UPDATE alt_credentials SET revoked=true WHERE actor_id=$1 AND token_digest<>$2",
+                "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE actor_id=$1 AND token_digest<>$2",
                 &[&actor, &digest],
             )?;
             audit_details(
@@ -154,7 +154,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1",
             &[&id],
         )?;
         audit_details(
@@ -194,7 +194,7 @@ impl Store {
         let owner: String = credential_row(&mut tx, &self.spec, admin)?.get("actor_id");
         if tx.execute("UPDATE alt_web_accounts SET password_hash=$2,generation=generation+1 WHERE actor_id=$1", &[&actor,&hash])?!=1{return Err(Error::Precondition("unknown local account"));}
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE actor_id=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE actor_id=$1",
             &[&actor],
         )?;
         audit_details(
@@ -230,7 +230,7 @@ impl Store {
         instance(&mut tx, &self.spec, &self.signing_key)?;
         if tx.execute("UPDATE alt_web_accounts SET password_hash=$2,disabled=false,generation=generation+1 WHERE actor_id=$1 AND administrator", &[&actor,&hash])?!=1{return Err(Error::Precondition("existing local administrator required"));}
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE actor_id=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE actor_id=$1",
             &[&actor],
         )?;
         audit_details(

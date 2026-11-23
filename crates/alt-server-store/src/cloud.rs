@@ -335,7 +335,7 @@ impl Store {
                 &[&claims.account_id.as_str()],
             )?;
             tx.execute(
-                "UPDATE alt_credentials SET revoked=true WHERE actor_id=$1",
+                "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE actor_id=$1",
                 &[&claims.account_id.as_str()],
             )?;
         }
@@ -460,7 +460,7 @@ impl Store {
         if self.spec.deployment_mode != DeploymentMode::Cloud {
             return Err(Error::Unauthorized);
         }
-        tx.execute("UPDATE alt_credentials SET revoked=true WHERE token_digest=$1 AND identity_source='cloud'", &[&credential_digest])?;
+        tx.execute("UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1 AND identity_source='cloud'", &[&credential_digest])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
     /// Invalidate known-refused service authority without losing its monotonic

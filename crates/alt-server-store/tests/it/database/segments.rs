@@ -253,7 +253,7 @@ fn segment_registration_failures_leave_locations_and_accounting_unchanged() {
             }
             "revoked" => {
                 f.client()
-                    .execute("UPDATE alt_credentials SET revoked=true", &[])
+                    .execute("UPDATE alt_credentials SET revoked=true,revoked_at=0", &[])
                     .unwrap();
             }
             "quota" => {

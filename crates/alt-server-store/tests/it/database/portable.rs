@@ -309,7 +309,7 @@ fn export_requires_current_content_authority_and_never_completes_missing_history
         .prepare_portable_export(&f.credential, scope, "good", portable_limits())
         .unwrap();
     f.client()
-        .execute("UPDATE alt_credentials SET revoked=true", &[])
+        .execute("UPDATE alt_credentials SET revoked=true,revoked_at=0", &[])
         .unwrap();
     assert!(
         f.store
@@ -317,7 +317,10 @@ fn export_requires_current_content_authority_and_never_completes_missing_history
             .is_err()
     );
     f.client()
-        .execute("UPDATE alt_credentials SET revoked=false", &[])
+        .execute(
+            "UPDATE alt_credentials SET revoked=false,revoked_at=NULL",
+            &[],
+        )
         .unwrap();
     // Git objects are read from the pack segments; the task record is not one
     let record = payload

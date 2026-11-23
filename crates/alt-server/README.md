@@ -325,10 +325,10 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18, 19 and 20, and backs up and restores schema
-18, 19, 20 and the current schema 21. A backup of an instance that is not yet
-upgraded requires its schema explicitly, `--schema 18`, `--schema 19` or
-`--schema 20`. Stop
+This release upgrades from schema 18, 19, 20 and 21, and backs up and restores
+schema 18 to 21 and the current schema 22. A backup of an instance that is not yet
+upgraded requires its schema explicitly, `--schema 18`, `--schema 19`,
+`--schema 20` or `--schema 21`. Stop
 the old service, save and verify its backup, then upgrade, naming the schema the
 instance is at:
 
@@ -378,6 +378,27 @@ repository. The database checked it once for every ref a push created, while a
 ref is only ever written under the lock of its repository's row and no
 repository is removed. No row changes.
 
+From schema 21 the transaction gives every request the moment it ended and every
+revoked credential the moment it was revoked, and adds three indexes. A
+committed request is given the moment in its receipt; a rejected or expired
+request and a revoked credential are given the moment of the upgrade, so nothing
+is removed sooner than it would have been. Every finished request row and every
+revoked credential row is written once; allow time in proportion to the number
+of requests.
+
+## Retention
+
+The running server removes what is over, a bounded number of rows at a time:
+
+| What | Kept |
+|---|---|
+| A request that was committed, rejected or expired | 30 days from that moment. For as long, a repeated request ID is answered with what became of the request; after that the same ID is a new request. A request whose publication carried task records is their history and is not removed, and neither is one a stored content segment still names |
+| A request left unfinished by an epoch before a restore | until 30 days after its time to upload ran out. While it is there, asking for it answers that its outcome is unknown |
+| Browser sessions, device and platform credentials, delegations, review approvals | 30 days after the session or the credential under it expired or was revoked |
+| Device codes and platform logins | until they expire |
+| A credential | 90 days after it expired, or 90 days after it was revoked once it has also expired, and only when no row above still names it. The row of a revoked credential that has not expired is what keeps its token refused, so it stays |
+| Instance and repository audit records | not removed |
+
 For disaster recovery, externally stop and fence the old service first. Create
 a dedicated empty PostgreSQL database and a new config pointing to **absent**
 byte-volume and receipt-key paths. Preserve the source installation/workspace
@@ -426,7 +447,7 @@ normal credentials or create the first browser account, then revoke the short
 recovery token. Existing browser administrators can instead use the password
 recovery command above.
 
-Operator acceptance includes a schema 18, a schema 19 and a schema 20 instance, each
+Operator acceptance includes a schema 18, a schema 19, a schema 20 and a schema 21 instance, each
 upgraded in place and restored from the backup taken before its upgrade,
 encrypted backup verification and isolated restoration. Hosts without Docker can select an
 isolated native PostgreSQL installation with
