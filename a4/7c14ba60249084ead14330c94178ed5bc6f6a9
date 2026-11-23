@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: count the attempts for a login at each address, so that guessing at it keeps its owner out nowhere else
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/tests/it/database/browser.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
