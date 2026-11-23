@@ -6,7 +6,7 @@ use alt_args::{ErrorKind, Matches, Parser};
 use alt_json::{Value, json};
 
 use crate::{cli::Cli, daemon::Response};
-pub use kinds::{PATHS_FAILED, PATHS_IGNORED, PATHS_UNKNOWN};
+pub use kinds::{PATHS_FAILED, PATHS_IGNORED, PATHS_UNKNOWN, REFUSED_AS_SAID};
 
 mod bindings;
 mod kinds;
@@ -93,7 +93,7 @@ impl Failure {
                 .map(|id| format!("request: {id}\n"))
                 .unwrap_or_default();
             match self.kind {
-                PATHS_IGNORED | PATHS_UNKNOWN | PATHS_FAILED => request,
+                PATHS_IGNORED | PATHS_UNKNOWN | PATHS_FAILED | REFUSED_AS_SAID => request,
                 _ => format!("fatal: {}\n{request}", self.message),
             }
             .into_bytes()

@@ -165,6 +165,7 @@ mod step_undo;
 mod stopped_trees;
 mod store_refresh;
 mod submission_records;
+mod switch_carry;
 mod switch_kinds;
 mod sync_order;
 #[cfg(target_os = "linux")]

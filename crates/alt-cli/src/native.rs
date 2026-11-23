@@ -63,10 +63,12 @@ mod remotes;
 pub use recovery::{export_git, prepared_blobs};
 mod requests;
 mod revert;
+mod said;
 mod sequence_editor;
 mod settings;
 mod signature;
 mod status;
+mod switch;
 mod task;
 mod unconfirmed;
 pub use unconfirmed::{AfterDiscards, Discards, tell_left_out};
@@ -1470,98 +1472,6 @@ impl<'a> NativeRepo<'a> {
         )?;
         writeln!(out, "created annotated tag '{name}' ({tag_oid}) → {target}")?;
         Ok(())
-    }
-
-    /// `alt switch <name>`: point HEAD at branch `name` and materialize its
-    /// tree into the working tree. `-c` creates the branch first. Switching
-    /// to an existing branch requires a clean tree (no staged/unstaged
-    /// changes) so no uncommitted work is lost.
-    pub fn switch(
-        &mut self,
-        name: &str,
-        create: bool,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
-        self.ensure_no_merge_in_progress("switch")?;
-        let full = format!("refs/heads/{name}");
-        let current = self.head_branch()?;
-
-        // emit either the human line or `{schema_version, branch, result}`
-        let report = |out: &mut dyn Write, result: &'static str, human: &str| -> Res<()> {
-            if json {
-                use crate::json::Json;
-                crate::json::emit(
-                    out,
-                    vec![("branch", Json::str(name)), ("result", Json::str(result))],
-                )?;
-            } else {
-                writeln!(out, "{human}")?;
-            }
-            Ok(())
-        };
-
-        if create {
-            check_branch_name(name)?;
-            if self.store.refs.get(&full).is_some() {
-                return Err(crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    format!("a branch named '{name}' already exists"),
-                )
-                .into());
-            }
-            // a new branch starts at the current commit (if any); the working
-            // tree and index carry over unchanged, so no checkout is needed.
-            if let Some(commit) = self.store.refs.resolve(&current)? {
-                // non-terminal tx of switch-with-create: the move_head below
-                // is the one that carries this command's idempotency key.
-                self.commit_refs(
-                    "branch",
-                    &[RefChange {
-                        name: full.clone(),
-                        old: None,
-                        new: Some(RefTarget::Oid(commit)),
-                    }],
-                )?;
-            }
-            self.move_head(&current, &full)?;
-            return report(
-                out,
-                "created",
-                &format!("Switched to a new branch '{name}'"),
-            );
-        }
-
-        if self.store.refs.get(&full).is_none() {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!("invalid reference: {name}"),
-            )
-            .into());
-        }
-        if full == current {
-            return report(out, "already_on", &format!("Already on '{name}'"));
-        }
-        self.ensure_clean("switch")?;
-
-        let target = match self.store.refs.resolve(&full)? {
-            Some(commit) => self.commit_entries(commit)?,
-            None => Vec::new(), // unborn target: tree becomes empty
-        };
-        let old = index_entries(&self.index()?);
-        let head_ref = self.head_ref.clone();
-        let head_old = self.store.refs.get(&head_ref).cloned();
-        self.commit_refs_checkout(
-            "switch",
-            &[RefChange {
-                name: head_ref,
-                old: head_old,
-                new: Some(RefTarget::Symbolic(full.clone())),
-            }],
-            &old,
-            &target,
-        )?;
-        report(out, "switched", &format!("Switched to branch '{name}'"))
     }
 
     /// Materializes `target` into the working tree, removing tracked files in

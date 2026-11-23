@@ -76,8 +76,8 @@ fn branch_switch_materializes_tree_and_exports_clean() {
     ok(alt(root, &["switch", "feat"]));
     assert!(root.join("b.txt").exists(), "feat file restored on switch");
 
-    // protection: a staged change must block a switch
-    std::fs::write(root.join("c.txt"), "dirty\n").unwrap();
+    // protection: a staged change the switch would write over blocks it
+    std::fs::write(root.join("b.txt"), "dirty\n").unwrap();
     ok(alt(root, &["add", "."]));
     let blocked = alt(root, &["switch", "main"]);
     assert!(!blocked.status.success(), "dirty switch must fail");
@@ -87,7 +87,7 @@ fn branch_switch_materializes_tree_and_exports_clean() {
         String::from_utf8_lossy(&blocked.stderr)
     );
 
-    // -c creates and switches in one step, carrying the staged c.txt over
+    // -c creates and switches in one step, carrying the staged b.txt over
     let created = ok(alt(root, &["switch", "-c", "feat2"]));
     assert!(
         created.contains("Switched to a new branch 'feat2'"),
