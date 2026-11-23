@@ -300,19 +300,33 @@ fn the_time_of_a_push_among_ten_thousand_refs() {
     drop(refs);
     let store = served(origin.path());
     store.borrow_mut().refresh().unwrap();
+    let sink = store.borrow().sink().unwrap();
 
+    // `ALT_PUSH_ROUNDS=<on top|beside>:<n>` for that many pushes of one
+    // kind, each synced as a server syncs it: the work of one is what a
+    // run takes more than a run of none
+    let asked = std::env::var("ALT_PUSH_ROUNDS").ok();
+    let asked = asked.as_deref().and_then(|asked| asked.split_once(':'));
+    let rounds = |what: &str| match asked {
+        Some((kind, rounds)) if what.starts_with(kind) => rounds.parse().unwrap(),
+        Some(_) => 0,
+        None => 3,
+    };
     for (what, parent) in [
         ("on top of a ref", top.to_string()),
         ("beside the refs", seed),
     ] {
-        for round in 0..3 {
+        for round in 0..rounds(what) {
             let new = commit_object(&parent, 1_700_000_001, "", &format!("{what} {round}"));
             let name = format!("refs/heads/{}-{round}", what.replace(' ', "-"));
             let updates = [creation(&name, &new.0.to_string())];
             let pack = pack_of(&[new]);
             let started = std::time::Instant::now();
             let landed = land(&store, &updates, Some(&pack), &|| ());
-            eprintln!("a push {what}: {:?}", started.elapsed());
+            sink.fsync_all().unwrap();
+            if asked.is_none() {
+                eprintln!("a push {what}: {:?}", started.elapsed());
+            }
             assert_eq!(landed, Landed::Moved);
         }
     }

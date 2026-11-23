@@ -1049,8 +1049,8 @@ fn read_push(
     let head = alt_wire::push::parse_push_request_head(&mut reader, HashAlgo::Sha1)
         .map_err(|e| format!("{e}"))?;
     let mut tmp = std::fs::File::create(pack).map_err(|e| format!("tempfile: {e}"))?;
+    // not synced: the file is gone when the request is over
     let n = std::io::copy(&mut reader, &mut tmp).map_err(|e| format!("stream pack: {e}"))?;
-    tmp.sync_all().map_err(|e| format!("fsync: {e}"))?;
     Ok((head, n))
 }
 

@@ -88,6 +88,7 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
     alt_git_pack::IndexLimits {
         object_bytes,
         inflated_bytes,
+        kept: false,
         ..Default::default()
     }
 }

@@ -37,6 +37,7 @@
 //! way, as for any object the store holds unreferenced.
 
 mod batch;
+mod kept;
 mod ref_tx;
 pub mod signed;
 mod taken;
@@ -46,7 +47,7 @@ pub use taken::{Recorded, Report, take_in};
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
 
-use alt_git_codec::{HashAlgo, ObjectId, RawObject};
+use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, RawObject};
 use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefTarget};
 use alt_wire::push::RefUpdate;
@@ -92,13 +93,22 @@ pub(crate) struct Objects<'a> {
 
 impl Objects<'_> {
     pub(crate) fn get(&self, oid: &ObjectId) -> Res<Option<RawObject>> {
-        if let Some(held) = self.odb.get(oid)? {
-            return Ok(Some(held));
+        // a commit read before is not taken out of the store again
+        if let Some(data) = kept::commit(oid)
+            && self.contains(oid)?
+        {
+            let (kind, data) = (ObjectKind::Commit, (*data).clone());
+            return Ok(Some(RawObject { kind, data }));
         }
-        match self.pack {
-            Some((ip, _)) => Ok(ip.read(oid)?.map(|packed| packed.to_raw())),
-            None => Ok(None),
+        let read = match (self.odb.get(oid)?, self.pack) {
+            (Some(held), _) => Some(held),
+            (None, Some((ip, _))) => ip.read(oid)?.map(|packed| packed.to_raw()),
+            (None, None) => None,
+        };
+        if let Some(commit) = read.as_ref().filter(|raw| raw.kind == ObjectKind::Commit) {
+            kept::keep(oid, &commit.data);
         }
+        Ok(read)
     }
 
     fn contains(&self, oid: &ObjectId) -> Res<bool> {
