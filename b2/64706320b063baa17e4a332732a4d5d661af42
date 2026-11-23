@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: open a repository with the cache of them let go of, and tell less of users and services
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/auth.rs
+touched: crates/alt-cli/tests/it/altd_server_untrusted.rs
