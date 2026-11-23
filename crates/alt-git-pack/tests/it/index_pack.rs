@@ -177,10 +177,55 @@ fn comb(depth: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
     (entries, objects)
 }
 
+/// The comb with its teeth the other way: the chain is by id, and the
+/// second delta of each of its objects is by offset. Which of two
+/// deltas by id has more under it is not known before both are
+/// resolved, so here the objects of the chain do have to wait.
+fn comb_by_id(depth: usize) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut entries = vec![plain_entry(&wide(0))];
+    let mut objects = vec![wide(0)];
+    for n in 1..depth {
+        entries.push(ref_entry(&blob(&wide(n - 1)), &delta(1000, 0, &wide(n))));
+        objects.push(wide(n));
+    }
+    for n in 0..depth {
+        let side = wide(depth + n);
+        let distance = entries[n..].iter().map(Vec::len).sum();
+        entries.push(ofs_entry(distance, &delta(1000, 0, &side)));
+        objects.push(side);
+    }
+    (entries, objects)
+}
+
+/// However little room the bases have, a chain whose objects each have
+/// one more delta takes one application for each delta: the object of a
+/// step is let go of when the chain goes on from it, and by then its
+/// other delta is resolved.
 #[test]
-fn bases_are_held_within_their_limit_and_made_again_when_a_delta_needs_them() {
+fn a_chain_with_a_delta_beside_each_step_is_resolved_in_work_linear_in_its_depth() {
+    for depth in [64, 128, 256] {
+        let (entries, objects) = comb(depth);
+        let dir = TempDir::new().unwrap();
+        let pack = written(&dir, &entries);
+        let all = index_pack(&pack, HashAlgo::Sha1, false).unwrap();
+        let whole = std::fs::read(&all.idx_path).unwrap();
+        assert_eq!(whole, by_git(&pack));
+        let few = index_pack_within(&pack, HashAlgo::Sha1, false, &limits(4000)).unwrap();
+        assert_eq!(std::fs::read(&few.idx_path).unwrap(), whole);
+        for work in [all.work, few.work] {
+            assert_eq!(work.hashed, 2 * depth as u64, "{work:?}");
+            assert_eq!(work.applied, 2 * depth as u64 - 1, "{work:?}");
+            // the object of a step and the one made of it
+            assert!(work.held <= 2000, "{work:?}");
+        }
+        reads_back(&pack, objects.into_iter());
+    }
+}
+
+#[test]
+fn bases_that_have_to_wait_are_held_within_their_limit_and_made_again_at_the_cost_of_the_pack() {
     const DEPTH: usize = 200;
-    let (entries, objects) = comb(DEPTH);
+    let (entries, objects) = comb_by_id(DEPTH);
     let dir = TempDir::new().unwrap();
     let pack = written(&dir, &entries);
     let all = index_pack(&pack, HashAlgo::Sha1, false).unwrap();
@@ -197,14 +242,38 @@ fn bases_are_held_within_their_limit_and_made_again_when_a_delta_needs_them() {
     // room for four bases, and for the one more that is being added
     assert!(few.work.held <= 5000, "{:?}", few.work);
     // a base that was let go of is made again from the one held below
-    // it, or from the pack: no more applications than the chain is deep
+    // it, or from the pack
     let again = few.work.applied - all.work.applied;
-    assert!(
-        again > 0 && again <= (DEPTH * DEPTH) as u64,
-        "{:?}",
-        few.work
-    );
+    assert!(again > 0, "{:?}", few.work);
     reads_back(&pack, objects.into_iter());
+
+    // what is made again is counted: with room for what the pack
+    // inflates to and for half of that again, it is refused
+    let inflated: usize = entries
+        .iter()
+        .skip(1)
+        .map(|_| delta(1000, 0, &wide(1)).len())
+        .sum();
+    let inflated = (inflated + 2 * DEPTH * 1000) as u64;
+    let exact = IndexLimits {
+        inflated_bytes: inflated,
+        ..IndexLimits::default()
+    };
+    assert!(index_pack_within(&pack, HashAlgo::Sha1, false, &exact).is_ok());
+    for (times, fits) in [(1000 * (again + 1), true), (1000 * again / 2, false)] {
+        let counted = IndexLimits {
+            inflated_bytes: inflated + times,
+            ..limits(4000)
+        };
+        let indexed = index_pack_within(&pack, HashAlgo::Sha1, false, &counted);
+        match fits {
+            true => assert!(indexed.is_ok(), "{indexed:?}"),
+            false => assert!(
+                matches!(indexed, Err(PackError::Limit("inflated bytes"))),
+                "{indexed:?}"
+            ),
+        }
+    }
 }
 
 #[test]

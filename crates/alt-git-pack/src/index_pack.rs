@@ -37,8 +37,9 @@
 //! The bases are held within [`IndexLimits::base_bytes`], git's
 //! `core.deltaBaseCacheLimit`: beyond it those nearest the plain entry
 //! are let go of and made again from the pack when another delta of
-//! theirs comes up, which costs no more delta applications than the
-//! chain is deep, and a chain is refused past [`MAX_DELTA_DEPTH`].
+//! theirs comes up. What is made again counts against
+//! [`IndexLimits::inflated_bytes`], and a chain is refused past
+//! [`MAX_DELTA_DEPTH`].
 
 mod idx;
 mod resolve;
@@ -65,7 +66,8 @@ pub struct IndexLimits {
     /// the most bytes one object of the pack may inflate to
     pub object_bytes: u64,
     /// the most bytes its entries and its objects may inflate to, all
-    /// together
+    /// together, an object counted again each time it has to be made
+    /// again
     pub inflated_bytes: u64,
     /// the bytes of delta bases held in memory while their deltas are
     /// resolved

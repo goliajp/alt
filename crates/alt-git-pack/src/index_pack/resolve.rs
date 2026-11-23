@@ -1,5 +1,18 @@
 //! The second pass: every delta resolved to its object and hashed, from
 //! its base onwards.
+//!
+//! An object is held while deltas of it are still to be resolved, and no
+//! longer: it is let go of when the last of them is taken up. The deltas
+//! of an object are taken in an order that keeps few objects waiting:
+//! those named by id first, then those named by offset, the one with the
+//! most entries under it last. Under a chain whose objects each have a
+//! further delta, the shape a history of one file has, nothing waits
+//! then but the object being worked on.
+//!
+//! What still has to wait is held within the limit of the bases, and an
+//! object let go of early is made again when it is come back to. That
+//! work is the sender's to cause: each object made again counts against
+//! what the pack may inflate to, like the objects themselves.
 
 use std::sync::Arc;
 
@@ -61,7 +74,16 @@ pub(super) fn resolve(
             Form::Ref(base) => by_id.push((*base, index as u32)),
         }
     }
-    by_offset.sort_unstable();
+    // how many entries rest on each by offset, itself included: a base
+    // lies before its deltas
+    let mut under = vec![1u32; entries.len()];
+    for (index, entry) in entries.iter().enumerate().rev() {
+        if let Form::Ofs(base) = entry.form {
+            under[base as usize] = under[base as usize].saturating_add(under[index]);
+        }
+    }
+    by_offset.sort_unstable_by_key(|(base, delta)| (*base, under[*delta as usize], *delta));
+    drop(under);
     by_id.sort_unstable_by(|a, b| (a.0.as_bytes(), a.1).cmp(&(b.0.as_bytes(), b.1)));
     let mut resolver = Resolver {
         pack,
@@ -122,6 +144,15 @@ impl Resolver<'_> {
         delta::apply_bounded(base, &self.scratch, self.limits.object_bytes)
     }
 
+    /// Counts an object made of a delta against what the pack may
+    /// inflate to.
+    fn count(&mut self, bytes: usize) -> Result<(), PackError> {
+        self.inflated = (self.inflated.checked_add(bytes as u64))
+            .filter(|total| *total <= self.limits.inflated_bytes)
+            .ok_or(PackError::Limit("inflated bytes"))?;
+        Ok(())
+    }
+
     /// Resolves every delta below the plain entry `root`.
     fn below(&mut self, root: u32, kind: ObjectKind) -> Result<(), PackError> {
         let oid = self.oids[root as usize].expect("hashed by the scan");
@@ -131,8 +162,8 @@ impl Resolver<'_> {
         self.stack.push(frame);
         self.lowest = 0;
         while let Some(top) = self.stack.last_mut() {
-            let next = (top.ofs.next().map(|at| self.by_offset[at].1))
-                .or_else(|| top.refs.next().map(|at| self.by_id[at].1));
+            let next = (top.refs.next().map(|at| self.by_id[at].1))
+                .or_else(|| top.ofs.next().map(|at| self.by_offset[at].1));
             let Some(child) = next else {
                 let done = self.stack.pop().expect("the top");
                 self.held -= done.data.map_or(0, |data| data.len());
@@ -149,9 +180,16 @@ impl Resolver<'_> {
             let base = self.base()?;
             let data = self.apply(&base, child)?;
             drop(base);
-            self.inflated = (self.inflated.checked_add(data.len() as u64))
-                .filter(|total| *total <= self.limits.inflated_bytes)
-                .ok_or(PackError::Limit("inflated bytes"))?;
+            // nothing more is made of the top frame's object: it stays
+            // as a step on the way, without its bytes
+            let top = self.stack.last_mut().expect("the top");
+            if top.ofs.is_empty()
+                && top.refs.is_empty()
+                && let Some(done) = top.data.take()
+            {
+                self.held -= done.len();
+            }
+            self.count(data.len())?;
             self.work.hashed += 1;
             let oid = ObjectId::hash_object(self.pack.algo(), kind, &data);
             self.oids[child as usize] = Some(oid);
@@ -182,6 +220,7 @@ impl Resolver<'_> {
         for at in from..=top {
             if at > 0 {
                 data = Arc::new(self.apply(&data, self.stack[at].entry)?);
+                self.count(data.len())?;
             }
             self.held += data.len();
             self.stack[at].data = Some(data.clone());
