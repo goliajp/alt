@@ -41,6 +41,15 @@ pub struct KeyedIdHasher {
     key: [u64; 2],
 }
 
+impl KeyedIdHasher {
+    /// Takes `word` in. A key of several digests is folded with the
+    /// number of the process too: folded bare, a peer could choose
+    /// pairs of digests that fold alike.
+    fn mix(&mut self, word: u64) {
+        self.state = (self.state.rotate_left(5) ^ word).wrapping_mul(self.key[1]);
+    }
+}
+
 impl Hasher for KeyedIdHasher {
     fn write(&mut self, bytes: &[u8]) {
         let word = match bytes.first_chunk::<8>() {
@@ -51,12 +60,12 @@ impl Hasher for KeyedIdHasher {
                 word
             }
         };
-        self.state = self.state.rotate_left(5) ^ u64::from_le_bytes(word);
+        self.mix(u64::from_le_bytes(word));
     }
 
     // the length of a slice and the variant of an enum, ahead of the digest
     fn write_usize(&mut self, n: usize) {
-        self.state = self.state.rotate_left(5) ^ n as u64;
+        self.mix(n as u64);
     }
 
     fn finish(&self) -> u64 {
@@ -124,6 +133,26 @@ mod tests {
         // and the control byte of the table, the top seven bits
         let tops = |hashes: Vec<u64>| slots(hashes.iter().map(|hash| hash >> 57).collect());
         assert_eq!(tops(ids.iter().map(|id| keyed.hash_one(id)).collect()), 128);
+    }
+
+    /// Pairs of ids chosen so that the two fold to the same word where
+    /// they are folded bare: keyed, each pair has a hash of its own.
+    #[test]
+    fn pairs_of_ids_chosen_to_fold_alike_are_told_apart_by_the_key() {
+        let pair = |change: u64| {
+            let (mut first, mut second) = ([0x5au8; 20], [0xa5u8; 20]);
+            first[..8].copy_from_slice(&(0x1234_5678_9abc_def0u64 ^ change).to_le_bytes());
+            second[..8]
+                .copy_from_slice(&(0x0fed_cba9_8765_4321u64 ^ change.rotate_left(5)).to_le_bytes());
+            (first, second)
+        };
+        let keyed = KeyedIdBuildHasher::default();
+        let mut hashes: Vec<u64> = (1u64..=4096)
+            .map(|n| keyed.hash_one(pair(n << 13)))
+            .collect();
+        hashes.sort_unstable();
+        hashes.dedup();
+        assert_eq!(hashes.len(), 4096);
     }
 
     #[test]
