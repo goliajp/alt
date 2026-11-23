@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep the synced boundary in the note of a reader that leaves out the frames which said it
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
