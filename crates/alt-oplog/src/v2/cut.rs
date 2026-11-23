@@ -78,7 +78,10 @@ impl Log {
         // a note that is not written costs the next command this look
         let _ = self.note_look(found.map(|found| found.at));
         if found.is_none() {
-            self.judged.set(u64::MAX);
+            // what a reader hid from this handle is still in the file,
+            // and is another boot's when the handle reads on
+            let all = self.hidden.is_none();
+            self.judged.set(if all { u64::MAX } else { self.state.end });
         }
         Ok(found)
     }
