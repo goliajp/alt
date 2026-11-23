@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the validation of a configuration out of the operator module
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/src/operator/validate.rs
