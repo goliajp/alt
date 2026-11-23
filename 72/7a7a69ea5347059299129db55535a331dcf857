@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: read a repository under one view of the database, waiting for no push to it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/read.rs
+touched: crates/alt-server-store/src/reading.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/reading.rs
