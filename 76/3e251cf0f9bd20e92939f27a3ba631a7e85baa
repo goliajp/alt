@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave nothing for the sink of a handle that holds no frame, which was told its ops were cut
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
