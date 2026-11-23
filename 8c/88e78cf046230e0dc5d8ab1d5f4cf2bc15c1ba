@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: give a sync the ops the log says name something, whichever of them the handle read: every ref transaction and the op of each workspace that last changed its index
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle/settled.rs
+touched: crates/alt-oplog/src/op.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/named.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/tests/it/v2_named.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_synced.rs
