@@ -1,6 +1,7 @@
 //! Single integration-test binary for alt-odb.
 
 mod abbrev;
+mod behind_writer;
 mod boot_runs;
 mod boot_runs_noted;
 #[cfg(target_os = "linux")]
