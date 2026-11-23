@@ -3,62 +3,74 @@
 //!
 //! A push beside the refs has every commit a ref points at read, to
 //! tell which of the commits under it the refs reach: with ten thousand
-//! refs that is ten thousand objects taken out of the store for each
-//! such push, the same ones every time. A commit is what its id says,
-//! in whichever repository: its bytes are kept by its id, for all the
-//! repositories this process serves, within [`LIMIT`].
+//! refs that is ten thousand objects taken out of the store and parsed
+//! for each such push, the same ones every time. A commit is what its
+//! id says, in whichever repository: what the walk goes by of it is
+//! kept by its id, for all the repositories this process serves, within
+//! [`LIMIT`].
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use alt_git_codec::ObjectId;
+use alt_hash::KeyedIdMap;
 
-/// The bytes of commits kept; all of them are let go of once one more
-/// would not fit.
-const LIMIT: usize = 32 << 20;
-/// A commit larger than this is not kept.
-const LARGEST: usize = 64 << 10;
+use crate::added_commits::Lineage;
+
+/// The bytes the commits kept may count for, as [`cost`] counts them;
+/// all of them are let go of once one more would not fit.
+const LIMIT: usize = 64 << 20;
 
 #[derive(Default)]
 struct Kept {
-    commits: HashMap<ObjectId, Arc<Vec<u8>>>,
+    commits: KeyedIdMap<ObjectId, Arc<Lineage>>,
     bytes: usize,
 }
 
 static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
 
+/// What a commit kept counts for: about what it takes in memory, its
+/// place in the table included.
+fn cost(commit: &Lineage) -> usize {
+    const EACH: usize = 256;
+    let parents = std::mem::size_of_val(&*commit.parents);
+    EACH + parents + commit.unreadable.as_ref().map_or(0, String::len)
+}
+
 /// The commit `oid` as it was read before.
-pub(super) fn commit(oid: &ObjectId) -> Option<Arc<Vec<u8>>> {
+pub(super) fn commit(oid: &ObjectId) -> Option<Arc<Lineage>> {
     let kept = KEPT.lock().unwrap();
     kept.as_ref()?.commits.get(oid).cloned()
 }
 
-/// Keeps `data`, which the commit `oid` was read as.
-pub(super) fn keep(oid: &ObjectId, data: &[u8]) {
-    if data.len() > LARGEST {
-        return;
-    }
+/// Keeps what the commit `oid` was read as.
+pub(super) fn keep(oid: &ObjectId, commit: &Arc<Lineage>) {
+    let cost = cost(commit);
     let mut kept = KEPT.lock().unwrap();
     let kept = kept.get_or_insert_with(Kept::default);
-    if kept.bytes + data.len() > LIMIT {
+    if kept.bytes + cost > LIMIT {
         *kept = Kept::default();
     }
-    if kept.commits.insert(*oid, Arc::new(data.to_vec())).is_none() {
-        kept.bytes += data.len();
+    if kept.commits.insert(*oid, Arc::clone(commit)).is_none() {
+        kept.bytes += cost;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+    use std::sync::Arc;
+
+    use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, RawObject};
     use alt_odb::NativeOdb;
+
+    use crate::added_commits::Lineage;
 
     use super::super::Objects;
 
     fn commit(message: &str) -> (ObjectId, Vec<u8>) {
         let tree = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tree, b"");
         let who = "t <t@e> 1700000000 +0000";
-        let data = format!("tree {tree}\nauthor {who}\ncommitter {who}\n\n{message}\n");
+        let above = format!("tree {tree}\nparent {tree}\nparent {tree}");
+        let data = format!("{above}\nauthor {who}\ncommitter {who}\n\n{message}\n");
         let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Commit, data.as_bytes());
         (oid, data.into_bytes())
     }
@@ -81,19 +93,21 @@ mod tests {
         }
         let [first, second] = odbs.each_ref().map(|odb| Objects { odb, pack: None });
 
-        // read out of the store, and then as it was kept: the same object
+        // read out of the store, and then as it was kept: the same commit
         assert!(super::commit(&here.0).is_none());
-        let read = first.get(&here.0).unwrap().unwrap();
-        assert_eq!((read.kind, &read.data), (ObjectKind::Commit, &here.1));
-        assert_eq!(*super::commit(&here.0).unwrap(), here.1);
-        let again = first.get(&here.0).unwrap().unwrap();
-        assert_eq!((again.kind, again.data), (read.kind, read.data));
+        let read = first.commit(&here.0).unwrap().unwrap();
+        let tree = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tree, b"");
+        assert_eq!((&*read.parents, read.tree), (&[tree; 2][..], Some(tree)));
+        assert_eq!((read.date, &read.unreadable), (1_700_000_000, &None));
+        assert!(Arc::ptr_eq(&super::commit(&here.0).unwrap(), &read));
+        assert!(Arc::ptr_eq(&first.commit(&here.0).unwrap().unwrap(), &read));
+        assert_eq!(first.get(&here.0).unwrap().unwrap().data, here.1);
 
-        // kept from one store, it is no object of a store that lacks it
-        assert!(second.get(&here.0).unwrap().is_none());
-        second.get(&elsewhere.0).unwrap().unwrap();
+        // kept from one store, it is no commit of a store that lacks it
+        assert!(second.commit(&here.0).unwrap().is_none());
+        second.commit(&elsewhere.0).unwrap().unwrap();
         assert!(super::commit(&elsewhere.0).is_some());
-        assert!(first.get(&elsewhere.0).unwrap().is_none());
+        assert!(first.commit(&elsewhere.0).unwrap().is_none());
 
         // and once that store has it, it is read there as anywhere
         odbs[1].put(here.0, ObjectKind::Commit, &here.1).unwrap();
@@ -102,6 +116,22 @@ mod tests {
             odb: &odbs[1],
             pack: None,
         };
-        assert_eq!(second.get(&here.0).unwrap().unwrap().data, here.1);
+        assert!(Arc::ptr_eq(
+            &second.commit(&here.0).unwrap().unwrap(),
+            &read
+        ));
+    }
+
+    /// What is kept counts for more than it takes: a commit of two
+    /// parents, the table's slot for it and the allocations around it.
+    #[test]
+    fn what_a_commit_kept_counts_for_covers_what_it_takes() {
+        let (oid, data) = commit("kept: counted");
+        let kind = ObjectKind::Commit;
+        let read = Lineage::of(&oid, Some(&RawObject { kind, data })).unwrap();
+        let slot = 2 * std::mem::size_of::<(ObjectId, Arc<Lineage>)>();
+        let held = std::mem::size_of::<Lineage>() + std::mem::size_of_val(&*read.parents);
+        // two words of counts in an `Arc`, two of bookkeeping for each allocation
+        assert!(super::cost(&read) >= slot + held + 6 * std::mem::size_of::<usize>());
     }
 }

@@ -289,7 +289,7 @@ fn looked_at(
     served: &[ObjectId],
     new: ObjectId,
 ) -> (usize, usize, usize) {
-    use alt_cli::added_commits::{Source, added};
+    use alt_cli::added_commits::{Lineage, Source, added};
     type Res<T> = Result<T, Box<dyn std::error::Error>>;
     let (reads, asked) = (Cell::new(0), Cell::new(0));
     let get = |oid: &ObjectId| -> Res<Option<alt_git_codec::RawObject>> {
@@ -306,13 +306,13 @@ fn looked_at(
         asked.set(asked.get() + 1);
         Ok(in_had(oid) || pack.idx().lookup(oid).is_some())
     };
-    let had = |oid: &ObjectId| -> Res<bool> { Ok(in_had(oid)) };
-    let fails = |_: &ObjectId| -> Res<Option<String>> { Ok(None) };
+    let commit = |oid: &ObjectId| -> Res<_> { Ok(Lineage::of(oid, get(oid)?.as_ref())) };
     let source = Source {
         get: &get,
+        commit: &commit,
         holds: &holds,
-        had: &had,
-        fails: &fails,
+        had: &|oid| Ok(in_had(oid)),
+        fails: &|_| Ok(None),
     };
     let added = added(&source, served, &[new]).unwrap().unwrap();
     (reads.get(), asked.get(), added.len())

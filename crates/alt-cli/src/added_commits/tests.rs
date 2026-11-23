@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use alt_git_codec::HashAlgo;
 
@@ -81,12 +81,7 @@ impl Held {
             self.reads.set(self.reads.get() + 1);
             self.objects.get(oid)
         };
-        let get = |oid: &ObjectId| -> Res<Option<RawObject>> {
-            Ok(read(oid).map(|raw| RawObject {
-                kind: raw.kind,
-                data: raw.data.clone(),
-            }))
-        };
+        let get = |oid: &ObjectId| -> Res<Option<RawObject>> { Ok(read(oid).cloned()) };
         let holds = |oid: &ObjectId| -> Res<bool> { Ok(self.objects.contains_key(oid)) };
         let had = |oid: &ObjectId| -> Res<bool> {
             Ok(self.objects.contains_key(oid) && !self.packed.contains(oid))
@@ -95,13 +90,15 @@ impl Held {
             read(oid);
             Ok((!passing.contains(oid)).then(|| format!("{oid} fails")))
         };
+        let commit = |oid: &ObjectId| -> Res<_> { Ok(Lineage::of(oid, read(oid))) };
         let source = Source {
             get: &get,
+            commit: &commit,
             holds: &holds,
             had: &had,
             fails: &fails,
         };
-        super::added(&source, served, new).unwrap()
+        (super::added(&source, served, new).unwrap()).map(|added| added.into_iter().collect())
     }
 
     pub(super) fn refusal(

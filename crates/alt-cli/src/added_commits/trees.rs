@@ -19,10 +19,11 @@
 //! against one of them at a time, and the trees in the place of a
 //! directory are found when that directory is come to.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use alt_git_codec::{ObjectId, ObjectKind, Tree, TreeEntry};
+use alt_hash::{KeyedIdMap, KeyedIdSet};
 
 use super::{Res, Source};
 
@@ -36,12 +37,12 @@ type Places = HashMap<Vec<u8>, (bool, ObjectId)>;
 
 pub(super) struct Trees {
     /// trees found whole
-    whole: HashSet<ObjectId>,
+    whole: KeyedIdSet<ObjectId>,
     /// the trees and blobs found outside what the refs reach
-    pub(super) added: HashSet<ObjectId>,
+    pub(super) added: KeyedIdSet<ObjectId>,
     /// the trees history the refs reach has, as they were read: `None`
     /// for one that does not read
-    bases: HashMap<ObjectId, Option<Rc<Places>>>,
+    bases: KeyedIdMap<ObjectId, Option<Rc<Places>>>,
     /// what `bases` counts for, the most it ever did, and its limit
     kept: usize,
     most: usize,
@@ -80,9 +81,9 @@ impl Trees {
     /// With trees of the history served kept up to `limit` bytes.
     pub(super) fn holding(limit: usize) -> Self {
         Trees {
-            whole: HashSet::new(),
-            added: HashSet::new(),
-            bases: HashMap::new(),
+            whole: KeyedIdSet::default(),
+            added: KeyedIdSet::default(),
+            bases: KeyedIdMap::default(),
             kept: 0,
             most: 0,
             limit,
@@ -140,7 +141,7 @@ impl Trees {
         source: &Source<'_>,
         files: &[&TreeEntry],
         bases: &[ObjectId],
-        blobs: &mut HashSet<ObjectId>,
+        blobs: &mut KeyedIdSet<ObjectId>,
     ) -> Res<bool> {
         let mut theirs = vec![false; files.len()];
         for base in bases.iter().filter(|_| !files.is_empty()) {
@@ -173,8 +174,8 @@ impl Trees {
     ) -> Res<bool> {
         // kept apart until the whole tree is found: one that lacks an
         // object vouches for none of its parts
-        let mut trees = HashSet::new();
-        let mut blobs = HashSet::new();
+        let mut trees = KeyedIdSet::default();
+        let mut blobs = KeyedIdSet::default();
         let mut stack: Vec<Waiting> = vec![(root, Rc::new(bases.to_vec()), None)];
         while let Some((oid, above, name)) = stack.pop() {
             if self.whole.contains(&oid) || trees.contains(&oid) {
@@ -241,16 +242,13 @@ mod tests {
         let reads = std::cell::Cell::new(0);
         let get = |oid: &ObjectId| -> Res<Option<RawObject>> {
             reads.set(reads.get() + 1);
-            let raw = held.get(oid);
-            Ok(raw.map(|raw| RawObject {
-                kind: raw.kind,
-                data: raw.data.clone(),
-            }))
+            Ok(held.get(oid).cloned())
         };
         let holds = |_: &ObjectId| -> Res<bool> { Ok(true) };
         let fails = |_: &ObjectId| -> Res<Option<String>> { Ok(None) };
         let source = Source {
             get: &get,
+            commit: &|_| Ok(None),
             holds: &holds,
             had: &holds,
             fails: &fails,
@@ -273,7 +271,7 @@ mod tests {
             assert_eq!(trees.added.len(), 51, "within {limit}");
             // looked at again: where trees were let go of, the first of
             // them to come up again takes the place of those still kept
-            trees.whole = HashSet::new();
+            trees.whole = KeyedIdSet::default();
             assert!(trees.whole(&source, root, &bases).unwrap());
             let again = if fit == 100 { 0 } else { 100 };
             assert_eq!(reads.get(), 101 + 1 + again, "within {limit}");

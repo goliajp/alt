@@ -1,8 +1,7 @@
 //! The objects of a push in the odb, until its refs moved.
 
-use std::collections::HashSet;
-
 use alt_git_codec::ObjectId;
+use alt_hash::KeyedIdSet;
 use alt_odb::{NativeOdb, OdbCheckpoint};
 
 use super::{PreparedPack, Res};
@@ -35,7 +34,7 @@ impl<'a> Batch<'a> {
     pub(super) fn write(
         &mut self,
         pack: Option<&PreparedPack>,
-        added: &HashSet<ObjectId>,
+        added: &KeyedIdSet<ObjectId>,
     ) -> Res<()> {
         let Some((ip, order)) = pack else {
             return Ok(());

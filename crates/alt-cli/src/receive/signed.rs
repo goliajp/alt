@@ -16,9 +16,8 @@
 //! [`crate::added_commits`]), where the commits it adds from outside the
 //! pack are checked as well.
 
-use std::collections::HashMap;
-
 use alt_git_codec::{ObjectId, ObjectKind};
+use alt_hash::KeyedIdMap;
 
 use super::{Objects, PreparedPack};
 use crate::native::{Principal, Store};
@@ -29,7 +28,7 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 /// it fails the policy, when it does.
 pub struct Checked {
     trust: Vec<(String, alt_sign::PublicKey)>,
-    pack: HashMap<ObjectId, Option<String>>,
+    pack: KeyedIdMap<ObjectId, Option<String>>,
 }
 
 /// Why the commit `oid` does not satisfy the policy, when it does not.
@@ -82,7 +81,7 @@ pub fn check_pack(
     trust: Vec<(String, alt_sign::PublicKey)>,
     prepared: Option<&PreparedPack>,
 ) -> Res<Checked> {
-    let mut pack = HashMap::new();
+    let mut pack = KeyedIdMap::default();
     if let Some((ip, order)) = prepared {
         for &(offset, i) in order {
             let obj = ip.read_at(offset)?;

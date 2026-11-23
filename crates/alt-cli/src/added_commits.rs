@@ -46,9 +46,10 @@ mod tests;
 #[cfg(test)]
 mod tree_tests;
 
-use std::collections::HashSet;
+use std::sync::Arc;
 
-use alt_git_codec::{ObjectId, ObjectKind, RawObject, Tag};
+use alt_git_codec::{Commit, ObjectId, ObjectKind, RawObject, Tag};
+use alt_hash::KeyedIdSet;
 use walk::{ADDED, Walk};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -56,10 +57,54 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 /// What a push is refused with when it adds an object that is not held.
 pub const MISSING: &str = "missing necessary objects";
 
+/// What the walk goes by of a commit: all of it follows from the bytes
+/// of the commit, and so from its id.
+pub struct Lineage {
+    pub parents: Box<[ObjectId]>,
+    pub tree: Option<ObjectId>,
+    /// the committer date, 0 where there is none
+    pub date: i64,
+    /// set for a commit that does not read as one
+    pub unreadable: Option<String>,
+}
+
+impl Lineage {
+    /// Of `oid` as it was read, when that is a commit.
+    pub fn of(oid: &ObjectId, read: Option<&RawObject>) -> Option<Arc<Self>> {
+        let commit = read.filter(|raw| raw.kind == ObjectKind::Commit);
+        commit.map(|raw| Arc::new(Self::read(oid, &raw.data)))
+    }
+
+    /// Of the commit `oid`, which has the bytes `data`.
+    fn read(oid: &ObjectId, data: &[u8]) -> Self {
+        let parsed = Commit::parse(data).map_err(|e| e.to_string());
+        let parsed = parsed.and_then(|commit| {
+            let tree = commit.tree().ok_or("no tree")?;
+            let parents = commit.parents().collect();
+            Ok((parents, Some(tree), commit.committer_date().unwrap_or(0)))
+        });
+        let (parents, tree, date, unreadable) = match parsed {
+            Ok((parents, tree, date)) => (parents, tree, date, None),
+            Err(e) => {
+                let unreadable = format!("commit {oid} unreadable: {e}");
+                (Box::default(), None, 0, Some(unreadable))
+            }
+        };
+        Lineage {
+            parents,
+            tree,
+            date,
+            unreadable,
+        }
+    }
+}
+
 /// Where the walk reads from.
 pub struct Source<'a> {
     /// an object, `None` when it is not held
     pub get: &'a dyn Fn(&ObjectId) -> Res<Option<RawObject>>,
+    /// a commit, `None` for what is not held or is no commit
+    pub commit: &'a dyn Fn(&ObjectId) -> Res<Option<Arc<Lineage>>>,
     /// whether an object is held
     pub holds: &'a dyn Fn(&ObjectId) -> Res<bool>,
     /// whether an object was held before the push
@@ -90,9 +135,9 @@ pub fn added(
     source: &Source<'_>,
     served: &[ObjectId],
     new: &[ObjectId],
-) -> Res<Result<HashSet<ObjectId>, String>> {
+) -> Res<Result<KeyedIdSet<ObjectId>, String>> {
     let mut walk = Walk::new(source, served);
-    let mut objects = HashSet::new();
+    let mut objects = KeyedIdSet::default();
     for &tip in new {
         let mut oid = tip;
         while !walk.tip(&oid) && !walk.mark(oid, ADDED)? {

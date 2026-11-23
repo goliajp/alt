@@ -45,14 +45,16 @@ mod taken;
 pub use taken::{Recorded, Report, take_in};
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use alt_git_codec::{HashAlgo, ObjectId, ObjectKind, RawObject};
+use alt_git_codec::{HashAlgo, ObjectId, RawObject};
+use alt_hash::KeyedIdSet;
 use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefTarget};
 use alt_wire::push::RefUpdate;
 
-use crate::added_commits::{self, Source};
+use crate::added_commits::{self, Lineage, Source};
 use crate::native::{Principal, Store};
 use batch::Batch;
 use signed::Checked;
@@ -93,22 +95,25 @@ pub(crate) struct Objects<'a> {
 
 impl Objects<'_> {
     pub(crate) fn get(&self, oid: &ObjectId) -> Res<Option<RawObject>> {
-        // a commit read before is not taken out of the store again
-        if let Some(data) = kept::commit(oid)
-            && self.contains(oid)?
-        {
-            let (kind, data) = (ObjectKind::Commit, (*data).clone());
-            return Ok(Some(RawObject { kind, data }));
-        }
-        let read = match (self.odb.get(oid)?, self.pack) {
+        Ok(match (self.odb.get(oid)?, self.pack) {
             (Some(held), _) => Some(held),
             (None, Some((ip, _))) => ip.read(oid)?.map(|packed| packed.to_raw()),
             (None, None) => None,
-        };
-        if let Some(commit) = read.as_ref().filter(|raw| raw.kind == ObjectKind::Commit) {
-            kept::keep(oid, &commit.data);
+        })
+    }
+
+    /// The commit `oid`; `None` for what is not held here, or is no
+    /// commit.
+    pub(crate) fn commit(&self, oid: &ObjectId) -> Res<Option<Arc<Lineage>>> {
+        // one read before is not taken out of the store again: that it
+        // is held here is not known from another repository having it
+        if let Some(kept) = kept::commit(oid)
+            && self.contains(oid)?
+        {
+            return Ok(Some(kept));
         }
-        Ok(read)
+        let commit = Lineage::of(oid, self.get(oid)?.as_ref());
+        Ok(commit.inspect(|commit| kept::keep(oid, commit)))
     }
 
     fn contains(&self, oid: &ObjectId) -> Res<bool> {
@@ -165,13 +170,14 @@ fn vet(
     odb: &NativeOdb,
     push: &Push<'_>,
     served: &[ObjectId],
-) -> Res<Result<HashSet<ObjectId>, String>> {
+) -> Res<Result<KeyedIdSet<ObjectId>, String>> {
     let objects = Objects {
         odb,
         pack: push.pack,
     };
     let new: Vec<ObjectId> = push.updates.iter().filter_map(|u| u.new).collect();
     let get = |oid: &ObjectId| objects.get(oid);
+    let commit = |oid: &ObjectId| objects.commit(oid);
     let holds = |oid: &ObjectId| objects.contains(oid);
     let had = |oid: &ObjectId| -> Res<bool> { Ok(odb.contains(oid)?) };
     let fails = |oid: &ObjectId| match push.checked {
@@ -180,6 +186,7 @@ fn vet(
     };
     let source = Source {
         get: &get,
+        commit: &commit,
         holds: &holds,
         had: &had,
         fails: &fails,
@@ -224,7 +231,9 @@ fn attempt(
         if changes.iter().any(|c| now.get(&c.name) != c.old.as_ref()) {
             return Ok(());
         }
-        let pointed: HashSet<&ObjectId> = now.values().filter_map(oid).collect();
+        let mut pointed: KeyedIdSet<&ObjectId> = KeyedIdSet::default();
+        pointed.reserve(now.len());
+        pointed.extend(now.values().filter_map(oid));
         if added.is_some() && served.iter().all(|oid| pointed.contains(oid)) {
             return Ok(());
         }
