@@ -180,6 +180,8 @@ pub enum Command {
     Rm(worktree_args::Rm),
     /// Move or rename a file or a directory
     Mv(worktree_args::Mv),
+    /// Put away what is not committed, and bring it back
+    Stash(worktree_args::Stash),
     /// Show a commit: header + per-file unified diff against its first parent
     Show {
         /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.

@@ -14,6 +14,7 @@ pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         Command::Reset(args) => reset(repo, args, out)?,
         Command::Rm(args) => rm(repo, args, out)?,
         Command::Mv(args) => mv(repo, args, out)?,
+        Command::Stash(args) => return super::stash::run(repo, args, out),
         _ => return Err("not a native command".into()),
     }
     Ok(0)

@@ -45,10 +45,6 @@ fn not_a_revision(rev: &str) -> Box<dyn std::error::Error> {
     said::refused(&said, 128)
 }
 
-fn fresh(entries: &[WorkEntry]) -> Vec<IndexEntry> {
-    entries.iter().map(|entry| stage_entry(entry, 0)).collect()
-}
-
 impl NativeRepo<'_> {
     /// `alt reset [--soft | --mixed | --hard] [<commit>]`, as git has it.
     pub fn reset(
@@ -88,7 +84,7 @@ impl NativeRepo<'_> {
         };
         let index = self.index()?;
         let mut edit = TreeEdit {
-            index: fresh(&entries),
+            index: tree_edit::fresh(&entries),
             files: Vec::new(),
         };
         if mode == ResetMode::Hard {
@@ -122,7 +118,7 @@ impl NativeRepo<'_> {
     /// The paths whose file a hard reset to `entries` has to write or
     /// remove: those `index` has otherwise, and those whose file is not as
     /// the index has it.
-    fn paths_off(&self, index: &Index, entries: &[WorkEntry]) -> Res<BTreeSet<BString>> {
+    pub(super) fn paths_off(&self, index: &Index, entries: &[WorkEntry]) -> Res<BTreeSet<BString>> {
         let mut off = BTreeSet::new();
         let staged = index_entries(index);
         for change in alt_worktree::changes(&staged, entries) {

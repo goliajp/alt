@@ -14,6 +14,7 @@ mod native;
 mod platform;
 mod prepare;
 mod sequence;
+mod stash;
 mod task;
 mod task_remote;
 mod vcs;

@@ -52,6 +52,11 @@ impl TreeEdit {
     }
 }
 
+/// The index entries a checkout of `entries` leaves.
+pub(super) fn fresh(entries: &[WorkEntry]) -> Vec<IndexEntry> {
+    entries.iter().map(|entry| stage_entry(entry, 0)).collect()
+}
+
 /// The paths at which two lists of index entries differ.
 fn differing(before: &[IndexEntry], after: &[IndexEntry]) -> BTreeSet<BString> {
     let key = |e: &IndexEntry| (e.path.clone(), e.stage());

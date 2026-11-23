@@ -75,6 +75,8 @@ mod said;
 mod sequence_editor;
 mod settings;
 mod signature;
+mod stash;
+pub use stash::Stashing;
 mod status;
 mod switch;
 mod task;
@@ -868,6 +870,8 @@ impl<'a> NativeRepo<'a> {
         }
         for c in changes {
             let force = match (&c.old, &c.new) {
+                // what is stashed is no history a branch could lose
+                _ if c.name.starts_with("refs/stash") => false,
                 // deletion is the canonical force op, but of the ref a rebase works on
                 (Some(_), None) => c.name != self.scratch_ref(),
                 // creation cannot rewrite history

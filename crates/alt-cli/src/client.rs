@@ -83,6 +83,7 @@ mod imp {
                 | Cmd::Reset(_)
                 | Cmd::Rm(_)
                 | Cmd::Mv(_)
+                | Cmd::Stash(_)
                 | Cmd::Merge { .. }
                 | Cmd::Flow { .. }
                 | Cmd::Undo { .. }

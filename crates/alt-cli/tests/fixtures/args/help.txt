@@ -26,6 +26,7 @@ Commands:
   reset        Move the current branch to a commit, or reset index entries
   rm           Remove files from the index and the working tree
   mv           Move or rename a file or a directory
+  stash        Put away what is not committed, and bring it back
   show         Show a commit: header + per-file unified diff against its first parent
   blame        Line-by-line origin attribution for one file (`git blame`-style)
   meta         Show or change the metadata recorded with a commit (kept in git notes under refs/notes/alt/meta; the commit itself never changes)
@@ -1529,6 +1530,23 @@ Options:
   -k                           Pass over a source that cannot be moved
   -n, --dry-run                Say what would be renamed and rename nothing
   -v, --verbose                Say each rename
+      --json                   Emit a structured JSON result instead of the human lines
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
+### alt stash
+Put away what is not committed, and bring it back
+
+Usage: alt stash [OPTIONS] [WORDS]...
+
+Arguments:
+  [WORDS]...  What to do: push (the default), list, apply, pop, drop or clear; then the entry it is done to, as `stash@{1}` or `1`, the latest where none is named
+
+Options:
+  -m, --message <MESSAGE>      With push: the message of the entry
+  -u, --include-untracked      With push: put the untracked files away as well
+      --index                  With apply and pop: bring back as staged what was staged
+  -q, --quiet                  Do not say what was saved, applied or dropped
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository

@@ -178,3 +178,34 @@ pub struct Mv {
     #[arg(long)]
     pub json: bool,
 }
+
+#[derive(alt_args::Args)]
+pub struct Stash {
+    /// What to do: push (the default), list, apply, pop, drop or clear;
+    /// then the entry it is done to, as `stash@{1}` or `1`, the latest
+    /// where none is named
+    #[arg(hint = none)]
+    pub words: Vec<String>,
+    /// With push: the message of the entry
+    #[arg(short = 'm', long, hint = none)]
+    pub message: Option<String>,
+    /// With push: put the untracked files away as well
+    #[arg(short = 'u', long = "include-untracked")]
+    pub include_untracked: bool,
+    /// With apply and pop: bring back as staged what was staged
+    #[arg(long)]
+    pub index: bool,
+    /// Do not say what was saved, applied or dropped
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+    /// Emit a structured JSON result instead of the human lines
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl Stash {
+    /// Whether the command only reads the stack.
+    pub fn reads(&self) -> bool {
+        self.words.first().is_some_and(|verb| verb == "list")
+    }
+}

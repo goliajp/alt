@@ -111,6 +111,18 @@ impl NativeRepo<'_> {
         theirs: &[WorkEntry],
         their_label: &str,
     ) -> Res<Vec<Resolved>> {
+        self.merge_trees_named(base, ours, theirs, ("HEAD", their_label))
+    }
+
+    /// [`merge_trees`](Self::merge_trees) with what a conflict calls each
+    /// side: ours, then theirs.
+    pub(super) fn merge_trees_named(
+        &mut self,
+        base: &[WorkEntry],
+        ours: &[WorkEntry],
+        theirs: &[WorkEntry],
+        labels: (&str, &str),
+    ) -> Res<Vec<Resolved>> {
         use std::collections::{BTreeSet, HashMap};
         let map = |es: &[WorkEntry]| -> HashMap<BString, WorkEntry> {
             es.iter().map(|e| (e.path.clone(), e.clone())).collect()
@@ -128,7 +140,7 @@ impl NativeRepo<'_> {
             let bo = bm.get(&path).cloned();
             let ao = om.get(&path).cloned();
             let to = tm.get(&path).cloned();
-            out.push(self.resolve_path(path, bo, ao, to, their_label)?);
+            out.push(self.resolve_path(path, bo, ao, to, labels)?);
         }
         Ok(out)
     }
@@ -140,7 +152,7 @@ impl NativeRepo<'_> {
         bo: Option<WorkEntry>,
         ao: Option<WorkEntry>,
         to: Option<WorkEntry>,
-        their_label: &str,
+        labels: (&str, &str),
     ) -> Res<Resolved> {
         let same = |x: &Option<WorkEntry>, y: &Option<WorkEntry>| match (x, y) {
             (None, None) => true,
@@ -176,8 +188,8 @@ impl NativeRepo<'_> {
                     return Ok(make_conflict(path, bo, ao, to, ours_bytes, mode));
                 };
                 let labels = alt_merge::Labels {
-                    ours: "HEAD",
-                    theirs: their_label,
+                    ours: labels.0,
+                    theirs: labels.1,
                 };
                 let m = alt_merge::merge(&base_bytes, &ours_bytes, &theirs_bytes, &labels);
                 if m.is_clean() {

@@ -15,6 +15,20 @@ fn several_records(cmd: &Command) -> bool {
     }
 }
 
+/// Whether `cmd` may begin an operation, go on with one or end one: what
+/// it does is then kept track of as a step.
+fn is_step(cmd: &Command) -> bool {
+    match cmd {
+        Command::Commit { validate, .. } => !validate,
+        Command::Merge { .. }
+        | Command::CherryPick { .. }
+        | Command::Revert { .. }
+        | Command::Rebase { .. }
+        | Command::Reset(_) => true,
+        _ => false,
+    }
+}
+
 /// The state file of the operation `cmd` gives up, and what it says once
 /// that is given up.
 fn gives_up(cmd: &Command) -> Option<(&'static str, &'static str)> {
@@ -78,17 +92,7 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
         }
         repo.begin_workspace_write()?;
         repo.forget_stale_cherry_pick()?;
-        let validate = matches!(cmd, Commit { validate: true, .. });
-        if matches!(
-            cmd,
-            Merge { .. }
-                | CherryPick { .. }
-                | Revert { .. }
-                | Rebase { .. }
-                | Commit { .. }
-                | Command::Reset(_)
-        ) && !validate
-        {
+        if is_step(cmd) {
             repo.begin_step(several_records(cmd))?;
         }
     }

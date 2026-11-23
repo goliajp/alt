@@ -77,7 +77,7 @@ impl NativeRepo<'_> {
 
     /// Stores the file at `path` as it is cleaned, and returns the entry
     /// the index gets for it.
-    fn stored(
+    pub(in crate::native) fn stored(
         &mut self,
         path: &BString,
         mode: u32,

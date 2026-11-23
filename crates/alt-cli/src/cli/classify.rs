@@ -28,6 +28,7 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Reset(_)
             | Command::Rm(_)
             | Command::Mv(_)
+            | Command::Stash(_)
             | Command::Diff { .. }
             | Command::Merge { .. }
             | Command::Flow { .. }
@@ -113,6 +114,9 @@ pub fn mutates_command(cmd: &Command) -> bool {
 
 /// Whether a native command writes: all of them do but the pure reads.
 fn native_mutates(cmd: &Command) -> bool {
+    if let Command::Stash(args) = cmd {
+        return !args.reads();
+    }
     !matches!(
         cmd,
         Command::Request { .. }

@@ -275,6 +275,7 @@ impl Execution {
                         | Command::CherryPick { .. }
                         | Command::Rebase { .. }
                         | Command::Revert { .. }
+                        | Command::Stash(_)
                 ),
             },
         )
