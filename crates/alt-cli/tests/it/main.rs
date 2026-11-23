@@ -23,6 +23,7 @@ mod altd_server_recorded;
 mod altd_server_refused_objects;
 mod altd_server_signed_commits;
 mod altd_server_slow_peers;
+mod altd_server_thin;
 mod altd_server_trees;
 mod altd_server_unsynced_objects;
 mod altd_server_untrusted;

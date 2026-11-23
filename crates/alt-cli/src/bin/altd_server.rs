@@ -1035,7 +1035,14 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    let pack = (pack_bytes_streamed != 0).then(|| (pack_tmp_path.as_path(), pack_limits()));
+    // the objects a thin pack is made of deltas of
+    let bases = |oid: &ObjectId| {
+        let read = repo.read_object(oid);
+        let read = read.map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(read.map(|raw| (raw.kind, raw.data)))
+    };
+    let whole = (pack_tmp_path.as_path(), pack_limits(), &bases as _);
+    let pack = (pack_bytes_streamed != 0).then_some(whole);
     // nothing is appended behind what a failed sync left in doubt
     let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
     let (unpack_result, moved) = match sig_block.or(stopped) {

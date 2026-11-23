@@ -71,12 +71,15 @@ pub const ATTEMPTS: usize = 4;
 pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
 
 /// Indexes the pack on disk at `path`, which may hold what `limits`
-/// allows. Nothing of the store is needed.
+/// allows. A push is sent thin, its deltas made of objects the server
+/// has: those are read from `bases` and the pack is made whole with
+/// them. Nothing else of the store is needed.
 pub fn prepare_pack(
     path: &std::path::Path,
     limits: &alt_git_pack::IndexLimits,
+    bases: alt_git_pack::Bases<'_>,
 ) -> Res<PreparedPack> {
-    let indexed = alt_git_pack::index_pack_within(path, HashAlgo::Sha1, true, limits)?;
+    let indexed = alt_git_pack::index_pack_thin(path, HashAlgo::Sha1, true, limits, Some(bases))?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
     let mut order: Vec<(u64, u32)> = (0..idx.len())

@@ -22,19 +22,23 @@ pub trait Recorded<T> {
 }
 
 /// Takes in the push of `updates` by `principal` (and how its signature
-/// went) with the pack at `pack`, when it sent one, and what that pack
-/// may hold. The pack is indexed and the signatures of its commits are
-/// checked before the store is taken in hand; `recorded` is called with
-/// it still in hand.
+/// went) with the pack at `pack`, when it sent one, what that pack may
+/// hold and where the bases it leaves out are read. The pack is indexed
+/// and the signatures of its commits are checked before the store is
+/// taken in hand; `recorded` is called with it still in hand.
 pub fn take_in<T>(
     store: &Held<Store>,
-    pack: Option<(&std::path::Path, alt_git_pack::IndexLimits)>,
+    pack: Option<(
+        &std::path::Path,
+        alt_git_pack::IndexLimits,
+        alt_git_pack::Bases<'_>,
+    )>,
     updates: &[RefUpdate],
     (principal, sig_label): &(Principal, &str),
     recorded: impl Recorded<T>,
 ) -> Res<Report<T>> {
     // a pack that fails to index is reported as the unpack error
-    let prepared = match pack.map(|(path, limits)| prepare_pack(path, &limits)) {
+    let prepared = match pack.map(|(path, limits, bases)| prepare_pack(path, &limits, bases)) {
         Some(Err(e)) => {
             let unpack = Err(format!("index-pack: {e}"));
             return Ok((unpack, Err("pack unpack failed".into())));
