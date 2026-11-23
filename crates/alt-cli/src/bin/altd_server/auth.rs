@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tiny_http::Method;
+use super::http::Method;
 
 /// What `check_auth` decided about a request. `Reject` carries the
 /// short string the body gets so a human running curl sees something
@@ -124,16 +124,11 @@ fn constant_time_eq_ignore_ascii_case(a: &[u8], b: &[u8]) -> bool {
 /// at `users_path`. The file format is `<name>\t<blake3-hex-of-token>\n`
 /// per line, with `#` comment lines and blank lines tolerated; the
 /// token itself is never stored, only its BLAKE3 hash.
-pub(super) fn check_auth(req: &tiny_http::Request, users_path: &Path) -> AuthOutcome {
+pub(super) fn check_auth(req: &super::http::Request, users_path: &Path) -> AuthOutcome {
     let Some(header_value) = req
         .headers()
         .iter()
-        .find(|h| {
-            h.field
-                .as_str()
-                .as_str()
-                .eq_ignore_ascii_case("authorization")
-        })
+        .find(|h| h.field.equiv("authorization"))
         .map(|h| h.value.as_str().to_owned())
     else {
         return AuthOutcome::Reject("missing Authorization header".into());

@@ -34,7 +34,7 @@ pub(super) fn max_body_bytes() -> u64 {
 /// magic `1f 8b 08 …` and bails with "length prefix is not valid
 /// hex" — which the stress harness deterministically hit at scale.
 pub(super) fn read_body_capped(
-    req: &mut tiny_http::Request,
+    req: &mut super::http::Request,
     body: &mut Vec<u8>,
     max: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -98,5 +98,18 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
         inflated_bytes,
         kept: false,
         ..Default::default()
+    }
+}
+
+/// The status a request is refused with where its body could not be read
+/// within its cap: the peer was too slow, ended early, or sent too much.
+pub(super) fn refusal(error: &(dyn std::error::Error + 'static)) -> u16 {
+    match error
+        .downcast_ref::<std::io::Error>()
+        .map(std::io::Error::kind)
+    {
+        Some(std::io::ErrorKind::TimedOut) => 408,
+        Some(std::io::ErrorKind::UnexpectedEof) => 400,
+        _ => 413,
     }
 }

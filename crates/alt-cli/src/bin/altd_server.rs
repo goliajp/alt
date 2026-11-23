@@ -28,6 +28,8 @@
 mod auth;
 #[path = "altd_server/fetch.rs"]
 mod fetch;
+#[path = "altd_server/http/mod.rs"]
+mod http;
 #[path = "altd_server/limits.rs"]
 mod limits;
 #[path = "altd_server/readers.rs"]
@@ -47,9 +49,9 @@ use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::CommandStatus;
 use auth::{AclRule, AuthOutcome, acl_allows, action_from_request, check_auth};
+use http::{Header, Method, Response, Server, StatusCode};
 use limits::{max_body_bytes, max_command_bytes, pack_limits, read_body_capped};
 use readers::RepoHandle;
-use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
 const UPLOAD_PACK_RESULT: &str = "application/x-git-upload-pack-result";
@@ -65,10 +67,9 @@ struct LogCtx {
     bytes_in: u64,
     /// response body byte count when the encoder knows the
     /// length up front (the common path — `Response::from_data`,
-    /// `from_string`, and the pack/sideband encoders all hand
-    /// tiny_http a finished `Vec<u8>`). `None` when the response is
-    /// chunked / streamed without a Content-Length, which we render
-    /// as JSON `null` in the access log.
+    /// `from_string`, and the pack/sideband encoders all hand over a
+    /// finished `Vec<u8>`). `None` is rendered as JSON `null` in the
+    /// access log.
     bytes_out: Option<u64>,
     /// total fsync count from the process-wide
     /// `WriteCoordinator.group.fsync_count()` snapshot at response
@@ -150,7 +151,7 @@ fn emit_access_log(req_id: &str, method: &Method, url: &str, log: &LogCtx, durat
 /// then hands the request off to `respond`. Replaces every bare
 /// `req.respond(resp)?` site so access logs always see the real status.
 fn respond_logged<R: std::io::Read>(
-    req: tiny_http::Request,
+    req: http::Request,
     resp: Response<R>,
     log: &mut LogCtx,
 ) -> std::io::Result<()> {
@@ -200,11 +201,8 @@ fn main() {
         (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
-    // parallel request dispatch via a worker pool. tiny_http
-    // is already thread-safe (Server: Send + Sync); previously the outer
-    // `for req in incoming_requests()` deserialized everything onto the
-    // main thread. With N workers each calling `server.recv()` in a
-    // loop, concurrent clients no longer queue behind a slow push.
+    // N workers each call `server.recv()` in a loop, so that concurrent
+    // clients do not queue behind a slow push
     let workers: usize = std::env::var("ALT_SERVER_WORKERS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -245,16 +243,13 @@ fn main() {
     }
 
     // Poll the shutdown flag on the main thread. Once SIGTERM/SIGINT
-    // fires, unblock all worker `recv()` calls (tiny_http: pending
-    // recv → Err, in-flight responses keep going) and join. The poll
-    // is cheap (100 ms) and only the main thread runs it, so the
-    // worker pool stays untouched.
+    // fires, unblock all worker `recv()` calls (pending recv → Err,
+    // in-flight responses keep going) and join. The poll is cheap
+    // (100 ms) and only the main thread runs it.
     loop {
         if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
             eprintln!("altd-server: shutdown signal received, unblocking workers");
-            // tiny_http: `unblock()` frees only ONE blocked recv() per
-            // call (https://docs.rs/tiny_http/0.12.0/tiny_http/struct.Server.html#method.unblock),
-            // so call it once per worker to drain the pool.
+            // `unblock()` frees one blocked recv() per call
             for _ in 0..workers {
                 server.unblock();
             }
@@ -317,7 +312,7 @@ fn install_signal_handlers() {
 /// the main loop so each worker thread runs the same path with no
 /// shared mutable state across workers (everything per-request is
 /// stack-local).
-fn serve_one(mode: &ServeMode, req: tiny_http::Request) {
+fn serve_one(mode: &ServeMode, req: http::Request) {
     let url = req.url().to_owned();
     let method = req.method().clone();
     let req_id = next_request_id();
@@ -592,7 +587,7 @@ fn dispatch(
     mode: &ServeMode,
     method: Method,
     url: &str,
-    req: tiny_http::Request,
+    req: http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // optional Basic auth in multi-repo mode. When the server
@@ -759,12 +754,12 @@ fn build_options_response(endpoint_allow: Option<&'static str>) -> Response<Curs
 /// only the args section differs — sniff the first frame to route.
 fn handle_upload_pack(
     repo: &Repository,
-    mut req: tiny_http::Request,
+    mut req: http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     if let Err(e) = read_body_capped(&mut req, &mut body, max_command_bytes()) {
-        let r = Response::from_string(format!("{e}")).with_status_code(StatusCode(413));
+        let r = Response::from_string(format!("{e}")).with_status_code(limits::refusal(&*e));
         respond_logged(req, r, log)?;
         return Ok(());
     }
@@ -837,7 +832,7 @@ fn handle_info_refs(
     repo: &Repository,
     writer: Option<&WriteCoordinator>,
     query: &str,
-    req: tiny_http::Request,
+    req: http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let service = parse_query(query, "service")
@@ -926,7 +921,7 @@ fn handle_info_refs(
 /// a body over the cap by the count. The reader's borrow of `req` ends
 /// here, before the response is sent.
 fn read_push(
-    req: &mut tiny_http::Request,
+    req: &mut http::Request,
     max: u64,
     pack: &std::path::Path,
 ) -> Result<(alt_wire::push::PushHead, u64), String> {
@@ -989,7 +984,7 @@ fn handle_receive_pack(
     repo: &Repository,
     writer: &WriteCoordinator,
     auth_user: Option<&str>,
-    mut req: tiny_http::Request,
+    mut req: http::Request,
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = &writer.store;
