@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: docs
+summary: say what an error of a ref transaction tells of the log, and pin it
+author-type: human
+author: doracawl
+touched: crates/alt-refs/src/commit.rs
+touched: crates/alt-refs/src/policy.rs
+touched: crates/alt-refs/src/record.rs
+touched: crates/alt-refs/tests/it/recorded.rs
