@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: name the log of a driven sequence after its seed, and count a log grown back after a cut died by the run it happened in
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
