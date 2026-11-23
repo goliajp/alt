@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: hold what is noted of where the log ends in a file to the generation it was said of, and forget a cut once it is made
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_notes.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
