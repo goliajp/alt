@@ -115,7 +115,7 @@ pub fn mutates_command(cmd: &Command) -> bool {
     if !is_native(cmd) {
         return matches!(
             cmd,
-            Command::Init { .. }
+            Command::Init(_)
                 | Command::Clone { .. }
                 | Command::Import { .. }
                 | Command::Intake { .. }

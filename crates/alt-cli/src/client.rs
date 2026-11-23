@@ -89,6 +89,7 @@ mod imp {
                 | Cmd::Undo { .. }
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
+                | Cmd::Reflog(_)
                 | Cmd::Complete(_)
                 | Cmd::Prompt(_)
         )
@@ -108,6 +109,7 @@ mod imp {
                 | Cmd::OpLog { .. }
                 | Cmd::CatFile(_)
                 | Cmd::RevParse { .. }
+                | Cmd::Reflog(_)
                 | Cmd::Complete(_)
                 | Cmd::Prompt(_)
                 | Cmd::Branch(crate::branch_args::Branch {

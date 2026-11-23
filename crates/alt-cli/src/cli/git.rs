@@ -32,6 +32,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
     let at_head = |spec: &str| at.at_head(spec);
     match cmd {
         Command::RevParse(args) => args.run(out, repo, at)?,
+        Command::Reflog(args) => args.run(out, repo, at)?,
         Command::CatFile(args) => {
             let oid = resolve(repo, &at_head(&args.object))?;
             let obj = repo
@@ -123,7 +124,7 @@ pub fn run_on_store<W: Write>(
     out: &mut W,
 ) -> Res<u8> {
     match &cli.command {
-        Command::Init { .. } => Err("the daemon does not serve 'init'".into()),
+        Command::Init(_) => Err("the daemon does not serve 'init'".into()),
         Command::Fsck(args) => crate::fsck::run(store, args, (cli, cwd, id), out),
         c if is_native(c) => {
             let (_alt_dir, coord) = native::resolve_workspace(cwd, cli.workspace.as_deref())?;

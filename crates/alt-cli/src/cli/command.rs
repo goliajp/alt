@@ -63,6 +63,8 @@ pub enum Command {
     RevParse(crate::rev_parse::RevParse),
     /// Show commit logs
     Log(log_cmd::LogArgs),
+    /// Show the log of a ref: the commits it was at, the latest first
+    Reflog(crate::reflog::Reflog),
     /// Verify and independently import a supported Git source for tasks
     Intake {
         #[arg(hint = dir)]
@@ -92,11 +94,7 @@ pub enum Command {
         target: std::path::PathBuf,
     },
     /// Create an empty native .alt repository
-    Init {
-        /// Directory to create the repo in (default: current directory)
-        #[arg(hint = dir)]
-        dir: Option<std::path::PathBuf>,
-    },
+    Init(crate::branch_args::Init),
     /// Stage file contents into the index
     Add {
         #[command(flatten)]

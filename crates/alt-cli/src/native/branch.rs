@@ -217,3 +217,11 @@ impl NativeRepo<'_> {
         Ok(())
     }
 }
+
+impl NativeRepo<'_> {
+    /// The branch this workspace was on before the one it is on, by its
+    /// short name; `None` where it was on no other.
+    pub fn branch_left(&self) -> Res<Option<String>> {
+        Ok(self.store.git_view()?.branch_before(&self.head_ref, 0)?)
+    }
+}

@@ -177,7 +177,7 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
     let mut out = Vec::new();
     let result = (|| -> Result<u8, Box<dyn std::error::Error>> {
         match &execution.parsed.cli.command {
-            Command::Init { dir } => native::init(dir.clone(), &mut out)?,
+            Command::Init(args) => native::init(args.dir.clone(), &mut out)?,
             Command::Clone { url, dir, json } => native::clone(
                 url,
                 dir.as_deref(),

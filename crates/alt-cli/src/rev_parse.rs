@@ -119,6 +119,9 @@ fn full_name(repo: &Repository, at: &Place, spec: &str) -> Res<Option<String>> {
     {
         return Ok(repo.upstream_of(named)?);
     }
+    if mapped.contains("@{-") {
+        return Ok(repo.full_name(&mapped)?);
+    }
     if let Some(branch) = repo.branch_of(&mapped)? {
         return Ok(Some(format!("refs/heads/{branch}")));
     }

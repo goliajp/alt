@@ -21,7 +21,15 @@ pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
                 return Err(fatal("only one reference expected"));
             }
             let create = args.create.then_some(Create { start });
-            repo.switch_command(&args.name, create, args.json, out)?
+            let left = match args.name == "-" && create.is_none() {
+                true => Some(
+                    repo.branch_left()?
+                        .ok_or_else(|| invalid_reference("@{-1}"))?,
+                ),
+                false => None,
+            };
+            let name = left.as_deref().unwrap_or(&args.name);
+            repo.switch_command(name, create, args.json, out)?
         }
         Command::Restore(args) => restore(repo, args, out)?,
         Command::Checkout(args) => checkout(repo, args, out)?,
@@ -152,6 +160,10 @@ fn checkout<W: Write>(
         return checkout_new(repo, args, out);
     }
     if let ([name], None, true) = (&names[..], side, args.paths.is_empty()) {
+        // `-` is the branch left last; with none it is a path, as in git
+        if let Some(left) = repo.branch_left()?.filter(|_| name == "-") {
+            return repo.switch(&left, None, args.json, out);
+        }
         if repo.store_refs_get(&format!("refs/heads/{name}")).is_some() {
             return repo.switch(name, None, args.json, out);
         }

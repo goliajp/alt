@@ -12,6 +12,7 @@ Commands:
   cat-file     Provide contents or details of repository objects
   rev-parse    Pick out and massage parameters
   log          Show commit logs
+  reflog       Show the log of a ref: the commits it was at, the latest first
   intake       Verify and independently import a supported Git source for tasks
   import       Import this git repository into a .alt store
   export       Export this .alt store back to a git repository
@@ -1331,6 +1332,20 @@ Options:
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
+### alt reflog
+Show the log of a ref: the commits it was at, the latest first
+
+Usage: alt reflog [OPTIONS] [REF]...
+
+Arguments:
+  [REF]...  The ref whose log to show: a branch, `HEAD` where none is given. `show` may come before it, as in git
+
+Options:
+  -n <COUNT>                   Show the latest COUNT moves only
+      --json                   Emit the log as a stable JSON object
+      --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
+      --request-id <HEX>       Stable request identity for a write in an existing native repository
+  -h, --help                   Print help
 ### alt intake
 Verify and independently import a supported Git source for tasks
 
@@ -1450,7 +1465,7 @@ Switch branches, materializing the target tree into the work tree
 Usage: alt switch [OPTIONS] <NAME> [START]
 
 Arguments:
-  <NAME>   Branch to switch to
+  <NAME>   Branch to switch to; `-` for the one left last
   [START]  With -c, where the new branch starts: a branch, a tag or a commit (the current commit where none is given)
 
 Options:

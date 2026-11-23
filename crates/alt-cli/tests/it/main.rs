@@ -131,6 +131,7 @@ mod read_json;
 mod readers;
 mod rebase;
 mod recovery_checked;
+mod reflog;
 mod remote;
 mod replay_refused;
 mod request_operations;

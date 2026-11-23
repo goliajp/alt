@@ -1,4 +1,4 @@
-//! The arguments of `alt branch` and `alt switch`.
+//! The arguments of `alt init`, `alt branch` and `alt switch`.
 
 #[derive(alt_args::Args)]
 pub struct Branch {
@@ -22,7 +22,7 @@ pub struct Branch {
 
 #[derive(alt_args::Args)]
 pub struct Switch {
-    /// Branch to switch to
+    /// Branch to switch to; `-` for the one left last
     #[arg(hint = "branch")]
     pub name: String,
     /// With -c, where the new branch starts: a branch, a tag or a
@@ -35,4 +35,11 @@ pub struct Switch {
     /// Emit a structured JSON result instead of the human line
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(alt_args::Args)]
+pub struct Init {
+    /// Directory to create the repo in (default: current directory)
+    #[arg(hint = dir)]
+    pub dir: Option<std::path::PathBuf>,
 }
