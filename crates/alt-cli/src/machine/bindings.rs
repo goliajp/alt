@@ -22,6 +22,7 @@ const LATER: &[&str] = &[
     "continue_pick",
     "abort_pick",
     "abort_merge",
+    "noted",
     "no_ff",
     "ff_only",
     "oneline",

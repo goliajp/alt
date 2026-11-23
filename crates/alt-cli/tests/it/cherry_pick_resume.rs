@@ -69,11 +69,11 @@ pub(crate) fn by_another_author() -> Trees {
     trees
 }
 
-/// Stops a pick of the last commit of `side` in each tree. git is asked
-/// for the line naming the commit picked, which alt always writes.
+/// Stops a pick of the last commit of `side` in each tree, which is to
+/// end with the line naming the commit picked.
 pub(crate) fn stop(trees: &Trees) {
     for (tree, daemon) in [("direct", false), ("served", true)] {
-        let picked = output(&trees.at(tree), &["cherry-pick", "side"], daemon);
+        let picked = output(&trees.at(tree), &["cherry-pick", "-x", "side"], daemon);
         assert_eq!(picked.status.code(), Some(1), "{tree}");
         // where it stops it names both ways out
         let said = String::from_utf8_lossy(&picked.stdout).into_owned();

@@ -9,10 +9,16 @@ impl NativeRepo<'_> {
     /// `alt cherry-pick <rev>`: take the changes introduced by commit
     /// `<rev>` (the diff between it and its first parent) and apply
     /// them on top of the current branch, then commit with the
-    /// original author + a copy of the message tagged
+    /// original author and message; `noted` adds git's `-x` line,
     /// `(cherry picked from commit <oid>)`. Returns `Ok(true)` when the
     /// 3-way merge stops in conflict (caller maps to exit code 1).
-    pub fn cherry_pick(&mut self, rev: &str, json: bool, out: &mut impl Write) -> Res<bool> {
+    pub fn cherry_pick(
+        &mut self,
+        rev: &str,
+        noted: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("cherry-pick")?;
         let repo = self.store.git_view()?;
         let target_oid = repo
@@ -44,7 +50,7 @@ impl NativeRepo<'_> {
         self.store.odb.flush()?;
 
         if resolved.iter().any(|r| r.conflicted) {
-            self.start_cherry_pick(target_oid, head_oid)?;
+            self.start_cherry_pick(target_oid, head_oid, noted)?;
             self.write_conflicted(&resolved)?;
             let conflicts: Vec<BString> = resolved
                 .iter()
@@ -84,7 +90,7 @@ impl NativeRepo<'_> {
         // `alt merge`'s success path does.
         let old = index_entries(&self.index()?);
 
-        let (author_sig, msg) = picked_identity(&target_commit, target_oid)?;
+        let (author_sig, msg) = picked_identity(&target_commit, target_oid, noted)?;
 
         let commit = write_commit(
             &mut self.store.odb,
@@ -108,9 +114,11 @@ impl NativeRepo<'_> {
 fn picked_identity(
     source: &alt_git_codec::Commit,
     picked: ObjectId,
+    noted: bool,
 ) -> Res<(Sig<'static>, String)> {
     let author = parse_ident(source.author().map(|b| b.to_vec()).unwrap_or_default())?;
-    Ok((author, picked_message(source.message().as_slice(), picked)))
+    let message = source.message();
+    Ok((author, picked_message(message.as_slice(), picked, noted)))
 }
 
 /// Says that `source`, the commit `picked`, was applied as `commit`.
@@ -139,15 +147,31 @@ fn report_picked(
     Ok(())
 }
 
-/// The picked commit's message, ending in the trailer that names it.
-fn picked_message(original: &[u8], picked: ObjectId) -> String {
+/// The message a pick of `picked` is committed with: the one it has,
+/// and where `noted` git's line that names it after that. The line joins
+/// a last paragraph of trailers and stands apart from anything else.
+fn picked_message(original: &[u8], picked: ObjectId, noted: bool) -> String {
     let mut msg = String::from_utf8_lossy(original).into_owned();
-    if !msg.ends_with('\n') {
-        msg.push('\n');
+    if !noted {
+        if !msg.ends_with('\n') {
+            msg.push('\n');
+        }
+        return msg;
     }
-    if !msg.ends_with("\n\n") {
-        msg.push('\n');
-    }
+    msg.truncate(msg.trim_end_matches('\n').len());
+    let trailer = |line: &str| {
+        let token = line.split(": ").next().unwrap_or_default();
+        let named = line.contains(": ")
+            && !token.is_empty()
+            && token
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        named || line.starts_with("(cherry picked from commit ")
+    };
+    let trailers = msg
+        .rsplit_once("\n\n")
+        .is_some_and(|(_, last)| last.lines().all(trailer));
+    msg.push_str(if trailers { "\n" } else { "\n\n" });
     msg.push_str(&format!("(cherry picked from commit {picked})\n"));
     msg
 }

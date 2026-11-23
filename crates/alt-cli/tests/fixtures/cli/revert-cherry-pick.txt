@@ -27,7 +27,7 @@ exit 0
 out| {"commit":"<id40:0>","operation_ids":["<id64:1>","<id64:2>"],"request_id":"<id32:3>","result":"applied","schema_version":1,"source":"<id40:4>"}
 $ [repo] alt show --json
 exit 0
-out| {"schema_version":1,"commits":[{"oid":"<id40:0>","tree":"<id40:5>","parents":["<id40:6>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: later\n\n(cherry picked from commit <id40:4>)\n","note_message":null}]}
+out| {"schema_version":1,"commits":[{"oid":"<id40:0>","tree":"<id40:5>","parents":["<id40:6>"],"author":"json-test <json@test> <digits> +0000","committer":"json-test <json@test> <digits> +0000","message":"feat: later\n","note_message":null}]}
 $ [repo] alt cherry-pick feat~1 --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:7>","<id64:8>","<id64:9>","<id64:10>","<id64:11>","<id64:12>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:12>","outcome":"partial","request_id":"<id32:13>","retryable":false},"schema_version":1}

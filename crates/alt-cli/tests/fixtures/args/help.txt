@@ -1831,6 +1831,7 @@ Arguments:
 Options:
       --continue               Commit the resolved cherry-pick
       --abort                  Put the index and the files back as they were before the cherry-pick
+  -x                           End the message with a line that names the commit picked
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository

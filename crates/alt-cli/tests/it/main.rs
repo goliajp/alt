@@ -37,6 +37,7 @@ mod ci_validate;
 mod clone;
 mod closed_fds;
 mod commit_batch;
+mod commit_ids;
 mod commit_loop;
 mod commit_meta;
 mod complete;

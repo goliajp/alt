@@ -1,7 +1,7 @@
 //! `alt cherry-pick <rev>`: apply one commit's changes on top of HEAD,
-//! recording a new commit with the original author + a "(cherry
-//! picked from commit …)" trailer. Conflicts stop and exit 1, same
-//! as git.
+//! recording a new commit with the original author and message, and
+//! with `-x` a "(cherry picked from commit …)" trailer. Conflicts stop
+//! and exit 1, same as git.
 
 use std::fs;
 use std::path::Path;
@@ -55,7 +55,7 @@ fn cherry_pick_non_conflicting_change_applies_on_top_of_head() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let (feature_oid, main_before) = diverged(tmp.path());
 
-    let out = ok(alt(tmp.path(), &["cherry-pick", &feature_oid]));
+    let out = ok(alt(tmp.path(), &["cherry-pick", "-x", &feature_oid]));
     assert!(out.contains("feature adds b"), "got: {out}");
 
     let head = ok(alt(tmp.path(), &["rev-parse", "HEAD"]))
@@ -75,7 +75,7 @@ fn cherry_pick_non_conflicting_change_applies_on_top_of_head() {
         "b applied from feature",
     );
 
-    // The trailer is in the message.
+    // The trailer -x asks for is in the message.
     let show = ok(alt(tmp.path(), &["show", "HEAD"]));
     assert!(
         show.contains(&format!("(cherry picked from commit {feature_oid})")),

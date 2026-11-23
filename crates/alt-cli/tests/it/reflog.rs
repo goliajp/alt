@@ -191,12 +191,12 @@ fn a_log_asked_past_its_end_and_a_branch_never_left_are_refused() {
 #[test]
 fn a_pick_is_told_as_a_pick() {
     let pair = branches();
-    std::fs::write(pair.alt.join("x"), "x\n").unwrap();
-    ok(alt(&pair.alt, &["add", "x"]));
-    ok(alt(&pair.alt, &["commit", "-m", "x"]));
-    ok(alt(&pair.alt, &["cherry-pick", &id(&pair, "side")]));
-    let log = ok(alt(&pair.alt, &["reflog", "-n", "1"]));
-    assert!(log.ends_with(" HEAD@{0}: cherry-pick: side one\n"), "{log}");
+    pair.write("x", "x\n");
+    pair.commit_all_at("x", T + 3);
+    pair.both(&["cherry-pick", &id(&pair, "side")]);
+    let log = pair.same(&["reflog", "-n", "2"]);
+    assert!(log.contains(" HEAD@{0}: cherry-pick: side one\n"), "{log}");
+    pair.same(&["reflog", "main"]);
 }
 
 #[test]

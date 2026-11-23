@@ -12,6 +12,7 @@ impl NativeRepo<'_> {
         let (picked, head) = self
             .stopped_cherry_pick()?
             .ok_or("cherry-pick --continue: no cherry-pick in progress")?;
+        let noted = self.pick_noted()?;
         let committer = self.committer()?;
         if self.index()?.entries.iter().any(|e| e.stage() > 0) {
             return Err(
@@ -33,7 +34,7 @@ impl NativeRepo<'_> {
             .get(&picked)?
             .ok_or("commit missing from store")?;
         let source = alt_git_codec::Commit::parse(&source.data)?;
-        let (author, message) = picked_identity(&source, picked)?;
+        let (author, message) = picked_identity(&source, picked, noted)?;
         let branch = self.head_branch()?;
         self.clear_cherry_pick()?;
         let commit = self.record_commit(
@@ -67,7 +68,7 @@ impl NativeRepo<'_> {
         let source = self.store.odb.get(&picked)?;
         let source = source.ok_or("commit missing from store")?;
         let source = alt_git_codec::Commit::parse(&source.data)?;
-        Ok(Some(picked_identity(&source, picked)?.0))
+        Ok(Some(picked_identity(&source, picked, false)?.0))
     }
 
     /// `alt cherry-pick --abort`: the index and the files as they were

@@ -15,6 +15,9 @@ pub struct CherryPick {
     /// Put the index and the files back as they were before the cherry-pick
     #[arg(long = "abort", conflicts_with = "rev")]
     pub abort_pick: bool,
+    /// End the message with a line that names the commit picked
+    #[arg(short = 'x', conflicts_with_all = ["continue_pick", "abort_pick"])]
+    pub noted: bool,
     /// Emit a structured JSON result instead of human lines.
     #[arg(long)]
     pub json: bool,

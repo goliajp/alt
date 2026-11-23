@@ -8,6 +8,9 @@
 //! head <oid>
 //! ```
 //!
+//! A third line, `noted`, is there where the commit is to name the one
+//! picked, as `-x` asks.
+//!
 //! The commit that concludes the pick removes it, and so does
 //! `alt cherry-pick --abort`. An alt from before the
 //! file existed commits without removing it, so it only counts while HEAD
@@ -23,11 +26,26 @@ impl NativeRepo<'_> {
 
     /// Records that picking `picked` onto `head` stopped, with the
     /// conflict the pick is about to write.
-    pub(in crate::native) fn start_cherry_pick(&self, picked: ObjectId, head: ObjectId) -> Res<()> {
+    pub(in crate::native) fn start_cherry_pick(
+        &self,
+        picked: ObjectId,
+        head: ObjectId,
+        noted: bool,
+    ) -> Res<()> {
+        let noted = if noted { "noted\n" } else { "" };
         self.plan_state(
             "CHERRY_PICK_HEAD",
-            Some(format!("picked {picked}\nhead {head}\n")),
+            Some(format!("picked {picked}\nhead {head}\n{noted}")),
         )
+    }
+
+    /// Whether the pick that stopped here is to name the commit picked.
+    pub(super) fn pick_noted(&self) -> Res<bool> {
+        match std::fs::read_to_string(self.cherry_pick_path()) {
+            Ok(text) => Ok(text.lines().nth(2) == Some("noted")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// The commit being picked and the commit HEAD was at when a

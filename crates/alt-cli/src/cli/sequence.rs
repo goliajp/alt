@@ -37,5 +37,5 @@ pub(super) fn cherry_pick<W: Write>(
         return Ok(0);
     }
     let rev = args.rev.as_deref().unwrap_or_default();
-    Ok(u8::from(repo.cherry_pick(rev, args.json, out)?))
+    Ok(u8::from(repo.cherry_pick(rev, args.noted, args.json, out)?))
 }
