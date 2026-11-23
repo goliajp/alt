@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: tell of a pg_dump older than the test server with the backup that failed for it
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator.rs
