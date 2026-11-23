@@ -2,31 +2,73 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use super::*;
 
-/// A server whose peers are given `grace`, with one worker that answers
-/// each request with its method, its target and its body.
-fn echo(grace: Duration) -> std::net::SocketAddr {
-    let server = Server::listen("127.0.0.1:0", grace, 4).unwrap();
+mod workers;
+
+/// the bytes on the wire a body may have for the one worker
+const BODY: u64 = 1 << 20;
+
+/// What the one worker does with the requests of some targets.
+#[derive(Default)]
+struct Told {
+    /// `/hold` is not answered before this is sent to or dropped
+    held: Option<mpsc::Receiver<()>>,
+}
+
+/// A server whose peers are given `limits`, with one worker. It answers
+/// a request with its method, its target and its body; one for `/refuse`
+/// without reading its body, one for `/large` with 64 MiB.
+fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
+    let server = Server::listen("127.0.0.1:0", limits, 4).unwrap();
     let address = server.server_addr();
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
+            match request.url() {
+                "/refuse" => {
+                    request.respond(Response::from_string("no").with_status_code(401));
+                    continue;
+                }
+                "/large" => {
+                    request.respond(Response::from_data(vec![0u8; 64 << 20]));
+                    continue;
+                }
+                "/hold" => drop(told.held.as_ref().map(mpsc::Receiver::recv)),
+                _ => {}
+            }
             let mut body = Vec::new();
-            let answer = match request.as_reader().read_to_end(&mut body) {
+            let answer = match request.body(BODY).read_to_end(&mut body) {
                 Ok(_) => {
                     let said = format!("{:?} {} ", request.method(), request.url());
                     Response::from_data([said.as_bytes(), &body].concat())
                 }
                 Err(error) => {
-                    Response::from_string(format!("{:?}", error.kind())).with_status_code(408)
+                    let status = match error.kind() {
+                        std::io::ErrorKind::FileTooLarge => 413,
+                        _ => 408,
+                    };
+                    Response::from_string(format!("{:?}", error.kind())).with_status_code(status)
                 }
             };
-            let _ = request.respond(answer);
+            request.respond(answer);
         }
     });
     address
+}
+
+fn within(grace: Duration) -> Limits {
+    Limits {
+        grace,
+        per_mib: Duration::from_secs(1),
+        linger: LINGER.min(grace),
+    }
+}
+
+fn echo(grace: Duration) -> std::net::SocketAddr {
+    told(within(grace), Told::default())
 }
 
 /// The status and the body of the next response on `reader`.
@@ -119,25 +161,31 @@ fn a_head_that_is_no_request_is_refused_and_ends_the_connection() {
 }
 
 const SHORT: Duration = Duration::from_millis(300);
+/// longer than a test waits for anything
+const LONG: Duration = Duration::from_secs(3600);
 
-/// How long the one worker takes to answer a request made now.
-fn answered(address: std::net::SocketAddr) -> Duration {
-    let began = Instant::now();
+/// Has the one worker answer a request made now.
+fn answered(address: std::net::SocketAddr) {
     let (mut stream, mut reader) = connected(address);
     stream.write_all(b"GET /now HTTP/1.1\r\n\r\n").unwrap();
     assert_eq!(response(&mut reader).1, b"Get /now ");
-    began.elapsed()
 }
 
 #[test]
 fn a_connection_that_sends_no_head_keeps_no_worker_and_is_let_go_of() {
+    // however long they are given, the worker is free while the two wait
+    let address = echo(LONG);
+    let silent = connected(address);
+    let (mut partial, _reader) = connected(address);
+    partial.write_all(b"GET /never HTTP/1.1\r\nHost").unwrap();
+    answered(address);
+    drop(silent);
+
     let address = echo(SHORT);
     let began = Instant::now();
     let (mut silent, mut silent_reader) = connected(address);
     let (mut partial, mut partial_reader) = connected(address);
     partial.write_all(b"GET /never HTTP/1.1\r\nHost").unwrap();
-    // the worker is free while the two wait
-    assert!(answered(address) < SHORT, "the worker waited for a head");
     // the one that sent nothing is ended, the one that began is told why
     assert_eq!(silent_reader.read(&mut [0]).unwrap(), 0);
     let (status, _, last) = response(&mut partial_reader);
@@ -147,34 +195,32 @@ fn a_connection_that_sends_no_head_keeps_no_worker_and_is_let_go_of() {
     let _ = silent.write_all(b"x");
 }
 
+/// A head that comes a byte at a time has the grace and no more: what
+/// came of it buys it nothing.
 #[test]
-fn a_body_that_stalls_or_trickles_keeps_the_worker_no_longer_than_its_peer_is_given() {
-    for trickle in [false, true] {
-        let address = echo(SHORT);
-        let began = Instant::now();
-        let (mut slow, mut reader) = connected(address);
-        slow.write_all(b"POST /slow HTTP/1.1\r\nContent-Length: 1000\r\n\r\n")
-            .unwrap();
-        let sender = std::thread::spawn(move || {
-            // a byte every tenth of a second would take a hundred seconds
-            while trickle && slow.write_all(b"x").is_ok() {
-                std::thread::sleep(Duration::from_millis(100));
+fn a_head_that_trickles_is_given_up_when_the_grace_is_over() {
+    let (mut slow, mut reader) = connected(echo(SHORT));
+    let sender = std::thread::spawn(move || {
+        let head = b"GET /never HTTP/1.1\r\nX: "
+            .iter()
+            .chain([b'x'; 4096].iter());
+        for byte in head {
+            if slow.write_all(&[*byte]).is_err() {
+                break;
             }
-            slow
-        });
-        let (status, body, last) = response(&mut reader);
-        assert_eq!(
-            (status.as_str(), last),
-            ("HTTP/1.1 408 Request Timeout", true)
-        );
-        assert_eq!(body, b"TimedOut");
-        let took = began.elapsed();
-        assert!(took >= SHORT && took < Duration::from_secs(10), "{took:?}");
-        // and the worker goes on to the next request
-        answered(address);
-        drop(reader);
-        drop(sender.join().unwrap());
-    }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        slow
+    });
+    let began = Instant::now();
+    let (status, _, last) = response(&mut reader);
+    assert_eq!(
+        (status.as_str(), last),
+        ("HTTP/1.1 408 Request Timeout", true)
+    );
+    // the whole of it would have taken eighty seconds
+    assert!(began.elapsed() < Duration::from_secs(40));
+    drop(sender.join().unwrap());
 }
 
 #[test]

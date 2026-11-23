@@ -1,37 +1,66 @@
 //! A connection read and written within the time its peer is given.
 //!
-//! A peer has `grace` to send or take anything at all, and from then on
-//! has to keep up an average of [`RATE`] bytes a second: what it has moved
-//! so far buys it the time to move more. One that stalls, or that moves a
-//! byte now and then, is let go of, and with it the thread that waited.
-//! The numbers are those Apache's `mod_reqtimeout` starts from.
+//! Each thing a peer does has a time of its own, counted from when the
+//! server turns to it, never from when the peer could have begun:
+//!
+//! - the head of a request has `grace`, whole;
+//! - a body has `grace` and [`Limits::per_mib`] for each MiB of it that
+//!   has come, so that one of `n` MiB is over, read or given up, within
+//!   `grace + n * per_mib` of the first read of it. Every byte on the
+//!   wire is counted against the bytes the body may have: chunk lines,
+//!   their extensions and trailers too;
+//! - a response has the same for each MiB written of it.
+//!
+//! No single read or write waits longer than `grace`. A peer that stalls
+//! or falls behind is let go of, and with it the thread that waited.
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-/// the bytes a second a peer has to average
-const RATE: u64 = 500;
+/// The times peers are given.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Limits {
+    /// for the head of a request, and for anything to begin with
+    pub(crate) grace: Duration,
+    /// for each MiB of a body or of a response
+    pub(crate) per_mib: Duration,
+    /// for what a peer still sends on a connection that is being ended
+    pub(crate) linger: Duration,
+}
+
+impl Limits {
+    /// How long a body or a response may take in all once `moved` bytes
+    /// of it have gone.
+    pub(super) fn allowed(&self, moved: u64) -> Duration {
+        let nanos = self.per_mib.as_nanos().saturating_mul(u128::from(moved)) >> 20;
+        let earned = Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX));
+        self.grace.saturating_add(earned)
+    }
+}
 
 /// How long a peer has had for what it is doing now, and what it moved.
 struct Pace {
     since: Instant,
     moved: u64,
+    /// what is moved buys no time: the head of a request
+    flat: bool,
 }
 
 impl Pace {
-    fn new() -> Self {
+    fn new(flat: bool) -> Self {
         Pace {
             since: Instant::now(),
             moved: 0,
+            flat,
         }
     }
 
     /// The longest the next read or write may wait.
-    fn wait(&self, grace: Duration) -> io::Result<Duration> {
-        let earned = grace + Duration::from_millis(self.moved.saturating_mul(1000) / RATE);
-        match earned.checked_sub(self.since.elapsed()) {
-            Some(left) if !left.is_zero() => Ok(left.min(grace)),
+    fn wait(&self, limits: &Limits) -> io::Result<Duration> {
+        let allowed = limits.allowed(if self.flat { 0 } else { self.moved });
+        match allowed.checked_sub(self.since.elapsed()) {
+            Some(left) if !left.is_zero() => Ok(left.min(limits.grace)),
             _ => Err(io::ErrorKind::TimedOut.into()),
         }
     }
@@ -50,24 +79,42 @@ pub(crate) struct Source {
     stream: TcpStream,
     held: Vec<u8>,
     at: usize,
-    grace: Duration,
+    limits: Limits,
     pace: Pace,
+    /// the bytes that may still be taken of the body being read
+    budget: u64,
 }
 
 impl Source {
-    pub(super) fn new(stream: TcpStream, grace: Duration) -> Self {
+    pub(super) fn new(stream: TcpStream, limits: Limits) -> Self {
         Source {
             stream,
             held: Vec::new(),
             at: 0,
-            grace,
-            pace: Pace::new(),
+            limits,
+            pace: Pace::new(true),
+            budget: u64::MAX,
         }
     }
 
-    /// What is read from here on is a new thing for the peer to send.
-    pub(super) fn begin(&mut self) {
-        self.pace = Pace::new();
+    /// What is read from here on is the head of a request.
+    pub(super) fn begin_head(&mut self) {
+        self.pace = Pace::new(true);
+        self.budget = u64::MAX;
+    }
+
+    /// What is read from here on is a body, of `most` bytes on the wire
+    /// at most.
+    pub(super) fn begin_body(&mut self, most: u64) {
+        self.pace = Pace::new(false);
+        self.budget = most;
+    }
+
+    /// Takes `count` bytes off what the body may still have.
+    fn spend(&mut self, count: usize) -> io::Result<()> {
+        let left = self.budget.checked_sub(count as u64);
+        self.budget = left.ok_or(io::ErrorKind::FileTooLarge)?;
+        Ok(())
     }
 
     /// The bytes read and not yet taken.
@@ -86,7 +133,7 @@ impl Source {
             self.held.drain(..self.at);
             self.at = 0;
         }
-        let wait = self.pace.wait(self.grace)?;
+        let wait = self.pace.wait(&self.limits)?;
         self.stream.set_read_timeout(Some(wait))?;
         let had = self.held.len();
         self.held.resize(had + 16 * 1024, 0);
@@ -102,6 +149,7 @@ impl Source {
         if self.ahead().is_empty() && self.more()? == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
+        self.spend(1)?;
         self.at += 1;
         Ok(self.held[self.at - 1])
     }
@@ -110,7 +158,7 @@ impl Source {
     pub(super) fn send(&mut self, sent: &mut Sent, bytes: &[u8]) -> io::Result<()> {
         let mut rest = bytes;
         while !rest.is_empty() {
-            let wait = sent.0.wait(self.grace)?;
+            let wait = sent.0.wait(&self.limits)?;
             self.stream.set_write_timeout(Some(wait))?;
             let wrote = self.stream.write(rest).map_err(timed_out)?;
             if wrote == 0 {
@@ -124,10 +172,12 @@ impl Source {
 
     /// Ends the connection so that the peer reads what was sent: nothing
     /// more is sent, and what the peer still sends is taken for a moment
-    /// instead of being answered with a reset.
+    /// instead of being answered with a reset. The thread of the
+    /// connection does this, as the worker processes of nginx do for a
+    /// connection they close lingering; no worker here waits for it.
     pub(super) fn close(mut self) {
         let _ = self.stream.shutdown(std::net::Shutdown::Write);
-        let until = Instant::now() + Duration::from_secs(2).min(self.grace);
+        let until = Instant::now() + self.limits.linger;
         let mut taken = [0u8; 16 * 1024];
         while let Some(left) = until.checked_duration_since(Instant::now()) {
             if left.is_zero() || self.stream.set_read_timeout(Some(left)).is_err() {
@@ -147,6 +197,7 @@ impl Read for Source {
             return Ok(0);
         }
         let count = buf.len().min(self.ahead().len());
+        self.spend(count)?;
         buf[..count].copy_from_slice(&self.ahead()[..count]);
         self.at += count;
         Ok(count)
@@ -158,7 +209,7 @@ pub(super) struct Sent(Pace);
 
 impl Sent {
     pub(super) fn new() -> Self {
-        Sent(Pace::new())
+        Sent(Pace::new(false))
     }
 }
 
@@ -166,25 +217,45 @@ impl Sent {
 mod tests {
     use super::*;
 
+    const LIMITS: Limits = Limits {
+        grace: Duration::from_secs(20),
+        per_mib: Duration::from_secs(8),
+        linger: Duration::from_secs(2),
+    };
+
     #[test]
-    fn what_a_peer_moved_buys_it_time_at_the_rate_and_no_wait_is_longer_than_the_grace() {
-        let grace = Duration::from_secs(20);
-        let mut pace = Pace::new();
-        assert!(pace.wait(grace).unwrap() <= grace);
+    fn a_body_is_over_within_the_grace_and_the_time_of_its_mibs_whatever_its_peer_does() {
+        assert_eq!(LIMITS.allowed(0), Duration::from_secs(20));
+        assert_eq!(LIMITS.allowed(1 << 20), Duration::from_secs(28));
+        assert_eq!(LIMITS.allowed(64 << 20), Duration::from_secs(20 + 8 * 64));
+        assert_eq!(LIMITS.allowed(1 << 19), Duration::from_secs(24));
+        assert!(LIMITS.allowed(u64::MAX) >= LIMITS.allowed(1 << 40));
+
+        let mut pace = Pace::new(false);
+        assert!(pace.wait(&LIMITS).unwrap() <= LIMITS.grace);
         // nothing moved in more than the grace
         pace.since = Instant::now() - Duration::from_secs(21);
-        assert_eq!(
-            pace.wait(grace).unwrap_err().kind(),
-            io::ErrorKind::TimedOut
-        );
-        // 1000 bytes are two seconds more
-        pace.moved = 1000;
-        let left = pace.wait(grace).unwrap();
+        let late = pace.wait(&LIMITS).unwrap_err();
+        assert_eq!(late.kind(), io::ErrorKind::TimedOut);
+        // a quarter of a MiB is two seconds more
+        pace.moved = 1 << 18;
+        let left = pace.wait(&LIMITS).unwrap();
         assert!(left <= Duration::from_secs(1) && left > Duration::from_millis(900));
         pace.since = Instant::now() - Duration::from_secs(23);
-        assert!(pace.wait(grace).is_err());
-        // a megabyte long ago: what it bought is not waited for in one go
-        pace.moved = 1 << 20;
-        assert_eq!(pace.wait(grace).unwrap(), grace);
+        assert!(pace.wait(&LIMITS).is_err());
+        // a GiB long ago: what it bought is not waited for in one go
+        pace.moved = 1 << 30;
+        assert_eq!(pace.wait(&LIMITS).unwrap(), LIMITS.grace);
+        // and all of it is over when the time of a GiB is
+        pace.since = Instant::now() - LIMITS.allowed(1 << 30);
+        assert!(pace.wait(&LIMITS).is_err());
+    }
+
+    #[test]
+    fn what_comes_of_a_head_buys_it_no_time() {
+        let mut pace = Pace::new(true);
+        pace.moved = 1 << 30;
+        pace.since = Instant::now() - Duration::from_secs(21);
+        assert!(pace.wait(&LIMITS).is_err());
     }
 }

@@ -150,14 +150,15 @@ fn emit_access_log(req_id: &str, method: &Method, url: &str, log: &LogCtx, durat
 /// Helper that captures the response's status code into the LogCtx and
 /// then hands the request off to `respond`. Replaces every bare
 /// `req.respond(resp)?` site so access logs always see the real status.
-fn respond_logged<R: std::io::Read>(
+fn respond_logged<R: std::io::Read + Send + 'static>(
     req: http::Request,
     resp: Response<R>,
     log: &mut LogCtx,
 ) -> std::io::Result<()> {
     log.status = resp.status_code().0;
     log.bytes_out = resp.data_length().map(|n| n as u64);
-    req.respond(resp)
+    req.respond(resp);
+    Ok(())
 }
 
 fn main() {
@@ -933,10 +934,10 @@ fn read_push(
     let mut reader: Box<dyn Read> = if gzipped {
         Box::new(alt_inflate::Reader::new(
             alt_inflate::Format::Gzip,
-            req.as_reader().take(max + 1),
+            req.body(max.saturating_add(1)).take(max + 1),
         ))
     } else {
-        Box::new(req.as_reader().take(max + 1))
+        Box::new(req.body(max.saturating_add(1)).take(max + 1))
     };
     // the commands are held in memory: they get a cap of their own
     let mut commands = (&mut reader).take(max_command_bytes());

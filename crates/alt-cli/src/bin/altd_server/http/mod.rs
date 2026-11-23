@@ -1,11 +1,15 @@
 //! HTTP/1.1 as `altd-server` speaks it, over the standard library alone.
 //!
 //! Every connection has a thread of its own that reads the heads of its
-//! requests; a request whose head is read waits for one of the workers,
-//! which reads its body and answers it. A connection that sends nothing,
-//! or sends slowly, so keeps its own thread and no worker, and is let go
-//! of when the time it is given is over (see [`paced`]). The connections
-//! open at once have a limit, and one above it is not taken.
+//! requests and writes the answers to them; a request whose head is read
+//! waits for one of the workers, which reads its body and makes the
+//! answer. So a worker waits for a peer while the body comes and at no
+//! other time, and there no longer than a body of that size is given
+//! (see [`paced`]): not for a head, not for a peer to take an answer,
+//! not for a connection to end. A connection that sends nothing, or
+//! sends or reads slowly, keeps its own thread, and is let go of when
+//! its time is over. The connections open at once have a limit, and one
+//! above it is not taken.
 //!
 //! TLS is in front of this, with whatever else a public listener needs.
 
@@ -23,12 +27,19 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 pub(crate) use head::{Header, Method};
+pub(crate) use paced::Limits;
 pub(crate) use request::Request;
 pub(crate) use response::{Response, StatusCode};
 
 /// What a peer is given to begin with, where `ALT_SERVER_IO_TIMEOUT_MS`
 /// says nothing else.
 const GRACE: Duration = Duration::from_secs(20);
+/// What a peer is given for each MiB of a body or a response, where
+/// `ALT_SERVER_IO_MS_PER_MIB` says nothing else: a megabit a second.
+const PER_MIB: Duration = Duration::from_secs(8);
+/// How long what a peer still sends is taken on a connection that is
+/// being ended.
+const LINGER: Duration = Duration::from_secs(2);
 /// The connections open at once, where `ALT_SERVER_MAX_CONNECTIONS` says
 /// nothing else.
 const CONNECTIONS: usize = 256;
@@ -49,7 +60,7 @@ struct Shared {
     waiting: Mutex<Waiting>,
     arrived: Condvar,
     open: AtomicUsize,
-    grace: Duration,
+    limits: Limits,
 }
 
 pub(crate) struct Server {
@@ -71,19 +82,26 @@ impl Server {
     /// environment bounds them.
     pub(crate) fn http(address: &str) -> io::Result<Server> {
         let grace = told("ALT_SERVER_IO_TIMEOUT_MS").map_or(GRACE, Duration::from_millis);
+        let per_mib = told("ALT_SERVER_IO_MS_PER_MIB").map_or(PER_MIB, Duration::from_millis);
         let most = told("ALT_SERVER_MAX_CONNECTIONS").unwrap_or(CONNECTIONS);
-        Server::listen(address, grace, most)
+        let linger = LINGER.min(grace);
+        let limits = Limits {
+            grace,
+            per_mib,
+            linger,
+        };
+        Server::listen(address, limits, most)
     }
 
     /// Listens at `address` for `most` connections at once, whose peers are
-    /// given `grace`.
-    fn listen(address: &str, grace: Duration, most: usize) -> io::Result<Server> {
+    /// given `limits`.
+    fn listen(address: &str, limits: Limits, most: usize) -> io::Result<Server> {
         let listener = TcpListener::bind(address)?;
         let shared = Arc::new(Shared {
             waiting: Mutex::default(),
             arrived: Condvar::new(),
             open: AtomicUsize::new(0),
-            grace,
+            limits,
         });
         let server = Server {
             address: listener.local_addr()?,
@@ -135,8 +153,8 @@ impl Server {
     }
 }
 
-/// Reads the requests of one connection, one behind the other, and hands
-/// each to the workers.
+/// Reads the requests of one connection, one behind the other, hands
+/// each to the workers and writes what they answer.
 fn connection(open: Open, stream: TcpStream) {
     // an answer is written in a few pieces, and none waits for the peer to
     // acknowledge the one before
@@ -144,7 +162,7 @@ fn connection(open: Open, stream: TcpStream) {
         return;
     }
     let shared = &open.0;
-    let mut source = paced::Source::new(stream, shared.grace);
+    let mut source = paced::Source::new(stream, shared.limits);
     loop {
         let head = match head::Head::read(&mut source) {
             Ok(Some(head)) => head,
@@ -156,7 +174,7 @@ fn connection(open: Open, stream: TcpStream) {
                     _ => return,
                 };
                 let refusal = Response::from_string(error.to_string()).with_status_code(status);
-                let _ = refusal.send(&mut source, true, false);
+                let _ = refusal.outgoing(true, false).send(&mut source);
                 return source.close();
             }
         };
@@ -169,9 +187,13 @@ fn connection(open: Open, stream: TcpStream) {
             .requests
             .push_back(request);
         shared.arrived.notify_one();
-        match returned.recv() {
-            Ok(Some(next)) => source = next,
-            _ => return,
+        let Ok((back, answer)) = returned.recv() else {
+            return;
+        };
+        source = back;
+        let last = answer.last;
+        if answer.send(&mut source).is_err() || last {
+            return source.close();
         }
     }
 }

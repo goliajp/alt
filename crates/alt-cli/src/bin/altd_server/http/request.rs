@@ -1,12 +1,19 @@
 //! A request as its handler has it: the head, the body as it comes off
 //! the connection, and the answer that goes back on it.
+//!
+//! A worker waits for the peer in one place, the reads of the body, and
+//! there within the time the body has (see [`super::paced`]), which
+//! begins with the first of those reads: what the request waited for a
+//! worker is not the peer's. The answer is handed back to the thread of
+//! the connection, which writes it and ends the connection where it
+//! has to; the worker is on to its next request by then.
 
 use std::io::{self, Read};
 use std::sync::mpsc::Sender;
 
 use super::head::{Framing, Head, Header, Method};
 use super::paced::{Sent, Source};
-use super::response::Response;
+use super::response::{Outgoing, Response};
 
 /// Where the reading of a chunked body is.
 enum Chunks {
@@ -20,10 +27,14 @@ enum Chunks {
 /// The body of a request, read off the connection as it is asked for.
 struct Body {
     source: Source,
+    /// the bytes on the wire it may have
+    most: u64,
     left: u64,
     chunks: Option<Chunks>,
     /// the peer is told to go on before the first of the body is read
     expects: bool,
+    /// not read from yet
+    untouched: bool,
 }
 
 fn line(source: &mut Source) -> io::Result<Vec<u8>> {
@@ -85,6 +96,9 @@ impl Read for Body {
         if self.over() || buf.is_empty() {
             return Ok(0);
         }
+        if std::mem::take(&mut self.untouched) {
+            self.source.begin_body(self.most);
+        }
         if std::mem::take(&mut self.expects) {
             let go_on = b"HTTP/1.1 100 Continue\r\n\r\n";
             self.source.send(&mut Sent::new(), go_on)?;
@@ -113,21 +127,22 @@ pub(crate) struct Request {
     head: Head,
     /// nothing once the request is answered
     body: Option<Body>,
-    /// the connection, for the next request on it, or nothing where it ended
-    back: Sender<Option<Source>>,
+    /// the connection and what is to be written on it
+    back: Sender<(Source, Outgoing)>,
 }
 
 impl Request {
-    pub(super) fn new(head: Head, mut source: Source, back: Sender<Option<Source>>) -> Self {
-        source.begin();
+    pub(super) fn new(head: Head, source: Source, back: Sender<(Source, Outgoing)>) -> Self {
         let body = Body {
             source,
+            most: u64::MAX,
             left: match head.framing {
                 Framing::Length(length) => length,
                 Framing::Chunked => 0,
             },
             chunks: (head.framing == Framing::Chunked).then_some(Chunks::Size(false)),
             expects: head.expects,
+            untouched: true,
         };
         Request {
             head,
@@ -156,40 +171,41 @@ impl Request {
         }
     }
 
-    pub(crate) fn as_reader(&mut self) -> &mut dyn Read {
-        self.body.as_mut().expect("a request not yet answered")
+    /// The body, which may take `most` bytes on the wire, framing and
+    /// all: reading past them is an error. The first call decides.
+    pub(crate) fn body(&mut self, most: u64) -> &mut dyn Read {
+        let body = self.body.as_mut().expect("a request not yet answered");
+        if body.untouched {
+            body.most = body.most.min(most);
+        }
+        body
     }
 
-    pub(crate) fn respond<R: Read>(mut self, response: Response<R>) -> io::Result<()> {
-        self.answer(response)
+    /// Has `response` sent. Whether the peer takes it is not waited for.
+    pub(crate) fn respond<R: Read + Send + 'static>(mut self, response: Response<R>) {
+        self.answer(response);
     }
 
-    /// Sends `response`. The connection goes on to its next request where
-    /// the body of this one was read to its end; where it was not, what is
-    /// left of it cannot be told from a next request, and the connection
-    /// ends.
-    fn answer<R: Read>(&mut self, response: Response<R>) -> io::Result<()> {
+    /// Hands `response` to the thread of the connection. The connection
+    /// goes on to its next request where the body of this one was read
+    /// to its end; where it was not, what is left of it cannot be told
+    /// from a next request, and the connection ends.
+    fn answer<R: Read + Send + 'static>(&mut self, response: Response<R>) {
         let Some(body) = self.body.take() else {
-            return Ok(());
+            return;
         };
         let last = self.head.last || !body.over();
-        let mut source = body.source;
         let bodiless = self.head.method == Method::Head;
-        let sent = response.send(&mut source, last, bodiless);
-        match (&sent, last) {
-            (Ok(()), false) => drop(self.back.send(Some(source))),
-            _ => {
-                source.close();
-                let _ = self.back.send(None);
-            }
-        }
-        sent
+        // the thread is gone where its connection is
+        let _ = self
+            .back
+            .send((body.source, response.outgoing(last, bodiless)));
     }
 }
 
 impl Drop for Request {
     /// A request its handler let go of without an answer is answered here.
     fn drop(&mut self) {
-        let _ = self.answer(Response::from_data(Vec::new()).with_status_code(500));
+        self.answer(Response::from_data(Vec::new()).with_status_code(500));
     }
 }

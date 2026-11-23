@@ -92,7 +92,7 @@ impl Head {
     /// Reads the head of the next request. Nothing where the peer ended
     /// the connection between requests.
     pub(super) fn read(source: &mut Source) -> io::Result<Option<Head>> {
-        source.begin();
+        source.begin_head();
         let end = loop {
             let end = source.ahead().windows(4).position(|w| w == b"\r\n\r\n");
             if end.unwrap_or(source.ahead().len()) > HEAD_BYTES {

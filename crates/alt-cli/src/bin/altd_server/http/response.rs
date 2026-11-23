@@ -88,15 +88,13 @@ impl<R: Read> Response<R> {
         usize::try_from(self.length).ok()
     }
 
-    /// Writes the response to `source`, without its body where the request
+    /// The response as it goes out, without its body where the request
     /// was for the head alone. `last` tells the peer that the connection
     /// ends behind it.
-    pub(super) fn send(
-        mut self,
-        source: &mut Source,
-        last: bool,
-        bodiless: bool,
-    ) -> io::Result<()> {
+    pub(super) fn outgoing(self, last: bool, bodiless: bool) -> Outgoing
+    where
+        R: Send + 'static,
+    {
         let status = self.status.0;
         let mut head = format!("HTTP/1.1 {status} {}\r\n", reason(status));
         for header in &self.headers {
@@ -111,11 +109,30 @@ impl<R: Read> Response<R> {
             head.push_str("Connection: close\r\n");
         }
         head.push_str("\r\n");
-        let mut sent = Sent::new();
-        source.send(&mut sent, head.as_bytes())?;
-        if empty || bodiless {
-            return Ok(());
+        Outgoing {
+            head: head.into_bytes(),
+            body: Box::new(self.body),
+            length: if empty || bodiless { 0 } else { self.length },
+            last,
         }
+    }
+}
+
+/// A response on its way out: the bytes of its head, and its body.
+pub(super) struct Outgoing {
+    head: Vec<u8>,
+    body: Box<dyn Read + Send>,
+    length: u64,
+    /// the connection ends behind it
+    pub(super) last: bool,
+}
+
+impl Outgoing {
+    /// Writes the response to `source`, within the time a response of
+    /// its length has.
+    pub(super) fn send(mut self, source: &mut Source) -> io::Result<()> {
+        let mut sent = Sent::new();
+        source.send(&mut sent, &self.head)?;
         let mut piece = vec![0u8; 64 * 1024];
         let mut left = self.length;
         while left > 0 {

@@ -43,7 +43,7 @@ pub(super) fn read_body_capped(
         .headers()
         .iter()
         .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
-    let limited = req.as_reader().take(max + 1);
+    let limited = req.body(max.saturating_add(1)).take(max + 1);
     if gzipped {
         // Decompress under the same cap so a 100 KiB gzip bomb that
         // expands to 10 GiB still bounces.
