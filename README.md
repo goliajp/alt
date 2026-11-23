@@ -244,6 +244,13 @@ plain HTTP and assumes the proxy terminates TLS. Authentication is HTTP
 Basic with per-principal tokens; the `.alt/policy` file in each repo gates
 what each principal may do.
 
+A fetch is given the objects the refs of the repository reach, and no
+others: an object left in the store by a push that was refused, or by a
+branch that was deleted, is not served to whoever asks for it by id. Git's
+own server, over protocol v2, gives any object it holds. Accepting only the
+tips of refs would be narrower still, but a partial clone asks by id for the
+blobs it left out, which no ref points at, and could not fetch them.
+
 ## Status and roadmap
 
 `alt` is in internal dogfood. The versioned package identifies the exact build;
