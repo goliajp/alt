@@ -103,16 +103,30 @@ fn opening(
     }
 }
 
+/// The first block at or after the one that starts at `block` whose
+/// header lies, in part at least, in one of the stretches `held` of the
+/// file that hold data; `None` when no such block follows.
+fn block_from(layout: &Layout, held: &[(u64, u64)], block: u64) -> Option<u64> {
+    held.iter().find_map(|(start, end)| {
+        // the first header that reaches past where the stretch starts
+        let reach = start.saturating_sub(BLOCK_HEADER_LEN as u64 - 1);
+        let first = reach.checked_next_multiple_of(layout.block)?.max(block);
+        (first < *end).then_some(first)
+    })
+}
+
 /// Looks for frames in the file from byte `from`, where reading stopped
 /// under `generation`, to byte `limit`: on from every block that opens
 /// with a checkpoint, and back from where the frames end in the block a
-/// walk stopped in and in the last one.
+/// walk stopped in and in the last one. `held` are the stretches of the
+/// file from `from` on that hold data: a block whose header lies in none
+/// of them opens with nothing.
 pub(crate) fn salvage(
     read: &mut ReadAt,
     layout: &Layout,
-    from: u64,
-    limit: u64,
+    (from, limit): (u64, u64),
     generation: u32,
+    held: &[(u64, u64)],
 ) -> std::io::Result<Salvaged> {
     let mut found = Salvaged::default();
     let (mut at, mut generation) = (from, generation);
@@ -121,13 +135,15 @@ pub(crate) fn salvage(
         if next > at {
             found.back(read, layout, (at, next.min(limit)), generation)?;
         }
-        let mut block = next;
+        let mut block = block_from(layout, held, next);
         let mut opened = None;
-        while opened.is_none() && block + (BLOCK_HEADER_LEN as u64) < limit {
+        while let Some(start) = block.filter(|start| start + (BLOCK_HEADER_LEN as u64) < limit)
+            && opened.is_none()
+        {
             // one from before the log was cut is no part of it any more
-            let reads = opening(read, layout, block, limit)?;
+            let reads = opening(read, layout, start, limit)?;
             opened = reads.filter(|located| located.state.generation >= generation);
-            block += layout.block;
+            block = block_from(layout, held, start + layout.block);
         }
         let Some(Located { mut state, .. }) = opened else {
             let last = (limit - 1) / layout.block * layout.block;

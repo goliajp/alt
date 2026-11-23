@@ -92,36 +92,102 @@ pub(crate) fn checkpoint_at(
         }))
 }
 
+/// Gives the stretches of the first bytes of the file, as many as it is
+/// told, that hold data, in their order.
+pub(crate) type Stretches<'a> = dyn FnMut(u64) -> std::io::Result<Vec<(u64, u64)>> + 'a;
+
+/// The last block before block number `block` whose header lies, in part
+/// at least, in one of the stretches `held` of the file that hold data;
+/// zero when there is none.
+fn block_before(layout: &Layout, held: &[(u64, u64)], block: u64) -> u64 {
+    let reached = |(start, end): &(u64, u64)| {
+        let last = ((end - 1) / layout.block).min(block - 1);
+        (last * layout.block + BLOCK_HEADER_LEN as u64 > *start).then_some(last)
+    };
+    held.iter().rev().find_map(reached).unwrap_or(0)
+}
+
 /// Where a read of a log `len` bytes long begins: the state of the
 /// last checkpoint a block header leads to which reads and ends within
 /// `len`, or of the empty log where there is none. `read` gives bytes of
 /// the file.
 pub fn locate(layout: &Layout, len: u64, read: &mut ReadAt) -> std::io::Result<Located> {
+    locate_past(layout, len, read, &mut |len| Ok(vec![(0, len)]))
+}
+
+/// [`locate`], with the blocks passed over whose headers lie in holes of
+/// the file: `data` is asked where the file holds data once a block is
+/// found to open with no header, and those of the blocks before it that
+/// lie in a hole are not read to find the same of them.
+pub(crate) fn locate_past(
+    layout: &Layout,
+    len: u64,
+    read: &mut ReadAt,
+    data: &mut Stretches,
+) -> std::io::Result<Located> {
     let mut block = len.saturating_sub(1) / layout.block;
+    let mut held = None;
     while block > 0 {
         let start = block * layout.block;
         let header = match len - start >= BLOCK_HEADER_LEN as u64 {
             true => layout.decode_header(&read(start, BLOCK_HEADER_LEN)?, start),
             false => None,
         };
-        if let Some(header) = header {
-            if header.first != 0
-                && let Some(state) = checkpoint_at(layout, len, start + header.first as u64, read)?
-            {
-                return Ok(state);
-            }
-            match header.checkpoint {
-                0 => return Ok(Located::empty()),
-                // the one it names lies before it
-                at if at < start => {
-                    if let Some(state) = checkpoint_at(layout, len, at, read)? {
-                        return Ok(state);
-                    }
+        let Some(header) = header else {
+            let held = match &held {
+                Some(held) => held,
+                None => held.insert(data(len)?),
+            };
+            block = block_before(layout, held, block);
+            continue;
+        };
+        if header.first != 0
+            && let Some(state) = checkpoint_at(layout, len, start + header.first as u64, read)?
+        {
+            return Ok(state);
+        }
+        match header.checkpoint {
+            0 => return Ok(Located::empty()),
+            // the one it names lies before it
+            at if at < start => {
+                if let Some(state) = checkpoint_at(layout, len, at, read)? {
+                    return Ok(state);
                 }
-                _ => {}
             }
+            _ => {}
         }
         block -= 1;
     }
     Ok(Located::empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_whose_headers_lie_in_holes_are_passed_over() {
+        let layout = Layout {
+            block: 4096,
+            id: [0; 16],
+        };
+        let before = |held: &[(u64, u64)], block| block_before(&layout, held, block);
+        // without holes, the block before
+        assert_eq!(before(&[(0, 1 << 30)], 500), 499);
+        assert_eq!(before(&[(0, 1 << 30)], 1), 0);
+        // a hole from within block 2 on: its header is the last
+        assert_eq!(before(&[(0, 9000)], 262_144), 2);
+        // data that ends where a block starts reaches no header of it
+        assert_eq!(before(&[(0, 8192)], 262_144), 1);
+        // a stretch between two headers holds none: the one before does
+        assert_eq!(before(&[(0, 5000), (40_000, 40_900)], 90), 1);
+        // one that begins within a header holds a part of it
+        assert_eq!(before(&[(0, 5000), (40_960 + 31, 50_000)], 90), 12);
+        // one that begins where a header ends holds the headers after it
+        assert_eq!(before(&[(0, 5000), (40_960 + 32, 45_000)], 90), 1);
+        assert_eq!(before(&[(0, 5000), (40_960 + 32, 50_000)], 90), 12);
+        assert_eq!(before(&[(0, 5000), (40_960 + 32, 50_000)], 12), 11);
+        assert_eq!(before(&[(0, 5000), (40_960 + 32, 50_000)], 11), 1);
+        assert_eq!(before(&[], 90), 0);
+    }
 }

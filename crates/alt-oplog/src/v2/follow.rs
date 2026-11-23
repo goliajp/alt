@@ -62,7 +62,9 @@ impl Log {
         let found = match stop {
             Stop::Unread => {
                 let (end, generation) = (state.end, state.generation);
-                Some(salvage(&mut read, &self.layout, end, size, generation)?)
+                let held = source.stretches(end, size)?;
+                let within = (end, size);
+                Some(salvage(&mut read, &self.layout, within, generation, &held)?)
             }
             Stop::End => None,
         };

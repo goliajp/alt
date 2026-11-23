@@ -69,7 +69,8 @@ pub(crate) struct Log {
     pub(super) reads: u64,
     pub(super) named: Option<SyncNamed>,
     pub(super) discarded: Vec<Discarded>,
-    pub(super) read: Cell<u64>,
+    /// how many bytes of the file this handle read, and in how many reads
+    pub(super) read: Cell<(u64, u64)>,
 }
 
 impl Log {
@@ -117,7 +118,7 @@ impl Log {
             reads: 0,
             named: None,
             discarded: Vec::new(),
-            read: Cell::new(FILE_HEADER_LEN as u64),
+            read: Cell::new((FILE_HEADER_LEN as u64, 1)),
         };
         // only the read needs the lock: writers append under the exclusive
         // one, so a frame cut short here is a crashed writer's
@@ -200,7 +201,11 @@ impl Log {
     }
 
     pub fn bytes_read(&self) -> u64 {
-        self.read.get()
+        self.read.get().0
+    }
+
+    pub fn file_reads(&self) -> u64 {
+        self.read.get().1
     }
 
     pub fn clamped(&self) -> bool {
@@ -234,7 +239,8 @@ impl Log {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
         let (end, generation) = (self.state.end, self.state.generation);
-        let found = salvage(&mut read, &self.layout, end, len, generation)?;
+        let held = source.stretches(end, len)?;
+        let found = salvage(&mut read, &self.layout, (end, len), generation, &held)?;
         Ok((found, len))
     }
 

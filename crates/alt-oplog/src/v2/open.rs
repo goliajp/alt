@@ -18,8 +18,9 @@ use std::path::Path;
 use crate::scan::parse_body;
 use crate::v2::block::{FILE_HEADER_LEN, Layout};
 use crate::v2::frame::{KIND_OP, View};
+use crate::v2::locate::locate_past;
 use crate::v2::salvage::salvage;
-use crate::v2::scan::{Located, Stop, Walk, locate};
+use crate::v2::scan::{Located, Stop, Walk};
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, walk_file};
 use crate::v2::tail::Tail;
@@ -47,7 +48,8 @@ pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
 /// Bytes of the log file as an open reads them, counted.
 pub(crate) struct Source<'a> {
     pub file: &'a File,
-    pub read: &'a Cell<u64>,
+    /// how many bytes were read, and in how many reads
+    pub read: &'a Cell<(u64, u64)>,
 }
 
 impl Source<'_> {
@@ -55,7 +57,8 @@ impl Source<'_> {
     /// first: a handle of this format writes at offsets and keeps no place
     /// in the file.
     pub fn at(&self, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
-        self.read.set(self.read.get() + len as u64);
+        let (bytes, reads) = self.read.get();
+        self.read.set((bytes + len as u64, reads + 1));
         let mut data = Vec::with_capacity(len);
         let mut file = self.file;
         file.seek(SeekFrom::Start(at))?;
@@ -64,6 +67,24 @@ impl Source<'_> {
             true => Ok(data),
             false => Err(std::io::ErrorKind::UnexpectedEof.into()),
         }
+    }
+
+    /// The stretches of the file between byte `from` and byte `to` that
+    /// hold data, in their order, as far as the file system tells them
+    /// from holes: what lies between them reads as zeros, and nobody has
+    /// to read it to know that no block of the log begins there.
+    pub fn stretches(&self, from: u64, to: u64) -> std::io::Result<Vec<(u64, u64)>> {
+        let mut held = Vec::new();
+        let mut at = from;
+        while at < to
+            && let Some((start, end)) = alt_os::holes::data_from(self.file, at)?
+            && start < to
+            && end > at
+        {
+            held.push((start, end.min(to)));
+            at = end;
+        }
+        Ok(held)
     }
 }
 
@@ -154,10 +175,10 @@ impl Loaded {
         &mut self,
         read: &mut ReadAt,
         layout: &Layout,
-        size: u64,
+        (size, held): (u64, &[(u64, u64)]),
     ) -> Result<bool, OpLogError> {
         let (end, generation) = (self.state.end, self.state.generation);
-        let found = salvage(read, layout, end, size, generation)?;
+        let found = salvage(read, layout, (end, size), generation, held)?;
         if end >= self.synced.max(found.claim) {
             self.passed = true;
             return Ok(false);
@@ -202,7 +223,7 @@ pub(crate) fn load(
     let mut read = |at: u64, len: usize| held(source, &window, at, len);
     let mut located = Located::empty();
     if !all {
-        located = locate(layout, size, &mut read)?;
+        located = locate_past(layout, size, &mut read, &mut |len| source.stretches(0, len))?;
     }
     let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &window)?;
     let tail = tail.filter(|tail| told_of(tail, &state, size, &window));
@@ -212,7 +233,10 @@ pub(crate) fn load(
     if !fresh && located.state.checkpoint != 0 && located.state.end > state.synced {
         // the machine went down since it was written: begin within what
         // is synced and read through all that follows
-        located = locate(layout, state.synced.max(FILE_HEADER_LEN as u64), &mut read)?;
+        let within = state.synced.max(FILE_HEADER_LEN as u64);
+        located = locate_past(layout, within, &mut read, &mut |len| {
+            source.stretches(0, len)
+        })?;
         (state, ops, stop) = pass(source, layout, &located, size, &window)?;
     }
     let synced = state.synced.max(tail.map_or(0, |tail| tail.synced));
@@ -239,7 +263,11 @@ pub(crate) fn load(
         let closes = read(loaded.state.end - 4, 4)?;
         loaded.closes.copy_from_slice(&closes);
     }
-    if stop == Stop::Unread && loaded.stopped(&mut read, layout, size)? {
+    let held = match stop {
+        Stop::Unread => source.stretches(loaded.state.end, size)?,
+        Stop::End => Vec::new(),
+    };
+    if stop == Stop::Unread && loaded.stopped(&mut read, layout, (size, &held))? {
         crate::settle::note_damage(&dir.join("durable"), loaded.state.end, size);
     }
     Ok(loaded)

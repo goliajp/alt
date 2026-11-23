@@ -280,6 +280,15 @@ impl OpLog {
         }
     }
 
+    /// In how many reads this handle has read [`Self::bytes_read`] bytes
+    /// of the log file. A version 1 log does not count them.
+    pub fn file_reads(&self) -> u64 {
+        match &self.0 {
+            Inner::V1(_) => 0,
+            Inner::V2(log) => log.file_reads(),
+        }
+    }
+
     /// What the frames of a version 2 log come to as this handle holds it.
     pub fn state(&self) -> Option<&v2::state::State> {
         match &self.0 {
