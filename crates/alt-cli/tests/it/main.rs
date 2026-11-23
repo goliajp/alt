@@ -81,6 +81,7 @@ mod identity;
 mod ignore_sources;
 #[cfg(target_os = "linux")]
 mod import_again;
+mod import_config;
 mod import_materialize;
 mod index_blobs;
 mod index_link;

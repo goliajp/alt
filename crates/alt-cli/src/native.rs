@@ -37,6 +37,7 @@ pub use diff::{DiffRequest, Summary};
 mod flow;
 mod http_auth;
 mod identity;
+mod import_config;
 mod in_progress;
 mod index_file;
 use index_file::{empty_index, save_index};
@@ -339,21 +340,7 @@ pub fn import(
     );
     let prepare = |refs: &mut RefStore| unconfirmed::sync_objects_first(refs, &alt_dir);
     let report = alt_import::import_git_with(repo, &alt_dir, &actor, timestamp_ms, prepare)?;
-    writeln!(
-        out,
-        "imported {} objects ({} new), {} refs ({} changed), \
-         {} lineage deltas into {}",
-        report.objects_seen,
-        report.objects_new,
-        report.refs_seen,
-        report.refs_changed,
-        report.lineage_deltas,
-        alt_dir.display()
-    )?;
-    match report.op {
-        Some(op) => writeln!(out, "op {op}")?,
-        None => writeln!(out, "already up to date, no op recorded")?,
-    }
+    import_config::say_imported(out, &report, &alt_dir)?;
 
     // Decide whether to materialize. We only do it when the work tree
     // is empty (a fresh import-into-blank-dir). If `target` is the
@@ -386,6 +373,9 @@ pub fn import(
     let taken = native.lfs_take(repo.git_dir())?;
     if taken > 0 {
         writeln!(out, "took {taken} LFS object(s)")?;
+    }
+    for name in native.take_remotes(repo)? {
+        writeln!(out, "took remote '{name}'")?;
     }
     if !fresh {
         return Ok(());
