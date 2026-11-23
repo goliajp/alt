@@ -197,7 +197,11 @@ impl Log {
             return Err(OpLogError::Lost { synced, holds: at });
         }
         let (pending, judged) = self.left_after(noted, at, looked);
-        // above every generation the file holds frames of, also past `at`
+        // above the generation of every frame that reads in the file,
+        // also past `at`. A cut made again after the power went while its
+        // checkpoint was written takes the generation that one was of:
+        // nothing else was written under it, a cut syncs its checkpoint
+        // before a frame is appended after
         let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
         let generation = self.state.generation.checked_add(1).ok_or(cut_before)?;
         if at != self.state.end {

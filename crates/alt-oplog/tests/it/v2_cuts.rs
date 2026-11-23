@@ -208,3 +208,72 @@ fn a_cut_before_an_earlier_one_is_of_a_generation_the_log_never_had() {
     assert_eq!((log.len(), log.state().unwrap().generation), (2, 2));
     log.verify().unwrap();
 }
+
+/// A log that was cut once and holds ops to cut again, as it is before
+/// the second cut and after it, and where it is cut then.
+fn before_and_after_a_second_cut() -> (Vec<u8>, Vec<u8>, u64) {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    log.append("a", 3, b"gone").unwrap();
+    drop(log);
+    boot(2);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.settle(but_gone).unwrap().unwrap().ops, 1);
+    grow(&mut log, "b", 2);
+    log.append("b", 3, b"gone").unwrap();
+    let at = log.anchor().unwrap().start;
+    stage(&mut log, 5);
+    drop(log);
+    let before = fs::read(dir.path().join("log")).unwrap();
+    boot(3);
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.settle(but_gone).unwrap().unwrap().ops, 6);
+    assert_eq!(log.state().unwrap().generation, 2);
+    (before, fs::read(dir.path().join("log")).unwrap(), at)
+}
+
+#[test]
+fn a_cut_made_again_after_its_checkpoint_was_torn_is_of_the_generation_that_one_was_of() {
+    let (before, after, at) = before_and_after_a_second_cut();
+    let at = at as usize;
+    let note = &after[at..];
+    for part in [1, 47, 48, note.len() / 2, note.len() - 1] {
+        // the power went with a part of the checkpoint of the second cut
+        // on disk: the frame it lies over does not read
+        let dir = alt_os::temp::tempdir().unwrap();
+        let mut torn = before.clone();
+        torn[at..at + part].copy_from_slice(&note[..part]);
+        let path = dir.path().join("log");
+        fs::write(&path, torn).unwrap();
+        boot(4);
+        let mut log = OpLog::open(dir.path()).unwrap();
+        log.refresh().unwrap();
+        // the cut is made again, under the generation of the torn one
+        assert_eq!((log.len(), log.state().unwrap().generation), (4, 2));
+        log.verify().unwrap();
+        let said = told(dir.path());
+        assert_eq!((said.len(), said[1].generation), (2, 1), "{part} bytes");
+        assert_eq!(said[1].bytes, (before.len() - at) as u64);
+        drop(log);
+
+        // nothing but that checkpoint was ever written under it: a cut
+        // syncs its checkpoint before anything is appended after. And
+        // the checkpoint of the first try, were it whole, names the frame
+        // before the cut as the one before it, not the checkpoint that
+        // took its place: it follows nothing
+        let whole = fs::read(&path).unwrap();
+        let mut with_the_first = whole.clone();
+        with_the_first.extend_from_slice(note);
+        fs::write(&path, with_the_first).unwrap();
+        boot(5);
+        let log = OpLog::open(dir.path()).unwrap();
+        assert_eq!(
+            (log.len(), log.appended_len(), log.passed_over()),
+            (4, whole.len() as u64, true),
+            "{part} bytes"
+        );
+        assert_eq!(log.state().unwrap().generation, 2);
+    }
+}
