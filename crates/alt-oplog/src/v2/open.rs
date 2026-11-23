@@ -252,10 +252,10 @@ pub(crate) fn load(
     let noted = Tail::noted(dir, boot);
     let tail = noted.says();
     let mut found = Found::up_to(source, layout, (boot, noted), size, all)?;
-    // To whoever opens a file of the length a reader of this boot noted,
-    // or a cut that was begun, the log ends where that says: while the
-    // log in the file is of the generation it was said of. A file that
-    // was cut since and grew back to the length holds another log.
+    // to whoever opens a file of the length a reader of this boot noted,
+    // or a cut that was begun, the log ends where that says, while the
+    // log in the file is of the generation it was said of: a file that
+    // was cut since and grew back to the length holds another log
     let generation = found.state.generation;
     let ends = |tail: &Tail| tail.hides(meta.len(), generation) && tail.ends < size;
     let hidden = tail.filter(ends).map(|tail| tail.ends);
