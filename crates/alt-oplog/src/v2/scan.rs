@@ -129,6 +129,10 @@ impl Walk<'_> {
         state: &mut State,
         each: &mut dyn FnMut(u64, u64, &View) -> Result<(), OpLogError>,
     ) -> Result<Stop, OpLogError> {
+        let mut seed = (
+            state.generation,
+            Seed::new(&self.layout.id, state.generation),
+        );
         while state.end < self.limit() {
             let Some((at, opens)) = self.next_start(state, state.end)? else {
                 return Ok(Stop::Unread);
@@ -136,7 +140,18 @@ impl Walk<'_> {
             let Some((bytes, end)) = lift_frame(&self.layout, self.data, self.base, at) else {
                 return Ok(Stop::Unread);
             };
-            let Some(view) = read_frame(&self.layout, &bytes, state.generation) else {
+            // a checkpoint names the generation it and what follows are of
+            let generation = match bytes[0] {
+                KIND_CHECKPOINT => generation_of(&bytes[body_at(bytes.first_chunk().unwrap())..]),
+                _ => Some(state.generation),
+            };
+            if generation != Some(seed.0) {
+                let Some(generation) = generation else {
+                    return Ok(Stop::Unread);
+                };
+                seed = (generation, Seed::new(&self.layout.id, generation));
+            }
+            let Some(view) = parse(&seed.1, &bytes) else {
                 return Ok(Stop::Unread);
             };
             let kind = view.head.kind;

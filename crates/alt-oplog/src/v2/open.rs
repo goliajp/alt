@@ -12,9 +12,9 @@
 
 use std::cell::Cell;
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::read::read_at;
 use crate::scan::parse_body;
 use crate::v2::block::{BLOCK_HEADER_LEN, FILE_HEADER_LEN, Layout};
 use crate::v2::frame::{CLOSE_LEN, HEADER_LEN, KIND_OP, View};
@@ -48,9 +48,19 @@ pub(crate) struct Source<'a> {
 }
 
 impl Source<'_> {
+    /// The `len` bytes at `at`, read into memory nothing was written to
+    /// first: a handle of this format writes at offsets and keeps no place
+    /// in the file.
     pub fn at(&self, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
         self.read.set(self.read.get() + len as u64);
-        read_at(self.file, at, len)
+        let mut data = Vec::with_capacity(len);
+        let mut file = self.file;
+        file.seek(SeekFrom::Start(at))?;
+        file.take(len as u64).read_to_end(&mut data)?;
+        match data.len() == len {
+            true => Ok(data),
+            false => Err(std::io::ErrorKind::UnexpectedEof.into()),
+        }
     }
 }
 

@@ -63,8 +63,8 @@ pub fn op_body(parent: &crate::OpId, timestamp_ms: u64, actor: &str, payload: &[
     crate::scan::encode_body(parent, timestamp_ms, actor, payload)
 }
 
-/// Creates an empty version 2 log in `dir` with blocks of 64 KiB, unless
-/// a log is there already.
+/// Creates an empty version 2 log in `dir` with blocks of the usual size,
+/// unless a log is there already.
 pub fn create(dir: &Path) -> std::io::Result<()> {
     create_with(dir, block::BLOCK_EXP)
 }

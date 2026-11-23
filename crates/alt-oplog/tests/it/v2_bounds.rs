@@ -40,10 +40,8 @@ fn ten_thousand_unsynced_frames_later_an_open_reads_no_more_than_a_block() {
             true => OpLog::open_read_only(dir.path(), None).unwrap(),
             false => OpLog::open(dir.path()).unwrap(),
         };
-        // a file header, a block header and a block, and the frames a
-        // snapshot may lag by
-        assert!(log.bytes_read() <= 64 + 2 * 32 + 65_536 + 16_384);
-        assert!(log.bytes_read() <= 64 + 65_536, "{}", log.bytes_read());
+        // the file header and what the last block holds
+        assert!(log.bytes_read() <= 64 + 16_384, "{}", log.bytes_read());
         assert_eq!(log.len(), 10_001);
         assert!(!log.unsettled() && !log.confirmed());
         assert_eq!(log.state().unwrap().workspaces.len(), 3);

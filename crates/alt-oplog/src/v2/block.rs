@@ -35,8 +35,9 @@ use crate::OpLogError;
 pub const FILE_HEADER_LEN: usize = 64;
 pub const BLOCK_HEADER_LEN: usize = 32;
 pub const VERSION: u8 = 2;
-/// 64 KiB blocks
-pub const BLOCK_EXP: u8 = 16;
+/// Blocks of 16 KiB: an open reads up to a block, and takes some 90
+/// thousand instructions for a full one of this size.
+pub const BLOCK_EXP: u8 = 14;
 
 const MAGIC: [u8; 4] = *b"ALTL";
 const BLOCK_MAGIC: [u8; 4] = *b"ALTB";
