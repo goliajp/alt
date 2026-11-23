@@ -9,7 +9,8 @@ use std::net::TcpStream;
 use std::process::Command;
 
 fn health(server: &Running) -> u16 {
-    match ureq::get(&format!("{}/healthz", server.url)).call() {
+    let asked = ureq::get(&format!("{}/healthz", server.url));
+    match asked.timeout(Duration::from_secs(30)).call() {
         Ok(response) => response.status(),
         Err(ureq::Error::Status(status, _)) => status,
         Err(error) => panic!("{error}"),

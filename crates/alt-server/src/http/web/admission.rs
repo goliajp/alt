@@ -35,19 +35,25 @@ fn admit(
 }
 
 /// The body of a request of `caller`, of `max` bytes at most and within the time a
-/// body has.
+/// body has, and the place it has among the bodies being received: kept by a
+/// request that goes on to wait for a worker, until it has one. A request that
+/// brings no body takes no place.
 async fn receive(
     state: &App,
     caller: &str,
     body: Body,
     max: u64,
-) -> std::result::Result<alt_os::temp::NamedTempFile, Refusal> {
-    let mut slot = state.receiving.begin(caller, 0);
-    let slot = slot
-        .as_mut()
-        .map_err(|full| Box::new(receiving::refusal(*full, None)))?;
-    let receipt = body::Receipt::of(state, Some(slot));
-    spool(body, max, receipt).await.map_err(unreceived)
+) -> std::result::Result<(alt_os::temp::NamedTempFile, Option<receiving::Slot>), Refusal> {
+    if max == 0 || axum::body::HttpBody::is_end_stream(&body) {
+        let receipt = body::Receipt::of(state, None);
+        let source = spool(body, max, receipt).await.map_err(unreceived)?;
+        return Ok((source, None));
+    }
+    let begun = state.receiving.begin(caller, 0);
+    let mut slot = begun.map_err(|full| Box::new(receiving::refusal(full, None)))?;
+    let receipt = body::Receipt::of(state, Some(&mut slot));
+    let source = spool(body, max, receipt).await.map_err(unreceived)?;
+    Ok((source, Some(slot)))
 }
 
 /// the response where the authority of a migration request could not be checked in time
@@ -96,7 +102,7 @@ pub(super) async fn admitted(
             true => state.factory.limits.request_bytes.min(16_384) as u64,
             false => 0,
         };
-        let source = receive(state, &caller, body, small).await?;
+        let (source, _) = receive(state, &caller, body, small).await?;
         let (permit, hashing) = admit(state, password)?;
         return Ok((source, permit, hashing));
     };
@@ -107,8 +113,12 @@ pub(super) async fn admitted(
         Err(Some(error)) => return Err(Box::new(store_failure(error, None))),
         Err(None) => return Err(unchecked()),
     };
-    let source = receive(state, &caller, body, max).await?;
-    Ok((source, receiving::worker(state, None).await?, hashing))
+    // its place is kept while it waits: what waits for a worker with its
+    // body whole counts among the bodies held like one that still comes
+    let (source, slot) = receive(state, &caller, body, max).await?;
+    let permit = receiving::worker(state, None).await?;
+    drop(slot);
+    Ok((source, permit, hashing))
 }
 
 /// the body of a request, its worker and its place among those that hash passwords

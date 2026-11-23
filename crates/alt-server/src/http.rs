@@ -227,6 +227,9 @@ pub async fn serve_with_browser(
     {
         return Err(std::io::Error::other("invalid HTTP limits"));
     }
+    if options.trusted_proxies.is_empty() {
+        eprintln!("{}", caller::UNNAMED);
+    }
     let mut background = tokio::task::JoinSet::new();
     let connections = Arc::new(Semaphore::new(options.connections));
     let state = Arc::new(App {

@@ -74,6 +74,10 @@ impl Network {
     }
 }
 
+/// What an instance with no proxy named says as it starts. It listens on this
+/// host alone, so every connection comes from the proxy in front of it.
+pub(super) const UNNAMED: &str = "alt-server: http.trusted_proxies names no proxy: every caller is taken for the peer of its connection, the proxy in front of this instance, and all callers share the sign-in attempts and the request bodies one address may have. Name the proxy, as in \"trusted_proxies\": [\"127.0.0.1\", \"::1\"].";
+
 /// An address as a proxy writes it: bare, in brackets, or with a port.
 fn written(text: &str) -> Option<IpAddr> {
     let text = text.trim();

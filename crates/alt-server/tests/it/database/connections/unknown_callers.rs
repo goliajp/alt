@@ -6,7 +6,8 @@ use std::io::Write;
 use std::net::TcpStream;
 
 fn health(server: &Running) -> u16 {
-    match ureq::get(&format!("{}/healthz", server.url)).call() {
+    let asked = ureq::get(&format!("{}/healthz", server.url));
+    match asked.timeout(Duration::from_secs(30)).call() {
         Ok(response) => response.status(),
         Err(ureq::Error::Status(status, _)) => status,
         Err(error) => panic!("{error}"),
@@ -70,4 +71,57 @@ fn sign_in_attempts_are_counted_for_the_address_the_proxy_names() {
     // what the sender wrote comes first; the proxy names whom it heard from last
     assert_eq!(device_code(&server, "203.0.113.7, 203.0.113.8"), 200);
     assert_eq!(device_code(&server, "203.0.113.8,203.0.113.7"), 503);
+}
+
+/// With no proxy named every caller is the peer, one address for all of them. The
+/// bodies that address may have under way are taken by requests that send none of
+/// theirs: a request that brings no body is answered all the same, and one that
+/// brings one is told to come later.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
+fn a_request_without_a_body_takes_no_place_among_the_bodies_being_received() {
+    let mut f = Fixture::new();
+    let server = start(&mut f, |_, options| {
+        options.trusted_proxies.clear();
+        options.receiving_each = 2;
+    });
+    let address = server.url.strip_prefix("http://").unwrap();
+    let head =
+        "POST /oauth/device/code HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\n";
+    let mut waiting = Vec::new();
+    for _ in 0..2 {
+        let mut socket = TcpStream::connect(address).unwrap();
+        let request = format!("{head}Host: {address}\r\nContent-Length: 30\r\n\r\n");
+        socket.write_all(request.as_bytes()).unwrap();
+        waiting.push(socket);
+    }
+    let status = |response: std::result::Result<ureq::Response, ureq::Error>| match response {
+        Ok(response) => response.status(),
+        Err(ureq::Error::Status(status, _)) => status,
+        Err(error) => panic!("{error}"),
+    };
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(30))
+        .build();
+    // the two are under way once a third body is refused its place
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        // the endpoint of the two answers a caller that has its bodies under
+        // way as it answers when it is busy
+        let third = agent.post(&format!("{}/oauth/device/code", server.url));
+        let third = third.set("Content-Type", "application/x-www-form-urlencoded");
+        if status(third.send_string("client_id=alt-cli&scope=account")) == 503 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "no body is refused its place"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    for _ in 0..3 {
+        let bodiless = agent.get(&format!("{}/web/config", server.url)).call();
+        assert_ne!(status(bodiless), 429);
+    }
+    drop(waiting);
 }
