@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: drop the prefixes of a request for refs at the number git drops them at
+author-type: human
+author: doracawl
+touched: crates/alt-wire/src/fetch/served.rs
+touched: crates/alt-wire/src/ls_refs/served.rs
