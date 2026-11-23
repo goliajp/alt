@@ -6,7 +6,10 @@ const ORIGIN: &str = "https://workbench.example.test";
 const PASSWORD: &str = "a private browser acceptance password";
 
 /// a service with one local user, after `adjust` changed its bounds
-fn start(f: &mut Fixture, adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions)) -> Running {
+pub(super) fn start(
+    f: &mut Fixture,
+    adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions),
+) -> Running {
     f.store
         .create_local_user(&f.credential, "reader", "reader", "reader", PASSWORD, false)
         .unwrap();

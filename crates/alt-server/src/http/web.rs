@@ -1,3 +1,4 @@
+mod admission;
 mod cloud_login;
 mod execute;
 mod input;
@@ -195,68 +196,40 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             Retry::Never,
         );
     }
-    let permit = match state.workers.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            return failure(
-                503,
-                ErrorCode::TemporarilyUnavailable,
-                "Instance is busy",
-                None,
-                Retry::SameRequest,
-            );
-        }
+    let mut body = Some(request.into_body());
+    let small = match writing {
+        true => state.factory.limits.request_bytes.min(16_384) as u64,
+        false => 0,
     };
-    // An unauthenticated password flood cannot allocate one Argon2 arena per
-    // HTTP connection, nor starve all normal publication workers.
-    let password_permit = if matches!(route, WebRoute::Login | WebRoute::CreateUser) {
-        match state.passwords.clone().try_acquire_owned() {
-            Ok(permit) => Some(permit),
-            Err(_) => {
-                return failure(
-                    503,
-                    ErrorCode::TemporarilyUnavailable,
-                    "Sign-in service is busy",
-                    None,
-                    Retry::SameRequest,
-                );
-            }
-        }
-    } else {
-        None
-    };
-    let (permit, max) = if let WebRoute::Portable(selected) = &route {
-        match portable_bound(&state, &browser, selected.clone(), token.clone(), permit).await {
-            Ok(value) => value,
-            Err(Some(error)) => return store_failure(error, None),
-            Err(None) => {
-                return failure(
-                    503,
-                    ErrorCode::TemporarilyUnavailable,
-                    "Current migration authority could not be checked",
-                    None,
-                    Retry::SameRequest,
-                );
-            }
-        }
-    } else {
-        (
-            permit,
-            if writing {
-                state.factory.limits.request_bytes.min(16_384) as u64
-            } else {
-                0
-            },
-        )
-    };
-    let source =
-        match tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), max))
-            .await
-        {
-            Ok(Ok(source)) => source,
-            Ok(Err(error)) => return unreceived(Some(error)),
-            Err(_) => return unreceived(None),
+    // who sends it is not known yet: a body that is slow to come keeps no worker waiting
+    let mut source = None;
+    if !matches!(route, WebRoute::Portable(_)) {
+        source = match admission::receive(&state, body.take().expect("body"), small).await {
+            Ok(source) => Some(source),
+            Err(refusal) => return *refusal,
         };
+    }
+    let password = matches!(route, WebRoute::Login | WebRoute::CreateUser);
+    let (mut permit, password_permit) = match admission::admit(&state, password) {
+        Ok(permits) => permits,
+        Err(refusal) => return *refusal,
+    };
+    if let WebRoute::Portable(selected) = &route {
+        let bound = portable_bound(&state, &browser, selected.clone(), token.clone(), permit);
+        let max = match bound.await {
+            Ok((held, max)) => {
+                permit = held;
+                max
+            }
+            Err(Some(error)) => return store_failure(error, None),
+            Err(None) => return *admission::unchecked(),
+        };
+        source = match admission::receive(&state, body.take().expect("body"), max).await {
+            Ok(source) => Some(source),
+            Err(refusal) => return *refusal,
+        };
+    }
+    let source = source.expect("body");
     let claim = Arc::new(login::Claim::default());
     let call = execute::Call {
         factory: state.factory.clone(),
@@ -334,31 +307,5 @@ async fn portable_bound(
         Ok(Ok(Ok(value))) => Ok(value),
         Ok(Ok(Err(error))) => Err(Some(error)),
         _ => Err(None),
-    }
-}
-/// the response to a body that could not be received; no error means it ran out of time
-fn unreceived(error: Option<BodyError>) -> Response<ResponseBody> {
-    match error {
-        Some(BodyError::Limit) => failure(
-            413,
-            ErrorCode::QuotaExceeded,
-            "Request body is too large",
-            None,
-            Retry::Never,
-        ),
-        Some(BodyError::Malformed) => failure(
-            400,
-            ErrorCode::InvalidRequest,
-            "Incomplete request body",
-            None,
-            Retry::Never,
-        ),
-        _ => failure(
-            503,
-            ErrorCode::TemporarilyUnavailable,
-            "Request could not be read",
-            None,
-            Retry::SameRequest,
-        ),
     }
 }
