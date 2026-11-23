@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: let no peer of altd-server keep a worker past the time it is given, over an http of the server's own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/auth.rs
+touched: crates/alt-cli/src/bin/altd_server/http/head.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
+touched: crates/alt-cli/tests/it/main.rs
