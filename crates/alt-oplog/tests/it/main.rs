@@ -33,6 +33,7 @@ mod v2_model;
 mod v2_named;
 mod v2_note_fields;
 mod v2_notes;
+mod v2_passed;
 mod v2_scan;
 mod v2_sequences;
 mod v2_synced;

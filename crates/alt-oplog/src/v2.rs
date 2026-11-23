@@ -22,6 +22,7 @@ mod log;
 mod named;
 mod notes;
 mod open;
+mod passed;
 pub mod receipt;
 mod reread;
 mod salvage;
