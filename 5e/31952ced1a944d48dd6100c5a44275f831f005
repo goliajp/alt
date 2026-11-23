@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: rename a file or a whole directory that a checkout only moves, so that mv keeps permissions, times and empty directories
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mv_rename.rs
