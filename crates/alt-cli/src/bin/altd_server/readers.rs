@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_cli::held::Held;
+use alt_git_codec::ObjectId;
 use alt_repo::Repository;
 
 use super::WriteCoordinator;
@@ -79,7 +80,17 @@ impl RepoHandle {
                 repo.follow_behind_writers()?;
                 repo
             }
-            None => Repository::discover(&self.repo_path)?,
+            None => {
+                // the object store is opened now, whatever the request
+                // is for: a handle that has read it reads on behind a
+                // writer, and one that has not waits for the writer when
+                // it comes to its first object
+                let repo = Repository::discover(&self.repo_path)?;
+                let algo = repo.algo()?;
+                let none = ObjectId::from_bytes(algo, &vec![0; algo.raw_len()])?;
+                repo.read_object(&none)?;
+                repo
+            }
         };
         Ok(Reading {
             repo: Some(repo),
