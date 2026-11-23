@@ -96,7 +96,7 @@ impl NativeRepo<'_> {
             algo,
         )?;
         self.store.odb.flush()?;
-        self.advance_branch_checkout(&head_ref, head_oid, commit, &old, &entries)?;
+        self.advance_branch_checkout("cherry-pick", &head_ref, head_oid, commit, &old, &entries)?;
 
         report_picked(&target_commit, target_oid, commit, json, out)?;
         Ok(false)

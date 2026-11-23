@@ -119,9 +119,11 @@ impl NativeRepo<'_> {
         Ok(operation)
     }
 
-    /// Advances `branch` from `old` to `new` in one ref transaction.
+    /// Advances `branch` from `old` to `new` in one ref transaction, as
+    /// the command `verb`.
     pub(super) fn advance_branch_checkout(
         &mut self,
+        verb: &str,
         branch: &str,
         old: ObjectId,
         new: ObjectId,
@@ -129,7 +131,7 @@ impl NativeRepo<'_> {
         after: &[WorkEntry],
     ) -> Res<()> {
         self.commit_refs_checkout(
-            "merge",
+            verb,
             &[RefChange {
                 name: branch.to_owned(),
                 old: Some(RefTarget::Oid(old)),

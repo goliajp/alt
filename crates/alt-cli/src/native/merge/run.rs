@@ -41,7 +41,7 @@ impl NativeRepo<'_> {
             MergeOutcome::FastForward(commit) => {
                 let target = self.commit_entries(commit)?;
                 let old = index_entries(&self.index()?);
-                self.advance_branch_checkout(&cur, ours, commit, &old, &target)?;
+                self.advance_branch_checkout("merge", &cur, ours, commit, &old, &target)?;
                 self.report_merge(
                     json,
                     out,
@@ -54,7 +54,7 @@ impl NativeRepo<'_> {
             }
             MergeOutcome::Merged { commit, entries } => {
                 let old = index_entries(&self.index()?);
-                self.advance_branch_checkout(&cur, ours, commit, &old, &entries)?;
+                self.advance_branch_checkout("merge", &cur, ours, commit, &old, &entries)?;
                 self.report_merge(
                     json,
                     out,
