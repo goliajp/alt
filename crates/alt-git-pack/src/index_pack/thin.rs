@@ -105,6 +105,7 @@ pub(super) fn complete(
         let Some((kind, data)) = bases(&oid)? else {
             continue;
         };
+        scanned.largest = scanned.largest.max(data.len() as u64);
         scanned.inflated = (scanned.inflated.checked_add(data.len() as u64))
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(PackError::Limit("inflated bytes"))?;

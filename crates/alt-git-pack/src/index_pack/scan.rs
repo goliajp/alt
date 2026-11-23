@@ -36,6 +36,9 @@ pub(super) struct Scanned {
     pub oids: Vec<Option<ObjectId>>,
     /// what the entries inflate to, all together
     pub inflated: u64,
+    /// the most bytes one entry inflates to, or the object of a delta is
+    /// said to have
+    pub largest: u64,
     pub body_end: usize,
 }
 
@@ -53,6 +56,7 @@ pub(super) fn scan(
     let mut entries: Vec<Entry> = Vec::with_capacity(room);
     let mut oids = Vec::with_capacity(room);
     let mut inflated = 0u64;
+    let mut largest = 0u64;
     let mut payload = Vec::new();
     let mut pos = 12usize;
     for _ in 0..count {
@@ -69,6 +73,11 @@ pub(super) fn scan(
             .ok_or(PackError::Limit("inflated bytes"))?;
         let next = pack.inflate_into(info.data_at, info.size, body_end, &mut payload)?;
         work.inflated += 1;
+        let made = match info.kind {
+            EntryKind::Plain(_) => 0,
+            _ => crate::delta::target_size(&payload)?.min(limits.object_bytes),
+        };
+        largest = largest.max(info.size).max(made);
         let (form, oid) = match info.kind {
             EntryKind::Plain(kind) => {
                 work.hashed += 1;
@@ -101,6 +110,7 @@ pub(super) fn scan(
         entries,
         oids,
         inflated,
+        largest,
         body_end,
     })
 }

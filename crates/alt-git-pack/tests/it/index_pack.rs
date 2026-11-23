@@ -152,7 +152,7 @@ fn the_index_of_deltas_before_their_bases_is_the_one_git_writes() {
     assert_eq!(std::fs::read(&indexed.idx_path).unwrap(), by_git(&pack));
 }
 
-fn wide(n: usize) -> Vec<u8> {
+pub(crate) fn wide(n: usize) -> Vec<u8> {
     let mut data = format!("{n:04} ").into_bytes();
     data.resize(1000, b'a' + (n % 26) as u8);
     data

@@ -42,10 +42,12 @@
 //! [`MAX_DELTA_DEPTH`].
 
 mod idx;
+mod memory;
 mod resolve;
 mod scan;
 mod thin;
 
+pub use memory::{Memory, Taken};
 pub use thin::Bases;
 
 use std::fs::File;
@@ -75,6 +77,8 @@ pub struct IndexLimits {
     /// whether the pack is kept: its index is synced then before it
     /// takes its name. One that is read and removed again needs no sync
     pub kept: bool,
+    /// what the pack takes its memory out of, and waits for
+    pub memory: Option<&'static Memory>,
 }
 
 impl Default for IndexLimits {
@@ -86,6 +90,7 @@ impl Default for IndexLimits {
             inflated_bytes: u64::MAX,
             base_bytes: crate::cache::DEFAULT_BUDGET,
             kept: true,
+            memory: None,
         }
     }
 }
@@ -117,6 +122,8 @@ pub struct IndexedPackOnDisk {
     /// Object count.
     pub objects: u32,
     pub work: IndexWork,
+    /// the memory the pack took, held for as long as its objects are read
+    pub memory: Option<Taken<'static>>,
 }
 
 /// Build a `.idx` for an existing `.pack` file. The idx is written next
@@ -165,7 +172,23 @@ pub fn index_pack_thin(
     verify_trailer(map, algo, &trailer)?;
 
     let mut work = IndexWork::default();
+    // an entry is inflated whole to be scanned: no larger than an object
+    // may be, nor than what its stream can inflate to
+    let body = (map.len() as u64).saturating_mul(1032);
+    let scanning = (limits
+        .memory
+        .map(|memory| memory.take(body.min(limits.object_bytes))))
+    .transpose()?;
     let mut scanned = scan::scan(&pack, count, limits, &mut work)?;
+    drop(scanning);
+    // resolved, the largest object is there as a base, as the instructions
+    // of a delta and as what they make, beside the bases that are held
+    let needed = |scanned: &scan::Scanned| {
+        let held = (limits.base_bytes as u64).min(scanned.inflated);
+        scanned.largest.saturating_mul(3).saturating_add(held)
+    };
+    let before = needed(&scanned);
+    let mut memory = (limits.memory.map(|memory| memory.take(before))).transpose()?;
     let mut oids = scanned.oids.clone();
     resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, &mut work)?;
     drop(pack);
@@ -176,6 +199,11 @@ pub fn index_pack_thin(
             thin::complete(pack_path, algo, &mut scanned, &mut oids, bases, limits)?
     {
         trailer = whole;
+        // a base that was appended may be larger than all the pack came with
+        if needed(&scanned) > before {
+            drop(memory.take());
+            memory = (limits.memory.map(|memory| memory.take(needed(&scanned)))).transpose()?;
+        }
         let pack = Pack::open(pack_path, algo)?;
         resolve::resolve(&pack, &mut scanned, &mut oids, came, limits, &mut work)?;
     }
@@ -224,6 +252,7 @@ pub fn index_pack_thin(
         trailer,
         objects: count,
         work,
+        memory,
     })
 }
 
