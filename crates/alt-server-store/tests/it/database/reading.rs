@@ -254,9 +254,10 @@ fn a_read_on_a_cloud_instance_waits_for_no_other_transaction() {
 
     // a read alone moves the recorded clock on, and is refused under a clock
     // that is behind what is recorded
+    // opened before the clock is looked at: opening records the clock too
+    let mut reader = f.reopen();
     let before = high_water(&f);
     std::thread::sleep(std::time::Duration::from_millis(1100));
-    let mut reader = f.reopen();
     reader.repository_info(&f.credential, "repository").unwrap();
     assert!(high_water(&f) >= before + 1000);
     let ahead = future() as i64;

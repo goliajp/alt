@@ -2,6 +2,7 @@ mod change_links;
 mod maintenance;
 mod observability;
 mod provision;
+mod schema_21;
 mod upgrade;
 use super::*;
 use alt_server::operator::{Config, HttpBounds};
