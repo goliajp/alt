@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: write a variable into a configuration file as git config does, and follow the includes of a file kept elsewhere
+author-type: human
+author: doracawl
+touched: crates/alt-git-config/src/edit.rs
+touched: crates/alt-git-config/src/include.rs
+touched: crates/alt-git-config/src/lib.rs
+touched: crates/alt-git-config/src/parse.rs
+touched: crates/alt-git-config/tests/it/edit.rs
+touched: crates/alt-git-config/tests/it/main.rs
