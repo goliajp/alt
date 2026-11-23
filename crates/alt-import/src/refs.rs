@@ -19,11 +19,11 @@ fn convert_target(target: alt_git_refs::RefTarget) -> Result<RefTarget, ImportEr
     })
 }
 
-/// Every ref the store is to have after an import of `repo`, HEAD first,
-/// and whether the entries of the stash among them are read from the log
-/// of `refs/stash`. A source that has entry refs of its own, as an export
-/// of a native store does, has its stack in those.
-pub(crate) fn wanted(repo: &Repository) -> Result<(Vec<(String, RefTarget)>, bool), ImportError> {
+/// Every ref the store is to have after an import of `repo`, HEAD first.
+/// The stash is the stack git has: an entry ref for each line of the log
+/// of `refs/stash`, the oldest first. An entry ref the source has itself,
+/// as an older export of a native store left them, is not read.
+pub(crate) fn wanted(repo: &Repository) -> Result<Vec<(String, RefTarget)>, ImportError> {
     let git_refs = repo.git_refs().ok_or(ImportError::NotAGitSource)?;
     let mut wanted: Vec<(String, RefTarget)> = Vec::new();
     if let Some(head) = git_refs.read("HEAD")? {
@@ -35,37 +35,26 @@ pub(crate) fn wanted(repo: &Repository) -> Result<(Vec<(String, RefTarget)>, boo
             .to_str()
             .map_err(|_| ImportError::NonUtf8Ref(r.name.to_str_lossy().into_owned()))?
             .to_owned();
-        if name == "HEAD" {
-            continue; // already handled
+        if name == "HEAD" || stash::entry_number(&name).is_some() {
+            continue;
         }
         wanted.push((name, convert_target(r.target)?));
     }
-    let own = wanted
-        .iter()
-        .any(|(name, _)| stash::entry_number(name).is_some());
-    let logged = match own {
-        true => Vec::new(),
-        false => stash::read_log(repo.git_dir())?,
-    };
-    for (number, commit) in logged.iter().enumerate() {
+    for (number, commit) in stash::read_log(repo.git_dir())?.iter().enumerate() {
         let name = format!("{}{number}", stash::ENTRIES);
         wanted.push((name, RefTarget::Oid(*commit)));
     }
-    Ok((wanted, !logged.is_empty()))
+    Ok(wanted)
 }
 
 /// The changes that bring `refs` to `wanted`: none for a ref that is
-/// there already. Where the stash was read from its log, an entry the
-/// store has and the log has no longer goes.
-pub(crate) fn changes(
-    refs: &RefStore,
-    wanted: Vec<(String, RefTarget)>,
-    stack_from_log: bool,
-) -> Vec<RefChange> {
+/// there already. Of the stash the store keeps what the source has: an
+/// entry that is gone there goes, and `refs/stash` with the last.
+pub(crate) fn changes(refs: &RefStore, wanted: Vec<(String, RefTarget)>) -> Vec<RefChange> {
     let gone = |(name, target): (&str, &RefTarget)| {
-        let entry = stash::entry_number(name).is_some();
+        let of_stash = name == stash::TOP || stash::entry_number(name).is_some();
         let kept = wanted.iter().any(|(wanted, _)| wanted == name);
-        (stack_from_log && entry && !kept).then(|| RefChange {
+        (of_stash && !kept).then(|| RefChange {
             name: name.to_owned(),
             old: Some(target.clone()),
             new: None,

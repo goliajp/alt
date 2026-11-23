@@ -205,7 +205,7 @@ pub fn import_git_with(
     odb.flush()?;
 
     // --- refs + HEAD: one atomic transaction = the import op ---
-    let (wanted, stack_from_log) = refs::wanted(repo)?;
+    let wanted = refs::wanted(repo)?;
 
     // --- same-path lineage deltas: storage form only, identity untouched ---
     let tips: Vec<ObjectId> = wanted
@@ -220,7 +220,7 @@ pub fn import_git_with(
     odb.flush()?;
 
     let refs_seen = wanted.len();
-    let changes = refs::changes(&refs, wanted, stack_from_log);
+    let changes = refs::changes(&refs, wanted);
 
     let refs_changed = changes.len();
     let op = if changes.is_empty() {
