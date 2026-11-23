@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: end the reads of the two stores without a drop that drops nothing
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive/kept.rs
