@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a range over a history with two merge bases, and the undo of a hard reset that gave up a cherry-pick
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/log_range.rs
+touched: crates/alt-cli/tests/it/reset_soft.rs
