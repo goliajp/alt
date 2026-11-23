@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: tell a device whose code was spent to begin again where its token could not be given
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/device.rs
