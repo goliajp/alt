@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: let go of the trees looked at longest ago, and refuse a push that has too much of the history read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits.rs
+touched: crates/alt-cli/src/added_commits/trees.rs
+touched: crates/alt-cli/src/added_commits/walk.rs
