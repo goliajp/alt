@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: take the bytes that close the last frame from the file when an open read none after the checkpoint it went back to
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
