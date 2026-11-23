@@ -1,5 +1,6 @@
-//! How long a peer keeps a worker: while the body comes, and no longer
-//! than a body of that size is given.
+//! A peer keeps no worker: not while its body comes, however slowly, not
+//! while it does not take its answer; and one that does not go on is let
+//! go of.
 
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -12,9 +13,14 @@ use super::*;
 #[test]
 fn a_request_that_waited_for_the_worker_has_the_time_of_its_body_from_then() {
     let (release, held) = mpsc::channel();
-    let address = told(within(SHORT), Told { held: Some(held) });
+    let (taken, took) = mpsc::channel();
+    let limits = within(SHORT);
+    let (held, taken) = (Some(held), Some(taken));
+    let address = told(limits, Told { held, taken });
     let (mut busy, mut busy_reader) = connected(address);
     busy.write_all(b"GET /hold HTTP/1.1\r\n\r\n").unwrap();
+    // the worker has the one that keeps it before the other is sent
+    took.recv_timeout(Duration::from_secs(60)).unwrap();
     let (mut waiting, mut reader) = connected(address);
     let head = b"POST /p HTTP/1.1\r\nContent-Length: 5\r\n\r\n";
     waiting.write_all(head).unwrap();
@@ -29,20 +35,21 @@ fn a_request_that_waited_for_the_worker_has_the_time_of_its_body_from_then() {
     assert_eq!(body, b"Post /p hello");
 }
 
+/// A body that does not come, and one of which too little comes in the
+/// time a body has to move in, are given up, in that time or the next.
 #[test]
-fn a_body_that_stalls_or_falls_behind_keeps_the_worker_no_longer_than_its_size_is_given() {
-    for trickle in [false, true] {
+fn a_body_that_stalls_or_dribbles_is_let_go_of() {
+    for dribble in [false, true] {
         let address = echo(SHORT);
         let began = Instant::now();
         let (mut slow, mut reader) = connected(address);
         slow.write_all(b"POST /slow HTTP/1.1\r\nContent-Length: 1000000\r\n\r\n")
             .unwrap();
         let sender = std::thread::spawn(move || {
-            // two thousand bytes a second, for twenty seconds: far from
-            // stalled, and far behind the MiB a second it is given
+            // some hundred bytes in the time a thousand are to come in
             let until = Instant::now() + Duration::from_secs(20);
-            while trickle && Instant::now() < until && slow.write_all(&[b'x'; 100]).is_ok() {
-                std::thread::sleep(Duration::from_millis(50));
+            while dribble && Instant::now() < until && slow.write_all(&[b'x'; 10]).is_ok() {
+                std::thread::sleep(Duration::from_millis(30));
             }
             slow
         });
@@ -54,11 +61,61 @@ fn a_body_that_stalls_or_falls_behind_keeps_the_worker_no_longer_than_its_size_i
         assert_eq!(body, b"TimedOut");
         let took = began.elapsed();
         assert!(took >= SHORT && took < Duration::from_secs(10), "{took:?}");
-        // and the worker goes on to the next request
         answered(address);
         drop(reader);
         drop(sender.join().unwrap());
     }
+}
+
+/// A body that comes slowly and goes on coming is taken to its end, over
+/// many times the time one has to move in, and the worker answers other
+/// requests while it comes.
+#[test]
+fn a_body_that_is_slow_and_goes_on_is_received_and_keeps_no_worker_meanwhile() {
+    let address = echo(SHORT);
+    let (mut slow, mut reader) = connected(address);
+    slow.write_all(b"POST /slow HTTP/1.1\r\nContent-Length: 100000\r\n\r\n")
+        .unwrap();
+    let began = Instant::now();
+    // a thousand bytes each twenty milliseconds: fifteen times what is
+    // asked of it, and two seconds for all of it
+    for sent in 0..100 {
+        slow.write_all(&[b'x'; 1000]).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        if sent % 25 == 0 {
+            answered(address);
+        }
+    }
+    let (status, body, _) = response(&mut reader);
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    assert_eq!(body.len(), "Post /slow ".len() + 100_000);
+    assert!(began.elapsed() >= 5 * SHORT);
+}
+
+/// The bodies received and not yet let go of have a size between them:
+/// one that passes it is told that there is no room now.
+#[test]
+fn a_body_there_is_no_room_for_is_told_so() {
+    let limits = Limits {
+        spool: 1000,
+        ..within(LONG)
+    };
+    let address = told(limits, Told::default());
+    let (mut stream, mut reader) = connected(address);
+    stream
+        .write_all(b"POST /p HTTP/1.1\r\nContent-Length: 5000\r\n\r\n")
+        .unwrap();
+    stream.write_all(&[b'x'; 5000]).unwrap();
+    let (status, body, _) = response(&mut reader);
+    assert_eq!(status, "HTTP/1.1 503 Service Unavailable");
+    assert_eq!(body, b"StorageFull");
+    // what it took is given back with it
+    let (mut stream, mut reader) = connected(address);
+    stream
+        .write_all(b"POST /p HTTP/1.1\r\nContent-Length: 900\r\n\r\n")
+        .unwrap();
+    stream.write_all(&[b'y'; 900]).unwrap();
+    assert_eq!(response(&mut reader).0, "HTTP/1.1 200 OK");
 }
 
 /// The lines of a chunked body are bytes of it: a peer does not keep

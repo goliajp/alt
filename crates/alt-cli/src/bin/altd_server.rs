@@ -95,8 +95,8 @@ fn main() {
                      env:\n  \
                      ALT_SERVER_REPO          single alt repo to serve (legacy mode)\n  \
                      ALT_SERVER_ROOT          multi-repo root; URLs map /<name>/… → <root>/<name>\n  \
-                     ALT_SERVER_WORKERS       parallel request handler threads (default 4)\n  \
-                     ALT_SERVER_REQUIRE_AUTH  set to 1 to refuse start when <root>/users is absent (fail-open auth guard)"
+                     ALT_SERVER_REQUIRE_AUTH  set to 1 to refuse start when <root>/users is absent (fail-open auth guard)\n{}",
+                    told::HELP
                 );
                 return;
             }
@@ -236,6 +236,9 @@ fn serve_one(mode: &ServeMode, req: http::Request) {
             log.status = 500;
         }
     }
+    if log.deferred {
+        return;
+    }
     let duration_ms = start.elapsed().as_millis();
     emit_access_log(&req_id, &method, &url, &log, duration_ms);
 }
@@ -344,6 +347,13 @@ fn dispatch(
     }
 
     if let Some(allow) = endpoint_allow {
+        // a body is received by the thread of its connection, and the
+        // request comes here again with it
+        if method == Method::Post && !req.received() {
+            log.deferred = true;
+            req.receive(limits::body_cap(&suffix));
+            return Ok(());
+        }
         if method == Method::Get && suffix.ends_with("/info/refs") {
             let repo = handle.open_repo()?;
             return handle_info_refs(&repo, handle.writer.as_deref(), query, req, log);
@@ -373,21 +383,6 @@ fn dispatch(
     let r = Response::from_string("not found").with_status_code(StatusCode(404));
     respond_logged(req, r, log)?;
     Ok(())
-}
-
-fn parse_query<'a>(query: &'a str, key: &str) -> Option<&'a str> {
-    for chunk in query.split('&') {
-        if let Some((k, v)) = chunk.split_once('=')
-            && k == key
-        {
-            return Some(v);
-        }
-    }
-    None
-}
-
-fn header(name: &str, value: &str) -> Header {
-    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header literals are valid")
 }
 
 fn die(msg: &str) -> ! {

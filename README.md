@@ -236,7 +236,7 @@ for supported task intake into an independent directory; the source stays intact
 repositories, it serves them over git smart-HTTP v2.
 
 ```sh
-altd-server --bind 127.0.0.1:8080 --root /srv/repos
+ALT_SERVER_ROOT=/srv/repos altd-server --bind 127.0.0.1:8080
 ```
 
 Front it with a reverse proxy (nginx, Caddy, …) for TLS — the server is
@@ -250,6 +250,21 @@ branch that was deleted, is not served to whoever asks for it by id. Git's
 own server, over protocol v2, gives any object it holds. Accepting only the
 tips of refs would be narrower still, but a partial clone asks by id for the
 blobs it left out, which no ref points at, and could not fetch them.
+
+Shallow clones and fetches (`--depth`, `--shallow-since`, `--shallow-exclude`,
+`--deepen`, `--unshallow`) are given the history they ask for, as Git's own
+server gives it.
+
+A peer may be as slow as its line. The body of a request and a response go
+on for as long as they move, 1 KiB a second on average over each half
+minute by default, and a peer that stalls is let go of within a minute. A
+slow peer keeps a connection and never one of the request handlers: the
+connections open at once are limited, and so are those of one address that
+is not the host itself. Behind a reverse proxy on the same host every
+client comes from the host, and the proxy is where the connections of one
+client are limited. These numbers, and those for the size of a push and the
+memory and disk requests may take, are set through the environment;
+`altd-server --help` lists them with their defaults.
 
 ## Status and roadmap
 

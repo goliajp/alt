@@ -64,6 +64,17 @@ pub(super) fn max_command_bytes() -> u64 {
     max_body_bytes().min(COMMANDS)
 }
 
+/// The bytes on the wire the body of a request to the endpoint `suffix`
+/// ends in may take: one more than it may have, so that one over is told
+/// by its count.
+pub(super) fn body_cap(suffix: &str) -> u64 {
+    let most = match suffix.ends_with("/git-receive-pack") {
+        true => max_body_bytes(),
+        false => max_command_bytes(),
+    };
+    most.saturating_add(1)
+}
+
 /// What the pack of a push may hold. A pack is as its sender made it:
 /// one small delta can stand for an object of any size, and each of a
 /// million of them for another. No object may inflate to more than a
@@ -88,14 +99,17 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
 }
 
 /// The status a request is refused with where its body could not be read
-/// within its cap: the peer was too slow, ended early, or sent too much.
+/// within its cap: the peer stopped sending, ended early, sent what is
+/// no body, or sent too much, or the server has no room for it now.
 pub(super) fn refusal(error: &(dyn std::error::Error + 'static)) -> u16 {
+    use std::io::ErrorKind;
     match error
         .downcast_ref::<std::io::Error>()
         .map(std::io::Error::kind)
     {
-        Some(std::io::ErrorKind::TimedOut) => 408,
-        Some(std::io::ErrorKind::UnexpectedEof) => 400,
+        Some(ErrorKind::TimedOut) => 408,
+        Some(ErrorKind::UnexpectedEof | ErrorKind::InvalidData) => 400,
+        Some(ErrorKind::StorageFull) => 503,
         _ => 413,
     }
 }

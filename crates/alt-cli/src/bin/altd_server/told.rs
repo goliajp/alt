@@ -23,6 +23,23 @@ const INFLATED_TIMES: u64 = 128;
 /// being ended.
 const LINGER: Duration = Duration::from_secs(2);
 
+/// The numbers the environment may give, as `--help` tells them. Each is
+/// a whole number above zero.
+pub(super) const HELP: &str = "  \
+ALT_SERVER_WORKERS                      requests handled at once (4)
+  ALT_SERVER_MAX_CONNECTIONS              connections open at once (256)
+  ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not this host (a quarter)
+  ALT_SERVER_MAX_PUSH_BYTES               bytes of the body of a push (1 GiB)
+  ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
+  ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in (3 pushes and 1 GiB)
+  ALT_SERVER_MAX_INDEX_WAIT_MS            how long a push waits for that memory before a 503 (600000)
+  ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes)
+  ALT_SERVER_MAX_OPEN_REPOS               repositories of a root kept open (16)
+  ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
+  ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
+  ALT_SERVER_IO_MIN_BYTES_PER_SEC         by this much on average (1024)
+  ALT_SERVER_SHUTDOWN_DEADLINE_MS         for requests under way when the server is stopped (30000)";
+
 pub(super) struct Told {
     /// `ALT_SERVER_MAX_PUSH_BYTES`: the bytes of the body of a request
     pub(super) push_bytes: u64,
@@ -43,7 +60,12 @@ pub(super) struct Told {
     /// at once. One takes some forty files, with its store and four
     /// requests reading it, and a process has a thousand by default
     pub(super) repos: usize,
-    /// `ALT_SERVER_IO_TIMEOUT_MS` and `ALT_SERVER_IO_MS_PER_MIB`
+    /// `ALT_SERVER_IO_TIMEOUT_MS` for the head of a request;
+    /// `ALT_SERVER_IO_WINDOW_MS` and `ALT_SERVER_IO_MIN_BYTES_PER_SEC`
+    /// for a body and a response to go on;
+    /// `ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS`, a quarter of the
+    /// connections unless it is set; `ALT_SERVER_MAX_RECEIVING_BYTES`,
+    /// four bodies of the largest size unless it is set
     pub(super) io: Limits,
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
     pub(super) shutdown: Duration,
@@ -73,7 +95,11 @@ impl Told {
         let index = push_bytes.saturating_mul(3).saturating_add(1 << 30);
         let grace = number(lookup, "ALT_SERVER_IO_TIMEOUT_MS", 20_000u64)?;
         let grace = Duration::from_millis(grace);
-        let per_mib = number(lookup, "ALT_SERVER_IO_MS_PER_MIB", 8_000u64)?;
+        let window = number(lookup, "ALT_SERVER_IO_WINDOW_MS", 30_000u64)?;
+        let rate = number(lookup, "ALT_SERVER_IO_MIN_BYTES_PER_SEC", 1024u64)?;
+        let connections = number(lookup, "ALT_SERVER_MAX_CONNECTIONS", 256usize)?;
+        let each = (connections / 4).max(1);
+        let spool = push_bytes.saturating_mul(4);
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
         Ok(Told {
@@ -82,12 +108,15 @@ impl Told {
             index_bytes: number(lookup, "ALT_SERVER_MAX_INDEX_BYTES", index)?,
             index_wait: Duration::from_millis(index_wait),
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
-            connections: number(lookup, "ALT_SERVER_MAX_CONNECTIONS", 256usize)?,
+            connections,
             repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
             io: Limits {
                 grace,
-                per_mib: Duration::from_millis(per_mib),
+                window: Duration::from_millis(window),
+                floor: (rate.saturating_mul(window) / 1000).max(1),
                 linger: LINGER.min(grace),
+                each: number(lookup, "ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS", each)?,
+                spool: number(lookup, "ALT_SERVER_MAX_RECEIVING_BYTES", spool)?,
             },
             shutdown: Duration::from_millis(shutdown),
         })
@@ -128,7 +157,9 @@ mod tests {
             (4, 256, 16)
         );
         assert_eq!(unset.io.grace, Duration::from_secs(20));
-        assert_eq!(unset.io.per_mib, Duration::from_secs(8));
+        assert_eq!(unset.io.window, Duration::from_secs(30));
+        assert_eq!((unset.io.floor, unset.io.each), (30 << 10, 64));
+        assert_eq!(unset.io.spool, 4 << 30);
         let names = [
             "ALT_SERVER_MAX_PUSH_BYTES",
             "ALT_SERVER_MAX_INFLATED_BYTES",
@@ -138,7 +169,10 @@ mod tests {
             "ALT_SERVER_MAX_CONNECTIONS",
             "ALT_SERVER_MAX_OPEN_REPOS",
             "ALT_SERVER_IO_TIMEOUT_MS",
-            "ALT_SERVER_IO_MS_PER_MIB",
+            "ALT_SERVER_IO_WINDOW_MS",
+            "ALT_SERVER_IO_MIN_BYTES_PER_SEC",
+            "ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS",
+            "ALT_SERVER_MAX_RECEIVING_BYTES",
             "ALT_SERVER_SHUTDOWN_DEADLINE_MS",
         ];
         for name in names {

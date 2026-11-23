@@ -20,11 +20,14 @@ const BODY: u64 = 1 << 20;
 struct Told {
     /// `/hold` is not answered before this is sent to or dropped
     held: Option<mpsc::Receiver<()>>,
+    /// told when the worker has taken `/hold` up
+    taken: Option<mpsc::Sender<()>>,
 }
 
 /// A server whose peers are given `limits`, with one worker. It answers
-/// a request with its method, its target and its body; one for `/refuse`
-/// without reading its body, one for `/large` with 64 MiB.
+/// a request with its method, its target and its body, which it has
+/// received first; one for `/refuse` without its body, one for `/large`
+/// with 64 MiB.
 fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
     let server = Server::listen("127.0.0.1:0", limits, 4).unwrap();
     let address = server.server_addr();
@@ -39,8 +42,17 @@ fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
                     request.respond(Response::from_data(vec![0u8; 64 << 20]));
                     continue;
                 }
-                "/hold" => drop(told.held.as_ref().map(mpsc::Receiver::recv)),
+                "/hold" => {
+                    if let Some(taken) = &told.taken {
+                        let _ = taken.send(());
+                    }
+                    let _ = told.held.as_ref().map(mpsc::Receiver::recv);
+                }
                 _ => {}
+            }
+            if !request.received() {
+                request.receive(BODY);
+                continue;
             }
             let mut body = Vec::new();
             let answer = match request.body(BODY).read_to_end(&mut body) {
@@ -51,6 +63,7 @@ fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
                 Err(error) => {
                     let status = match error.kind() {
                         std::io::ErrorKind::FileTooLarge => 413,
+                        std::io::ErrorKind::StorageFull => 503,
                         _ => 408,
                     };
                     Response::from_string(format!("{:?}", error.kind())).with_status_code(status)
@@ -62,11 +75,16 @@ fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
     address
 }
 
+/// A head has `grace`; a body and a response are to move a thousand
+/// bytes in each `grace` that passes.
 fn within(grace: Duration) -> Limits {
     Limits {
         grace,
-        per_mib: Duration::from_secs(1),
+        window: grace,
+        floor: 1000,
         linger: LINGER.min(grace),
+        each: 2,
+        spool: 4 * BODY,
     }
 }
 
@@ -251,4 +269,46 @@ fn a_connection_above_the_limit_is_not_taken() {
         assert!(Instant::now() < until, "no connection is taken again");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// The connections of an address are counted for it, those of the
+/// network of a host for IPv6, and those of this host for nobody.
+#[test]
+fn an_address_has_so_many_connections_open_and_no_more() {
+    let shared = Arc::new(Shared {
+        waiting: Mutex::default(),
+        arrived: Condvar::new(),
+        open: AtomicUsize::new(0),
+        from: Mutex::default(),
+        held: Arc::default(),
+        limits: within(GRACE),
+    });
+    let open = |address: &str| shared.open(address.parse().unwrap(), 8);
+    let two = [open("203.0.113.7"), open("::ffff:203.0.113.7")];
+    assert!(two.iter().all(Option::is_some));
+    assert!(open("203.0.113.7").is_none());
+    let other = [
+        open("203.0.113.8"),
+        open("2001:db8::1"),
+        open("2001:db8::2"),
+    ];
+    assert!(other.iter().all(Option::is_some));
+    assert!(open("2001:db8:0:0:1::").is_none());
+    assert!(open("2001:db8:0:1::1").is_some());
+    assert!(open("fe80::1").is_some() && open("fe80::2").is_some());
+    drop(two);
+    assert!(open("203.0.113.7").is_some());
+    // a proxy on this host stands for everybody behind it
+    let local: Vec<_> = (0..4)
+        .map(|_| open("127.0.0.1"))
+        .chain([open("::1")])
+        .collect();
+    assert!(local.iter().all(Option::is_some));
+    // and all of them together are within what the server takes
+    assert_eq!(shared.open.load(Ordering::Acquire), 8);
+    assert!(open("127.0.0.1").is_none() && open("198.51.100.1").is_none());
+    assert_eq!(shared.open.load(Ordering::Acquire), 8);
+    drop((other, local));
+    assert_eq!(shared.open.load(Ordering::Acquire), 0);
+    assert!(shared.from.lock().unwrap().is_empty());
 }

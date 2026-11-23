@@ -1,15 +1,18 @@
 //! HTTP/1.1 as `altd-server` speaks it, over the standard library alone.
 //!
 //! Every connection has a thread of its own that reads the heads of its
-//! requests and writes the answers to them; a request whose head is read
-//! waits for one of the workers, which reads its body and makes the
-//! answer. So a worker waits for a peer while the body comes and at no
-//! other time, and there no longer than a body of that size is given
-//! (see [`paced`]): not for a head, not for a peer to take an answer,
-//! not for a connection to end. A connection that sends nothing, or
-//! sends or reads slowly, keeps its own thread, and is let go of when
-//! its time is over. The connections open at once have a limit, and one
-//! above it is not taken.
+//! requests, receives their bodies and writes the answers to them; a
+//! request waits for one of the workers with its head read, and again
+//! with its body received when its handler asked for that. So a worker
+//! waits for no peer: not for a head, not for a body, not for a peer to
+//! take an answer, not for a connection to end.
+//!
+//! What a peer keeps is its connection and the thread of it, for as long
+//! as it goes on with what it is doing (see [`paced`]), and the file its
+//! body is received into or its answer is sent from. Those have limits
+//! of their own: the connections open at once, of which an address may
+//! have so many, and the bytes of the bodies received. A connection
+//! above a limit is not taken.
 //!
 //! TLS is in front of this, with whatever else a public listener needs.
 
@@ -18,10 +21,10 @@ mod paced;
 mod request;
 mod response;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -42,6 +45,10 @@ struct Shared {
     waiting: Mutex<Waiting>,
     arrived: Condvar,
     open: AtomicUsize,
+    /// the connections open from each address that has a limit
+    from: Mutex<HashMap<IpAddr, usize>>,
+    /// the bytes of the bodies received and still held
+    held: Arc<AtomicU64>,
     limits: Limits,
 }
 
@@ -50,12 +57,68 @@ pub(crate) struct Server {
     shared: Arc<Shared>,
 }
 
-/// One of the connections that are open, for as long as it is.
-struct Open(Arc<Shared>);
+/// One of the connections that are open, for as long as it is, and the
+/// address it counts for.
+struct Open(Arc<Shared>, Option<IpAddr>);
 
 impl Drop for Open {
     fn drop(&mut self) {
         self.0.open.fetch_sub(1, Ordering::AcqRel);
+        if let Some(address) = self.1 {
+            let mut from = self.0.from.lock().expect("addresses");
+            if let Some(open) = from.get_mut(&address) {
+                *open -= 1;
+                if *open == 0 {
+                    from.remove(&address);
+                }
+            }
+        }
+    }
+}
+
+/// What the connections of `peer` are counted under: nothing for this
+/// host, the address for IPv4 and on the link, the network of a host for
+/// IPv6 elsewhere.
+fn counted(peer: IpAddr) -> Option<IpAddr> {
+    let peer = match peer {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(peer, IpAddr::V4),
+        v4 => v4,
+    };
+    match peer {
+        _ if peer.is_loopback() => None,
+        // the hosts of the link the server is on share their first 64 bits
+        IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => Some(peer),
+        IpAddr::V6(v6) => Some(IpAddr::V6((u128::from(v6) >> 64 << 64).into())),
+        v4 => Some(v4),
+    }
+}
+
+impl Shared {
+    /// Counts a connection from `peer` in, where the server and the
+    /// address have room for one more.
+    fn open(self: &Arc<Self>, peer: IpAddr, most: usize) -> Option<Open> {
+        if self.open.fetch_add(1, Ordering::AcqRel) >= most {
+            drop(Open(Arc::clone(self), None));
+            return None;
+        }
+        let address = counted(peer);
+        if let Some(address) = address {
+            let mut from = self.from.lock().expect("addresses");
+            let open = from.entry(address).or_insert(0);
+            if *open >= self.limits.each {
+                drop(from);
+                drop(Open(Arc::clone(self), None));
+                return None;
+            }
+            *open += 1;
+        }
+        Some(Open(Arc::clone(self), address))
+    }
+
+    fn enqueue(&self, request: Request) {
+        let mut waiting = self.waiting.lock().expect("requests");
+        waiting.requests.push_back(request);
+        self.arrived.notify_one();
     }
 }
 
@@ -68,6 +131,8 @@ impl Server {
             waiting: Mutex::default(),
             arrived: Condvar::new(),
             open: AtomicUsize::new(0),
+            from: Mutex::default(),
+            held: Arc::default(),
             limits,
         });
         let server = Server {
@@ -88,11 +153,10 @@ impl Server {
                         continue;
                     };
                     pause = Duration::ZERO;
-                    if shared.open.fetch_add(1, Ordering::AcqRel) >= most {
-                        drop(Open(Arc::clone(&shared)));
+                    let peer = stream.peer_addr().ok();
+                    let Some(open) = peer.and_then(|peer| shared.open(peer.ip(), most)) else {
                         continue;
-                    }
-                    let open = Open(Arc::clone(&shared));
+                    };
                     let serve = move || connection(open, stream);
                     let thread = std::thread::Builder::new().stack_size(256 * 1024);
                     // one that cannot be started lets go of the connection
@@ -155,16 +219,22 @@ fn connection(open: Open, stream: TcpStream) {
             }
         };
         let (back, returned) = mpsc::channel();
-        let request = Request::new(head, source, back);
-        shared
-            .waiting
-            .lock()
-            .expect("requests")
-            .requests
-            .push_back(request);
-        shared.arrived.notify_one();
-        let Ok((back, answer)) = returned.recv() else {
-            return;
+        shared.enqueue(Request::new(head, source, back));
+        let (back, answer) = loop {
+            match returned.recv() {
+                Ok(request::Back::Answer(source, answer)) => break (source, answer),
+                Ok(request::Back::Receive(mut request, most)) => {
+                    // one whose body has no file to go to is let go of,
+                    // and answers itself
+                    if request
+                        .spool(most, &shared.held, shared.limits.spool)
+                        .is_ok()
+                    {
+                        shared.enqueue(*request);
+                    }
+                }
+                Err(_) => return,
+            }
         };
         source = back;
         let last = answer.last;

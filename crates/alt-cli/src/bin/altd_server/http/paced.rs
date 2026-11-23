@@ -1,49 +1,48 @@
-//! A connection read and written within the time its peer is given.
+//! A connection read and written for as long as its peer goes on.
 //!
 //! Each thing a peer does has a time of its own, counted from when the
 //! server turns to it, never from when the peer could have begun:
 //!
 //! - the head of a request has `grace`, whole;
-//! - a body has `grace` and [`Limits::per_mib`] for each MiB of it that
-//!   has come, so that one of `n` MiB is over, read or given up, within
-//!   `grace + n * per_mib` of the first read of it. Every byte on the
-//!   wire is counted against the bytes the body may have: chunk lines,
-//!   their extensions and trailers too;
-//! - a response has the same for each MiB written of it.
+//! - a body and a response have no time in all. They are gone on with
+//!   while they move: in each [`Limits::window`] that passes, no fewer
+//!   than [`Limits::floor`] bytes. A peer on a slow line is as slow as its
+//!   line and is not let go of for it; one that stalls, or lets through a
+//!   byte now and then, is, within two windows of when it began to.
 //!
-//! No single read or write waits longer than `grace`. A peer that stalls
-//! or falls behind is let go of, and with it the thread that waited.
+//! What a slow peer keeps is its connection and the thread of it, never
+//! a worker: see [`super`] for what bounds those.
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-/// The times peers are given.
+/// What peers are given.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Limits {
-    /// for the head of a request, and for anything to begin with
+    /// for the head of a request
     pub(crate) grace: Duration,
-    /// for each MiB of a body or of a response
-    pub(crate) per_mib: Duration,
+    /// the time in which a body or a response has to move
+    pub(crate) window: Duration,
+    /// the bytes it has to move in that time
+    pub(crate) floor: u64,
     /// for what a peer still sends on a connection that is being ended
     pub(crate) linger: Duration,
+    /// the connections one address may have open at once; one of this
+    /// host has no limit, a proxy in front of the server being one
+    pub(crate) each: usize,
+    /// the bytes of bodies received and not yet let go of by their
+    /// requests, all together
+    pub(crate) spool: u64,
 }
 
-impl Limits {
-    /// How long a body or a response may take in all once `moved` bytes
-    /// of it have gone.
-    pub(super) fn allowed(&self, moved: u64) -> Duration {
-        let nanos = self.per_mib.as_nanos().saturating_mul(u128::from(moved)) >> 20;
-        let earned = Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX));
-        self.grace.saturating_add(earned)
-    }
-}
-
-/// How long a peer has had for what it is doing now, and what it moved.
+/// How a peer does at what it is doing now.
 struct Pace {
+    /// when the window began
     since: Instant,
+    /// what moved in it
     moved: u64,
-    /// what is moved buys no time: the head of a request
+    /// the head of a request: all of it within the grace
     flat: bool,
 }
 
@@ -56,21 +55,32 @@ impl Pace {
         }
     }
 
-    /// The longest the next read or write may wait.
-    fn wait(&self, limits: &Limits) -> io::Result<Duration> {
-        let allowed = limits.allowed(if self.flat { 0 } else { self.moved });
-        match allowed.checked_sub(self.since.elapsed()) {
-            Some(left) if !left.is_zero() => Ok(left.min(limits.grace)),
-            _ => Err(io::ErrorKind::TimedOut.into()),
+    /// The longest the next read or write may wait: to the end of the
+    /// window, where what moved in it is looked at.
+    fn wait(&mut self, limits: &Limits) -> io::Result<Duration> {
+        let whole = if self.flat {
+            limits.grace
+        } else {
+            limits.window
+        };
+        if self.since.elapsed() >= whole {
+            if self.flat || self.moved < limits.floor {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            *self = Pace::new(false);
         }
+        Ok(whole
+            .saturating_sub(self.since.elapsed())
+            .max(Duration::from_millis(1)))
     }
 }
 
-fn timed_out(error: io::Error) -> io::Error {
-    match error.kind() {
-        io::ErrorKind::WouldBlock => io::ErrorKind::TimedOut.into(),
-        _ => error,
-    }
+/// Whether `error` is that of a read or a write that waited its time out.
+fn waited_out(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 /// The bytes a peer sends: those read ahead of where the request is, then
@@ -133,15 +143,25 @@ impl Source {
             self.held.drain(..self.at);
             self.at = 0;
         }
-        let wait = self.pace.wait(&self.limits)?;
-        self.stream.set_read_timeout(Some(wait))?;
+        let limits = self.limits;
         let had = self.held.len();
-        self.held.resize(had + 16 * 1024, 0);
-        let read = self.stream.read(&mut self.held[had..]);
-        self.held.truncate(had + *read.as_ref().unwrap_or(&0));
-        let read = read.map_err(timed_out)?;
-        self.pace.moved += read as u64;
-        Ok(read)
+        // a read that waited to the end of a window is no end: what
+        // moved in the window is looked at, and the next begins
+        loop {
+            let wait = self.pace.wait(&limits)?;
+            self.stream.set_read_timeout(Some(wait))?;
+            self.held.resize(had + 16 * 1024, 0);
+            let read = self.stream.read(&mut self.held[had..]);
+            self.held.truncate(had + *read.as_ref().unwrap_or(&0));
+            match read {
+                Ok(read) => {
+                    self.pace.moved += read as u64;
+                    return Ok(read);
+                }
+                Err(error) if waited_out(&error) => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// One byte, or the end of what the peer sends as an error.
@@ -160,7 +180,10 @@ impl Source {
         while !rest.is_empty() {
             let wait = sent.0.wait(&self.limits)?;
             self.stream.set_write_timeout(Some(wait))?;
-            let wrote = self.stream.write(rest).map_err(timed_out)?;
+            let wrote = match self.stream.write(rest) {
+                Err(error) if waited_out(&error) => continue,
+                wrote => wrote?,
+            };
             if wrote == 0 {
                 return Err(io::ErrorKind::WriteZero.into());
             }
@@ -219,42 +242,43 @@ mod tests {
 
     const LIMITS: Limits = Limits {
         grace: Duration::from_secs(20),
-        per_mib: Duration::from_secs(8),
+        window: Duration::from_secs(30),
+        floor: 30 << 10,
         linger: Duration::from_secs(2),
+        each: 64,
+        spool: 4 << 30,
     };
 
     #[test]
-    fn a_body_is_over_within_the_grace_and_the_time_of_its_mibs_whatever_its_peer_does() {
-        assert_eq!(LIMITS.allowed(0), Duration::from_secs(20));
-        assert_eq!(LIMITS.allowed(1 << 20), Duration::from_secs(28));
-        assert_eq!(LIMITS.allowed(64 << 20), Duration::from_secs(20 + 8 * 64));
-        assert_eq!(LIMITS.allowed(1 << 19), Duration::from_secs(24));
-        assert!(LIMITS.allowed(u64::MAX) >= LIMITS.allowed(1 << 40));
-
+    fn a_body_goes_on_while_it_moves_and_is_over_in_the_window_in_which_it_does_not() {
         let mut pace = Pace::new(false);
-        assert!(pace.wait(&LIMITS).unwrap() <= LIMITS.grace);
-        // nothing moved in more than the grace
-        pace.since = Instant::now() - Duration::from_secs(21);
-        let late = pace.wait(&LIMITS).unwrap_err();
-        assert_eq!(late.kind(), io::ErrorKind::TimedOut);
-        // a quarter of a MiB is two seconds more
-        pace.moved = 1 << 18;
-        let left = pace.wait(&LIMITS).unwrap();
-        assert!(left <= Duration::from_secs(1) && left > Duration::from_millis(900));
-        pace.since = Instant::now() - Duration::from_secs(23);
-        assert!(pace.wait(&LIMITS).is_err());
-        // a GiB long ago: what it bought is not waited for in one go
-        pace.moved = 1 << 30;
-        assert_eq!(pace.wait(&LIMITS).unwrap(), LIMITS.grace);
-        // and all of it is over when the time of a GiB is
-        pace.since = Instant::now() - LIMITS.allowed(1 << 30);
-        assert!(pace.wait(&LIMITS).is_err());
+        assert!(pace.wait(&LIMITS).unwrap() <= LIMITS.window);
+        // a window that ends with enough moved in it begins another, and
+        // that for as long as the peer keeps it up: a day of windows here
+        for _ in 0..2880 {
+            pace.moved = LIMITS.floor;
+            pace.since = Instant::now() - LIMITS.window;
+            let left = pace.wait(&LIMITS).unwrap();
+            assert!(left > Duration::from_secs(29) && pace.moved == 0);
+        }
+        // within a window nothing is asked of what moved
+        pace.since = Instant::now() - Duration::from_secs(29);
+        assert!(pace.wait(&LIMITS).unwrap() <= Duration::from_secs(1));
+        // one byte short at the end of one is the end
+        pace.moved = LIMITS.floor - 1;
+        pace.since = Instant::now() - LIMITS.window;
+        assert_eq!(
+            pace.wait(&LIMITS).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
     }
 
     #[test]
     fn what_comes_of_a_head_buys_it_no_time() {
         let mut pace = Pace::new(true);
         pace.moved = 1 << 30;
+        pace.since = Instant::now() - Duration::from_secs(19);
+        assert!(pace.wait(&LIMITS).unwrap() <= Duration::from_secs(1));
         pace.since = Instant::now() - Duration::from_secs(21);
         assert!(pace.wait(&LIMITS).is_err());
     }

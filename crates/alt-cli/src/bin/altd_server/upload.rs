@@ -34,6 +34,21 @@ pub(super) fn build_options_response(
     resp
 }
 
+pub(super) fn parse_query<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    for chunk in query.split('&') {
+        if let Some((k, v)) = chunk.split_once('=')
+            && k == key
+        {
+            return Some(v);
+        }
+    }
+    None
+}
+
+pub(super) fn header(name: &str, value: &str) -> Header {
+    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("static header literals are valid")
+}
+
 /// POST /git-upload-pack. v2 dispatch on the first `command=…` line:
 /// `ls-refs` and `fetch` both land here. The request body
 /// header is identical (`command=<x>\n` + optional `object-format=…`),

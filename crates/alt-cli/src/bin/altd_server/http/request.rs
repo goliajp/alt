@@ -1,14 +1,18 @@
-//! A request as its handler has it: the head, the body as it comes off
-//! the connection, and the answer that goes back on it.
+//! A request as its handler has it: the head, the body, and the answer
+//! that goes back on the connection.
 //!
-//! A worker waits for the peer in one place, the reads of the body, and
-//! there within the time the body has (see [`super::paced`]), which
-//! begins with the first of those reads: what the request waited for a
-//! worker is not the peer's. The answer is handed back to the thread of
-//! the connection, which writes it and ends the connection where it
-//! has to; the worker is on to its next request by then.
+//! A worker waits for the peer nowhere. A handler that is to read a body
+//! hands the request back first ([`Request::receive`]): the thread of
+//! the connection takes the body off the wire into a file, for as long
+//! as the peer goes on with it (see [`super::paced`]), and the request
+//! comes to a worker again with its body there to be read. The answer is
+//! handed back likewise, to be written by that thread, which ends the
+//! connection where it has to.
 
-use std::io::{self, Read};
+use std::fs::File;
+use std::io::{self, Read, Seek, Write};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
 use super::head::{Framing, Head, Header, Method};
@@ -24,9 +28,36 @@ enum Chunks {
     Over,
 }
 
-/// The body of a request, read off the connection as it is asked for.
+/// A body taken off the wire, and what ended the taking where it did
+/// not come whole. Its bytes count against what bodies may take between
+/// them for as long as this is there.
+struct Spool {
+    file: File,
+    _dir: alt_os::temp::TempDir,
+    failed: Option<io::Error>,
+    bytes: u64,
+    of: Arc<AtomicU64>,
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        self.of.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+/// What a request hands to the thread of its connection.
+pub(super) enum Back {
+    /// the answer, with the connection it goes out on
+    Answer(Source, Outgoing),
+    /// the request, for its body to be received within so many bytes
+    Receive(Box<Request>, u64),
+}
+
+/// The body of a request, read off the connection or out of the file it
+/// was received into.
 struct Body {
     source: Source,
+    spool: Option<Spool>,
     /// the bytes on the wire it may have
     most: u64,
     left: u64,
@@ -102,6 +133,58 @@ impl Body {
 
 impl Read for Body {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let Some(spool) = &mut self.spool else {
+            return self.wire(buf);
+        };
+        match spool.file.read(buf)? {
+            0 => spool.failed.take().map_or(Ok(0), Err),
+            read => Ok(read),
+        }
+    }
+}
+
+impl Body {
+    /// Takes the body off the wire, `most` bytes of it at most, into a
+    /// file. `held` is what the bodies received take between them, of
+    /// which there may be `room`.
+    fn receive(&mut self, most: u64, held: &Arc<AtomicU64>, room: u64) -> io::Result<()> {
+        self.most = self.most.min(most);
+        let dir = alt_os::temp::tempdir()?;
+        let mut file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(dir.path().join("body"))?;
+        let mut spool = Spool {
+            file: file.try_clone()?,
+            _dir: dir,
+            failed: None,
+            bytes: 0,
+            of: Arc::clone(held),
+        };
+        let mut piece = vec![0u8; 64 * 1024];
+        spool.failed = loop {
+            match self.wire(&mut piece) {
+                Ok(0) => break None,
+                Ok(read) => {
+                    spool.bytes += read as u64;
+                    if held.fetch_add(read as u64, Ordering::AcqRel) + read as u64 > room {
+                        break Some(io::ErrorKind::StorageFull.into());
+                    }
+                    if let Err(error) = file.write_all(&piece[..read]) {
+                        break Some(error);
+                    }
+                }
+                Err(error) => break Some(error),
+            }
+        };
+        spool.file.rewind()?;
+        self.spool = Some(spool);
+        Ok(())
+    }
+
+    /// The next of the body off the wire.
+    fn wire(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.over() || buf.is_empty() {
             return Ok(0);
         }
@@ -136,14 +219,15 @@ pub(crate) struct Request {
     head: Head,
     /// nothing once the request is answered
     body: Option<Body>,
-    /// the connection and what is to be written on it
-    back: Sender<(Source, Outgoing)>,
+    /// to the thread of the connection
+    back: Sender<Back>,
 }
 
 impl Request {
-    pub(super) fn new(head: Head, source: Source, back: Sender<(Source, Outgoing)>) -> Self {
+    pub(super) fn new(head: Head, source: Source, back: Sender<Back>) -> Self {
         let body = Body {
             source,
+            spool: None,
             most: u64::MAX,
             left: match head.framing {
                 Framing::Length(length) => length,
@@ -180,8 +264,32 @@ impl Request {
         }
     }
 
-    /// The body, which may take `most` bytes on the wire, framing and
-    /// all: reading past them is an error. The first call decides.
+    /// Whether the body is there to be read without a wait for the peer:
+    /// received, or none.
+    pub(crate) fn received(&self) -> bool {
+        let body = self.body.as_ref().expect("a request not yet answered");
+        body.spool.is_some() || body.over()
+    }
+
+    /// Hands the request to the thread of its connection, to come to a
+    /// worker again once its body is received. The body may take `most`
+    /// bytes on the wire, framing and all; one that takes more, ends
+    /// early or stops coming is received as far as it went, and reading
+    /// it ends in the error.
+    pub(crate) fn receive(self, most: u64) {
+        let back = self.back.clone();
+        // the thread is gone where its connection is
+        let _ = back.send(Back::Receive(Box::new(self), most));
+    }
+
+    /// Receives the body: see [`Self::receive`].
+    pub(super) fn spool(&mut self, most: u64, held: &Arc<AtomicU64>, room: u64) -> io::Result<()> {
+        let body = self.body.as_mut().expect("a request not yet answered");
+        body.receive(most, held, room)
+    }
+
+    /// The body. Where it was not received it is read off the wire, and
+    /// may take `most` bytes there: reading past them is an error.
     pub(crate) fn body(&mut self, most: u64) -> &mut dyn Read {
         let body = self.body.as_mut().expect("a request not yet answered");
         if body.untouched {
@@ -206,9 +314,8 @@ impl Request {
         let last = self.head.last || !body.over();
         let bodiless = self.head.method == Method::Head;
         // the thread is gone where its connection is
-        let _ = self
-            .back
-            .send((body.source, response.outgoing(last, bodiless)));
+        let answer = Back::Answer(body.source, response.outgoing(last, bodiless));
+        let _ = self.back.send(answer);
     }
 }
 

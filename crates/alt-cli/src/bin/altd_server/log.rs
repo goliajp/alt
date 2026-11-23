@@ -9,6 +9,8 @@ use super::*;
 #[derive(Default)]
 pub(super) struct LogCtx {
     pub(super) status: u16,
+    /// the request was handed back for its body and is not over
+    pub(super) deferred: bool,
     pub(super) bytes_in: u64,
     /// response body byte count when the encoder knows the
     /// length up front (the common path — `Response::from_data`,

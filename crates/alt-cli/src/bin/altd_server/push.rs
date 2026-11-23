@@ -12,7 +12,7 @@ pub(super) fn read_push(
     req: &mut http::Request,
     max: u64,
     pack: &std::path::Path,
-) -> Result<(alt_wire::push::PushHead, u64), String> {
+) -> Result<(alt_wire::push::PushHead, u64), (u16, String)> {
     use std::io::Read;
     let gzipped = req
         .headers()
@@ -30,13 +30,13 @@ pub(super) fn read_push(
     // the commands are held in memory: they get a cap of their own
     let mut commands = (&mut reader).take(max_command_bytes());
     let head = alt_wire::push::parse_push_request_head(&mut commands, HashAlgo::Sha1)
-        .map_err(|e| format!("{e}"))?;
-    let mut tmp = std::fs::File::create(pack).map_err(|e| format!("tempfile: {e}"))?;
+        .map_err(|e| (400, format!("{e}")))?;
+    let mut tmp = std::fs::File::create(pack).map_err(|e| (500, format!("tempfile: {e}")))?;
     // the cap is on what the body inflates to as well: a gzip body is
     // counted as it is written out. Not synced: the file is gone when
     // the request is over
     let n = std::io::copy(&mut (&mut reader).take(over), &mut tmp)
-        .map_err(|e| format!("stream pack: {e}"))?;
+        .map_err(|e| (limits::refusal(&e), format!("stream pack: {e}")))?;
     Ok((head, n))
 }
 
@@ -83,8 +83,8 @@ pub(super) fn handle_receive_pack(
     let parse_outcome = read_push(&mut req, max, &pack_tmp_path);
     let (head, pack_bytes_streamed) = match parse_outcome {
         Ok(t) => t,
-        Err(reason) => {
-            let r = Response::from_string(reason).with_status_code(StatusCode(400));
+        Err((status, reason)) => {
+            let r = Response::from_string(reason).with_status_code(StatusCode(status));
             respond_logged(req, r, log)?;
             return Ok(());
         }
