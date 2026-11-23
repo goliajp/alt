@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: end the wait for a server that should not have started, and for curl, after a time
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_told.rs
+touched: crates/alt-cli/tests/it/altd_server_wants.rs
