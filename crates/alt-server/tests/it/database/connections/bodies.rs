@@ -17,7 +17,7 @@ fn health(server: &Running) -> u16 {
     }
 }
 
-fn connect(server: &Running) -> (TcpStream, BufReader<TcpStream>) {
+pub(super) fn connect(server: &Running) -> (TcpStream, BufReader<TcpStream>) {
     let socket = TcpStream::connect(server.url.strip_prefix("http://").unwrap()).unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(30)))
@@ -27,7 +27,7 @@ fn connect(server: &Running) -> (TcpStream, BufReader<TcpStream>) {
 }
 
 /// The status line of the next response and its body.
-fn answer(reader: &mut BufReader<TcpStream>) -> (String, String) {
+pub(super) fn answer(reader: &mut BufReader<TcpStream>) -> (String, String) {
     let mut status = String::new();
     reader.read_line(&mut status).unwrap();
     let mut length = 0;
@@ -51,7 +51,7 @@ fn answer(reader: &mut BufReader<TcpStream>) -> (String, String) {
 }
 
 /// Reads the interim response that tells a client to send its body.
-fn gone_on(reader: &mut BufReader<TcpStream>) {
+pub(super) fn gone_on(reader: &mut BufReader<TcpStream>) {
     let mut go_on = String::new();
     reader.read_line(&mut go_on).unwrap();
     assert!(go_on.starts_with("HTTP/1.1 100"), "{go_on}");
@@ -96,6 +96,11 @@ fn a_body_that_does_not_come_keeps_no_worker_and_a_caller_has_so_many_under_way(
 
 /// A push of one commit to `refs/heads/queued`, as the bytes of its request body.
 fn push_body(f: &Fixture) -> Vec<u8> {
+    push_of(f, b"queued\n")
+}
+
+/// the same push, of a commit whose one file has this content
+pub(super) fn push_of(f: &Fixture, content: &[u8]) -> Vec<u8> {
     let temp = alt_os::temp::tempdir().unwrap();
     ok(
         temp.path(),
@@ -103,7 +108,7 @@ fn push_body(f: &Fixture) -> Vec<u8> {
         &["init", "-q", "--initial-branch=main"],
     );
     identity(temp.path(), &f.token);
-    std::fs::write(temp.path().join("file"), "queued\n").unwrap();
+    std::fs::write(temp.path().join("file"), content).unwrap();
     ok(temp.path(), &f.token, &["add", "file"]);
     ok(temp.path(), &f.token, &["commit", "-qm", "queued"]);
     let commit = text(ok(temp.path(), &f.token, &["rev-parse", "HEAD"]));
@@ -127,7 +132,7 @@ fn push_body(f: &Fixture) -> Vec<u8> {
     body
 }
 
-fn queued_refs(f: &Fixture) -> i64 {
+pub(super) fn queued_refs(f: &Fixture) -> i64 {
     let count = "SELECT count(*) FROM alt_refs WHERE name='refs/heads/queued'";
     f.client().query_one(count, &[]).unwrap().get(0)
 }

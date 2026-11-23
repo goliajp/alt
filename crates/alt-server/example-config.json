@@ -53,7 +53,7 @@
     "header_bytes": 16384,
     "headers": 64,
     "header_timeout_ms": 5000,
-    "body_timeout_ms": 60000,
+    "body_timeout_ms": 30000,
     "work_timeout_ms": 30000,
     "connection_timeout_ms": 120000,
     "database_connect_timeout_ms": 5000,

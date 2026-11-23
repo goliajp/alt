@@ -1,34 +1,44 @@
 //! A request body received into a bounded temporary file.
 //!
-//! A body has the time bodies are given, as a whole, and has to keep coming: in
-//! each [`WINDOW`] that passes, [`RATE`] bytes a second on average. One that stalls
-//! is given up within two of those, however fast it came before; one that is as
-//! slow as its line and goes on has all the time bodies are given.
+//! A body has to keep coming: in each window that passes, [`RATE`] bytes a second
+//! on average. The window is the time the configuration gives a body to move in.
+//! A body that stalls is given up within two windows, however fast it came
+//! before; one that is as slow as its line and goes on is received whole, however
+//! long that takes. It keeps no worker meanwhile, and what callers and the
+//! instance may have under way at once is bounded where bodies are counted.
 use super::*;
 
 /// the bytes a second a body has to average over a window
 const RATE: u64 = 1024;
-/// the time in which a body has to have moved
-const WINDOW: Duration = Duration::from_secs(30);
+
+/// the least that has to move in a window of this length
+pub(super) fn least(window: Duration) -> u64 {
+    (RATE as u128 * window.as_millis() / 1000) as u64
+}
 
 /// Whether a body goes on: what came of it in the window that is running.
 struct Progress {
+    window: Duration,
     until: tokio::time::Instant,
     moved: u64,
 }
 impl Progress {
-    fn from(now: tokio::time::Instant) -> Self {
-        let (until, moved) = (now + WINDOW, 0);
-        Progress { until, moved }
+    fn from(now: tokio::time::Instant, window: Duration) -> Self {
+        let (until, moved) = (now + window, 0);
+        Progress {
+            window,
+            until,
+            moved,
+        }
     }
     /// The end of the window `now` is in. Where the one before is just over, too
     /// little having come in it is the end of the body.
     fn window(&mut self, now: tokio::time::Instant) -> Result<tokio::time::Instant, BodyError> {
         if now >= self.until {
-            if self.moved < RATE * WINDOW.as_secs() {
+            if self.moved < least(self.window) {
                 return Err(BodyError::Slow);
             }
-            *self = Progress::from(now);
+            *self = Progress::from(now, self.window);
         }
         Ok(self.until)
     }
@@ -38,7 +48,7 @@ pub(super) enum BodyError {
     Limit,
     Malformed,
     Storage,
-    /// it stalled, or the time of a body is over
+    /// it stalled: too little of it came in a window
     Slow,
     /// the instance holds as many bytes of bodies as it may
     Full,
@@ -65,12 +75,7 @@ pub(super) async fn spool(
     receipt: Receipt<'_>,
 ) -> Result<alt_os::temp::NamedTempFile, BodyError> {
     let mut guard = observation::current().map(|trace| trace.phase(Phase::Upload));
-    let whole = receipt.options.body_timeout;
-    let received = spool_inner(body, max, guard.as_mut(), receipt);
-    let result = match tokio::time::timeout(whole, received).await {
-        Ok(result) => result,
-        Err(_) => Err(BodyError::Slow),
-    };
+    let result = spool_inner(body, max, guard.as_mut(), receipt).await;
     if let Some(guard) = guard {
         guard.finish(match &result {
             Ok(_) => Outcome::Ok,
@@ -90,7 +95,8 @@ async fn spool_inner(
     let temp = alt_os::temp::NamedTempFile::new()?;
     let mut file = tokio::fs::File::from_std(temp.as_file().try_clone()?);
     let mut remaining = max;
-    let mut progress = Progress::from(tokio::time::Instant::now());
+    let window = receipt.options.body_timeout;
+    let mut progress = Progress::from(tokio::time::Instant::now(), window);
     loop {
         // a wait that ends with the window goes on in the next, where
         // enough came in the one that is over
@@ -123,10 +129,12 @@ async fn spool_inner(
 mod tests {
     use super::*;
 
+    const WINDOW: Duration = Duration::from_secs(30);
+
     #[test]
     fn a_body_goes_on_while_it_moves_and_what_came_fast_buys_no_time_to_stall_in() {
         let began = tokio::time::Instant::now();
-        let mut progress = Progress::from(began);
+        let mut progress = Progress::from(began, WINDOW);
         // as slow as it may be, for a day
         let mut now = began;
         for _ in 0..2880 {
@@ -135,7 +143,7 @@ mod tests {
                     .window(now)
                     .is_ok_and(|until| until == now + WINDOW)
             );
-            progress.moved = RATE * WINDOW.as_secs();
+            progress.moved = least(WINDOW);
             now += WINDOW;
         }
         // a GiB in one window, and nothing in the next
@@ -150,8 +158,8 @@ mod tests {
         let stalled = progress.window(now + 2 * WINDOW);
         assert!(matches!(stalled, Err(BodyError::Slow)));
         // one byte short of what a window asks for
-        let mut progress = Progress::from(began);
-        progress.moved = RATE * WINDOW.as_secs() - 1;
+        let mut progress = Progress::from(began, WINDOW);
+        progress.moved = least(WINDOW) - 1;
         assert!(matches!(
             progress.window(began + WINDOW),
             Err(BodyError::Slow)

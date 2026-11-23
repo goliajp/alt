@@ -105,6 +105,14 @@ may run, and is answered `503` with `retry: same_request` when none comes free:
 nothing of it was applied. Requests whose time to upload ran out are ended by the
 running server, which gives back what they had reserved.
 
+`http.body_timeout_ms` is the time a body has to move in, not the time a whole
+body has: in every such window at least 1024 bytes a second have to arrive on
+average. A body that keeps to that is received however long it takes; one that
+stalls is answered `408` within two windows. A response is held to the same pace
+while its reader takes it. `http.connection_timeout_ms` is the time a connection
+has when nothing of a body moves on it, counted again from every piece of a body
+that does.
+
 Enable the configured origin and create a local browser account explicitly:
 
 ```sh
