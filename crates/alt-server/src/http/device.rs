@@ -196,8 +196,15 @@ async fn inner(
                 match store.poll_device_authorization(&digest).map_err(mapped)? {
                     DevicePoll::Waiting(error) => Err(error),
                     DevicePoll::Ready { expires_at_unix_ms } => {
+                        // the code is spent from here on: asking again with it gets
+                        // nothing, so a failure says to begin again, not to wait
                         let token = credential(&factory.signing_key, &digest);
-                        factory.authenticate(&mut store, &token).map_err(mapped)?;
+                        factory
+                            .authenticate(&mut store, &token)
+                            .map_err(|error| match error {
+                                Error::Unauthorized => DeviceError::AccessDenied,
+                                _ => DeviceError::ExpiredToken,
+                            })?;
                         let remaining =
                             expires_at_unix_ms.saturating_sub(crate::cloud::clock()) / 1000;
                         if remaining == 0 {
@@ -209,7 +216,7 @@ async fn inner(
                             expires_in: remaining,
                             scope: CLI_SCOPE.into(),
                         })
-                        .map_err(|_| DeviceError::TemporarilyUnavailable)
+                        .map_err(|_| DeviceError::ExpiredToken)
                     }
                 }
             }
