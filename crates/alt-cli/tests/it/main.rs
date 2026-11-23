@@ -153,6 +153,7 @@ mod step_changed;
 mod step_crash;
 #[cfg(debug_assertions)]
 mod step_given_up;
+#[cfg(debug_assertions)]
 mod step_left;
 #[cfg(debug_assertions)]
 mod step_notes;
