@@ -67,9 +67,13 @@ pub const ATTEMPTS: usize = 4;
 /// order.
 pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
 
-/// Indexes the pack on disk at `path`. Nothing of the store is needed.
-pub fn prepare_pack(path: &std::path::Path) -> Res<PreparedPack> {
-    let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
+/// Indexes the pack on disk at `path`, which may hold what `limits`
+/// allows. Nothing of the store is needed.
+pub fn prepare_pack(
+    path: &std::path::Path,
+    limits: &alt_git_pack::IndexLimits,
+) -> Res<PreparedPack> {
+    let indexed = alt_git_pack::index_pack_within(path, HashAlgo::Sha1, true, limits)?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
     let mut order: Vec<(u64, u32)> = (0..idx.len())

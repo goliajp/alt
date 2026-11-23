@@ -166,6 +166,9 @@ impl GroupCommit {
 }
 
 impl crate::receive::Recorded<u64> for &GroupCommit {
+    // the ticket is handed out with the store still in hand, once the
+    // batch of objects has ended: a sink syncs the odb under the shared
+    // `odb.lock`, and so never between a push's objects and its refs
     fn moved(self) -> u64 {
         self.assign()
     }

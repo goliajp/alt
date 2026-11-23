@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use crate::altd_server::{Server, alt, ok, spawn_server_with_env};
+use crate::altd_server_pack_limits::{git, push, source};
 use crate::daemon_stop::Stop;
 use crate::scan_daemon::daemon_pid;
 
@@ -61,38 +62,6 @@ int fsync(int fd) {
         String::from_utf8_lossy(&built.stderr)
     );
     library
-}
-
-fn git(dir: &Path, args: &[&str]) -> Output {
-    Command::new("git")
-        .current_dir(dir)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(["-c", "user.name=tester", "-c", "user.email=t@e"])
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .output()
-        .unwrap()
-}
-
-/// A git repository beneath `root` with one commit of its own.
-fn source(root: &Path, label: &str) -> PathBuf {
-    let src = root.join(label);
-    fs::create_dir(&src).unwrap();
-    assert!(
-        git(&src, &["init", "-q", "-b", "main", "."])
-            .status
-            .success()
-    );
-    fs::write(src.join("f.txt"), format!("{label}\n")).unwrap();
-    assert!(git(&src, &["add", "."]).status.success());
-    assert!(git(&src, &["commit", "-q", "-m", label]).status.success());
-    src
-}
-
-fn push(src: &Path, url: &str, branch: &str) -> Output {
-    git(src, &["push", url, &format!("HEAD:refs/heads/{branch}")])
 }
 
 /// A repository with one commit beneath `root`, and an `altd-server` of

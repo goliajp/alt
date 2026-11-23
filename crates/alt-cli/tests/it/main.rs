@@ -16,6 +16,7 @@ mod altd_server_connected;
 mod altd_server_landing;
 mod altd_server_left_unsynced;
 mod altd_server_no_new_objects;
+mod altd_server_pack_limits;
 mod altd_server_recorded;
 mod altd_server_refused_objects;
 mod altd_server_signed_commits;

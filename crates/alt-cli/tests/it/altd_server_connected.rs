@@ -263,7 +263,7 @@ fn git_pack(repo: &Path, revs: &str) -> (alt_os::temp::TempDir, alt_cli::receive
         .write_all(revs.as_bytes())
         .unwrap();
     assert!(git.wait().unwrap().success());
-    let prepared = alt_cli::receive::prepare_pack(&path).unwrap();
+    let prepared = alt_cli::receive::prepare_pack(&path, &Default::default()).unwrap();
     (dir, prepared)
 }
 

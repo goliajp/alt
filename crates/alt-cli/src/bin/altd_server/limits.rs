@@ -1,4 +1,5 @@
-//! What a request may bring: the bytes of its body.
+//! What a request may bring: the bytes of its body and what the pack of
+//! a push may inflate to.
 
 /// hard cap on POST request bodies (push pack + upload-pack
 /// command bodies). Bound by `ALT_SERVER_MAX_PUSH_BYTES`; default
@@ -60,4 +61,33 @@ pub(super) fn read_body_capped(
         .into());
     }
     Ok(())
+}
+
+/// How many times the bytes a push may bring its entries and objects may
+/// inflate to, all together, unless `ALT_SERVER_MAX_INFLATED_BYTES` says.
+const INFLATED_TIMES: u64 = 16;
+
+/// What the pack of a push may hold. A pack is as its sender made it:
+/// one small delta can stand for an object of any size, and each of a
+/// million of them for another. No object may inflate to more than a
+/// push may bring ([`max_body_bytes`]), which bounds the memory a push
+/// takes; all of them together to no more than
+/// `ALT_SERVER_MAX_INFLATED_BYTES`, sixteen times that by default, which
+/// bounds the time.
+pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
+    use std::sync::OnceLock;
+    static INFLATED: OnceLock<u64> = OnceLock::new();
+    let object_bytes = max_body_bytes();
+    let inflated_bytes = *INFLATED.get_or_init(|| {
+        std::env::var("ALT_SERVER_MAX_INFLATED_BYTES")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(object_bytes.saturating_mul(INFLATED_TIMES))
+    });
+    alt_git_pack::IndexLimits {
+        object_bytes,
+        inflated_bytes,
+        ..Default::default()
+    }
 }

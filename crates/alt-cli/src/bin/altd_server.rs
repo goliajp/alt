@@ -43,7 +43,7 @@ use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::CommandStatus;
 use auth::{AclRule, AuthOutcome, acl_allows, action_from_request, check_auth};
-use limits::{max_body_bytes, read_body_capped};
+use limits::{max_body_bytes, pack_limits, read_body_capped};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
@@ -1157,10 +1157,7 @@ fn handle_receive_pack(
         return Ok(());
     }
 
-    let pack = (pack_bytes_streamed != 0).then_some(pack_tmp_path.as_path());
-    // the ticket is handed out with the store still in hand, once the
-    // batch of objects has ended: a sink syncs the odb under the shared
-    // `odb.lock`, and so never between a push's objects and its refs
+    let pack = (pack_bytes_streamed != 0).then(|| (pack_tmp_path.as_path(), pack_limits()));
     // nothing is appended behind what a failed sync left in doubt
     let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
     let (unpack_result, moved) = match sig_block.or(stopped) {
