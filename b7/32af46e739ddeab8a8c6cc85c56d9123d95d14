@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: have the packs indexed at once take their memory out of one amount, and wait for it
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/delta.rs
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/memory.rs
+touched: crates/alt-git-pack/src/index_pack/scan.rs
+touched: crates/alt-git-pack/src/index_pack/thin.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/index_memory.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
+touched: crates/alt-git-pack/tests/it/main.rs
