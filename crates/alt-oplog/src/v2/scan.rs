@@ -95,6 +95,20 @@ impl Walk<'_> {
         Some((at + BLOCK_HEADER_LEN as u64, Some(header)))
     }
 
+    /// The frame `bytes` are after the frames `state` stands for, read
+    /// under the generation it is of, which `seed` is kept at: a
+    /// checkpoint names the generation it and what follows are of.
+    fn read<'a>(&self, bytes: &'a [u8], state: &State, seed: &mut (u32, Seed)) -> Option<View<'a>> {
+        let generation = match bytes.first()? {
+            &KIND_CHECKPOINT => generation_of(bytes.get(body_at(bytes.first_chunk()?)..)?)?,
+            _ => state.generation,
+        };
+        if generation != seed.0 {
+            *seed = (generation, Seed::new(&self.layout.id, generation));
+        }
+        parse(&seed.1, bytes)
+    }
+
     /// Reads the frames that follow `state` and takes each into it, then
     /// hands it to `each` with where it starts and ends.
     pub fn run(
@@ -132,18 +146,7 @@ impl Walk<'_> {
             let Some((bytes, end)) = lifted else {
                 return Ok(Stop::Unread);
             };
-            // a checkpoint names the generation it and what follows are of
-            let generation = match bytes[0] {
-                KIND_CHECKPOINT => generation_of(&bytes[body_at(bytes.first_chunk().unwrap())..]),
-                _ => Some(state.generation),
-            };
-            if generation != Some(seed.0) {
-                let Some(generation) = generation else {
-                    return Ok(Stop::Unread);
-                };
-                seed = (generation, Seed::new(&self.layout.id, generation));
-            }
-            let Some(view) = parse(&seed.1, &bytes) else {
+            let Some(view) = self.read(&bytes, state, &mut seed) else {
                 return Ok(Stop::Unread);
             };
             let kind = view.head.kind;

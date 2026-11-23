@@ -139,17 +139,11 @@ pub(crate) fn salvage(
         found.covered += state.end - state.last;
         found.claim = found.claim.max(state.synced);
         found.first = earlier(found.first, Some(state.last));
-        let walked = walk_file(
-            read,
-            layout,
-            &mut state,
-            limit,
-            false,
-            &mut |at, end, view| {
-                found.note(at, end, view);
-                Ok(())
-            },
-        );
+        let mut each = |at: u64, end: u64, view: &View| {
+            found.note(at, end, view);
+            Ok(())
+        };
+        let walked = walk_file(read, layout, &mut state, limit, false, &mut each);
         // frames that do not follow one another end a walk as bytes do
         if let Err(OpLogError::Io(e)) = walked {
             return Err(e);
