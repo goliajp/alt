@@ -19,7 +19,10 @@ pub use adler32::adler32;
 pub use blake2b::Blake2b;
 pub use crc32::{Crc32, crc32};
 pub use hmac::{HmacSha256, hmac_sha256, pbkdf2_hmac_sha256};
-pub use ident::{IdBuildHasher, IdHasher, IdMap, IdSet};
+pub use ident::{
+    IdBuildHasher, IdHasher, IdMap, IdSet, KeyedIdBuildHasher, KeyedIdHasher, KeyedIdMap,
+    KeyedIdSet,
+};
 pub use sha1::{Sha1, sha1};
 pub use sha1_many::{Parts, sha1_many};
 pub use sha256::{Sha256, sha256};
