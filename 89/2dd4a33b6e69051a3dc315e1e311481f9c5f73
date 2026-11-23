@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: put a stash on top of the entry another workspace put on the stack meanwhile
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/stash/save.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/stash_concurrent.rs
