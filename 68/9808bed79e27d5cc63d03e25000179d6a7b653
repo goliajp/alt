@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the row of a cloud instance's authority and the authority of a repository in files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/cloud.rs
+touched: crates/alt-server-store/src/cloud/held.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/repository_authority.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server/src/http/web/execute.rs
