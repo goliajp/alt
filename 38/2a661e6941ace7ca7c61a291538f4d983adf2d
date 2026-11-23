@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: read no ref by a name that leads out of the git directory
+author-type: human
+author: doracawl
+touched: crates/alt-git-refs/src/lib.rs
+touched: crates/alt-git-refs/tests/it/main.rs
+touched: crates/alt-git-refs/tests/it/refs_names.rs
