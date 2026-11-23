@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: index the packs of pushes within one amount of memory for the server
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_connected.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
