@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: receive the body of a request on its connection, and go on with a peer for as long as it moves
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/log.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
