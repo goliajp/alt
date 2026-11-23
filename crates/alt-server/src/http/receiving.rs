@@ -1,0 +1,213 @@
+//! The bodies of requests while they are received: no worker is held for one.
+//!
+//! A worker is what a request runs on, and there are few. A body that is slow to
+//! come would keep one for as long as a body is given, so a request has none while
+//! its body is received: it had one to be authorized, gave it back, and waits for
+//! one again when the body is whole. That wait is the request's own, up to the time
+//! a request may run: a push that was sent in full is not turned away because the
+//! instance happened to be busy at that moment.
+//!
+//! What is bounded instead is the receiving itself: how many bodies one caller has
+//! under way at once, and how many bytes of bodies the instance holds that no
+//! worker has taken yet. A caller is an account, or an address where nobody has
+//! signed in.
+
+use super::*;
+use std::{
+    collections::HashMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+use tokio::sync::OwnedSemaphorePermit;
+
+pub(super) struct Receiving {
+    callers: Mutex<HashMap<String, usize>>,
+    bytes: AtomicU64,
+    each: usize,
+    most: u64,
+}
+
+/// why a body is not received
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Full {
+    /// the caller has as many bodies under way as one caller may
+    Caller,
+    /// the instance holds as many bytes of bodies as it may
+    Instance,
+}
+
+/// One body being received, until it is dropped.
+pub(super) struct Slot {
+    of: Arc<Receiving>,
+    caller: String,
+    bytes: u64,
+}
+
+impl Receiving {
+    pub(super) fn new(each: usize, most: u64) -> Arc<Self> {
+        Arc::new(Receiving {
+            callers: Mutex::default(),
+            bytes: AtomicU64::new(0),
+            each,
+            most,
+        })
+    }
+
+    /// Begins a body of `caller` that says it has `declared` bytes.
+    pub(super) fn begin(self: &Arc<Self>, caller: &str, declared: u64) -> Result<Slot, Full> {
+        if self.bytes.load(Ordering::Acquire).saturating_add(declared) > self.most {
+            return Err(Full::Instance);
+        }
+        let mut callers = self.callers.lock().expect("receiving callers");
+        let under_way = callers.entry(caller.to_owned()).or_insert(0);
+        if *under_way >= self.each {
+            return Err(Full::Caller);
+        }
+        *under_way += 1;
+        Ok(Slot {
+            of: self.clone(),
+            caller: caller.to_owned(),
+            bytes: 0,
+        })
+    }
+}
+
+impl Slot {
+    /// Counts `bytes` more of the body.
+    pub(super) fn took(&mut self, bytes: u64) -> Result<(), Full> {
+        self.bytes += bytes;
+        let held = self.of.bytes.fetch_add(bytes, Ordering::AcqRel);
+        if held.saturating_add(bytes) > self.of.most {
+            return Err(Full::Instance);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.of.bytes.fetch_sub(self.bytes, Ordering::AcqRel);
+        let mut callers = self.of.callers.lock().expect("receiving callers");
+        if let Some(under_way) = callers.get_mut(&self.caller) {
+            *under_way -= 1;
+            if *under_way == 0 {
+                callers.remove(&self.caller);
+            }
+        }
+    }
+}
+
+/// the response to a body that is not received for `full`
+pub(super) fn refusal(full: Full, key: Option<RequestKey>) -> Response<ResponseBody> {
+    let (status, message) = match full {
+        Full::Caller => (
+            429,
+            "Too many request bodies are being received from this caller",
+        ),
+        Full::Instance => (
+            503,
+            "Instance is receiving as much as it holds; retry the same request",
+        ),
+    };
+    let code = ErrorCode::TemporarilyUnavailable;
+    failure(status, code, message, key, Retry::SameRequest)
+}
+
+/// the response to a body that could not be received
+pub(super) fn unreceived(error: BodyError, key: Option<RequestKey>) -> Response<ResponseBody> {
+    let unavailable = ErrorCode::TemporarilyUnavailable;
+    let (status, code, message, retry) = match error {
+        BodyError::Limit => (
+            413,
+            ErrorCode::QuotaExceeded,
+            "Request body exceeds the selected bound",
+            Retry::Never,
+        ),
+        BodyError::Storage => (
+            503,
+            unavailable,
+            "Request storage is temporarily unavailable",
+            Retry::SameRequest,
+        ),
+        BodyError::Malformed => (
+            400,
+            ErrorCode::InvalidRequest,
+            "Request body is incomplete or contains unsupported trailers",
+            Retry::SameRequest,
+        ),
+        BodyError::Slow => (
+            408,
+            unavailable,
+            "Request body deadline exceeded",
+            Retry::SameRequest,
+        ),
+        BodyError::Full => return refusal(Full::Instance, key),
+    };
+    failure(status, code, message, key, retry)
+}
+
+/// The key of a caller nobody has signed in as: its address, a /64 for IPv6.
+pub(super) fn address(caller: std::net::IpAddr) -> String {
+    match caller {
+        std::net::IpAddr::V6(v6) if v6.to_ipv4_mapped().is_none() => {
+            format!("address:{:x}", u128::from(v6) >> 64)
+        }
+        other => format!("address:{other}"),
+    }
+}
+
+/// A worker for a request whose body is whole: waited for as long as a request may
+/// run, and no longer. Nothing of the request was done where none came.
+pub(super) async fn worker(
+    state: &App,
+    key: Option<RequestKey>,
+) -> Result<OwnedSemaphorePermit, Box<Response<ResponseBody>>> {
+    let waited = state.workers.clone().acquire_owned();
+    match tokio::time::timeout(state.options.work_timeout, waited).await {
+        Ok(Ok(permit)) => Ok(permit),
+        _ => Err(Box::new(failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "Instance is busy; retry the same request",
+            key,
+            Retry::SameRequest,
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_caller_has_so_many_bodies_under_way_and_the_instance_so_many_bytes() {
+        let receiving = Receiving::new(2, 1000);
+        let first = receiving.begin("a", 0).unwrap();
+        let mut second = receiving.begin("a", 400).unwrap();
+        assert_eq!(receiving.begin("a", 0).err(), Some(Full::Caller));
+        let mut other = receiving.begin("b", 0).unwrap();
+        // what a body says it has is looked at, and what comes of it is counted
+        second.took(400).unwrap();
+        assert_eq!(receiving.begin("c", 601).err(), Some(Full::Instance));
+        other.took(600).unwrap();
+        assert_eq!(other.took(1), Err(Full::Instance));
+        drop(other);
+        // a body that is over gives back its place and its bytes
+        drop(first);
+        let mut third = receiving.begin("a", 600).unwrap();
+        third.took(600).unwrap();
+        drop((second, third));
+        assert!(receiving.callers.lock().unwrap().is_empty());
+        assert_eq!(receiving.bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn the_addresses_of_one_host_are_one_caller() {
+        let of = |text: &str| address(text.parse().unwrap());
+        assert_eq!(of("2001:db8::1"), of("2001:db8::ffff"));
+        assert_ne!(of("2001:db8::1"), of("2001:db8:0:1::1"));
+        assert_ne!(of("192.0.2.1"), of("192.0.2.2"));
+    }
+}

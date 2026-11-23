@@ -17,9 +17,11 @@ pub(crate) fn spawn_observed<T: Send + 'static>(
 }
 mod pool;
 mod provision;
+mod receiving;
 mod respond;
 mod routes;
 mod web;
+mod work;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
@@ -126,6 +128,10 @@ pub struct HttpOptions {
     /// the reverse proxies whose `X-Forwarded-For` is read for the address a
     /// request came from; with none the address is the peer's
     pub trusted_proxies: Vec<Network>,
+    /// the bodies one caller may have being received at once
+    pub receiving_each: usize,
+    /// the bytes of bodies that are being received, or wait for a worker
+    pub receiving_bytes: u64,
     pub native: NativeOptions,
 }
 struct App {
@@ -134,6 +140,7 @@ struct App {
     factory: pool::Pool,
     options: HttpOptions,
     workers: Arc<Semaphore>,
+    receiving: Arc<receiving::Receiving>,
     browser: Option<WebOptions>,
     passwords: Arc<Semaphore>,
 }
@@ -202,6 +209,7 @@ pub async fn serve_with_browser(
             )
         })?;
     if options.connections == 0
+        || options.receiving_each == 0
         || options.workers == 0
         || options.header_bytes < 8192
         || options.headers == 0
@@ -223,6 +231,7 @@ pub async fn serve_with_browser(
         compaction: crate::compaction::Compaction::start(factory.clone()),
         factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
+        receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
         options,
         browser,
         passwords: Arc::new(Semaphore::new(2)),

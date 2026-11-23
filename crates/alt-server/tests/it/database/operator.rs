@@ -82,6 +82,8 @@ impl OperatorDb {
                 worker_lease_ms: 30000,
                 approval_ttl_ms: 60000,
                 trusted_proxies: vec![],
+                receiving_each: None,
+                receiving_megabytes: None,
             },
         };
         std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();

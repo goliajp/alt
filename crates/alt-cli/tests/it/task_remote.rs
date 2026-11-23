@@ -198,6 +198,8 @@ impl Server {
             work_timeout: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(60),
             trusted_proxies: vec![],
+            receiving_each: 4,
+            receiving_bytes: 1 << 30,
             native: NativeOptions {
                 portable: None,
                 task_limits: task_limits(),

@@ -100,13 +100,14 @@ async fn inner(
     let starting = request.uri().path() == "/oauth/device/code";
     let revoking = request.uri().path() == "/oauth/revoke";
     // nobody is known yet: a body that is slow to come keeps no worker waiting
-    let source =
-        match tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), 2048))
-            .await
-        {
-            Ok(Ok(source)) => source,
-            _ => return failure(DeviceError::InvalidRequest),
-        };
+    let Ok(mut slot) = state.receiving.begin(&receiving::address(peer), 0) else {
+        return failure(DeviceError::TemporarilyUnavailable);
+    };
+    let receipt = body::Receipt::of(&state, Some(&mut slot));
+    let Ok(source) = spool(request.into_body(), 2048, receipt).await else {
+        return failure(DeviceError::InvalidRequest);
+    };
+    drop(slot);
     let permit = match state.workers.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => return failure(DeviceError::TemporarilyUnavailable),

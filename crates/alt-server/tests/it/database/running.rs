@@ -57,6 +57,8 @@ impl Running {
             work_timeout: Duration::from_secs(10),
             connection_timeout: Duration::from_secs(30),
             trusted_proxies: vec!["127.0.0.1".parse().unwrap()],
+            receiving_each: 4,
+            receiving_bytes: 1 << 30,
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),

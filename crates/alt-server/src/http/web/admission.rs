@@ -34,17 +34,20 @@ pub(super) fn admit(
     Ok((worker, Some(hashing)))
 }
 
-/// The body of a request, of `max` bytes at most and within the time a body has.
+/// The body of a request of `caller`, of `max` bytes at most and within the time a
+/// body has.
 pub(super) async fn receive(
     state: &App,
+    caller: &str,
     body: Body,
     max: u64,
 ) -> std::result::Result<alt_os::temp::NamedTempFile, Refusal> {
-    match tokio::time::timeout(state.options.body_timeout, spool(body, max)).await {
-        Ok(Ok(source)) => Ok(source),
-        Ok(Err(error)) => Err(unreceived(Some(error))),
-        Err(_) => Err(unreceived(None)),
-    }
+    let mut slot = state.receiving.begin(caller, 0);
+    let slot = slot
+        .as_mut()
+        .map_err(|full| Box::new(receiving::refusal(*full, None)))?;
+    let receipt = body::Receipt::of(state, Some(slot));
+    spool(body, max, receipt).await.map_err(unreceived)
 }
 
 /// the response where the authority of a migration request could not be checked in time
@@ -52,17 +55,17 @@ pub(super) fn unchecked() -> Refusal {
     busy("Current migration authority could not be checked")
 }
 
-/// the response to a body that could not be received; no error means it ran out of time
-fn unreceived(error: Option<BodyError>) -> Refusal {
+/// the response to a body that could not be received
+fn unreceived(error: BodyError) -> Refusal {
     match error {
-        Some(BodyError::Limit) => Box::new(failure(
+        BodyError::Limit => Box::new(failure(
             413,
             ErrorCode::QuotaExceeded,
             "Request body is too large",
             None,
             Retry::Never,
         )),
-        Some(BodyError::Malformed) => Box::new(failure(
+        BodyError::Malformed => Box::new(failure(
             400,
             ErrorCode::InvalidRequest,
             "Incomplete request body",

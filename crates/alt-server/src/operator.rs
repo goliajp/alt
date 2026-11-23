@@ -80,6 +80,14 @@ pub struct HttpBounds {
     /// the address of a caller; with none named the header is not read.
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_proxies: Vec<String>,
+    /// How many request bodies one caller may have being received at once; an
+    /// eighth of `connections` where it is not given.
+    #[json(default, skip_serializing_if = "Option::is_none")]
+    pub receiving_each: Option<usize>,
+    /// How many megabytes of request bodies may be held that no worker has taken
+    /// yet; four of the largest body there may be where it is not given.
+    #[json(default, skip_serializing_if = "Option::is_none")]
+    pub receiving_megabytes: Option<u64>,
 }
 impl Config {
     /// Accept either an explicitly issued raw operator secret or the private,
@@ -265,6 +273,8 @@ impl Config {
             || h.database_statement_timeout_ms > 300_000
             || h.database_connect_timeout_ms > 300_000
             || h.worker_lease_ms < h.work_timeout_ms
+            || h.receiving_each == Some(0)
+            || h.receiving_megabytes == Some(0)
             || h.trusted_proxies.len() > 64
             || (h.trusted_proxies.iter()).any(|proxy| proxy.parse::<crate::Network>().is_err())
         {
@@ -554,6 +564,15 @@ impl Config {
             trusted_proxies: (h.trusted_proxies.iter())
                 .filter_map(|proxy| proxy.parse().ok())
                 .collect(),
+            receiving_each: h.receiving_each.unwrap_or((h.connections / 8).max(1)),
+            receiving_bytes: match h.receiving_megabytes {
+                Some(megabytes) => megabytes.saturating_mul(1 << 20),
+                None => {
+                    let body =
+                        (self.limits.total_bytes).saturating_add(self.limits.request_bytes as u64);
+                    body.saturating_mul(4)
+                }
+            },
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,
