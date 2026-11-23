@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: hold no worker while the body of a request is received, and wait for one when it is whole
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/body.rs
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/provision.rs
+touched: crates/alt-server/src/http/receiving.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/admission.rs
+touched: crates/alt-server/src/http/web/cloud_login.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/bodies.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/running.rs
