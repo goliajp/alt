@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: resolve the deltas of a pack from their bases onwards, with the bases held within a limit
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/src/index_pack/scan.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/src/pack.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
+touched: crates/alt-git-pack/tests/it/ingress.rs
+touched: crates/alt-git-pack/tests/it/main.rs
