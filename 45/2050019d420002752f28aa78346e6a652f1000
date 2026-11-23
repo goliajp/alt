@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: bound what a request to altd-server may have it hold, write and reach
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_untrusted.rs
+touched: crates/alt-cli/tests/it/main.rs
