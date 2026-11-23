@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: have a reader note its look at the log only where nothing noted since says more than it knows
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
