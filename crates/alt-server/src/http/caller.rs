@@ -28,15 +28,17 @@ fn plain(address: IpAddr) -> IpAddr {
 impl std::str::FromStr for Network {
     type Err = ();
 
-    /// `192.0.2.7`, `10.0.0.0/8`, `::1`, `fd00::/8`
+    /// `192.0.2.7`, `10.0.0.0/8`, `::1`, `fd00::/8`. An IPv4 network
+    /// written as an IPv6 one (`::ffff:10.0.0.0/104`) is the IPv4 network
+    /// it is; one that is more than the IPv4 addresses is refused.
     fn from_str(text: &str) -> Result<Self, ()> {
         let (address, bits) = match text.split_once('/') {
             Some((address, bits)) => (address, Some(bits)),
             None => (text, None),
         };
-        let address: IpAddr = address.parse().map_err(|_| ())?;
-        let whole = if address.is_ipv4() { 32 } else { 128 };
-        let bits = match bits {
+        let written: IpAddr = address.parse().map_err(|_| ())?;
+        let whole: u32 = if written.is_ipv4() { 32 } else { 128 };
+        let bits: u32 = match bits {
             Some(bits) if bits.bytes().all(|b| b.is_ascii_digit()) => {
                 bits.parse().map_err(|_| ())?
             }
@@ -46,16 +48,23 @@ impl std::str::FromStr for Network {
         if bits > whole {
             return Err(());
         }
+        let address = plain(written);
+        let bits = match address == written {
+            true => bits,
+            false => bits.checked_sub(96).ok_or(())?,
+        };
         Ok(Network { address, bits })
     }
 }
 
 impl Network {
     pub fn contains(&self, address: IpAddr) -> bool {
+        // no bits to share is every address of the kind
         let shared = |ours: u128, theirs: u128, whole: u32| {
-            self.bits == 0 || (ours ^ theirs) >> (whole - self.bits) == 0
+            let apart = whole.checked_sub(self.bits);
+            apart.is_some_and(|apart| (ours ^ theirs).checked_shr(apart).unwrap_or(0) == 0)
         };
-        match (plain(self.address), plain(address)) {
+        match (self.address, plain(address)) {
             (IpAddr::V4(ours), IpAddr::V4(theirs)) => {
                 shared(u32::from(ours).into(), u32::from(theirs).into(), 32)
             }
@@ -184,6 +193,7 @@ mod tests {
         assert!(has("fd00::/8", "fd12::1") && !has("fd00::/8", "fe80::1"));
         assert!(has("0.0.0.0/0", "203.0.113.7") && !has("0.0.0.0/0", "2001:db8::1"));
         assert!(has("127.0.0.1", "::ffff:127.0.0.1"));
+        assert!(has("::/0", "2001:db8::1") && !has("::/0", "203.0.113.7"));
         for bad in [
             "",
             "10.0.0.0/33",
@@ -195,5 +205,42 @@ mod tests {
         ] {
             assert!(of(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn an_ipv4_network_written_as_an_ipv6_one_is_that_network_and_no_more() {
+        let of = |text: &str| text.parse::<Network>();
+        let has =
+            |network: &str, address: &str| of(network).unwrap().contains(address.parse().unwrap());
+        for outside in [
+            "203.0.113.7",
+            "8.8.8.8",
+            "::ffff:8.8.8.8",
+            "2001:db8::1",
+            "::1",
+        ] {
+            assert!(!has("::ffff:127.0.0.1", outside), "{outside}");
+            assert!(!has("::ffff:10.0.0.0/104", outside), "{outside}");
+        }
+        assert!(has("::ffff:127.0.0.1", "127.0.0.1"));
+        assert!(has("::ffff:127.0.0.1", "::ffff:127.0.0.1"));
+        assert!(
+            has("::ffff:10.0.0.0/104", "10.200.0.1") && !has("::ffff:10.0.0.0/104", "11.0.0.1")
+        );
+        assert_eq!(of("::ffff:10.0.0.0/104"), of("10.0.0.0/8"));
+        // every IPv4 address, and no IPv6 one
+        assert!(has("::ffff:0:0/96", "8.8.8.8") && !has("::ffff:0:0/96", "2001:db8::1"));
+        // fewer bits than the IPv4 addresses share is no IPv4 network
+        for bad in ["::ffff:0:0/95", "::ffff:10.0.0.0/8", "::ffff:127.0.0.1/0"] {
+            assert!(of(bad).is_err(), "{bad:?}");
+        }
+        // a proxy named so vouches for what it appends, and nobody else does
+        let named = &["::ffff:127.0.0.1"];
+        assert_eq!(from("127.0.0.1", &["203.0.113.7"], named), "203.0.113.7");
+        assert_eq!(
+            from("198.51.100.1", &["203.0.113.7"], named),
+            "198.51.100.1"
+        );
+        assert_eq!(from("8.8.8.8", &["203.0.113.7"], named), "8.8.8.8");
     }
 }
