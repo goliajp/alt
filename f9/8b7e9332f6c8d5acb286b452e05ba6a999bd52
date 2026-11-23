@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a commit kept is read as it is in the store and is none where the store lacks it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive/kept.rs
