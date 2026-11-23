@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: build the tests of a merge that was cut short in a debug build only, as the points they are killed at
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
