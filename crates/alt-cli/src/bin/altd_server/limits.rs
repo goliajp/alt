@@ -73,15 +73,21 @@ pub(super) fn max_command_bytes() -> u64 {
 
 /// How many times the bytes a push may bring its entries and objects may
 /// inflate to, all together, unless `ALT_SERVER_MAX_INFLATED_BYTES` says.
-const INFLATED_TIMES: u64 = 16;
+///
+/// A history is packed as deltas, and what it inflates to is every
+/// version of every file: some thirty times the bytes of the pack for the
+/// history of a library, and more where large files change a little at a
+/// time. Four times that is room for the histories there are, and still a
+/// bound on what a pack made to be costly has the server hash.
+const INFLATED_TIMES: u64 = 128;
 
 /// What the pack of a push may hold. A pack is as its sender made it:
 /// one small delta can stand for an object of any size, and each of a
 /// million of them for another. No object may inflate to more than a
 /// push may bring ([`max_body_bytes`]), which bounds the memory a push
 /// takes; all of them together to no more than
-/// `ALT_SERVER_MAX_INFLATED_BYTES`, sixteen times that by default, which
-/// bounds the time.
+/// `ALT_SERVER_MAX_INFLATED_BYTES`, [`INFLATED_TIMES`] that by default,
+/// which bounds the time.
 pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
     use std::sync::OnceLock;
     static INFLATED: OnceLock<u64> = OnceLock::new();
