@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: begin a read as a statement like the others, so the plans its connection keeps are kept
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading.rs
