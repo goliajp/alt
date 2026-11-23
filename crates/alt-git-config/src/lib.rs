@@ -2,6 +2,7 @@
 //! (bool/int conversions, last-one-wins), and `include`/`includeIf`
 //! resolution. Pure-logic crate, business-agnostic.
 
+mod edit;
 mod include;
 mod parse;
 mod wildmatch;
@@ -10,7 +11,8 @@ use std::path::Path;
 
 use alt_bytes::{BStr, BString};
 
-pub use include::IncludeContext;
+pub use edit::{Name, add, overlay, set};
+pub use include::{IncludeContext, Moved, Place, place};
 pub use parse::parse_file;
 pub use wildmatch::wildmatch;
 
@@ -69,7 +71,18 @@ impl Config {
         path: &Path,
         ctx: &IncludeContext,
     ) -> Result<(Self, Vec<std::path::PathBuf>), ConfigError> {
-        let (entries, files) = include::load_with_includes(path, ctx)?;
+        let (entries, files) = include::load_with_includes(path, ctx, None)?;
+        Ok((Self { entries }, files))
+    }
+
+    /// [`load_listing`](Self::load_listing) of a file of a git directory
+    /// that is kept elsewhere.
+    pub fn load_moved(
+        path: &Path,
+        ctx: &IncludeContext,
+        moved: &Moved,
+    ) -> Result<(Self, Vec<std::path::PathBuf>), ConfigError> {
+        let (entries, files) = include::load_with_includes(path, ctx, Some(moved))?;
         Ok((Self { entries }, files))
     }
 

@@ -33,6 +33,17 @@ pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<(usize, Entry)>, (usize, 
     })
 }
 
+/// The section and the subsection a section header names, `header`
+/// reaching from its `[` to its `]`.
+pub(crate) fn section_of(header: &[u8]) -> Result<(String, Option<BString>), ConfigError> {
+    let mut parser = Parser {
+        data: header,
+        pos: 0,
+    };
+    let ctx = parser.parse_section_header()?;
+    Ok((ctx.section, ctx.subsection))
+}
+
 /// What git's parser skips as blank.
 fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r')
