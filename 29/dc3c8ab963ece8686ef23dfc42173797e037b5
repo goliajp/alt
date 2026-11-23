@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: docs
+summary: say where the server takes the address of a caller from, and leave the edge to its own handling of the header
+author-type: human
+author: doracawl
+touched: self-hosted/Caddyfile
+touched: self-hosted/README.md
