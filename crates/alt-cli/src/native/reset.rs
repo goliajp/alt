@@ -118,8 +118,12 @@ impl NativeRepo<'_> {
     /// give up, or that the mode cannot be used in.
     fn ensure_resettable(&self, mode: ResetMode) -> Res<()> {
         use in_progress::OperationKind;
-        match self.operation_kind()? {
-            Some(OperationKind::Merge) if mode == ResetMode::Soft => Err(settings::fatal(
+        let kind = self.operation_kind()?;
+        // a conflict in the index is a merge under way, whatever left it
+        let merging = matches!(kind, Some(OperationKind::Merge))
+            || self.index()?.entries.iter().any(|e| e.stage() > 0);
+        match kind {
+            _ if mode == ResetMode::Soft && merging => Err(settings::fatal(
                 "Cannot do a soft reset in the middle of a merge.".into(),
             )),
             None | Some(OperationKind::Merge | OperationKind::CherryPick) => Ok(()),

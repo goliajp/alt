@@ -130,6 +130,7 @@ mod remote;
 mod replay_refused;
 mod request_operations;
 mod reset;
+mod reset_soft;
 mod reset_unborn;
 mod restore;
 mod rev_parse;
