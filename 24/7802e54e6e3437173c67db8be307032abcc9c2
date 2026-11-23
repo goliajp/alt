@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: tell what a fetch asked for by id from a set, and answer a fetch that is refused with 400
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server_wants.rs
+touched: crates/alt-server/src/git_read.rs
