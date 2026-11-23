@@ -230,14 +230,13 @@ impl NativeRepo<'_> {
             for path in loose.iter().filter(|path| !wanted.contains_key(path)) {
                 edit.write(path, None);
             }
-            let taken = |e: &Box<dyn std::error::Error>| match e.downcast_ref() {
-                Some(alt_refs::RefError::Conflict { name }) => {
-                    name == TOP || name.starts_with(ENTRIES)
-                }
-                _ => false,
+            let taken = |e: &(dyn std::error::Error + 'static)| {
+                let of_stack = |name: &String| name == TOP || name.starts_with(ENTRIES);
+                let conflict = e.downcast_ref::<alt_refs::RefError>();
+                matches!(conflict, Some(alt_refs::RefError::Conflict { name }) if of_stack(name))
             };
             match self.apply_edit("stash", &refs, edit) {
-                Err(e) if taken(&e) => self.store.refs.refresh()?,
+                Err(e) if taken(e.as_ref()) => self.store.refs.refresh()?,
                 done => return done.map(drop),
             }
         }

@@ -11,10 +11,13 @@ use super::*;
 pub(in crate::native) fn names_control_directory(name: &[u8]) -> bool {
     // the code points HFS+ ignores, as UTF-8: U+200C to U+200F, U+202A
     // to U+202E, U+206A to U+206F and U+FEFF
-    let ignored = |at: &[u8]| match at {
-        [0xe2, 0x80, 0x8c..=0x8f | 0xaa..=0xae, ..] | [0xe2, 0x81, 0xaa..=0xaf, ..] => true,
-        [0xef, 0xbb, 0xbf, ..] => true,
-        _ => false,
+    let ignored = |at: &[u8]| {
+        matches!(
+            at,
+            [0xe2, 0x80, 0x8c..=0x8f | 0xaa..=0xae, ..]
+                | [0xe2, 0x81, 0xaa..=0xaf, ..]
+                | [0xef, 0xbb, 0xbf, ..]
+        )
     };
     let mut seen = Vec::with_capacity(name.len());
     let mut at = 0;
