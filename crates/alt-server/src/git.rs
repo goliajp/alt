@@ -201,3 +201,11 @@ pub(crate) fn execute_git_with_cache(
     };
     crate::git_read::read(store.limits(), receive, &command, view)
 }
+
+/// What the objects of a push may inflate to, all together, where its pack may
+/// have `pack_bytes`. The packs of long histories inflate to some thirty times
+/// their size, and more where large files change a little at a time; this is four
+/// times that, and still a bound on what a pack made to be costly has hashed.
+pub(crate) fn inflated_bytes(pack_bytes: u64) -> u64 {
+    pack_bytes.saturating_mul(128)
+}

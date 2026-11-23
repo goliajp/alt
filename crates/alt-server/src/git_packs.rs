@@ -320,7 +320,7 @@ fn publish(
                     &Limits {
                         objects: limits.graph_objects as u64,
                         object_bytes: limits.object_bytes,
-                        inflated_bytes: limits.total_bytes,
+                        inflated_bytes: crate::git::inflated_bytes(limits.total_bytes),
                         delta_depth: 4095,
                     },
                 )
