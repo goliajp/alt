@@ -18,8 +18,13 @@ pub(super) async fn run(state: Arc<App>) {
     loop {
         tokio::time::sleep(state.options.expiry_interval).await;
         let factory = (*state.factory).clone();
-        let ended = spawn_blocking(move || factory.open()?.expire_requests(BATCH)).await;
-        if let Ok(Err(error)) = ended {
+        let told = log.clone();
+        let ended = spawn_blocking(move || {
+            let mut one =
+                |repository: &str, error| told.failed("request expiry", repository, &error);
+            factory.open()?.expire_requests(BATCH, &mut one)
+        });
+        if let Ok(Err(error)) = ended.await {
             log.failed("request expiry", "", &error);
         }
     }
