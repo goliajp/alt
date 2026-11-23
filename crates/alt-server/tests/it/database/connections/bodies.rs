@@ -218,3 +218,50 @@ fn a_push_that_no_worker_comes_free_for_is_told_to_send_itself_again() {
     assert!(failure.contains("\"retry\":\"same_request\""), "{failure}");
     assert_eq!(refs, 0);
 }
+
+/// An upload is begun and its connection ends half-way through the content. The
+/// request keeps what it reserved while it may still be resumed; once its time is
+/// over the server ends it and the room is free, with nobody asking.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
+fn an_upload_whose_connection_ended_gives_back_what_it_reserved_when_its_time_is_over() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let payload = Payload::new("dropped", None);
+    let base = "/v1/repositories/repository/epochs/1/requests";
+    let begin = alt_server::BeginRequest {
+        publication: payload.publication.clone(),
+        manifest: payload.manifest.clone(),
+    };
+    let (status, state) = server.json("POST", base, &f.token, &begin);
+    assert_eq!((status, state["state"].as_str()), (200, Some("receiving")));
+    let (entry, bytes) = (&payload.manifest.entries[1], &payload.contents[1]);
+    let (mut socket, _reader) = connect(&server);
+    let head = format!(
+        "PUT {base}/owner/dropped/content/{} HTTP/1.1\r\nHost: alt\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n",
+        entry.blake3,
+        f.token,
+        bytes.len()
+    );
+    socket.write_all(head.as_bytes()).unwrap();
+    socket.write_all(&bytes[..bytes.len() / 2]).unwrap();
+    drop(socket);
+
+    let held = |f: &Fixture| -> (i64, String) {
+        let held = "SELECT r.reserved_bytes,q.state FROM alt_repositories r JOIN alt_requests q ON q.repository=r.id";
+        let row = f.client().query_one(held, &[]).unwrap();
+        (row.get(0), row.get(1))
+    };
+    // several rounds of the server's own go by, and it is left alone
+    std::thread::sleep(Duration::from_secs(1));
+    let (reserved, state) = held(&f);
+    assert!(reserved > 0 && state == "receiving", "{reserved} {state}");
+    f.client()
+        .execute("UPDATE alt_requests SET expires_at=0", &[])
+        .unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while held(&f) != (0, "expired".to_owned()) {
+        assert!(std::time::Instant::now() < until, "{:?}", held(&f));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}

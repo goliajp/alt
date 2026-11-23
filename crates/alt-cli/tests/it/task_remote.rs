@@ -200,6 +200,7 @@ impl Server {
             trusted_proxies: vec![],
             receiving_each: 4,
             receiving_bytes: 1 << 30,
+            expiry_interval: Duration::from_secs(30),
             native: NativeOptions {
                 portable: None,
                 task_limits: task_limits(),

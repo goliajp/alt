@@ -59,6 +59,7 @@ impl Running {
             trusted_proxies: vec!["127.0.0.1".parse().unwrap()],
             receiving_each: 4,
             receiving_bytes: 1 << 30,
+            expiry_interval: Duration::from_millis(200),
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),

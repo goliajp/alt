@@ -564,6 +564,7 @@ impl Config {
             trusted_proxies: (h.trusted_proxies.iter())
                 .filter_map(|proxy| proxy.parse().ok())
                 .collect(),
+            expiry_interval: Duration::from_secs(30),
             receiving_each: h.receiving_each.unwrap_or((h.connections / 8).max(1)),
             receiving_bytes: match h.receiving_megabytes {
                 Some(megabytes) => megabytes.saturating_mul(1 << 20),
