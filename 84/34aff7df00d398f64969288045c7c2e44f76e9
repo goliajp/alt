@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep the trees of served history within a limit while a push is looked at
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits/trees.rs
+touched: crates/alt-cli/src/added_commits/walk.rs
