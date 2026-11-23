@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: make a thin pack whole with the bases its store has before it is indexed
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/idx.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/src/index_pack/thin.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/thin_pack.rs
