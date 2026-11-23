@@ -16,6 +16,7 @@ mod follow;
 pub mod frame;
 mod log;
 mod named;
+mod notes;
 mod open;
 pub mod receipt;
 mod salvage;
