@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: add crc-32c by the crc instructions of x86-64 and armv8, with a table fallback
+author-type: human
+author: doracawl
+touched: crates/alt-hash/Cargo.toml
+touched: crates/alt-hash/examples/crc32c_cost.rs
+touched: crates/alt-hash/src/crc32c.rs
+touched: crates/alt-hash/src/lib.rs
+touched: crates/alt-hash/tests/it/crc32c.rs
+touched: crates/alt-hash/tests/it/main.rs
