@@ -20,7 +20,7 @@ fn busy(message: &str) -> Refusal {
 ///
 /// An unauthenticated password flood cannot allocate one Argon2 arena per
 /// HTTP connection, nor starve all normal publication workers.
-pub(super) fn admit(
+fn admit(
     state: &App,
     password: bool,
 ) -> std::result::Result<(OwnedSemaphorePermit, Option<OwnedSemaphorePermit>), Refusal> {
@@ -36,7 +36,7 @@ pub(super) fn admit(
 
 /// The body of a request of `caller`, of `max` bytes at most and within the time a
 /// body has.
-pub(super) async fn receive(
+async fn receive(
     state: &App,
     caller: &str,
     body: Body,
@@ -51,7 +51,7 @@ pub(super) async fn receive(
 }
 
 /// the response where the authority of a migration request could not be checked in time
-pub(super) fn unchecked() -> Refusal {
+fn unchecked() -> Refusal {
     busy("Current migration authority could not be checked")
 }
 
@@ -73,5 +73,80 @@ fn unreceived(error: BodyError) -> Refusal {
             Retry::Never,
         )),
         _ => busy("Request could not be read"),
+    }
+}
+
+/// What a browser request runs with: its body, the worker, and where it hashes a
+/// password one of the two that do. Nobody is known while the body of most
+/// requests comes, so it is received before a worker is taken. A migration is
+/// authorized first, on a worker it gives back while its body comes.
+pub(super) async fn admitted(
+    state: &App,
+    browser: &WebOptions,
+    route: &WebRoute,
+    token: &Option<String>,
+    peer: IpAddr,
+    body: Body,
+    writing: bool,
+) -> std::result::Result<Admitted, Refusal> {
+    let caller = receiving::address(peer);
+    let password = matches!(route, WebRoute::Login | WebRoute::CreateUser);
+    let WebRoute::Portable(selected) = route else {
+        let small = match writing {
+            true => state.factory.limits.request_bytes.min(16_384) as u64,
+            false => 0,
+        };
+        let source = receive(state, &caller, body, small).await?;
+        let (permit, hashing) = admit(state, password)?;
+        return Ok((source, permit, hashing));
+    };
+    let (permit, hashing) = admit(state, password)?;
+    let bound = portable_bound(state, browser, selected.clone(), token.clone(), permit);
+    let max = match bound.await {
+        Ok(max) => max,
+        Err(Some(error)) => return Err(Box::new(store_failure(error, None))),
+        Err(None) => return Err(unchecked()),
+    };
+    let source = receive(state, &caller, body, max).await?;
+    Ok((source, receiving::worker(state, None).await?, hashing))
+}
+
+/// the body of a request, its worker and its place among those that hash passwords
+type Admitted = (
+    alt_os::temp::NamedTempFile,
+    OwnedSemaphorePermit,
+    Option<OwnedSemaphorePermit>,
+);
+
+/// the body bound of a migration request, once its caller is authorized on the
+/// worker `permit` is of; no error means the check did not finish
+async fn portable_bound(
+    state: &App,
+    browser: &WebOptions,
+    selected: crate::PortableRoute,
+    token: Option<String>,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> std::result::Result<u64, Option<Error>> {
+    let factory = state.factory.clone();
+    let token = token.ok_or(Error::Unauthorized);
+    let origin = browser.origin.clone();
+    let options = state.options.native.clone();
+    let prepared = tokio::time::timeout(
+        state.options.work_timeout,
+        crate::http::spawn_observed(Phase::Execute, move || {
+            let mut store = factory.open()?;
+            let token = token?;
+            let credential = factory.authenticate(&mut store, &token)?;
+            store.browser_session(&credential, &origin)?;
+            let _permit = permit;
+            let max = crate::portable::request_bytes(&mut store, &credential, &options, &selected)?;
+            Ok::<_, Error>(max)
+        }),
+    )
+    .await;
+    match prepared {
+        Ok(Ok(Ok(value))) => Ok(value),
+        Ok(Ok(Err(error))) => Err(Some(error)),
+        _ => Err(None),
     }
 }

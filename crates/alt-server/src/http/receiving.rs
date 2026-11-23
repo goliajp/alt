@@ -158,6 +158,33 @@ pub(super) fn address(caller: std::net::IpAddr) -> String {
     }
 }
 
+/// The body of the request of `caller`, of `size` bytes at most, and the worker
+/// the request then runs on: received with no worker held, and one waited for
+/// once it is whole.
+pub(super) async fn receive(
+    state: &App,
+    request: Request,
+    caller: &str,
+    size: u64,
+    key: &Option<RequestKey>,
+) -> Result<(alt_os::temp::NamedTempFile, OwnedSemaphorePermit), Box<Response<ResponseBody>>> {
+    let length = request.headers().get(header::CONTENT_LENGTH);
+    let declared = length.map(|length| length.to_str().ok().and_then(|s| s.parse::<u64>().ok()));
+    if declared.is_some_and(|declared| declared.is_none_or(|n| n > size)) {
+        return Err(Box::new(unreceived(BodyError::Limit, key.clone())));
+    }
+    let begun = state
+        .receiving
+        .begin(caller, declared.flatten().unwrap_or(0));
+    let mut slot = begun.map_err(|full| Box::new(refusal(full, key.clone())))?;
+    let receipt = body::Receipt::of(state, Some(&mut slot));
+    let spooled = spool(request.into_body(), size, receipt).await;
+    let source = spooled.map_err(|error| Box::new(unreceived(error, key.clone())))?;
+    // whole: from here the request waits for a worker like any that runs
+    let permit = worker(state, key.clone()).await?;
+    Ok((source, permit))
+}
+
 /// A worker for a request whose body is whole: waited for as long as a request may
 /// run, and no longer. Nothing of the request was done where none came.
 pub(super) async fn worker(

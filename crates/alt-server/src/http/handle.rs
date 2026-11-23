@@ -109,29 +109,11 @@ pub(super) async fn handle(
             );
         }
     };
-    let length = request.headers().get(header::CONTENT_LENGTH);
-    let declared = length.map(|length| length.to_str().ok().and_then(|s| s.parse::<u64>().ok()));
-    if declared.is_some_and(|declared| declared.is_none_or(|n| n > size)) {
-        return receiving::unreceived(BodyError::Limit, request_key);
-    }
-    let mut slot = match state
-        .receiving
-        .begin(&caller, declared.flatten().unwrap_or(0))
-    {
-        Ok(slot) => slot,
-        Err(full) => return receiving::refusal(full, request_key),
-    };
-    let receipt = body::Receipt::of(&state, Some(&mut slot));
-    let mut source = match spool(request.into_body(), size, receipt).await {
-        Ok(source) => source,
-        Err(error) => return receiving::unreceived(error, request_key),
-    };
-    // whole: from here the request waits for a worker like any that runs
-    let permit = match receiving::worker(&state, request_key.clone()).await {
-        Ok(permit) => permit,
+    let received = receiving::receive(&state, request, &caller, size, &request_key);
+    let (mut source, permit) = match received.await {
+        Ok(received) => received,
         Err(refusal) => return *refusal,
     };
-    drop(slot);
     let factory = state.factory.clone();
     let work = work::Work {
         factory: factory.clone(),

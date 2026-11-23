@@ -132,7 +132,7 @@ fn queued_refs(f: &Fixture) -> i64 {
 }
 
 /// A push is authorized and told to send its body; the one worker is taken by
-/// another request meanwhile, which waits for a row the test holds. What the push
+/// another request meanwhile, one that writes and waits for a row the test holds. What the push
 /// is answered once its body is whole: after the row is let go of where `freed`,
 /// and with the row still held where not.
 fn pushed_while_busy(work_timeout: Duration, freed: bool) -> ((String, String), i64) {
@@ -157,14 +157,23 @@ fn pushed_while_busy(work_timeout: Duration, freed: bool) -> ((String, String), 
     let mut held = Some(holder.transaction().unwrap());
     let row = "SELECT 1 FROM alt_repositories WHERE id='repository' FOR UPDATE";
     held.as_mut().unwrap().query_one(row, &[]).unwrap();
+    // a request that writes to the repository: its statement waits for the row
+    let payload = Payload::new("other", None);
+    let begin = alt_json::to_vec(&alt_server::BeginRequest {
+        publication: payload.publication.clone(),
+        manifest: payload.manifest.clone(),
+    })
+    .unwrap();
     let (url, token) = (server.url.clone(), f.token.clone());
     let other = std::thread::spawn(move || {
-        let request = ureq::get(&format!("{url}/v1/repositories/repository"))
-            .set("Authorization", &format!("Bearer {token}"));
-        let _ = request.timeout(Duration::from_secs(90)).call();
+        let path = "/v1/repositories/repository/epochs/1/requests";
+        let request = ureq::post(&format!("{url}{path}"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .set("Content-Type", "application/json");
+        let _ = request.timeout(Duration::from_secs(90)).send_bytes(&begin);
     });
     // the other request has the worker once its statement waits for the row
-    let waits = "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock'";
+    let waits = "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND datname=current_database()";
     let until = std::time::Instant::now() + Duration::from_secs(30);
     while f.client().query_one(waits, &[]).unwrap().get::<_, i64>(0) == 0 {
         assert!(
@@ -225,8 +234,9 @@ fn a_push_that_no_worker_comes_free_for_is_told_to_send_itself_again() {
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
 fn an_upload_whose_connection_ended_gives_back_what_it_reserved_when_its_time_is_over() {
-    let f = Fixture::new();
-    let server = Running::start(&f);
+    let mut f = Fixture::new();
+    let brisk = Duration::from_millis(200);
+    let server = start(&mut f, |_, options| options.expiry_interval = brisk);
     let payload = Payload::new("dropped", None);
     let base = "/v1/repositories/repository/epochs/1/requests";
     let begin = alt_server::BeginRequest {
