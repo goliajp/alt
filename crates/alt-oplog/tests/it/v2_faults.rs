@@ -268,10 +268,14 @@ fn cut_sync_fails(dir: &Path) {
     io_error(log.settle(but_gone));
     assert!(file_len(dir) >= len, "nothing was cut off the file");
     fail_syncs(dir, false);
+    // the note beside the log ends it where it is cut, for as long as
+    // the file is no shorter
     let mut next = OpLog::open(dir).unwrap();
-    assert_eq!((next.len(), next.state().unwrap().generation), (3, 1));
+    assert_eq!((next.len(), next.state().unwrap().generation), (3, 0));
+    assert!(next.passed_over());
     next.append("b", 9, b"next").unwrap();
     next.sync().unwrap();
+    assert_eq!(next.state().unwrap().generation, 2);
     let (all, state) = frames(dir);
     let said = all.iter().find(|frame| frame.0 == at).unwrap();
     assert_eq!(said.3.unwrap().ops, 2, "what was cut is told once");

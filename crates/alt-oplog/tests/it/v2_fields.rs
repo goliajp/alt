@@ -184,19 +184,21 @@ fn each_changed_header(whole: &[u8], mut with: impl FnMut(Vec<u8>, String)) {
     }
 }
 
-/// `tail` as it says `fields` of the log in boot `in_boot`, and whether
-/// ops are left to be looked at.
-pub fn tail(in_boot: u8, generation: u32, pending: bool, fields: [u64; 3]) -> [u8; 64] {
-    let mut bytes = [0u8; 64];
+/// `tail` as it says `fields` of the log in boot `in_boot` (up to where
+/// it is synced, from where ops need vouching for, how long the file is
+/// whose end is hidden, and where the log ends in it), and whether ops
+/// are left to be looked at and a cut was begun.
+pub fn tail(in_boot: u8, generation: u32, flags: (bool, bool), fields: [u64; 4]) -> [u8; 72] {
+    let mut bytes = [0u8; 72];
     bytes[..4].copy_from_slice(b"ALTT");
-    bytes[4] = pending as u8;
+    bytes[4] = flags.0 as u8 | (flags.1 as u8) << 1;
     bytes[8..24].copy_from_slice(&[in_boot; 16]);
     bytes[24..28].copy_from_slice(&generation.to_le_bytes());
     for (n, field) in fields.iter().enumerate() {
         bytes[32 + n * 8..40 + n * 8].copy_from_slice(&field.to_le_bytes());
     }
-    let sum = alt_hash::blake3::hash(&bytes[..56]);
-    bytes[56..].copy_from_slice(&sum.as_bytes()[..8]);
+    let sum = alt_hash::blake3::hash(&bytes[..64]);
+    bytes[64..].copy_from_slice(&sum.as_bytes()[..8]);
     bytes
 }
 
@@ -243,22 +245,29 @@ fn a_note_beside_the_log_that_says_any_number_is_read_with_or_refused() {
     let (whole, noted) = written(dir.path());
     let anchors = anchors(dir.path());
     let word = |at: usize| u64::from_le_bytes(noted[at..at + 8].try_into().unwrap());
-    let said = [word(32), word(40), word(48)];
+    let said = [word(32), word(40), word(48), word(56)];
     let len = whole.len() as u64;
-    let fields = [(0, false), (1, false), (2, false), (3, false)];
-    for (field, pending) in fields.into_iter().chain([(1, true), (2, true), (3, true)]) {
-        for to in values(len, said[1].min(len)) {
-            let (mut generation, mut fields) = (1, said);
-            match field {
-                0 => generation = to as u32,
-                n => fields[n - 1] = to,
+    let flags = [(false, false), (true, false), (false, true), (true, true)];
+    let mut cases = 0;
+    for (pending, cutting) in flags {
+        for field in 0..5 {
+            for to in values(len, said[1].min(len)) {
+                // as a reader's note and a cut that was begun leave it: of
+                // a file as long as this one
+                let (mut generation, mut fields) = (1, [said[0], said[1], len, said[1]]);
+                match field {
+                    0 => generation = to as u32,
+                    n => fields[n - 1] = to,
+                }
+                let note = tail(2, generation, (pending, cutting), fields);
+                fs::write(dir.path().join("tail"), note).unwrap();
+                let case = format!("note field {field} = {to}, {pending} {cutting}");
+                read_through(dir.path(), &anchors, &case);
+                cases += 1;
             }
-            let note = tail(2, generation, pending, fields);
-            fs::write(dir.path().join("tail"), note).unwrap();
-            let case = format!("note field {field} = {to}, pending {pending}");
-            read_through(dir.path(), &anchors, &case);
         }
     }
+    assert_eq!(cases, 200);
 }
 
 #[test]

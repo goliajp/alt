@@ -213,9 +213,9 @@ impl Log {
         let (generation, closes) = (self.state.generation, self.closes);
         let end = self.state.end;
         Tail::update(&self.dir, self.boot, |tail| {
-            tail.generation = generation;
+            tail.stands(generation);
             tail.raise(upto, (end == upto).then_some(closes));
-            (tail.pending, tail.judged, tail.hidden) = (false, end, 0);
+            (tail.pending, tail.judged) = (false, end);
         })?;
         self.synced = self.synced.max(upto);
         self.judged.set(u64::MAX);

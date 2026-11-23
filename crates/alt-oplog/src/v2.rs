@@ -140,6 +140,27 @@ pub fn in_no_boot() {
     BOOT.set(Told::Nothing);
 }
 
+thread_local! {
+    static CUT_DIES: Cell<u8> = const { Cell::new(0) };
+}
+
+/// Makes a cut of a log on this thread end after step `step` of it as if
+/// its process had died there (1 the note in `tail`, 2 the checkpoint, 3
+/// its sync, 4 the file made shorter, 5 the sync of that), and every cut
+/// run through with `None`: for a test of what such a death leaves.
+#[doc(hidden)]
+pub fn cut_dies_after(step: Option<u8>) {
+    CUT_DIES.set(step.unwrap_or(0));
+}
+
+/// Fails where a test has the cut die after step `step`.
+pub(crate) fn cut_reached(step: u8) -> std::io::Result<()> {
+    match CUT_DIES.get() == step {
+        true => Err(std::io::Error::other("the cut was made to die here")),
+        false => Ok(()),
+    }
+}
+
 /// The boot a handle opened now on this thread runs in; `None` where the
 /// kernel tells none, and nothing a boot left in its cache is then taken
 /// on trust.

@@ -9,6 +9,7 @@ use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::scan::Stop;
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
+use crate::v2::tail::Tail;
 use crate::{Discarded, Op, OpLogError};
 
 impl Log {
@@ -73,14 +74,17 @@ impl Log {
     /// when `cut`, under the exclusive lock, and stays in it otherwise.
     fn read_on(&mut self, cut: bool) -> Result<(), OpLogError> {
         let size = self.file.metadata()?.len();
-        if !self.holds_head(size)? {
+        let noted = self.tail();
+        // a cut that was begun leaves the file as long as it was at first
+        let cut_away = |tail: Tail| tail.cuts(self.state.generation, self.state.end);
+        if !self.holds_head(size)? || noted.is_some_and(cut_away) {
             return Err(OpLogError::CutBack);
         }
         if size <= self.state.end || (!cut && self.hidden == Some(size)) {
             return Ok(());
         }
         let (state, added, found) = self.read_past(size)?;
-        let synced = self.tail().map_or(0, |tail| tail.synced);
+        let synced = noted.map_or(0, |tail| tail.synced);
         let claim = found.as_ref().map_or(0, |found| found.claim);
         if found.is_some() && state.end < synced.max(self.synced).max(state.synced).max(claim) {
             return Err(OpLogError::Format("oplog record corrupt"));
@@ -103,6 +107,10 @@ impl Log {
                 ops: found.ops,
             };
             self.cut_end(discarded)?;
+        } else if cut && noted.is_some_and(|tail| tail.cutting) {
+            // the cut never came to the log: its frames are all there
+            let generation = self.state.generation;
+            Tail::update(&self.dir, self.boot, |tail| tail.stands(generation))?;
         }
         if cut {
             self.hidden = None;

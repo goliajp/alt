@@ -86,6 +86,9 @@ impl Log {
             return Err(OpLogError::CutBack);
         }
         let mut tail = Tail::read(&self.dir, self.boot).unwrap_or_default();
+        if tail.cuts(self.state.generation, target) {
+            return Err(OpLogError::CutBack);
+        }
         if tail.synced < target {
             self.file.sync_all()?;
             tail.generation = tail.generation.max(self.state.generation);

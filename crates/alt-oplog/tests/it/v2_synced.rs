@@ -270,10 +270,10 @@ fn a_tail_of_another_boot_or_one_that_does_not_read_says_nothing() {
     drop(log);
     let path = dir.path().join("tail");
     let written = fs::read(&path).unwrap();
-    assert_eq!(written.len(), 64);
+    assert_eq!(written.len(), 72);
     let fresh = |dir: &Path| !OpLog::open(dir).unwrap().unsettled();
     assert!(fresh(dir.path()));
-    for at in 0..64 {
+    for at in 0..72 {
         let mut other = written.clone();
         other[at] ^= 1;
         fs::write(&path, other).unwrap();

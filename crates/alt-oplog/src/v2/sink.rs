@@ -82,12 +82,14 @@ impl Sink {
         }
         let held = Held::take(&self.dir)?;
         let mut closes = [0u8; 4];
+        let mut tail = Tail::read(&self.dir, self.boot).unwrap_or_default();
         let in_place = self.file.metadata()?.len() >= reached.target
             && self
                 .file
                 .read_exact_at(&mut closes, reached.target - 4)
                 .is_ok()
-            && closes == reached.closes;
+            && closes == reached.closes
+            && !tail.cuts(reached.generation, reached.target);
         if !in_place {
             // the frames were cut: there is nothing of this handle's to
             // sync until it appends again
@@ -97,7 +99,6 @@ impl Sink {
             }
             return Err(OpLogError::CutBack);
         }
-        let mut tail = Tail::read(&self.dir, self.boot).unwrap_or_default();
         if tail.synced < reached.target {
             self.file.sync_all()?;
             tail.generation = tail.generation.max(reached.generation);

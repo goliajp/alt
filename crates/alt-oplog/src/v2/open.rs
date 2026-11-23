@@ -140,7 +140,7 @@ fn told_of(tail: &Tail, state: &State, size: u64, window: &(u64, Vec<u8>)) -> bo
         .checked_sub(4)
         .and_then(|at| at.checked_sub(window.0));
     let held = closes.and_then(|at| window.1.get(at as usize..)?.first_chunk::<4>());
-    tail.generation == state.generation
+    tail.tells(state.generation)
         && tail.judged <= size
         && held.is_none_or(|held| *held == tail.closes || tail.closes == [0; 4])
 }
@@ -182,11 +182,12 @@ pub(crate) fn load(
     let mut size = crate::settle::read_end(&meta);
     let clamped = size < meta.len();
     let tail = Tail::read(dir, boot);
-    // what a reader of this boot found to be no part of the log
-    let ends = |tail: &Tail| tail.pending && tail.hidden == meta.len() && tail.judged < size;
+    // what a reader of this boot found to be no part of the log, or a
+    // cut that was begun takes away
+    let ends = |tail: &Tail| tail.hidden != 0 && tail.hidden == meta.len() && tail.ends < size;
     let hidden = tail.filter(ends);
     let hidden = hidden.map(|tail| {
-        size = tail.judged;
+        size = tail.ends;
         meta.len()
     });
     let size = size.max(FILE_HEADER_LEN as u64);

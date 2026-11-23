@@ -146,7 +146,7 @@ fn a_note_that_ops_are_left_from_before_the_boundary_has_those_past_it_looked_at
     let dir = alt_os::temp::tempdir().unwrap();
     let synced = left_by_boot_1(dir.path(), &Meta::default());
     // as no writer leaves it: ops to look at from the first frame on
-    let note = tail(2, 0, true, [synced, 64, 0]);
+    let note = tail(2, 0, (true, false), [synced, 64, 0, 0]);
     fs::write(dir.path().join("tail"), note).unwrap();
     let mut asked = Vec::new();
     let mut log = OpLog::open(dir.path()).unwrap();

@@ -17,6 +17,7 @@
 use std::sync::OnceLock;
 
 use crate::v2::block::FILE_HEADER_LEN;
+use crate::v2::cut_reached;
 use crate::v2::frame::{Cut, KIND_OP, UNSYNCED, View};
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
@@ -145,7 +146,7 @@ impl Log {
     /// nothing of the frames before it.
     fn left_after(&self, noted: Option<Tail>, at: u64, looked: bool) -> (bool, u64) {
         let judged = self.judged.get().min(at);
-        let noted = noted.filter(|tail| tail.pending && tail.generation == self.state.generation);
+        let noted = noted.filter(|tail| tail.pending && tail.tells(self.state.generation));
         match (looked, noted) {
             (true, _) => (false, at),
             (false, Some(tail)) => (true, tail.judged.max(judged).min(at)),
@@ -154,11 +155,17 @@ impl Log {
     }
 
     /// Cuts the log at `at`, where a frame this handle holds starts or
-    /// the last one ends, under the exclusive lock of the log. The log
-    /// says so before anything is gone: a checkpoint under the next
-    /// generation is written over what is cut and synced, and only then
-    /// is the file made to end with it. Nothing is cut that was recorded
-    /// as synced. `looked` says that every op before `at` was vouched for.
+    /// the last one ends, under the exclusive lock of the log. Nothing is
+    /// cut that was recorded as synced. `looked` says that every op
+    /// before `at` was vouched for.
+    ///
+    /// The order holds through a power cut and through the death of this
+    /// process alike. `tail` first says that a file as long as this one
+    /// is a log up to `at`: the frames past it stay readable until the
+    /// file is made shorter, and are no log from the next step on. Then
+    /// the log says what is cut, in a checkpoint under the next
+    /// generation written over it and synced. Only then is the file made
+    /// to end with that checkpoint.
     fn cut_at(&mut self, at: u64, discarded: Discarded, looked: bool) -> Result<(), OpLogError> {
         self.may_write()?;
         // neither a frame that must be known is cut nor the log after one
@@ -170,32 +177,45 @@ impl Log {
             return Err(OpLogError::Lost { synced, holds: at });
         }
         let (pending, judged) = self.left_after(noted, at, looked);
+        // above every generation the file holds frames of, also past `at`
+        let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
+        let generation = self.state.generation.checked_add(1).ok_or(cut_before)?;
         if at != self.state.end {
             self.read_to(at)?;
             self.may_append()?;
         }
+        let mut tail = Tail {
+            // the ops from `at` on are there until the checkpoint lies over them
+            pending: pending || looked,
+            cutting: true,
+            generation,
+            closes: [0; 4],
+            synced,
+            judged: if pending { judged } else { at },
+            hidden: self.file.metadata()?.len(),
+            ends: at,
+        };
+        tail.write(&self.dir, self.boot, &held)?;
+        cut_reached(1)?;
         let cut = Cut {
             bytes: discarded.to - discarded.from,
             ops: discarded.ops.len() as u32,
         };
         let mut state = self.state.clone();
-        let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
-        state.generation = state.generation.checked_add(1).ok_or(cut_before)?;
+        state.generation = generation;
         let bytes = self.composer().checkpoint(&mut state, Some(cut))?;
         self.put(&bytes, state)?;
+        cut_reached(2)?;
         self.file.sync_all()?;
+        cut_reached(3)?;
         self.file.set_len(self.state.end)?;
+        cut_reached(4)?;
         self.file.sync_all()?;
+        cut_reached(5)?;
         self.unsynced = false;
-        let tail = Tail {
-            pending,
-            generation: self.state.generation,
-            closes: [0; 4],
-            synced,
-            // with nothing left to look at, the checkpoint is covered too
-            judged: if pending { judged } else { self.state.end },
-            hidden: 0,
-        };
+        tail.stands(generation);
+        // with nothing left to look at, the checkpoint is covered too
+        (tail.pending, tail.judged) = (pending, if pending { judged } else { self.state.end });
         tail.write(&self.dir, self.boot, &held)?;
         if looked {
             self.judged.set(u64::MAX);

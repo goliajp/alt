@@ -10,9 +10,9 @@ impl Log {
     /// Notes in `tail` what a reader's look came to: every op it holds
     /// vouched for, or the first one that is not at `unheld`, from which
     /// on a file as long as the one it read is no log to a reader. It
-    /// holds no lock on the log: of a log that was cut since it read, or
-    /// that somebody noted or synced further than it knows, it notes
-    /// nothing.
+    /// holds no lock on the log: of a log that was cut since it read or
+    /// is being cut, or that somebody noted or synced further than it
+    /// knows, it notes nothing.
     pub(super) fn note_look(&self, unheld: Option<u64>) -> std::io::Result<()> {
         if !self.writable {
             return Ok(());
@@ -22,14 +22,17 @@ impl Log {
         Tail::update(&self.dir, self.boot, |tail| {
             let other = *tail != Tail::default() && tail.generation != generation;
             let further = unheld.is_some_and(|at| tail.judged > at || tail.synced > at);
-            if other || tail.pending || further {
+            if other || tail.cutting || tail.pending || further {
                 return;
             }
             tail.generation = generation;
             // the frames that said so may be among those no longer read
             tail.raise(synced, None);
             match unheld {
-                Some(at) => (tail.pending, tail.judged, tail.hidden) = (true, at, seen),
+                Some(at) => {
+                    (tail.pending, tail.judged) = (true, at);
+                    (tail.hidden, tail.ends) = (seen, at);
+                }
                 None => tail.judged = tail.judged.max(end),
             }
         })
@@ -43,9 +46,9 @@ impl Log {
         }
         let (generation, synced, end) = (self.state.generation, self.synced, self.state.end);
         Tail::update(&self.dir, self.boot, |tail| {
-            tail.generation = generation;
+            tail.stands(generation);
             tail.raise(synced, None);
-            (tail.pending, tail.judged, tail.hidden) = (false, end, 0);
+            (tail.pending, tail.judged) = (false, end);
         })
     }
 
@@ -54,7 +57,7 @@ impl Log {
     /// after is of this boot, and there is nothing left to look at.
     pub(super) fn vouched_since(&mut self) -> Result<bool, OpLogError> {
         let generation = self.state.generation;
-        let vouched = |tail: Tail| !tail.pending && tail.generation == generation;
+        let vouched = |tail: Tail| !tail.pending && !tail.cutting && tail.generation == generation;
         let judged = self
             .tail()
             .filter(|tail| vouched(*tail))
@@ -76,10 +79,12 @@ impl Log {
         let (generation, synced) = (self.state.generation, self.synced);
         let judged = self.judged.get();
         Tail::update(&self.dir, self.boot, |tail| {
-            tail.generation = generation;
+            // what was noted of a log of another generation says nothing here
+            let noted = tail.pending && tail.tells(generation);
+            tail.stands(generation);
             tail.raise(synced, None);
-            if !tail.pending {
-                (tail.pending, tail.judged, tail.hidden) = (true, judged, 0);
+            if !noted {
+                (tail.pending, tail.judged) = (true, judged);
             }
         })?;
         self.left_noted = true;
