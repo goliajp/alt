@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: read no reference of a repository for a caller who may not read it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/statements.rs
+touched: crates/alt-server-store/tests/it/database/pack_view.rs
