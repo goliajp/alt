@@ -12,7 +12,11 @@ use std::io::{BufWriter, Write};
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
 use alt_hash::KeyedIdSet;
 use alt_repo::Repository;
-use alt_wire::fetch::{FetchRequest, encode_fetch_response_packfile};
+use alt_wire::fetch::{
+    FetchRequest, encode_acknowledgments, encode_fetch_response_packfile, encode_shallow_info,
+};
+
+use super::shallow::{self, Shallow};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -175,20 +179,44 @@ fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
 }
 
 /// The response to `req`, in a file that has no name any more: the
-/// want/have closure of the request, less what its filter leaves out, as
-/// a pack in side-band frames. The pack is the wire payload and is not
-/// kept. A request for what no ref reaches is answered as `git
-/// upload-pack` answers a want it does not serve.
+/// want/have closure of the request, less what its filter and the ends
+/// of its history leave out, as a pack in side-band frames. The pack is
+/// the wire payload and is not kept. A request for what no ref reaches is
+/// answered as `git upload-pack` answers a want it does not serve.
+///
+/// A request that does not say `done` is told which of its `have` lines
+/// the server has too. It gets its pack in the same response once one of
+/// them is, and is otherwise left to send more of them or `done`: the
+/// pack then leaves out what the commits acknowledged so far reach, which
+/// may be less than a longer negotiation would have found.
 pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
     let mut framed = BufWriter::new(File::create(&path)?);
-    match unreached(repo, req)? {
-        Some(oid) => {
-            let refusal = format!("ERR upload-pack: not our ref {oid}");
-            alt_wire::pkt::write_data(&mut framed, refusal.as_bytes())?;
+    let refused = |framed: &mut BufWriter<File>, why: &str| {
+        alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
+    };
+    if let Some(oid) = unreached(repo, req)? {
+        refused(&mut framed, &format!("not our ref {oid}"))?;
+    } else {
+        let common = reached(repo, req)?;
+        let ready = !req.wait_for_done && !common.is_empty();
+        if !req.done && !ready {
+            encode_acknowledgments(&mut framed, &common, false)?;
+        } else {
+            match shallow::ends(repo, req)? {
+                Err(why) => refused(&mut framed, &why)?,
+                Ok(shallow) => {
+                    if !req.done {
+                        encode_acknowledgments(&mut framed, &common, true)?;
+                    }
+                    if let Some(told) = &shallow.told {
+                        encode_shallow_info(&mut framed, told)?;
+                    }
+                    pack(repo, req, &shallow, &common, dir.path(), &mut framed)?;
+                }
+            }
         }
-        None => pack(repo, req, dir.path(), &mut framed)?,
     }
     framed.flush()?;
     drop(framed);
@@ -200,10 +228,14 @@ pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
 fn pack(
     repo: &Repository,
     req: &FetchRequest,
+    shallow: &Shallow,
+    common: &[ObjectId],
     dir: &std::path::Path,
     framed: &mut impl Write,
 ) -> Res<()> {
-    let outgoing = repo.reachable_objects(&req.wants, &reached(repo, req)?)?;
+    let mut roots = req.wants.clone();
+    roots.extend(&shallow.parents);
+    let outgoing = repo.reachable_objects_between(&roots, common, &shallow.ends)?;
     let filter = parse_filter_spec(req.filter.as_deref());
     // only a limit on the size of blobs has an object read to tell
     // whether it goes
@@ -220,9 +252,6 @@ fn pack(
         if asked.contains(oid) || !filter.excludes(*kind, bytes) {
             going.push((*oid, *kind));
         }
-    }
-    if going.is_empty() {
-        return Ok(encode_fetch_response_packfile(framed, &[])?);
     }
     let count =
         u32::try_from(going.len()).map_err(|_| "outgoing object set exceeds u32 (server-side)")?;

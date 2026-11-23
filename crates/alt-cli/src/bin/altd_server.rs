@@ -42,6 +42,8 @@ mod nonces;
 mod push;
 #[path = "altd_server/readers.rs"]
 mod readers;
+#[path = "altd_server/shallow.rs"]
+mod shallow;
 #[path = "altd_server/told.rs"]
 mod told;
 #[path = "altd_server/upload.rs"]

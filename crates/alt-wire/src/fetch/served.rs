@@ -77,6 +77,8 @@ pub fn parse_fetch_request<R: Read>(
                     "thin-pack" => req.thin_pack = true,
                     "ofs-delta" => req.ofs_delta = true,
                     "include-tag" => req.include_tag = true,
+                    "wait-for-done" => req.wait_for_done = true,
+                    _ if req.depth.line(s, line)? => {}
                     _ => {
                         if let Some(hex) = s.strip_prefix("want ") {
                             let oid = parse_oid_str(hex.trim(), algo, line)?;

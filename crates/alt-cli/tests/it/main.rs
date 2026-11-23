@@ -22,6 +22,7 @@ mod altd_server_push_cost;
 mod altd_server_reads;
 mod altd_server_recorded;
 mod altd_server_refused_objects;
+mod altd_server_shallow;
 mod altd_server_signed_commits;
 mod altd_server_slow_peers;
 mod altd_server_thin;

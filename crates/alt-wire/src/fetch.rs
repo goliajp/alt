@@ -47,8 +47,13 @@ use alt_git_codec::{HashAlgo, ObjectId};
 
 use crate::pkt::{self, Frame, PktError};
 
+mod depth;
 mod served;
 
+use depth::parse_shallow;
+pub use depth::{
+    Depth, MAX_DEEPEN_NOTS, MAX_SHALLOWS, WHOLE_DEPTH, encode_acknowledgments, encode_shallow_info,
+};
 pub use served::{MAX_HAVES, MAX_WANTS, encode_fetch_response_packfile, parse_fetch_request};
 
 /// Client-side fetch arguments. Maps directly to protocol v2's optional
@@ -79,6 +84,10 @@ pub struct FetchRequest {
     /// (omit blobs at or above n bytes), `tree:0` (omit trees + blobs;
     /// only commits go on the pack). `None` = full clone.
     pub filter: Option<String>,
+    /// `wait-for-done\n` — the server sends no pack before `done`.
+    pub wait_for_done: bool,
+    /// Where the history asked for ends.
+    pub depth: Depth,
 }
 
 /// Encode a `fetch` request body. Caller wraps this in the HTTP
@@ -384,33 +393,6 @@ fn parse_ack(line: &[u8], algo: HashAlgo) -> Result<FetchAck, FetchError> {
     })
 }
 
-fn parse_shallow(line: &[u8], algo: HashAlgo) -> Result<ShallowInfo, FetchError> {
-    let s = std::str::from_utf8(line).map_err(|_| FetchError::BadLine {
-        section: "shallow-info".into(),
-        line: line.to_vec(),
-    })?;
-    if let Some(rest) = s.strip_prefix("shallow ") {
-        return Ok(ShallowInfo::Shallow(parse_oid(
-            rest.trim(),
-            algo,
-            line,
-            "shallow-info",
-        )?));
-    }
-    if let Some(rest) = s.strip_prefix("unshallow ") {
-        return Ok(ShallowInfo::Unshallow(parse_oid(
-            rest.trim(),
-            algo,
-            line,
-            "shallow-info",
-        )?));
-    }
-    Err(FetchError::BadLine {
-        section: "shallow-info".into(),
-        line: line.to_vec(),
-    })
-}
-
 fn parse_wanted_ref(line: &[u8], algo: HashAlgo) -> Result<WantedRef, FetchError> {
     let s = std::str::from_utf8(line).map_err(|_| FetchError::BadLine {
         section: "wanted-refs".into(),
@@ -491,7 +473,7 @@ mod tests {
             thin_pack: true,
             ofs_delta: true,
             include_tag: true,
-            filter: None,
+            ..Default::default()
         };
         let mut buf = Vec::new();
         encode_fetch_request(&mut buf, &req, Some("sha1")).unwrap();
