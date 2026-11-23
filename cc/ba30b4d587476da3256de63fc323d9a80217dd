@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: test
+summary: have the driver of a log find the ops it appended in the file itself, hold what looks give back to what they were told, and come upon a cut that was begun
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
