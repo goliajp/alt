@@ -106,6 +106,7 @@ mod merge_modes;
 mod mixed_versions;
 mod monorepo_bench;
 mod mv;
+mod mv_rename;
 mod nested_repo;
 mod never_synced_runs;
 mod old_daemon;

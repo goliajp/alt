@@ -6,6 +6,7 @@ use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::hash;
 
+mod moves;
 mod paths;
 
 impl NativeRepo<'_> {
@@ -134,8 +135,16 @@ impl NativeRepo<'_> {
             let applied = self.apply_file_state(&path, &change.after);
             applied.map_err(|e| format!("cannot write '{path}': {e}").into())
         };
-        changes.clone().filter(removed).try_for_each(apply)?;
-        changes.filter(|c| !removed(c)).try_for_each(apply)
+        // a file that only moves is renamed, before anything is removed
+        let all: Vec<&FileChange> = changes.collect();
+        let moved = self.rename_moved(&all)?;
+        let rest = || {
+            all.iter()
+                .copied()
+                .filter(|c| !moved.contains(c.path.as_slice()))
+        };
+        rest().filter(removed).try_for_each(apply)?;
+        rest().filter(|c| !removed(c)).try_for_each(apply)
     }
 
     /// Refuses, before anything is written, a change that would put a file
