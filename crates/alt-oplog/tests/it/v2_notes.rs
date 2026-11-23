@@ -262,7 +262,8 @@ fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() 
         Ok(())
     }));
     log.append("w", 1, b"committed").unwrap();
-    assert_eq!(*given.lock().unwrap(), 60);
+    // of the sixty ops, the one of each workspace that last staged
+    assert_eq!(*given.lock().unwrap(), 3);
     log.sync().unwrap();
     let committed = log.appended_len();
     assert!(log.confirmed() && log.synced_here() == committed);

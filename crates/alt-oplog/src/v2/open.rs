@@ -37,6 +37,7 @@ pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
         seq: view.head.seq,
         flags: view.head.flags,
         workspace: view.head.workspace,
+        linked: view.ext.linked.is_some(),
         inverse_of: view.ext.inverse_of,
         request: view.ext.request,
     });

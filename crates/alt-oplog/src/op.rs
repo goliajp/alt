@@ -101,6 +101,8 @@ pub struct Framed {
     pub flags: u8,
     /// zeros for an op of no workspace
     pub workspace: [u8; 8],
+    /// a ref transaction: its frame names the one before it
+    pub linked: bool,
     /// the frame of the op this one undoes
     pub inverse_of: Option<u64>,
     pub request: Option<[u8; 16]>,

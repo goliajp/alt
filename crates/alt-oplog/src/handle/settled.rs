@@ -40,12 +40,13 @@ impl OpLog {
     /// or a sink made from it afterwards records as synced ops that
     /// nobody has recorded yet: `sync` syncs what those ops name, so that
     /// no op is recorded as synced ahead of what it names. A version 2
-    /// log gives it, of the ops about to be recorded, those this handle
-    /// read and before them every ref transaction and the op of each
-    /// workspace that last changed its index, in the order of the log; a
-    /// version 1 log those that were appended while appends were left
-    /// unsynced, where a boundary is about to be set over them, and none
-    /// otherwise.
+    /// log gives it, of the ops about to be recorded, every ref
+    /// transaction and the op of each workspace that last changed its
+    /// index, in the order of the log: that op names the index before it
+    /// and the one after, and an earlier change of the same index names
+    /// nothing a later command needs. A version 1 log gives those that
+    /// were appended while appends were left unsynced, where a boundary
+    /// is about to be set over them, and none otherwise.
     pub fn sync_named_with(&mut self, sync: SyncNamed) {
         on!(mut self, log => log.sync_named_with(sync))
     }

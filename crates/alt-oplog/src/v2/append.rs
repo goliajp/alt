@@ -160,6 +160,7 @@ impl Log {
                 seq: self.state.seq,
                 flags,
                 workspace,
+                linked: meta.linked,
                 inverse_of: meta.inverse_of,
                 request: meta.request,
             }),
