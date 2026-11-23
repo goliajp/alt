@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a file that is no log of a format this build reads on its first bytes, before any of it is read as a version 1 log
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle.rs
+touched: crates/alt-oplog/src/handle/format.rs
