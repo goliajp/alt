@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: note that ops another boot left are still to be looked at when a writer that syncs nothing appends after them
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
