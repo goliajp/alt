@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: test
+summary: hold a driven log to a ledger of what was done to it, through receipts, anchors, writers meanwhile and logs grown back, on blocks of three sizes
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_checks.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_meanwhile.rs
+touched: crates/alt-oplog/tests/it/v2_mishaps.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
