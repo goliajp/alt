@@ -14,7 +14,12 @@ pub(super) fn merge<W: Write>(repo: &mut NativeRepo, args: &Merge, out: &mut W) 
     }
     repo.ensure_no_pick_to_conclude()?;
     let branch = args.branch.as_deref().unwrap_or_default();
-    Ok(u8::from(repo.merge(branch, args.json, out)?))
+    Ok(u8::from(repo.merge(
+        branch,
+        args.fast_forward(),
+        args.json,
+        out,
+    )?))
 }
 
 /// git exits 1 when a cherry-pick stops in conflict

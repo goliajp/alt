@@ -245,7 +245,14 @@ fn the_index_of_a_stopped_merge_is_written_after_its_blobs_are_synced() {
     let mut store = Store::open(alt_dir).unwrap();
     store.set_defer_durability(true);
     let mut merging = NativeRepo::attach(&mut store, coord, crate::test_identity(), None);
-    let stopped = merging.merge("theirs", false, &mut Vec::new()).unwrap();
+    let stopped = merging
+        .merge(
+            "theirs",
+            alt_cli::native::FastForward::Allowed,
+            false,
+            &mut Vec::new(),
+        )
+        .unwrap();
     assert!(stopped, "the merge did not stop on the conflict");
     let merged = std::fs::read_to_string(repo.join("each.txt")).unwrap();
     assert_eq!(merged, lines("one", "nine"));

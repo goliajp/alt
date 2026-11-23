@@ -4,7 +4,10 @@
 use super::*;
 
 mod reset;
+mod run;
 mod state;
+pub use run::FastForward;
+pub(super) use run::MergeOutcome;
 mod write;
 
 impl NativeRepo<'_> {
