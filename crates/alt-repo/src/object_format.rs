@@ -18,6 +18,10 @@ pub(crate) fn object_format(config_path: &Path) -> Result<HashAlgo, RepoError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
         Err(e) => return Err(e.into()),
     };
+    format_of(&plain)
+}
+
+fn format_of(plain: &Config) -> Result<HashAlgo, RepoError> {
     match plain.get_str("extensions", None, "objectformat") {
         None => Ok(HashAlgo::Sha1),
         Some(v) if v.as_ref() as &[u8] == b"sha256" => Ok(HashAlgo::Sha256),
@@ -25,8 +29,11 @@ pub(crate) fn object_format(config_path: &Path) -> Result<HashAlgo, RepoError> {
     }
 }
 
-/// The hash algorithm of a native store: the one of the git repository it
-/// was imported from (its config is kept under `git-import/`), else sha1.
+/// The hash algorithm of a native store: the one its own configuration
+/// names, or that of the git repository it was imported from names, else
+/// sha1.
 pub fn native_object_format(alt_dir: &Path) -> Result<HashAlgo, RepoError> {
-    object_format(&alt_dir.join("git-import/config"))
+    format_of(&Config {
+        entries: crate::kept_config::plain(alt_dir)?,
+    })
 }

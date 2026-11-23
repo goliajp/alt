@@ -1,7 +1,9 @@
-//! `alt config <key> [<value>] | --list | --unset <key>`: read + write
-//! access to the alt repo's config (the same `<alt-dir>/git-import/
-//! config` file `alt-import` preserved from the source `.git` so the
-//! existing git config story keeps working post-transition).
+//! `alt config <key> [<value>] | --list | --unset <key>`: reads the
+//! configuration that applies to the repository and writes the store's
+//! own file, `<alt-dir>/git-import/config`. What an import kept of the
+//! git repository's configuration lies under that file and is never
+//! written here: a value set here stands over it, and the next import
+//! leaves it standing.
 //!
 //! Write caveat: the on-disk file is rewritten from the parsed Entry
 //! list, which **does not preserve comments, blank lines, or include
@@ -89,6 +91,14 @@ fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
             && e.key == name)
     });
     if entries.len() == before {
+        let applies = crate::git_settings::repository(repo)?;
+        if applies
+            .get(&section, subsection.as_deref(), &name)
+            .is_some()
+        {
+            let whose = "is set by the imported git configuration, which stays as it is";
+            return Err(format!("'{key}' {whose}; `alt config {key} <value>` overrides it").into());
+        }
         return Err(format!("'{key}' not set").into());
     }
     write_entries(&path, &entries)?;
@@ -101,8 +111,7 @@ fn entry_subsection_bytes(e: &Entry) -> Option<&[u8]> {
 }
 
 fn config_path(repo: &Repository) -> PathBuf {
-    // For an alt-backed repo, git_dir() == the `.alt` dir, and the
-    // config alt-import preserves lives under git-import/config.
+    // for an alt-backed repo, git_dir() is the `.alt` dir
     repo.git_dir().join("git-import").join("config")
 }
 

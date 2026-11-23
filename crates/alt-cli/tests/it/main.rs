@@ -39,6 +39,7 @@ mod commit_loop;
 mod commit_meta;
 mod complete;
 mod config;
+mod config_layers;
 #[cfg(target_os = "linux")]
 mod config_paths;
 // the points to be killed at are in a debug build only

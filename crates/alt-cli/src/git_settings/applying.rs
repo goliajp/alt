@@ -44,7 +44,8 @@ pub fn forget() {
 }
 
 /// The configuration that applies in the repository that keeps its own
-/// file as `config` in `dir`, as the caller of this thread reads it.
+/// file as `config` in `dir`, and under `source` there what an import
+/// took over, as the caller of this thread reads it.
 /// `branch` is asked for the branch checked out only where an `includeIf`
 /// of the configuration goes by it.
 pub(crate) fn applying(dir: &Path, branch: impl FnOnce() -> Option<BString>) -> Res<Arc<Applying>> {
@@ -87,22 +88,16 @@ pub(crate) fn applying(dir: &Path, branch: impl FnOnce() -> Option<BString>) -> 
 }
 
 fn read(dir: &Path, branch: Option<BString>) -> Res<Applying> {
-    let file = dir.join("config");
     let (mut entries, mut files) = outer_listed(Some(dir.to_owned()), branch.clone())?;
-    if !file.is_file() {
-        files.push(file);
-        return Ok(Applying {
-            config: Config { entries },
-            files,
-        });
-    }
     let ctx = IncludeContext {
         git_dir: Some(dir.to_owned()),
         branch,
         home: home(),
     };
-    let (own, read) = Config::load_listing(&file, &ctx)?;
-    entries.extend(own.entries);
+    // under the repository's own file lies what an import kept of the
+    // git repository's
+    let (own, read) = alt_repo::kept_config::layers(dir, &ctx)?;
+    entries.extend(own);
     files.extend(read);
     Ok(Applying {
         config: Config { entries },

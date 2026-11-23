@@ -13,6 +13,7 @@ alt-git-pack.workspace = true
 alt-git-refs.workspace = true
 alt-odb.workspace = true
 alt-refs.workspace = true
+alt-repo.workspace = true
 alt-bytes.workspace = true
 
 [dev-dependencies]

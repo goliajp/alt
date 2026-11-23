@@ -69,8 +69,10 @@ fn full_import_migrates_objects_refs_head_and_config() {
 
     // contract 2: config preserved byte-for-byte
     let src = std::fs::read(repo_dir.path().join(".git/config")).unwrap();
-    let kept = std::fs::read(alt_dir.join("git-import/config")).unwrap();
+    let kept = std::fs::read(alt_dir.join("git-import/source/config")).unwrap();
     assert_eq!(src, kept);
+    // the store's own file is not the import's to write
+    assert!(!alt_dir.join("git-import/config").exists());
 
     // exactly one op in the log
     assert_eq!(native.oplog().len(), 1);

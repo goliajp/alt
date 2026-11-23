@@ -377,21 +377,15 @@ pub fn import(
     for name in native.take_remotes(repo)? {
         writeln!(out, "took remote '{name}'")?;
     }
-    if !fresh {
-        return Ok(());
+    if fresh {
+        native.materialise_fresh(target, out)?;
     }
-    if let Err(e) = native.materialise_head() {
+    for key in native.not_carried(repo)? {
         writeln!(
             out,
-            "warning: import succeeded but work-tree materialize failed: {e}"
+            "warning: '{key}' did not come along: {}",
+            import_config::WHY
         )?;
-    } else {
-        let branch = native.head_branch().unwrap_or_else(|_| "HEAD".to_string());
-        let short = branch
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&branch)
-            .to_string();
-        writeln!(out, "materialized {short} into {}", target.display())?;
     }
     let _ = cwd; // suppress unused-var when same_dir short-circuits
     Ok(())

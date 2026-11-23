@@ -253,13 +253,8 @@ pub fn files(odb: &NativeOdb, commit: ObjectId) -> Result<BTreeMap<String, FileE
     Ok(result)
 }
 pub fn config_bytes(alt_dir: &Path) -> Result<Vec<u8>> {
-    match fs::read(alt_dir.join("git-import/config")) {
-        Ok(bytes) => Ok(bytes),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Ok(b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n".to_vec())
-        }
-        Err(e) => Err(e.into()),
-    }
+    let kept = alt_repo::kept_config::for_git(alt_dir, <[u8]>::to_vec)?;
+    Ok(kept.unwrap_or_else(|| b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n".to_vec()))
 }
 
 #[cfg(test)]

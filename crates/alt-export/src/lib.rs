@@ -17,7 +17,6 @@ use std::path::Path;
 
 use alt_bytes::BString;
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_git_config::Config;
 use alt_git_pack::PackWriter;
 use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
@@ -32,6 +31,8 @@ pub enum ExportError {
     GitRefs(alt_git_refs::RefError),
     Pack(alt_git_pack::PackError),
     Config(alt_git_config::ConfigError),
+    /// The configuration files the store keeps could not be read.
+    Kept(alt_repo::RepoError),
     Format(&'static str),
     TargetNotEmpty(std::path::PathBuf),
     /// A ref names an object the store does not hold.
@@ -47,6 +48,7 @@ impl std::fmt::Display for ExportError {
             Self::GitRefs(e) => std::fmt::Display::fmt(e, f),
             Self::Pack(e) => std::fmt::Display::fmt(e, f),
             Self::Config(e) => std::fmt::Display::fmt(e, f),
+            Self::Kept(e) => std::fmt::Display::fmt(e, f),
             Self::Format(v) => write!(f, "export format: {v}"),
             Self::TargetNotEmpty(v) => {
                 write!(f, "export target {} exists and is not empty", v.display())
@@ -68,6 +70,7 @@ impl std::error::Error for ExportError {
             Self::GitRefs(e) => e.source(),
             Self::Pack(e) => e.source(),
             Self::Config(e) => e.source(),
+            Self::Kept(e) => e.source(),
             _ => None,
         }
     }
@@ -106,6 +109,12 @@ impl From<alt_git_pack::PackError> for ExportError {
 impl From<alt_git_config::ConfigError> for ExportError {
     fn from(e: alt_git_config::ConfigError) -> Self {
         Self::Config(e)
+    }
+}
+
+impl From<alt_repo::RepoError> for ExportError {
+    fn from(e: alt_repo::RepoError) -> Self {
+        Self::Kept(e)
     }
 }
 
@@ -157,31 +166,25 @@ pub fn export_git_naming(
     report
 }
 
-/// Writes the config, which declares the object format: the preserved
-/// one where there is one, the minimum a repository needs otherwise.
+/// Writes the config, which declares the object format: what the store
+/// kept of the git repository it was imported from with the store's own
+/// settings written in, or the minimum a repository needs. With it go
+/// the other configuration files the import kept.
 fn write_config(alt_dir: &Path, git_dir: &Path) -> Result<HashAlgo, ExportError> {
-    let preserved = alt_dir.join("git-import/config");
-    if !preserved.is_file() {
+    // the export writes files-backend refs by decision, so a preserved
+    // extensions.refstorage (e.g. reftable) must not survive; everything
+    // else of a kept copy returns byte-identical
+    let Some(bytes) = alt_repo::kept_config::for_git(alt_dir, strip_refstorage)? else {
         // native-born store without an import config
         fs::write(
             git_dir.join("config"),
             b"[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
         )?;
         return Ok(HashAlgo::Sha1);
-    }
-    let bytes = fs::read(&preserved)?;
-    let plain = Config {
-        entries: alt_git_config::parse_file(&bytes)?,
     };
-    let algo = match plain.get_str("extensions", None, "objectformat") {
-        None => HashAlgo::Sha1,
-        Some(v) if v.as_ref() as &[u8] == b"sha256" => HashAlgo::Sha256,
-        Some(_) => return Err(ExportError::Format("unknown extensions.objectFormat")),
-    };
-    // the export writes files-backend refs by decision, so a preserved
-    // extensions.refstorage (e.g. reftable) must not survive; everything
-    // else returns byte-identical
-    fs::write(git_dir.join("config"), strip_refstorage(&bytes))?;
+    let algo = alt_repo::native_object_format(alt_dir)?;
+    fs::write(git_dir.join("config"), bytes)?;
+    alt_repo::kept_config::give(alt_dir, git_dir)?;
     Ok(algo)
 }
 

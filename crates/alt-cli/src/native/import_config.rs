@@ -1,6 +1,6 @@
 //! What an import takes over from the configuration of the git
-//! repository besides the file itself, which the store keeps as it is and
-//! reads its own settings from.
+//! repository besides the file itself, which the store keeps a copy of
+//! and reads under its own settings.
 //!
 //! A git repository has its remotes in that file; a store has one file
 //! for each under `remotes/`. An import makes those files, so that
@@ -51,6 +51,59 @@ impl NativeRepo<'_> {
             taken.push(name);
         }
         Ok(taken)
+    }
+}
+
+/// Why a variable the git repository read is not read here.
+pub(super) const WHY: &str = "a file the git configuration includes sets it, and the path to that file leads elsewhere from here";
+
+impl NativeRepo<'_> {
+    /// Checks out the head of a store imported into an empty directory,
+    /// and says so. An import whose files cannot be written stands.
+    pub(super) fn materialise_fresh(&mut self, target: &Path, out: &mut impl Write) -> Res<()> {
+        if let Err(e) = self.materialise_head() {
+            let said = "warning: import succeeded but work-tree materialize failed";
+            return Ok(writeln!(out, "{said}: {e}")?);
+        }
+        let branch = self.head_branch().unwrap_or_else(|_| "HEAD".to_string());
+        let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
+        Ok(writeln!(
+            out,
+            "materialized {short} into {}",
+            target.display()
+        )?)
+    }
+
+    /// The variables the git repository `source` read from its own
+    /// configuration that the store does not read from its copy of it,
+    /// or reads other values of: a file the configuration includes by a
+    /// relative path is found from the store only where it lay in the
+    /// git directory or lies in the working tree.
+    pub(super) fn not_carried(&self, source: &alt_repo::Repository) -> Res<Vec<String>> {
+        let home = crate::git_settings::home();
+        let theirs = source.config_at(home.clone())?.entries;
+        let control = self.store.alt_dir.join("git-import");
+        let ctx = alt_git_config::IncludeContext {
+            git_dir: Some(control.clone()),
+            branch: source.branch_of("HEAD")?,
+            home,
+        };
+        let (ours, _) = alt_repo::kept_config::source(&control, &ctx)?;
+        let values = |entries: &[alt_git_config::Entry], name| -> Vec<Option<BString>> {
+            let named = entries
+                .iter()
+                .filter(|e| alt_git_config::Name::of(e) == name);
+            named.map(|e| e.value.clone()).collect()
+        };
+        let mut differing: Vec<String> = Vec::new();
+        for entry in theirs.iter().chain(&ours) {
+            let name = alt_git_config::Name::of(entry);
+            let key = entry.display_key();
+            if values(&theirs, name) != values(&ours, name) && !differing.contains(&key) {
+                differing.push(key);
+            }
+        }
+        Ok(differing)
     }
 }
 

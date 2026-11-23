@@ -63,11 +63,13 @@ impl AltBackend {
         Ok(self.refs.get_or_init(|| refs))
     }
 
-    /// The preserved git config (`git-import/config`), with its includes;
-    /// one of a file under `~` is looked for in `home`.
+    /// The configuration of the store: what an import kept of the git
+    /// repository's, and on top the store's own file, includes resolved.
+    /// A file under `~` is looked for in `home`.
     pub fn load_config(&self, home: Option<PathBuf>) -> Result<Config, RepoError> {
-        let config_path = self.alt_dir.join("git-import/config");
-        if !config_path.is_file() {
+        let control = self.alt_dir.join("git-import");
+        let listed = |dir: &str| control.join(dir).join("config").is_file();
+        if !listed("") && !listed("source") {
             return Ok(Config::default());
         }
         let branch = match self.refs()?.get("HEAD") {
@@ -76,14 +78,13 @@ impl AltBackend {
                 .map(|short| BString::from(short.as_bytes().to_vec())),
             _ => None,
         };
-        // include paths resolve relative to the preserved copy; the
-        // original .git is gone by design (no coexistence)
         let ctx = IncludeContext {
-            git_dir: Some(self.alt_dir.join("git-import")),
+            git_dir: Some(control.clone()),
             branch,
             home,
         };
-        Ok(Config::load(&config_path, &ctx)?)
+        let (entries, _) = crate::kept_config::layers(&control, &ctx)?;
+        Ok(Config { entries })
     }
 }
 
@@ -96,8 +97,7 @@ impl Repository {
         match &self.backend {
             Backend::Alt(alt) => alt.load_config(home),
             Backend::Git { .. } => {
-                let path = self.repo_dir.join("config");
-                if !path.is_file() {
+                if !self.repo_dir.join("config").is_file() {
                     return Ok(Config::default());
                 }
                 let ctx = IncludeContext {
@@ -105,7 +105,8 @@ impl Repository {
                     branch: self.branch_of("HEAD")?,
                     home,
                 };
-                Ok(Config::load(&path, &ctx)?)
+                let (entries, _) = crate::kept_config::of_git(&self.repo_dir, &ctx)?;
+                Ok(Config { entries })
             }
         }
     }

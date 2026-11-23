@@ -7,6 +7,7 @@
 //! backend: a `.git` directory or a native `.alt` store.
 
 mod alt_backend;
+pub mod kept_config;
 mod object_format;
 mod odb;
 mod revspec;
@@ -110,15 +111,13 @@ impl Repository {
                 .map(|short| BString::from(short.to_vec())),
             _ => None,
         };
-        let config = if config_path.is_file() {
-            let ctx = IncludeContext {
-                git_dir: Some(git_dir.clone()),
-                branch,
-                home: std::env::var_os("HOME").map(PathBuf::from),
-            };
-            Config::load(&config_path, &ctx)?
-        } else {
-            Config::default()
+        let ctx = IncludeContext {
+            git_dir: Some(git_dir.clone()),
+            branch,
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        };
+        let config = Config {
+            entries: kept_config::of_git(&git_dir, &ctx)?.0,
         };
 
         let objects = git_dir.join("objects");
@@ -177,7 +176,7 @@ impl Repository {
         if let Some(algo) = self.algo.get() {
             return Ok(*algo);
         }
-        let algo = object_format(&self.repo_dir.join("git-import/config"))?;
+        let algo = native_object_format(&self.repo_dir)?;
         Ok(*self.algo.get_or_init(|| algo))
     }
 

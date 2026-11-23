@@ -8,6 +8,7 @@
 mod abandoned_add;
 mod abort;
 mod cherry_pick;
+mod config_layers;
 // the points to be killed at are in a debug build only
 #[cfg(debug_assertions)]
 mod completed_late;
