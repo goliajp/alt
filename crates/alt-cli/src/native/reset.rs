@@ -61,17 +61,7 @@ impl NativeRepo<'_> {
             None => head,
         };
         self.ensure_resettable(mode)?;
-        let moved = match (head, target) {
-            (Some(old), Some(new)) if old != new => {
-                self.ensure_topic_branch_or_unborn("reset")?;
-                vec![RefChange {
-                    name: branch,
-                    old: Some(RefTarget::Oid(old)),
-                    new: Some(RefTarget::Oid(new)),
-                }]
-            }
-            _ => Vec::new(),
-        };
+        let moved = self.branch_move(branch, head, target)?;
         if mode == ResetMode::Soft {
             if !moved.is_empty() {
                 self.commit_refs_only("reset", &moved)?;
@@ -100,6 +90,28 @@ impl NativeRepo<'_> {
         self.apply_edit("reset", &moved, edit)?;
         self.settle_state()?;
         self.say_reset(target, mode, said, out)
+    }
+
+    /// The change that brings `branch` from `head` to `target`: none
+    /// where it is there already, and a branch without a commit comes to
+    /// be at the commit.
+    fn branch_move(
+        &self,
+        branch: String,
+        head: Option<ObjectId>,
+        target: Option<ObjectId>,
+    ) -> Res<Vec<RefChange>> {
+        let Some(new) = target.filter(|new| head != Some(*new)) else {
+            return Ok(Vec::new());
+        };
+        if head.is_some() {
+            self.ensure_topic_branch_or_unborn("reset")?;
+        }
+        Ok(vec![RefChange {
+            name: branch,
+            old: head.map(RefTarget::Oid),
+            new: Some(RefTarget::Oid(new)),
+        }])
     }
 
     /// Refuses a reset where an operation is under way that it cannot
