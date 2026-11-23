@@ -117,9 +117,19 @@ impl Head {
     }
 
     fn parse(text: &[u8]) -> io::Result<Head> {
-        let mut lines = text.split(|b| *b == b'\n').map(|line| match line {
-            [line @ .., b'\r'] => line,
-            line => line,
+        // a line ends with CR LF and with nothing else: a proxy in front
+        // that takes a bare LF for one, or does not, has to find the same
+        // lines here
+        let mut rest = text;
+        let mut lines = std::iter::from_fn(|| {
+            let line = rest.windows(2).position(|w| w == b"\r\n");
+            let (line, behind) = match line {
+                Some(end) => (&rest[..end], &rest[end + 2..]),
+                None if rest.is_empty() => return None,
+                None => (rest, &rest[rest.len()..]),
+            };
+            rest = behind;
+            Some(line)
         });
         let line = lines.next().unwrap_or_default();
         let mut words = line.split(|b| *b == b' ');
@@ -134,7 +144,23 @@ impl Head {
             _ => return Err(bad("the version of the request")),
         };
         let url = String::from_utf8(url.to_vec()).map_err(|_| bad("the target"))?;
-        if !url.starts_with('/') || url.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+        if url.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+            return Err(bad("the target of the request"));
+        }
+        // the absolute form, as a client sends it to a proxy: what is
+        // behind the authority is the target
+        let absolute = ["http://", "https://"].iter().find_map(|scheme| {
+            let known = url.get(..scheme.len())?.eq_ignore_ascii_case(scheme);
+            let behind = known.then(|| &url[scheme.len()..])?;
+            let path = behind.find(['/', '?']).unwrap_or(behind.len());
+            (path > 0).then(|| match &behind[path..] {
+                "" => "/".to_owned(),
+                query if query.starts_with('?') => format!("/{query}"),
+                path => path.to_owned(),
+            })
+        });
+        let url = absolute.unwrap_or(url);
+        if !url.starts_with('/') {
             return Err(bad("the target of the request"));
         }
         let method = match method {
@@ -168,8 +194,10 @@ impl Head {
                 let length = length.parse().ok().filter(|_| digits);
                 Framing::Length(length.ok_or(bad("the length of the body"))?)
             }
+            // a coding is of HTTP/1.1: one named by an older message is
+            // read by some and not by others
             (1, 0) => match Head::header(&headers, "Transfer-Encoding") {
-                Some(coding) if coding.eq_ignore_ascii_case("chunked") => Framing::Chunked,
+                Some(coding) if !old && coding.eq_ignore_ascii_case("chunked") => Framing::Chunked,
                 _ => return Err(bad("the coding of the body")),
             },
             // a body framed twice is read one way here and another way elsewhere
@@ -235,7 +263,13 @@ mod tests {
             "GET  / HTTP/1.1",
             "GET / HTTP/1.1 x",
             "get / HTTP/1.1",
-            "GET http://h/ HTTP/1.1",
+            "GET ftp://h/ HTTP/1.1",
+            "GET http:/// HTTP/1.1",
+            "GET h/ HTTP/1.1",
+            "GET / HTTP/1.1\r\nHost: h\nX: y",
+            "GET / HTTP/1.1\nHost: h",
+            "GET / HTTP/1.1\r\nHost: h\rX: y",
+            "POST / HTTP/1.0\r\nTransfer-Encoding: chunked",
             "GET /a\tb HTTP/1.1",
             "GET / HTTP/1.1\r\nno colon",
             "GET / HTTP/1.1\r\nbad name: v",
@@ -249,6 +283,16 @@ mod tests {
             "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked",
         ] {
             assert!(parsed(refused).is_err(), "{refused:?}");
+        }
+        // the absolute form names the same target
+        for (sent, target) in [
+            ("http://h/a?b", "/a?b"),
+            ("HTTP://h:80/", "/"),
+            ("https://h", "/"),
+            ("http://h?b", "/?b"),
+        ] {
+            let head = parsed(&format!("GET {sent} HTTP/1.1")).unwrap();
+            assert_eq!(head.url, target);
         }
         let many: String = (0..=HEADERS).map(|n| format!("\r\nH{n}: v")).collect();
         assert!(parsed(&format!("GET / HTTP/1.1{many}")).is_err());

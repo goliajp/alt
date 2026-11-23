@@ -52,6 +52,18 @@ fn line(source: &mut Source) -> io::Result<Vec<u8>> {
     Ok(line)
 }
 
+/// The size a chunk line gives: hex digits and nothing else, before any
+/// extensions.
+fn chunk_size(line: &[u8]) -> Option<u64> {
+    let digits = line.iter().take_while(|b| b.is_ascii_hexdigit()).count();
+    let behind = line[digits..].trim_ascii_start();
+    let extended = behind.is_empty() == (digits == line.len());
+    if digits == 0 || digits > 16 || !extended || !(behind.is_empty() || behind[0] == b';') {
+        return None;
+    }
+    u64::from_str_radix(std::str::from_utf8(&line[..digits]).ok()?, 16).ok()
+}
+
 impl Body {
     fn over(&self) -> bool {
         match &self.chunks {
@@ -73,11 +85,8 @@ impl Body {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, "a chunk end"));
                     }
                     let size = line(&mut self.source)?;
-                    let digits = size.split(|b| *b == b';').next().unwrap_or_default();
-                    let size = std::str::from_utf8(digits).ok();
-                    let size = size.and_then(|hex| u64::from_str_radix(hex.trim(), 16).ok());
-                    let size =
-                        size.ok_or(io::Error::new(io::ErrorKind::InvalidData, "a chunk size"))?;
+                    let size = chunk_size(&size)
+                        .ok_or(io::Error::new(io::ErrorKind::InvalidData, "a chunk size"))?;
                     if size > 0 {
                         self.chunks = Some(Chunks::Within(size));
                         continue;
@@ -207,5 +216,38 @@ impl Drop for Request {
     /// A request its handler let go of without an answer is answered here.
     fn drop(&mut self) {
         self.answer(Response::from_data(Vec::new()).with_status_code(500));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chunk_size;
+
+    #[test]
+    fn the_size_of_a_chunk_is_hex_digits_and_nothing_before_or_around_them() {
+        for (line, size) in [
+            ("0", 0),
+            ("1a", 26),
+            ("A;x=y", 10),
+            ("3 ;x", 3),
+            ("ffffffffffffffff", u64::MAX),
+        ] {
+            assert_eq!(chunk_size(line.as_bytes()), Some(size), "{line:?}");
+        }
+        for line in [
+            "",
+            "+3",
+            " 3",
+            "\t3",
+            "3 ",
+            "3\t",
+            "0x3",
+            "3 x",
+            ";x",
+            "-1",
+            "10000000000000000",
+        ] {
+            assert_eq!(chunk_size(line.as_bytes()), None, "{line:?}");
+        }
     }
 }
