@@ -9,6 +9,8 @@ use recovery::hash;
 mod moves;
 mod paths;
 
+pub(super) use paths::ensure_no_control_directory;
+
 impl NativeRepo<'_> {
     pub(super) fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
         use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};

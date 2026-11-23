@@ -7,8 +7,10 @@ use super::*;
 
 impl NativeRepo<'_> {
     /// Reject staging/committing a path that the policy's `path_allow` does
-    /// not match. Empty allow-list = no constraint.
+    /// not match. Empty allow-list = no constraint. Under any policy, no
+    /// path goes where a file system may take it for a control directory.
     pub(super) fn ensure_path_allowed(&self, path: &[u8]) -> Res<()> {
+        checkout_files::ensure_no_control_directory(path)?;
         // a pattern is text: where there are patterns, so is every path allowed
         let text = std::str::from_utf8(path).ok();
         if !self.caps.path_allow.is_empty() && !text.is_some_and(|p| self.caps.allows_path_name(p))

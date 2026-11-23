@@ -89,6 +89,7 @@ mod import_materialize;
 mod index_blobs;
 mod index_link;
 mod index_seen;
+mod invalid_paths;
 mod json_outputs;
 mod left_snapshots;
 mod lfs;
