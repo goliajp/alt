@@ -151,6 +151,10 @@ pub(super) fn unreceived(error: BodyError, key: Option<RequestKey>) -> Response<
 /// The key of a caller nobody has signed in as: its address, a /64 for IPv6.
 pub(super) fn address(caller: std::net::IpAddr) -> String {
     match caller {
+        // every host of the link the server is on has the same first 64 bits
+        std::net::IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => {
+            format!("address:{v6}")
+        }
         std::net::IpAddr::V6(v6) if v6.to_ipv4_mapped().is_none() => {
             format!("address:{:x}", u128::from(v6) >> 64)
         }
@@ -236,5 +240,6 @@ mod tests {
         assert_eq!(of("2001:db8::1"), of("2001:db8::ffff"));
         assert_ne!(of("2001:db8::1"), of("2001:db8:0:1::1"));
         assert_ne!(of("192.0.2.1"), of("192.0.2.2"));
+        assert_ne!(of("fe80::1"), of("fe80::2"));
     }
 }
