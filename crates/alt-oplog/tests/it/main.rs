@@ -14,3 +14,4 @@ mod synced_writers;
 mod unconfirmed;
 mod v2_format;
 mod v2_image;
+mod v2_scan;
