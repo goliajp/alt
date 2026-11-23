@@ -192,6 +192,8 @@ impl NativeRepo<'_> {
 
     /// Puts `commit` on the stack and brings the index and the files to
     /// what `head` has, the untracked files `loose` gone, as one operation.
+    /// The stack is the repository's: where another workspace put an
+    /// entry on it meanwhile, this one goes on top of that.
     fn put_away(
         &mut self,
         head: ObjectId,
@@ -199,34 +201,46 @@ impl NativeRepo<'_> {
         commit: ObjectId,
         loose: &[BString],
     ) -> Res<()> {
-        let latest = self.stash_entries().first().map(|entry| entry.number + 1);
-        let refs = [
-            RefChange {
-                name: format!("{ENTRIES}{}", latest.unwrap_or(0)),
-                old: None,
-                new: Some(RefTarget::Oid(commit)),
-            },
-            RefChange {
-                name: TOP.to_owned(),
-                old: self.store.refs.get(TOP).cloned(),
-                new: Some(RefTarget::Oid(commit)),
-            },
-        ];
         let target = self.commit_entries(head)?;
-        let mut edit = TreeEdit {
-            index: tree_edit::fresh(&target),
-            files: Vec::new(),
-        };
         let wanted: BTreeMap<&BString, &WorkEntry> =
             target.iter().map(|entry| (&entry.path, entry)).collect();
-        for path in self.paths_off(index, &target)? {
-            edit.write(&path, wanted.get(&path).copied());
+        let off = self.paths_off(index, &target)?;
+        loop {
+            let latest = self.stash_entries().first().map(|entry| entry.number + 1);
+            let refs = [
+                RefChange {
+                    name: format!("{ENTRIES}{}", latest.unwrap_or(0)),
+                    old: None,
+                    new: Some(RefTarget::Oid(commit)),
+                },
+                RefChange {
+                    name: TOP.to_owned(),
+                    old: self.store.refs.get(TOP).cloned(),
+                    new: Some(RefTarget::Oid(commit)),
+                },
+            ];
+            let mut edit = TreeEdit {
+                index: tree_edit::fresh(&target),
+                files: Vec::new(),
+            };
+            for path in &off {
+                edit.write(path, wanted.get(path).copied());
+            }
+            // an untracked file where HEAD has one is written as HEAD has it
+            for path in loose.iter().filter(|path| !wanted.contains_key(path)) {
+                edit.write(path, None);
+            }
+            let taken = |e: &Box<dyn std::error::Error>| match e.downcast_ref() {
+                Some(alt_refs::RefError::Conflict { name }) => {
+                    name == TOP || name.starts_with(ENTRIES)
+                }
+                _ => false,
+            };
+            match self.apply_edit("stash", &refs, edit) {
+                Err(e) if taken(&e) => self.store.refs.refresh()?,
+                done => return done.map(drop),
+            }
         }
-        // an untracked file where HEAD has one is written as HEAD has it
-        for path in loose.iter().filter(|path| !wanted.contains_key(path)) {
-            edit.write(path, None);
-        }
-        self.apply_edit("stash", &refs, edit).map(drop)
     }
 
     /// Stores a commit of a stash entry, by whoever runs the command. The
