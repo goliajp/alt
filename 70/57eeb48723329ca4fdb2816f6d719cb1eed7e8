@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: hold the clock a cloud read moves on to the read alone, and keep the upgrade of schema 21 in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/portable.rs
+touched: crates/alt-server-store/tests/it/database/reading.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
+touched: crates/alt-server/tests/it/database/operator/upgrade.rs
