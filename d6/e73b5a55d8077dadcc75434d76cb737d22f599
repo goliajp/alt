@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: take no place among the bodies being received for a request that brings none, and say at the start that no proxy is named
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/caller.rs
+touched: crates/alt-server/src/http/web/admission.rs
+touched: crates/alt-server/tests/it/database/connections/bodies.rs
+touched: crates/alt-server/tests/it/database/connections/unknown_callers.rs
+touched: self-hosted/README.md
