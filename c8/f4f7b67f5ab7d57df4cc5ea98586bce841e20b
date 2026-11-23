@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: take each want and have of a fetch once, within a number, and find the prefix of a ref by a search
+author-type: human
+author: doracawl
+touched: crates/alt-wire/src/fetch.rs
+touched: crates/alt-wire/src/fetch/served.rs
+touched: crates/alt-wire/src/ls_refs.rs
+touched: crates/alt-wire/src/ls_refs/served.rs
