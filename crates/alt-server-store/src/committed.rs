@@ -28,13 +28,41 @@ macro_rules! outbox_event_sql {
 }
 pub(crate) use {outbox_event_sql, receipt_sql, state_sql};
 
+macro_rules! request_sql {
+    () => {
+        concat!(
+            "SELECT q.*,",
+            state_sql!(),
+            " AS outcome FROM alt_requests q WHERE q.repository=$1 AND q.epoch=$2 AND q.actor_id=$3 AND q.request_id=$4"
+        )
+    };
+}
+
 /// The row of a request, with its state as the protocol has it in `outcome`: `result`
-/// alone is not that state once the request is committed.
+/// alone is not that state once the request is committed. The row is locked: the
+/// request is not changed by another until the transaction is over.
 pub(crate) fn request_row(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
 ) -> Result<Option<alt_pg::Row>> {
-    Ok(tx.query_opt(concat!("SELECT q.*,", state_sql!(), " AS outcome FROM alt_requests q WHERE q.repository=$1 AND q.epoch=$2 AND q.actor_id=$3 AND q.request_id=$4 FOR UPDATE"),&[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
+    let epoch = integer(key.scope.recovery_epoch)?;
+    let scope = &key.scope.repository_instance_id;
+    let key: [&(dyn alt_pg::ToSql + Sync); 4] = [scope, &epoch, &key.actor_id, &key.request_id];
+    Ok(tx.query_opt(concat!(request_sql!(), " FOR UPDATE"), &key)?)
+}
+
+/// The row [`request_row`] gives, as the transaction sees it and without a lock on
+/// it: for one that only tells what a request came to. Under the one view of a
+/// read a lock would fail where the request was changed since the read began, and
+/// the caller who asks what became of a request would be told that nobody knows.
+pub(crate) fn request_seen(
+    tx: &mut Transaction<'_>,
+    key: &RequestKey,
+) -> Result<Option<alt_pg::Row>> {
+    let epoch = integer(key.scope.recovery_epoch)?;
+    let scope = &key.scope.repository_instance_id;
+    let key: [&(dyn alt_pg::ToSql + Sync); 4] = [scope, &epoch, &key.actor_id, &key.request_id];
+    Ok(tx.query_opt(request_sql!(), &key)?)
 }
 
 /// a receipt without its publication, field for field

@@ -1,5 +1,5 @@
 use crate::Jsonb;
-pub(crate) use crate::committed::request_row;
+pub(crate) use crate::committed::{request_row, request_seen};
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, DurableBytes, Error, Result, Store, reading};
@@ -138,7 +138,7 @@ impl Store {
         }
         // Old epochs may return retained facts. Absence is meaningful only in
         // the current epoch; never turn a restored snapshot's gap into replay.
-        let row = request_row(&mut tx, key)?;
+        let row = request_seen(&mut tx, key)?;
         if let Some(row) = &row {
             check_request_attribution(row, &auth)?;
         }
