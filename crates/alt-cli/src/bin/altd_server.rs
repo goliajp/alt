@@ -44,6 +44,7 @@ use auth::{AclRule, AuthOutcome, acl_allows, action_from_request, check_auth};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
+const STOPPED: &str = "writes are stopped until the server is started again: a sync failed";
 
 /// per-request log context filled in as dispatch progresses.
 /// The outer serve loop reads it back after dispatch returns and emits
@@ -1220,7 +1221,9 @@ fn handle_receive_pack(
     // batch of objects has ended: a sink syncs the odb under the shared
     // `odb.lock`, and so never between a push's objects and its refs
     let assign = || writer.group.assign();
-    let (unpack_result, moved) = match sig_block {
+    // nothing is appended behind what a failed sync left in doubt
+    let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
+    let (unpack_result, moved) = match sig_block.or(stopped) {
         Some(reason) => (Ok(()), Err(reason)),
         None => receive::take_in(store, pack, &head.updates, &principal, assign)?,
     };

@@ -82,7 +82,7 @@ pub(crate) fn spawn_server(repo_dir: &Path) -> Server {
     spawn_server_with_env(&[("ALT_SERVER_REPO", repo_dir.to_str().unwrap())])
 }
 
-fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
+pub(crate) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
     let bin = env!("CARGO_BIN_EXE_altd-server");
     let mut cmd = Command::new(bin);
     cmd.args(["--bind", "127.0.0.1:0"])

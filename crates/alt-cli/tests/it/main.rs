@@ -61,6 +61,8 @@ mod diff_git;
 mod eol;
 mod exclude_dirs;
 mod exclude_order;
+#[cfg(target_os = "linux")]
+mod failed_sync;
 mod fetch;
 mod flow;
 mod flow_enforce;
