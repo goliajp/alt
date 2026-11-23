@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: name the type of a log's commits, and write a condition and a sort as clippy asks
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/src/native/stash.rs
