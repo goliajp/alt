@@ -38,7 +38,9 @@ pub(crate) fn prepared(pack: &[u8]) -> (alt_os::temp::TempDir, PreparedPack) {
     let dir = alt_os::temp::tempdir().unwrap();
     let path = dir.path().join("incoming.pack");
     std::fs::write(&path, pack).unwrap();
-    let prepared = receive::prepare_pack(&path, &Default::default(), &|_| Ok(None)).unwrap();
+    let prepared = receive::prepare_pack(&path, &Default::default(), &|_| Ok(None))
+        .unwrap()
+        .0;
     (dir, prepared)
 }
 

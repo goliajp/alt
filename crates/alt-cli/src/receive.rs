@@ -70,6 +70,10 @@ pub const ATTEMPTS: usize = 4;
 /// order.
 pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
 
+/// The memory a pack took to be indexed, which it keeps for as long as its
+/// objects are read out of it.
+pub type PackMemory = Option<alt_git_pack::Taken<'static>>;
+
 /// Indexes the pack on disk at `path`, which may hold what `limits`
 /// allows. A push is sent thin, its deltas made of objects the server
 /// has: those are read from `bases` and the pack is made whole with
@@ -78,7 +82,7 @@ pub fn prepare_pack(
     path: &std::path::Path,
     limits: &alt_git_pack::IndexLimits,
     bases: alt_git_pack::Bases<'_>,
-) -> Res<PreparedPack> {
+) -> Res<(PreparedPack, PackMemory)> {
     let indexed = alt_git_pack::index_pack_thin(path, HashAlgo::Sha1, true, limits, Some(bases))?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
@@ -86,7 +90,7 @@ pub fn prepare_pack(
         .map(|i| (idx.offset_at(i).expect("idx in range"), i))
         .collect();
     order.sort_unstable();
-    Ok((ip, order))
+    Ok(((ip, order), indexed.memory))
 }
 
 /// The objects a push may name: those the odb holds and those of its

@@ -72,11 +72,13 @@ pub(super) fn max_command_bytes() -> u64 {
 /// `ALT_SERVER_MAX_INFLATED_BYTES`, 128 times that by default,
 /// which bounds the time.
 pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
+    static INDEXING: std::sync::OnceLock<alt_git_pack::Memory> = std::sync::OnceLock::new();
     let told = super::told::told();
     alt_git_pack::IndexLimits {
         object_bytes: told.push_bytes,
         inflated_bytes: told.inflated_bytes,
         kept: false,
+        memory: Some(INDEXING.get_or_init(|| alt_git_pack::Memory::new(told.index_bytes))),
         ..Default::default()
     }
 }

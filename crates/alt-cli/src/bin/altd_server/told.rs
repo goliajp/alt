@@ -28,6 +28,9 @@ pub(super) struct Told {
     pub(super) push_bytes: u64,
     /// `ALT_SERVER_MAX_INFLATED_BYTES`: what the pack of a push inflates to
     pub(super) inflated_bytes: u64,
+    /// `ALT_SERVER_MAX_INDEX_BYTES`: the memory the packs of pushes take
+    /// between them while they are indexed; a push waits for it
+    pub(super) index_bytes: u64,
     /// `ALT_SERVER_WORKERS`
     pub(super) workers: usize,
     /// `ALT_SERVER_MAX_CONNECTIONS`
@@ -61,6 +64,9 @@ impl Told {
     pub(super) fn read(lookup: &dyn Fn(&str) -> Option<OsString>) -> Result<Told, String> {
         let push_bytes = number(lookup, "ALT_SERVER_MAX_PUSH_BYTES", 1u64 << 30)?;
         let inflated = push_bytes.saturating_mul(INFLATED_TIMES);
+        // the largest object a push may bring three times over, and the
+        // bases held beside it: room for one push at its worst
+        let index = push_bytes.saturating_mul(3).saturating_add(1 << 30);
         let grace = number(lookup, "ALT_SERVER_IO_TIMEOUT_MS", 20_000u64)?;
         let grace = Duration::from_millis(grace);
         let per_mib = number(lookup, "ALT_SERVER_IO_MS_PER_MIB", 8_000u64)?;
@@ -68,6 +74,7 @@ impl Told {
         Ok(Told {
             push_bytes,
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
+            index_bytes: number(lookup, "ALT_SERVER_MAX_INDEX_BYTES", index)?,
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections: number(lookup, "ALT_SERVER_MAX_CONNECTIONS", 256usize)?,
             repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
@@ -104,6 +111,7 @@ mod tests {
     #[test]
     fn a_number_that_does_not_read_ends_the_start_and_is_not_taken_for_the_default() {
         let unset = with(&[]).unwrap();
+        assert_eq!(unset.index_bytes, 4 << 30);
         assert_eq!(
             (unset.push_bytes, unset.inflated_bytes),
             (1 << 30, 128 << 30)
@@ -117,6 +125,7 @@ mod tests {
         let names = [
             "ALT_SERVER_MAX_PUSH_BYTES",
             "ALT_SERVER_MAX_INFLATED_BYTES",
+            "ALT_SERVER_MAX_INDEX_BYTES",
             "ALT_SERVER_WORKERS",
             "ALT_SERVER_MAX_CONNECTIONS",
             "ALT_SERVER_MAX_OPEN_REPOS",
