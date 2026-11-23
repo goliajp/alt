@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: lift frames out of blocks, and guard writes, in files that have room for them
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/lift.rs
+touched: crates/alt-oplog/src/v2/log.rs
