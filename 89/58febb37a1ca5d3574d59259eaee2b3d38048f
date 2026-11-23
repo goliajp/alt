@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: drive handles on a log through sequences drawn from a seed and hold each to what the file and its writers know
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
