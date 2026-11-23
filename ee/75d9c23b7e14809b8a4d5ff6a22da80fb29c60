@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: put away only the paths named to stash push, and say that hunks are not picked
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/stash.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/stash.rs
+touched: crates/alt-cli/src/native/stash/among.rs
+touched: crates/alt-cli/src/native/stash/save.rs
+touched: crates/alt-cli/src/worktree_args.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/stash_paths.rs
