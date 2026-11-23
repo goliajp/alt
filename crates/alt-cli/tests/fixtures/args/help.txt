@@ -1893,12 +1893,13 @@ Join another branch into the current one
 Usage: alt merge [OPTIONS] [BRANCH]
 
 Arguments:
-  [BRANCH]  Branch to merge into the current branch
+  [BRANCH]  Branch, or any other commit, to merge into the current branch
 
 Options:
       --abort                  Put the index and the files back as they were before the merge
       --no-ff                  Record a merge commit even where the branch could be fast-forwarded
       --ff-only                Fast-forward or change nothing: refuse a merge that needs a commit
+      --no-edit                Take the message of the merge commit as it is (alt never opens an editor, so this is already the default; accepted as in git)
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository

@@ -4,7 +4,8 @@
 use super::*;
 
 impl NativeRepo<'_> {
-    /// `alt merge <branch>`: three-way merge `branch` into the current branch.
+    /// `alt merge <commit>`: three-way merge what `branch_name` names, a
+    /// branch or any other commit, into the current branch.
     /// Returns whether the merge stopped in conflict. Fast-forwards when our
     /// branch is strictly behind and `ff` lets it; otherwise writes a
     /// two-parent merge commit (clean) or leaves conflict markers + unmerged
@@ -18,12 +19,8 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("merge")?;
-        let their_ref = format!("refs/heads/{branch_name}");
-        let theirs = self
-            .store
-            .refs
-            .resolve(&their_ref)?
-            .ok_or_else(|| format!("merge: {branch_name} - not something we can merge"))?;
+        let brought = self.brought(branch_name)?;
+        let theirs = brought.commit;
         let cur = self.head_branch()?;
         let ours = self
             .store
@@ -33,7 +30,7 @@ impl NativeRepo<'_> {
         self.ensure_clean("merge")?;
 
         let into = cur.strip_prefix("refs/heads/").unwrap_or(&cur).to_owned();
-        match self.compute_merge(ours, theirs, branch_name, &into, ff)? {
+        match self.compute_merge_of(ours, &brought, &into, ff)? {
             MergeOutcome::UpToDate => {
                 self.report_merge(json, out, "up_to_date", None, &[], "Already up to date.")?;
                 Ok(false)
@@ -130,6 +127,19 @@ impl NativeRepo<'_> {
         into: &str,
         ff: FastForward,
     ) -> Res<MergeOutcome> {
+        self.compute_merge_of(ours, &Brought::branch(label, theirs), into, ff)
+    }
+
+    /// [`compute_merge`](Self::compute_merge) of what the command line
+    /// named, which need not be a branch.
+    fn compute_merge_of(
+        &mut self,
+        ours: ObjectId,
+        brought: &Brought,
+        into: &str,
+        ff: FastForward,
+    ) -> Res<MergeOutcome> {
+        let (theirs, label) = (brought.commit, brought.label.as_str());
         let bases = self.merge_bases(&[ours], &[theirs])?;
         if bases == [theirs] {
             return Ok(MergeOutcome::UpToDate);
@@ -141,7 +151,7 @@ impl NativeRepo<'_> {
             self.ensure_signing()?;
             // the tree of a merge that could have been a fast-forward is theirs
             let entries = self.commit_entries(theirs)?;
-            let commit = self.write_merge_commit(ours, theirs, &entries, label, into)?;
+            let commit = self.write_merge_commit(ours, theirs, &entries, &brought.message(into))?;
             return Ok(MergeOutcome::Merged { commit, entries });
         }
         if ff == FastForward::Only {
@@ -162,35 +172,29 @@ impl NativeRepo<'_> {
         }
 
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let commit = self.write_merge_commit(ours, theirs, &entries, label, into)?;
+        let commit = self.write_merge_commit(ours, theirs, &entries, &brought.message(into))?;
         Ok(MergeOutcome::Merged { commit, entries })
     }
 
     /// Stores the commit that merges `theirs` into `ours` with the tree of
-    /// `entries`. Its message is git's: the branch merged into is named
-    /// unless it is `main` or `master`.
+    /// `entries` and the message `msg`.
     fn write_merge_commit(
         &mut self,
         ours: ObjectId,
         theirs: ObjectId,
         entries: &[WorkEntry],
-        label: &str,
-        into: &str,
+        msg: &str,
     ) -> Res<ObjectId> {
         let (author, committer) = (self.author()?, self.committer()?);
         let algo = self.store.algo()?;
         let tree = write_tree(&mut self.store.odb, entries, algo)?;
-        let msg = match into {
-            "main" | "master" => format!("Merge branch '{label}'\n"),
-            _ => format!("Merge branch '{label}' into {into}\n"),
-        };
         let commit = write_commit(
             &mut self.store.odb,
             tree,
             &[ours, theirs],
             &author.sig(),
             &committer.sig(),
-            &msg,
+            msg,
             algo,
         )?;
         self.store.odb.flush()?;

@@ -106,6 +106,7 @@ mod merge_abort;
 mod merge_criss_cross;
 mod merge_ff;
 mod merge_modes;
+mod merge_named;
 mod mixed_versions;
 mod monorepo_bench;
 mod mv;

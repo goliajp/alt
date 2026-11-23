@@ -3,8 +3,10 @@
 
 use super::*;
 
+mod named;
 mod reset;
 mod run;
+pub(super) use named::Brought;
 mod state;
 pub use run::FastForward;
 pub(super) use run::MergeOutcome;

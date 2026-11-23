@@ -59,8 +59,8 @@ $ [repo] alt switch 不存在-日本語 --json
 exit 1
 err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"invalid reference: 不存在-日本語","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:3>","retryable":false},"schema_version":1}
 $ [repo] alt merge absent --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"merge: absent - not something we can merge","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:4>","retryable":false},"schema_version":1}
+exit 1
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"merge: absent - not something we can merge\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"merge: absent - not something we can merge","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:4>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick absent --json
 exit 128
 err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'absent'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:5>","retryable":false},"schema_version":1}

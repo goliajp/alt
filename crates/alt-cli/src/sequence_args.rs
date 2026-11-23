@@ -25,7 +25,7 @@ pub struct CherryPick {
 
 #[derive(alt_args::Args)]
 pub struct Merge {
-    /// Branch to merge into the current branch
+    /// Branch, or any other commit, to merge into the current branch
     #[arg(required_unless_present = "abort_merge", hint = "branch")]
     pub branch: Option<String>,
     /// Put the index and the files back as they were before the merge
@@ -37,6 +37,10 @@ pub struct Merge {
     /// Fast-forward or change nothing: refuse a merge that needs a commit
     #[arg(long = "ff-only", conflicts_with = "abort_merge")]
     pub ff_only: bool,
+    /// Take the message of the merge commit as it is (alt never opens an
+    /// editor, so this is already the default; accepted as in git)
+    #[arg(long = "no-edit")]
+    pub as_it_is: bool,
     /// Emit a structured JSON result instead of the human lines
     #[arg(long)]
     pub json: bool,

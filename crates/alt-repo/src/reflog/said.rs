@@ -38,8 +38,16 @@ impl Repository {
         let (of, how) = match parents[..] {
             [first, second, ..] if first == old => {
                 let subject = self.subject(new)?;
-                let named = subject
-                    .strip_prefix(b"Merge branch '")
+                // the word the merge was asked with, where its message has it
+                let kinds: [&[u8]; 4] = [
+                    b"Merge branch '",
+                    b"Merge tag '",
+                    b"Merge remote-tracking branch '",
+                    b"Merge commit '",
+                ];
+                let named = kinds
+                    .iter()
+                    .find_map(|kind| subject.strip_prefix(*kind))
                     .and_then(|rest| rest.find_byte(b'\'').map(|end| rest[..end].to_vec()));
                 let of = named.unwrap_or_else(|| second.to_string().into_bytes());
                 (of, "Merge made by the 'ort' strategy.")
