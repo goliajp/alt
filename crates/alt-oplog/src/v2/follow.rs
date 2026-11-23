@@ -26,7 +26,7 @@ impl Log {
 
     /// Reads the frames other writers appended and cuts off what a
     /// crashed one left at the end, which stays in a log this build may
-    /// not write; the caller holds the exclusive lock.
+    /// not write or append to; the caller holds the exclusive lock.
     pub(super) fn catch_up(&mut self) -> Result<(), OpLogError> {
         self.read_on(self.writable)
     }
@@ -98,8 +98,10 @@ impl Log {
             full.extend_from_slice(&added);
         }
         self.ops.extend(added);
-        self.passed = !cut && found.is_some();
-        if let Some(found) = found.filter(|_| cut) {
+        // a cut is said in a frame appended where the log is cut
+        let cuts = cut && self.knows_all()?;
+        self.passed = !cuts && found.is_some();
+        if let Some(found) = found.filter(|_| cuts) {
             let discarded = Discarded {
                 from: self.state.end,
                 to: size,
@@ -107,7 +109,7 @@ impl Log {
                 ops: found.ops,
             };
             self.cut_end(discarded)?;
-        } else if cut && noted.is_some_and(|tail| tail.cutting) {
+        } else if cuts && noted.is_some_and(|tail| tail.cutting) {
             // the cut never came to the log: its frames are all there
             let generation = self.state.generation;
             Tail::update(&self.dir, self.boot, |tail| tail.stands(generation))?;

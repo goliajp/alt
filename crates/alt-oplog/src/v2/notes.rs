@@ -14,7 +14,7 @@ impl Log {
     /// is being cut, or that somebody noted or synced further than it
     /// knows, it notes nothing.
     pub(super) fn note_look(&self, unheld: Option<u64>) -> std::io::Result<()> {
-        if !self.writable {
+        if !self.notes()? {
             return Ok(());
         }
         let (generation, synced) = (self.state.generation, self.synced);
@@ -41,7 +41,7 @@ impl Log {
     /// Notes in `tail` that every op of the log was vouched for, by a
     /// writer that holds its lock and has read it to its end.
     pub(super) fn note_settled(&self) -> std::io::Result<()> {
-        if !self.writable {
+        if !self.notes()? {
             return Ok(());
         }
         let (generation, synced, end) = (self.state.generation, self.synced, self.state.end);

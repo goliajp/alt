@@ -31,11 +31,13 @@ impl Log {
     /// Leaves what this handle appended so far for its sink to sync and
     /// to record.
     pub(super) fn defer_sync(&mut self) -> Result<(), OpLogError> {
+        let Some((target, closes)) = self.sync_target()? else {
+            return Ok(());
+        };
         let synced = self.tail().map_or(0, |tail| tail.synced);
         let pending = self.named_from(synced.max(self.synced_here()).max(self.synced))?;
         let mut reached = self.deferred.lock().unwrap();
-        reached.target = self.state.end;
-        reached.closes = self.closes;
+        (reached.target, reached.closes) = (target, closes);
         reached.generation = self.state.generation;
         reached.pending = pending;
         Ok(())

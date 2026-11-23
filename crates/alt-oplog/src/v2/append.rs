@@ -24,20 +24,34 @@ impl Log {
         }
     }
 
-    /// Refuses where the last frame that says nothing is appended after
-    /// it by whoever does not know it is of a kind this build skips.
-    pub(super) fn may_append(&self) -> Result<(), OpLogError> {
+    /// Whether this build knows every frame of the log that says nothing
+    /// is appended after it by whoever does not: the last such frame is
+    /// not of a kind this build skips.
+    pub(super) fn knows_all(&self) -> std::io::Result<bool> {
         let at = self.state.required;
         if at == 0 || at >= self.state.end {
-            return Ok(());
+            return Ok(true);
         }
         let kind = self.source().at(at, 1)?[0];
-        match matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT) {
+        Ok(matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT))
+    }
+
+    /// Refuses where a frame says nothing is appended after it by whoever
+    /// does not know it, and this build does not.
+    pub(super) fn may_append(&self) -> Result<(), OpLogError> {
+        match self.knows_all()? {
             true => Ok(()),
             false => Err(OpLogError::Format(
                 "the oplog holds a frame this alt must know to append after it",
             )),
         }
+    }
+
+    /// Whether this build notes anything beside the log: not beside one
+    /// it may not write, nor of ops that lie before a frame it would have
+    /// to know, which it cannot vouch for.
+    pub(super) fn notes(&self) -> std::io::Result<bool> {
+        Ok(self.writable && self.knows_all()?)
     }
 
     /// Runs `run` with the exclusive lock on the log taken; it is given
@@ -180,6 +194,7 @@ impl Log {
         self.file.write_all_at(bytes, self.state.end)?;
         self.closes.copy_from_slice(&bytes[bytes.len() - 4..]);
         self.state = state;
+        self.wrote = (self.state.end, self.closes);
         self.unsynced = true;
         Ok(())
     }
@@ -197,6 +212,7 @@ impl Log {
             return Ok(());
         }
         self.may_write()?;
+        self.may_append()?;
         if relaxed_durability() {
             return self.note_left();
         }

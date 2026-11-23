@@ -56,6 +56,9 @@ pub(crate) struct Log {
     pub(super) defer: bool,
     pub(super) write_count: u64,
     pub(super) unsynced: bool,
+    /// where the last frame this handle wrote ends, and the four bytes
+    /// of the file before that
+    pub(super) wrote: (u64, [u8; 4]),
     pub(super) deferred: Deferred,
     pub(super) clamped: bool,
     pub(super) passed: bool,
@@ -102,6 +105,7 @@ impl Log {
             defer: false,
             write_count: 0,
             unsynced: false,
+            wrote: (0, [0; 4]),
             deferred: Deferred::default(),
             clamped: false,
             passed: false,

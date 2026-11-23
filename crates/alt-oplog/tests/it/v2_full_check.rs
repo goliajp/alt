@@ -125,7 +125,7 @@ fn the_full_check_holds_a_receipt_to_what_it_answered_and_to_the_frames_of_its_r
 /// Appends to the log in `dir`, as an alt that knows more kinds of frames
 /// would in boot 1, a frame of a kind this build does not know with
 /// `flags`, and then `ops` ops.
-fn appended_by_a_later_alt(dir: &Path, flags: u8, ops: usize) {
+pub fn appended_by_a_later_alt(dir: &Path, flags: u8, ops: usize) {
     let mut bytes = fs::read(dir.join("log")).unwrap();
     let layout = FileHeader::decode(&bytes).unwrap().layout();
     let mut state = State::empty();
@@ -212,6 +212,29 @@ fn nothing_is_appended_after_a_frame_that_says_it_must_be_known_and_is_not() {
         OpLog::open(dir.path()).unwrap().state().unwrap().required,
         at
     );
+}
+
+#[test]
+fn a_sync_records_no_more_than_the_handle_wrote_before_a_frame_it_would_have_to_know() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    let synced = log.appended_len();
+    log.append("a", 3, b"its own").unwrap();
+    let own = log.appended_len();
+    // a later alt appends meanwhile, and the handle reads it
+    appended_by_a_later_alt(dir.path(), SKIPPABLE | REQUIRED, 3);
+    log.refresh().unwrap();
+    assert!(log.len() == 6 && log.appended_len() > own);
+    assert_eq!(log.bounded_to(), Some(synced));
+    log.sync().unwrap();
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(own));
+    // there is nothing more of its own to sync
+    let noted = fs::read(dir.path().join("tail")).unwrap();
+    log.sync().unwrap();
+    assert_eq!(fs::read(dir.path().join("tail")).unwrap(), noted);
+    log.verify().unwrap();
 }
 
 #[test]

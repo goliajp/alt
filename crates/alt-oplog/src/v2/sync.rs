@@ -63,13 +63,32 @@ impl Log {
         if relaxed_durability() {
             return Ok(());
         }
+        // over a frame this build would have to know it sets no boundary
+        let end = self.state.end;
+        if !self.tail().is_some_and(|tail| tail.synced >= end) {
+            self.may_append()?;
+        }
         self.sync_to_end()
+    }
+
+    /// Up to where a sync of this handle records the log as synced, with
+    /// the four bytes before that: the last frame it holds. Of a log with
+    /// a frame this build would have to know, it is the last frame the
+    /// handle wrote itself, while that is not synced: what lies past it
+    /// may be named by the frame it does not know.
+    pub(super) fn sync_target(&self) -> std::io::Result<Option<(u64, [u8; 4])>> {
+        match self.knows_all()? {
+            true => Ok(Some((self.state.end, self.closes))),
+            false => Ok(self.unsynced.then_some(self.wrote)),
+        }
     }
 
     /// Records the log as synced up to the last frame this handle holds,
     /// fsyncing it unless another committer's fsync already covered it.
     fn sync_to_end(&mut self) -> Result<(), OpLogError> {
-        let target = self.state.end;
+        let Some((target, closes)) = self.sync_target()? else {
+            return Ok(());
+        };
         if self.tail().is_some_and(|tail| tail.synced >= target) {
             self.unsynced = false;
             self.note_synced(target);
@@ -92,7 +111,7 @@ impl Log {
         if tail.synced < target {
             self.file.sync_all()?;
             tail.generation = tail.generation.max(self.state.generation);
-            tail.raise(target, Some(self.closes));
+            tail.raise(target, Some(closes));
             tail.judged = tail.judged.max(target);
             tail.write(&self.dir, self.boot, &held)?;
         }
