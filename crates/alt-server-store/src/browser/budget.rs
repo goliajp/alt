@@ -23,10 +23,15 @@ fn networks(address: std::net::IpAddr) -> [std::net::IpAddr; 2] {
     }
 }
 
-/// what one address, the /24 or /48 it is of, and one login may attempt in a minute
+/// what one address and the /24 or /48 it is of may attempt in a minute
 const ADDRESS_ATTEMPTS: i32 = 100;
 const NETWORK_ATTEMPTS: i32 = 400;
+/// What may be attempted for one login in a minute: from one address, and from
+/// everywhere. The first is what holds a guesser back; were it the only number
+/// and counted for the login alone, whoever knows a login could keep its owner
+/// out by guessing at it. The second bounds the guessing of many addresses.
 const LOGIN_ATTEMPTS: i32 = 10;
+const LOGIN_EVERYWHERE: i32 = 100;
 /// The attempts of everybody in a minute past which an address is held to
 /// [`BUSY_ATTEMPTS`]. Nobody is refused for this number alone: whoever can reach
 /// it from many addresses would otherwise refuse everyone else with it. It keeps
@@ -50,7 +55,11 @@ pub(crate) fn login_budget(
         ("global".to_owned(), i32::MAX),
         (key("network", &address.to_string()), ADDRESS_ATTEMPTS),
         (key("wider", &wider.to_string()), NETWORK_ATTEMPTS),
-        (key("login", login), LOGIN_ATTEMPTS),
+        (
+            key("login-at", &format!("{login}\n{address}")),
+            LOGIN_ATTEMPTS,
+        ),
+        (key("login", login), LOGIN_EVERYWHERE),
     ];
     let mut busy = false;
     for (index, (key, max)) in rows.into_iter().enumerate() {

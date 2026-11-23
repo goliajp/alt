@@ -392,3 +392,40 @@ fn an_approved_device_code_is_exchanged_for_its_token_once() {
         ));
     }
 }
+
+/// Whoever guesses at a login from one address is held to ten attempts a minute
+/// there; the owner of the login, at another address, is not kept out by them.
+#[test]
+#[ignore = "requires isolated PostgreSQL; the attempts for one login from one address and from another"]
+fn the_attempts_for_a_login_from_one_address_keep_no_other_address_out() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    // a code nobody was given: each look for it is an attempt of this account
+    let looked = |f: &mut Fixture, address: &str| {
+        let address = address.parse().unwrap();
+        f.store
+            .device_consent(&parent, &origin(), "ZZZZ-9999", address)
+    };
+    for _ in 0..10 {
+        let refused = looked(&mut f, "192.0.2.1");
+        assert!(matches!(
+            refused,
+            Err(alt_server_store::Error::Unauthorized)
+        ));
+    }
+    let limited = looked(&mut f, "192.0.2.1");
+    assert!(matches!(
+        limited,
+        Err(alt_server_store::Error::Precondition(_))
+    ));
+    let elsewhere = looked(&mut f, "198.51.100.9");
+    assert!(matches!(
+        elsewhere,
+        Err(alt_server_store::Error::Unauthorized)
+    ));
+}
