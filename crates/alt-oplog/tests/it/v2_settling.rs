@@ -15,6 +15,7 @@ impl Run {
     pub fn cut_died(&mut self, index: usize, step: u8, refused: Option<&[u8]>) {
         let len = self.file_len();
         self.counts.cuts_died.fetch_add(1, Ordering::Relaxed);
+        self.died += 1;
         self.handles.remove(index);
         self.ledger.hides.clear();
         self.ledger.begun = None;

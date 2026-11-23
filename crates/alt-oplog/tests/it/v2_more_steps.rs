@@ -146,7 +146,7 @@ impl Run {
             0 => None,
             step => Some(3 + step as u8),
         };
-        let died = self.counts.cuts_died.load(Ordering::Relaxed);
+        let died = self.died;
         let before = match self.rng.below(3) {
             0 => {
                 // more than the checkpoint of the cut and an op take
@@ -173,8 +173,7 @@ impl Run {
                 before
             }
         };
-        let died = self.counts.cuts_died.load(Ordering::Relaxed) != died;
-        self.fill(before, died);
+        self.fill(before, self.died != died);
         for index in 0..self.handles.len() {
             if self.handles[index].read_only && self.ledger.holds(self.handles[index].log.anchor())
             {

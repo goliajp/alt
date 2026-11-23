@@ -42,6 +42,8 @@ pub struct Run {
     pub request: u8,
     /// a cut of this step left its checkpoint synced
     pub cut_synced: bool,
+    /// how many cuts of this run died
+    pub died: u64,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -83,6 +85,11 @@ impl Run {
         let dir = alt_os::temp::tempdir().unwrap();
         boot(1);
         alt_oplog::v2::create_with(dir.path(), block_exp).unwrap();
+        // the log is named after the seed: a sequence lays the same bytes
+        // every time it runs
+        let mut named = super::v2_image::header(block_exp);
+        named.id[..8].copy_from_slice(&seed.to_le_bytes());
+        super::v2_features::with_header(dir.path(), named);
         Run {
             dir,
             rng: Rng(seed),
@@ -99,6 +106,7 @@ impl Run {
             appended: 0,
             request: 1,
             cut_synced: false,
+            died: 0,
             trace: Vec::new(),
             counts: &BY_BLOCK[(block_exp as usize - 10) / 2],
         }
