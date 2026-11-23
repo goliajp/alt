@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: have a request body move in every half minute, whatever came of it before
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/body.rs
