@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: send what a fetch asks for by its id whatever its filter, as a partial clone needs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_wants.rs
