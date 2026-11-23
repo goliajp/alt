@@ -3,7 +3,7 @@
 
 use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_pack_segment::{Limits, Oid, Segment, SegmentSet, ingest};
+use alt_pack_segment::{Oid, Segment, SegmentSet, ingest};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
@@ -27,6 +27,7 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
     match error {
         E::Io(error) => Error::Io(error),
         E::Limit(reason) => Error::Limit(reason),
+        E::Busy(reason) => Error::Busy(reason),
         E::Format(reason) | E::Corrupt(reason) => Error::Integrity(reason),
         E::Dangling(..) | E::MissingBase(_) | E::NotFound(_) => {
             Error::Integrity("pack references an unavailable object")
@@ -70,6 +71,7 @@ pub(crate) fn receive(
     repository: &str,
     source: &mut dyn Read,
     view: PackView,
+    room: Option<crate::git::Verifying>,
 ) -> Result<Output> {
     let limits = store.limits();
     // Before a body too large for its buffer, git sends a lone flush packet to probe
@@ -144,7 +146,7 @@ pub(crate) fn receive(
             repository,
             &view,
             &head,
-            pack,
+            (pack, room),
             Some((id, path, file)),
             &mut created,
             &mut published,
@@ -155,7 +157,7 @@ pub(crate) fn receive(
             repository,
             &view,
             &head,
-            &pack,
+            (&pack, room),
             None,
             &mut created,
             &mut published,
@@ -181,6 +183,9 @@ pub(crate) fn receive(
         Err(Error::Unauthorized) => Some("access revoked".to_owned()),
         // the operator can raise a limit; the pusher has to know which one it was
         Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
+        Err(Error::Busy(_)) => {
+            Some("the packs of other pushes are being verified; push again".to_owned())
+        }
         Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
     };
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
@@ -288,7 +293,7 @@ fn publish(
     repository: &str,
     view: &PackView,
     head: &alt_wire::push::PushHead,
-    pack: &[u8],
+    (pack, room): (&[u8], Option<crate::git::Verifying>),
     spooled: Option<(&String, &std::path::PathBuf, &mut std::fs::File)>,
     created: &mut Option<std::path::PathBuf>,
     published: &mut bool,
@@ -314,17 +319,8 @@ fn publish(
     if !pack.is_empty() {
         let ingested =
             alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Decode, || {
-                ingest(
-                    pack,
-                    &view.segments,
-                    &Limits {
-                        objects: limits.graph_objects as u64,
-                        object_bytes: limits.object_bytes,
-                        inflated_bytes: crate::git::inflated_bytes(limits.total_bytes),
-                        delta_depth: 4095,
-                    },
-                )
-                .map_err(segment_error)
+                let within = crate::git::pack_limits(limits, room);
+                ingest(pack, &view.segments, &within).map_err(segment_error)
             })?;
         if ingested.objects() > 0 {
             let (segment_id, path, bytes, inline) = match spooled {

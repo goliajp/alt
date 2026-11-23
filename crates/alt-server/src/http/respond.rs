@@ -114,6 +114,13 @@ pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<R
             key,
             Retry::SameRequest,
         ),
+        Error::Busy(_) => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "The instance is busy with other requests; retry the same request",
+            key,
+            Retry::SameRequest,
+        ),
         Error::Unauthorized => failure(
             403,
             ErrorCode::Forbidden,

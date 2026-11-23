@@ -1,146 +1,140 @@
-//! Resolves the deltas below one base of a received pack.
+//! Resolves the deltas of a received pack below their bases.
 
 use crate::{
-    Error, Kind, OidMap,
-    ingest::{Limits, Meta, digest},
-    object,
+    Error, Kind, Oid, SegmentSet,
+    format::CommitRow,
+    ingest::{Meta, digest},
     scan::{self, Raw},
+    told::Told,
 };
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    sync::atomic::{AtomicU64, Ordering},
+use alt_git_pack::{
+    IndexWork,
+    walk::{Budget, Deltas, Objects, Walk},
 };
 
 pub(crate) struct Shared<'a> {
     pub pack: &'a [u8],
     pub entries: &'a [Raw],
-    pub by_base: &'a OidMap<Vec<usize>>,
-    pub limits: &'a Limits,
-    /// bytes of the objects that deltas made and further deltas wait for, on every
-    /// thread together
-    pub waiting: &'a AtomicU64,
+    pub existing: &'a SegmentSet,
+    pub told: &'a Told<'a>,
+    pub deltas: &'a Deltas<Oid>,
+    pub budget: &'a Budget,
+    /// the bases that earlier segments hold: the numbers behind the last entry of
+    /// the pack are theirs
+    pub outside: &'a [Oid],
+    /// what was resolved before this pass, by entry
+    pub metas: &'a [Option<Meta>],
 }
 
-pub(crate) struct Frame {
-    data: Vec<u8>,
+/// An object no delta of this pack made, which deltas are made of.
+pub(crate) struct Root {
+    pub entry: u32,
+    pub oid: Oid,
+    pub kind: Kind,
+    /// deltas below a plain entry, in the segment that holds it
+    pub depth: u16,
+}
+
+#[derive(Default)]
+pub(crate) struct Made {
+    pub metas: Vec<(usize, Meta)>,
+    pub commits: Vec<CommitRow>,
+    pub work: IndexWork,
+}
+
+struct Verified<'s> {
+    shared: &'s Shared<'s>,
+    /// of the root the walk is below
     kind: Kind,
-    depth: u16,
-    index: Option<usize>,
-    children: Vec<usize>,
-    next: usize,
-    /// whether its bytes are among those that wait
-    made: bool,
+    made: Made,
 }
 
-impl Frame {
-    /// a base that no delta of this pack made: a plain entry, or an object of an
-    /// earlier segment
-    pub(crate) fn base(
-        data: Vec<u8>,
-        kind: Kind,
-        depth: u16,
-        index: Option<usize>,
-        children: Vec<usize>,
-    ) -> Self {
-        Frame {
-            data,
-            kind,
-            depth,
-            index,
-            children,
-            next: 0,
-            made: false,
-        }
-    }
+impl Objects for Verified<'_> {
+    type Id = Oid;
+    type Error = Error;
 
-    /// The object the delta at `index` made, which further deltas wait for. A base
-    /// that has more deltas than the one descended into stays: a pack can be made so
-    /// that every link of a chain does, and the objects that wait are then as many as
-    /// the chain is deep. They count against what the pack may inflate to.
-    fn made(
-        shared: &Shared<'_>,
-        (data, kind, depth): (Vec<u8>, Kind, u16),
-        index: usize,
-        children: Vec<usize>,
-    ) -> Result<Self, Error> {
-        let bytes = data.len() as u64;
-        let waiting = shared.waiting.fetch_add(bytes, Ordering::Relaxed);
-        if waiting + bytes > shared.limits.inflated_bytes {
-            return Err(Error::Limit("delta bases"));
-        }
-        let made = Frame::base(data, kind, depth, Some(index), children);
-        Ok(Frame { made: true, ..made })
-    }
-
-    fn over(self, shared: &Shared<'_>) {
-        if self.made {
-            let bytes = self.data.len() as u64;
-            shared.waiting.fetch_sub(bytes, Ordering::Relaxed);
-        }
-    }
-}
-
-/// the instructions of the delta at `index`
-fn delta<'a>(shared: &Shared<'a>, index: usize) -> Result<Cow<'a, [u8]>, Error> {
-    let raw = &shared.entries[index];
-    Ok(match &raw.data {
-        Some(delta) => Cow::Borrowed(delta.as_slice()),
-        // not kept by the scan
-        None => {
-            let start = raw.offset as usize + raw.header as usize;
-            Cow::Owned(scan::inflate(&shared.pack[start..], raw.size as usize)?.0)
-        }
-    })
-}
-
-/// resolves every delta below one base; returns the metadata of each resolved entry
-pub(crate) fn descend(
-    shared: &Shared<'_>,
-    offset_children: &HashMap<usize, Vec<usize>>,
-    root: Frame,
-) -> Result<Vec<(usize, Meta)>, Error> {
-    let mut done = Vec::new();
-    let mut stack = vec![root];
-    while let Some(frame) = stack.last_mut() {
-        let Some(child) = frame.children.get(frame.next).copied() else {
-            stack.pop().expect("the frame").over(shared);
-            continue;
+    /// A base is taken when a delta of it is come to, not before: of a plain entry
+    /// the scan kept, the bytes it kept; of any other, read anew.
+    fn payload<'a>(&'a mut self, entry: u32, scratch: &'a mut Vec<u8>) -> Result<&'a [u8], Error> {
+        let shared = self.shared;
+        let Some(raw) = shared.entries.get(entry as usize) else {
+            let base = &shared.outside[entry as usize - shared.entries.len()];
+            let read = shared.existing.read(base);
+            *scratch = read.map_err(|_| Error::MissingBase(*base))?.1;
+            return Ok(scratch);
         };
-        frame.next += 1;
-        let depth = frame.depth + 1;
-        if depth > shared.limits.delta_depth {
-            return Err(Error::Limit("delta depth"));
+        if let Some(data) = &raw.data {
+            return Ok(data);
         }
-        let delta = delta(shared, child)?;
-        let data =
-            alt_git_pack::delta::apply_bounded(&frame.data, &delta, shared.limits.object_bytes)
-                .map_err(|_| Error::Format("delta instructions"))?;
-        let kind = frame.kind;
-        let (oid, blake3) = digest(kind, &data);
+        let start = raw.offset as usize + raw.header as usize;
+        *scratch = scan::inflate(&shared.pack[start..], raw.size as usize)?.0;
+        Ok(scratch)
+    }
+
+    fn reached(&self, delta: u32) -> bool {
+        self.shared.metas[delta as usize].is_some()
+    }
+
+    fn made(&mut self, delta: u32, of: u32, depth: u32, object: &[u8]) -> Result<Oid, Error> {
+        let (shared, kind) = (self.shared, self.kind);
+        let (oid, blake3) = digest(kind, object);
+        let row = shared.told.object(delta, &oid, kind, object)?;
+        self.made.commits.extend(row);
+        let base = ((of as usize) < shared.entries.len()).then_some(of as usize);
         let meta = Meta {
             oid,
             blake3,
             kind,
-            size: data.len() as u64,
-            depth,
-            base: frame.index,
-            outside: frame.index.is_none(),
-            parsed: object::parse(kind, &data)?,
+            size: object.len() as u64,
+            depth: depth as u16,
+            base,
+            outside: base.is_none(),
         };
-        let mut children = shared.by_base.get(&oid).cloned().unwrap_or_default();
-        if let Some(more) = offset_children.get(&child) {
-            children.extend_from_slice(more);
-        }
-        done.push((child, meta));
-        // a base is dropped before its last child is descended into, so a chain holds
-        // one object and not one per link
-        if frame.next == frame.children.len() {
-            stack.pop().expect("the frame").over(shared);
-        }
-        if !children.is_empty() {
-            stack.push(Frame::made(shared, (data, kind, depth), child, children)?);
-        }
+        self.made.metas.push((delta as usize, meta));
+        Ok(oid)
     }
-    Ok(done)
+}
+
+/// Resolves every delta below `roots`, below no more of them at once than `walks`
+/// where that is told.
+pub(crate) fn below(
+    shared: &Shared<'_>,
+    roots: Vec<Root>,
+    walks: Option<usize>,
+) -> Result<Made, Error> {
+    let groups: Vec<Vec<Root>> = match walks {
+        None => roots.into_iter().map(|root| vec![root]).collect(),
+        Some(walks) => {
+            let mut groups: Vec<Vec<Root>> = (0..walks.max(1)).map(|_| Vec::new()).collect();
+            for (at, root) in roots.into_iter().enumerate() {
+                groups[at % walks.max(1)].push(root);
+            }
+            groups
+        }
+    };
+    let parts = alt_threads::map_owned(groups, 1, |roots| -> Result<Made, Error> {
+        let verified = Verified {
+            shared,
+            kind: Kind::Blob,
+            made: Made::default(),
+        };
+        let mut walk = Walk::new(verified, shared.deltas, shared.budget);
+        for root in roots {
+            walk.objects.kind = root.kind;
+            walk.below(root.entry, &root.oid, u32::from(root.depth))?;
+        }
+        let mut made = walk.objects.made;
+        made.work = walk.work;
+        Ok(made)
+    });
+    let mut all = Made::default();
+    for part in parts {
+        let part = part?;
+        all.metas.extend(part.metas);
+        all.commits.extend(part.commits);
+        all.work.inflated += part.work.inflated;
+        all.work.applied += part.work.applied;
+        all.work.hashed += part.work.hashed;
+    }
+    Ok(all)
 }

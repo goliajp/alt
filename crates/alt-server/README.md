@@ -113,6 +113,23 @@ while its reader takes it. `http.connection_timeout_ms` is the time a connection
 has when nothing of a body moves on it, counted again from every piece of a body
 that does.
 
+The packs of pushes are verified in `http.indexing_megabytes` of memory between
+them: 4096 by default, or what one pack that holds an object of
+`limits.object_bytes` takes where that is more, which is also the least the key
+may be set to. A pack takes what it needs before it allocates: what its entries
+inflate to while it is scanned, up to 256 MiB; the objects further deltas wait
+for, up to 96 MiB, beyond which they are kept in files of their own up to
+1536 MiB and beyond those made again; and four times its largest object for each
+thread that resolves its deltas. Where others leave less than that, a pack is
+resolved by fewer threads, down to one. A push that finds the memory taken waits
+for as long as a request may run (`http.work_timeout_ms`) and is then refused
+with nothing applied: Git shows `the packs of other pushes are being verified;
+push again`, and a client that reads no report is answered `503` with
+`retry: same_request`. What a pack inflates to counts its entries and the objects
+its deltas make, an object again each time it has to be made again, and may be
+128 times `limits.total_bytes`. The commits of one pack may name two parents for
+each of its entries and 65,536 beside (`commit parents` beyond that).
+
 Enable the configured origin and create a local browser account explicitly:
 
 ```sh

@@ -124,6 +124,11 @@ pub(super) async fn handle(
         compaction: state.compaction.clone(),
         protocol_v2,
         view,
+        // no one waits for the answer longer than for the work
+        verifying: crate::git::Verifying {
+            memory: state.options.verifying,
+            by: std::time::Instant::now() + state.options.work_timeout,
+        },
     };
     let result = tokio::time::timeout(
         state.options.work_timeout,

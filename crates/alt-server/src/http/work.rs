@@ -89,6 +89,7 @@ pub(super) struct Work {
     pub(super) compaction: crate::compaction::Compaction,
     pub(super) protocol_v2: bool,
     pub(super) view: Option<PackView>,
+    pub(super) verifying: crate::git::Verifying,
 }
 impl Work {
     pub(super) fn run(
@@ -132,6 +133,7 @@ impl Work {
                     self.protocol_v2,
                     source,
                     self.view.ok_or(Error::Integrity("Git repository view"))?,
+                    Some(self.verifying),
                 )?;
                 if let Some(repository) = pushed {
                     self.compaction.published(&repository);

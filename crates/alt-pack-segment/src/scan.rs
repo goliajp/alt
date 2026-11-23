@@ -88,6 +88,12 @@ pub(crate) fn inflate(input: &[u8], size: usize) -> Result<(Vec<u8>, usize), Err
 pub(crate) struct Scanned {
     pub entries: Vec<Raw>,
     pub body_end: usize,
+    /// what the entries inflate to, all together
+    pub inflated: u64,
+    /// the bytes of the payloads kept
+    pub held: u64,
+    /// the most bytes one entry inflates to, or the object of a delta is said to have
+    pub largest: u64,
 }
 
 /// Inflated payloads stay in memory for the later passes while they fit: a plain blob
@@ -115,6 +121,7 @@ pub(crate) fn scan(
     let mut entries = Vec::with_capacity(count);
     let mut inflated = 0u64;
     let mut held = 0u64;
+    let mut largest = 0u64;
     let mut pos = 12;
     for index in 0..count {
         let (form, size, head) = header(&pack[..body_end], pos)?;
@@ -135,6 +142,13 @@ pub(crate) fn scan(
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(Error::Limit("inflated bytes"))?;
         let (data, compressed) = inflate(&pack[pos + head..body_end], size as usize)?;
+        let made = match form {
+            Form::Plain(_) => 0,
+            _ => alt_git_pack::delta::target_size(&data)
+                .map_err(|_| Error::Format("delta instructions"))?
+                .min(limits.object_bytes),
+        };
+        largest = largest.max(size).max(made);
         let len = head + compressed;
         let fits = held + data.len() as u64 <= budget;
         let data = match form {
@@ -162,5 +176,11 @@ pub(crate) fn scan(
     if pos != body_end {
         return Err(Error::Format("bytes after the last entry"));
     }
-    Ok(Scanned { entries, body_end })
+    Ok(Scanned {
+        entries,
+        body_end,
+        inflated,
+        held,
+        largest,
+    })
 }

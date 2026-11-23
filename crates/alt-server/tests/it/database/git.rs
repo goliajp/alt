@@ -1,6 +1,7 @@
 use super::*;
 mod many_refs;
 mod raw_push;
+mod verifying;
 use std::{
     path::Path,
     process::{Command, Output},

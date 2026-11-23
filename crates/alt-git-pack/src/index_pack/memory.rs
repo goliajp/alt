@@ -65,6 +65,29 @@ impl Memory {
         *free -= bytes;
         Ok(Taken { of: self, bytes })
     }
+
+    /// All there is, free or taken.
+    pub fn all(&self) -> u64 {
+        self.all
+    }
+
+    /// Takes `bytes` where they are free now, and waits for nothing.
+    pub fn take_now(&self, bytes: u64) -> Option<Taken<'_>> {
+        let mut free = self.free.lock().expect("index memory");
+        let left = free.checked_sub(bytes)?;
+        *free = left;
+        Some(Taken { of: self, bytes })
+    }
+}
+
+impl Taken<'_> {
+    /// Gives back all but `bytes` of what was taken.
+    pub fn keep(&mut self, bytes: u64) {
+        let back = self.bytes.saturating_sub(bytes);
+        self.bytes -= back;
+        *self.of.free.lock().expect("index memory") += back;
+        self.of.given_back.notify_all();
+    }
 }
 
 impl Drop for Taken<'_> {

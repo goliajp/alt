@@ -134,6 +134,8 @@ pub struct HttpOptions {
     pub receiving_each: usize,
     /// the bytes of bodies that are being received, or wait for a worker
     pub receiving_bytes: u64,
+    /// the memory the packs of pushes are verified in, all at once
+    pub verifying: &'static alt_pack_segment::Memory,
     /// how often requests whose time to upload ran out are ended
     pub expiry_interval: Duration,
     /// the passwords that are checked at once: each takes the memory of one hash

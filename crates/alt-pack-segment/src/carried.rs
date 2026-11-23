@@ -7,7 +7,7 @@
 //! value of their leading bits starts: a lookup reads one table entry and the one or
 //! two ids that share those bits.
 
-use crate::{Error, Kind, Oid, SegmentSet, object::Parsed};
+use crate::{Kind, Oid};
 
 pub(crate) struct Carried {
     oids: Vec<Oid>,
@@ -61,33 +61,6 @@ impl Carried {
             .binary_search(oid)
             .ok()
             .map(|at| self.kinds[low + at])
-    }
-
-    /// Fails unless every object that `parsed`, the content of `from`, refers to is
-    /// carried or held by `existing`, as the kind it is referred to as.
-    pub fn check(&self, existing: &SegmentSet, from: &Oid, parsed: &Parsed) -> Result<(), Error> {
-        let one = |to: &Oid, kind: Kind| -> Result<(), Error> {
-            let found = match self.kind(to) {
-                Some(found) => Some(found),
-                None => existing.kind(to)?,
-            };
-            if found == Some(kind) {
-                Ok(())
-            } else {
-                Err(Error::Dangling(*from, *to))
-            }
-        };
-        match parsed {
-            Parsed::Blob => Ok(()),
-            Parsed::Commit { tree, parents } => {
-                one(tree, Kind::Tree)?;
-                parents
-                    .iter()
-                    .try_for_each(|parent| one(parent, Kind::Commit))
-            }
-            Parsed::Tree(entries) => entries.iter().try_for_each(|(oid, kind)| one(oid, *kind)),
-            Parsed::Tag { object, kind } => one(object, *kind),
-        }
     }
 }
 

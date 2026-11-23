@@ -113,6 +113,9 @@ impl Config {
             || h.worker_lease_ms < h.work_timeout_ms
             || h.receiving_each == Some(0)
             || h.receiving_megabytes == Some(0)
+            || h.indexing_megabytes.is_some_and(|megabytes| {
+                megabytes.saturating_mul(1 << 20) < crate::git::least_verifying_bytes(self.limits)
+            })
             || h.trusted_proxies.len() > 64
             || (h.trusted_proxies.iter()).any(|proxy| proxy.parse::<crate::Network>().is_err())
         {
@@ -168,6 +171,13 @@ impl Config {
                     body.saturating_mul(4)
                 }
             },
+            // one for as long as the process serves
+            verifying: Box::leak(Box::new(alt_pack_segment::Memory::new(
+                match h.indexing_megabytes {
+                    Some(megabytes) => megabytes.saturating_mul(1 << 20),
+                    None => crate::git::least_verifying_bytes(self.limits).max(4 << 30),
+                },
+            ))),
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,

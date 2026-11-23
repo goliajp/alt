@@ -53,6 +53,9 @@ pub enum Error {
     Json(alt_json::Error),
     Integrity(&'static str),
     Limit(&'static str),
+    /// what the request needs is taken by other requests, and was not given back
+    /// in the time it had to wait
+    Busy(&'static str),
     Precondition(&'static str),
     AuthorityUnavailable,
     Unauthorized,
@@ -71,6 +74,7 @@ impl std::fmt::Display for Error {
             Self::Json(e) => write!(f, "encoding: {e}"),
             Self::Integrity(what) => write!(f, "integrity failure: {what}"),
             Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
+            Self::Busy(what) => write!(f, "busy with other requests: {what}"),
             Self::Precondition(what) => write!(f, "precondition failed: {what}"),
             Self::AuthorityUnavailable => {
                 f.write_str("current account authority is temporarily unavailable")
@@ -95,6 +99,7 @@ impl std::error::Error for Error {
             Self::Json(e) => Some(e),
             Self::Integrity(_)
             | Self::Limit(_)
+            | Self::Busy(_)
             | Self::Precondition(_)
             | Self::AuthorityUnavailable
             | Self::Unauthorized

@@ -12,7 +12,7 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
 }
 
 /// The size a delta says the object it makes has.
-pub(crate) fn target_size(delta: &[u8]) -> Result<u64, PackError> {
+pub fn target_size(delta: &[u8]) -> Result<u64, PackError> {
     let mut pos = 0;
     varint(delta, &mut pos)?;
     varint(delta, &mut pos)

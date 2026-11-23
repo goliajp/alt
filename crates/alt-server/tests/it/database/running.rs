@@ -61,6 +61,7 @@ impl Running {
             receiving_bytes: 1 << 30,
             expiry_interval: Duration::from_secs(3600),
             password_places: 2,
+            verifying: Box::leak(Box::new(alt_server::PackMemory::new(4 << 30))),
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),

@@ -96,11 +96,11 @@ pub fn merge(parts: &[Arc<Segment>], older: &SegmentSet) -> Result<Vec<u8>, Erro
     pack[8..12].copy_from_slice(&count.to_be_bytes());
     let trailer = alt_hash::sha1(&pack);
     pack.extend_from_slice(&trailer);
+    // what the parts were verified within, they are within together
     let limits = Limits {
-        objects: u64::from(u32::MAX),
-        object_bytes: u64::MAX,
-        inflated_bytes: u64::MAX,
         delta_depth: u16::MAX,
+        parents_beside: usize::MAX,
+        ..Limits::of(u64::from(u32::MAX), u64::MAX, u64::MAX)
     };
     let ingested = ingest(&pack, older, &limits)?;
     // the parts are deleted once the merge is published, and ingesting only proves

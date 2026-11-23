@@ -1,22 +1,58 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, OidMap, Record, SegmentSet,
+    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
     carried::Carried,
-    descend::{Frame, Shared, descend},
+    descend::{self, Root, Shared},
     format::{self, CommitRow, Delta, NO_BASE},
-    object::{self, Parsed},
-    object_id,
+    object_id, plain, room,
     scan::{self, Form},
+    told::Told,
 };
-use std::{collections::HashMap, io::Write, sync::atomic::AtomicU64};
+use alt_git_pack::{
+    IndexWork, Memory,
+    walk::{Budget, Deltas, Of},
+};
+use std::{io::Write, time::Instant};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
     pub objects: u64,
     pub object_bytes: u64,
+    /// what the entries and the objects deltas make inflate to, all together, an
+    /// object counted again each time it has to be made again
     pub inflated_bytes: u64,
     pub delta_depth: u16,
+    /// The parents the commits may name beyond two for each entry of the pack. They
+    /// are written into the index of the segment and read with it, and deltas make
+    /// commits of many parents out of few bytes.
+    pub parents_beside: usize,
+    /// the bytes of delta bases held in memory while their deltas are resolved, and
+    /// of those written to files of their own when memory has no room for them
+    pub base_bytes: usize,
+    pub spill_bytes: u64,
+    /// what the pack takes its memory out of, and until when it waits for it
+    pub memory: Option<&'static Memory>,
+    pub memory_by: Option<Instant>,
+}
+
+impl Limits {
+    /// The bases held as an index of a pack holds them, out of no common amount. The
+    /// commits of a history have little more than one parent each; one that joins
+    /// sixty thousand branches still fits.
+    pub const fn of(objects: u64, object_bytes: u64, inflated_bytes: u64) -> Self {
+        Limits {
+            objects,
+            object_bytes,
+            inflated_bytes,
+            delta_depth: 4095,
+            parents_beside: 1 << 16,
+            base_bytes: 96 << 20,
+            spill_bytes: 16 * (96 << 20),
+            memory: None,
+            memory_by: None,
+        }
+    }
 }
 
 /// plain blobs above this size are hashed during the scan and not kept in memory
@@ -25,7 +61,7 @@ const KEEP: usize = 1 << 20;
 /// pack is inflated once and hashed on every core; what lies beyond is hashed by the
 /// scan itself and inflated again where a delta needs it, so that the memory a pack
 /// takes does not grow with its size.
-const HELD: u64 = 256 << 20;
+pub(crate) const HELD: u64 = 256 << 20;
 
 pub(crate) struct Meta {
     pub oid: Oid,
@@ -36,7 +72,20 @@ pub(crate) struct Meta {
     /// scan index of the base inside this pack
     pub base: Option<usize>,
     pub outside: bool,
-    pub parsed: Parsed,
+}
+
+impl Meta {
+    pub(crate) fn plain(oid: Oid, blake3: [u8; 32], kind: Kind, size: u64) -> Self {
+        Meta {
+            oid,
+            blake3,
+            kind,
+            size,
+            depth: 0,
+            base: None,
+            outside: false,
+        }
+    }
 }
 
 pub struct Ingested {
@@ -44,9 +93,15 @@ pub struct Ingested {
     commits: Vec<CommitRow>,
     flags: u32,
     pack_len: u64,
+    work: IndexWork,
 }
 
 impl Ingested {
+    /// The work resolving the deltas took, and the most their bases took at once.
+    pub fn work(&self) -> IndexWork {
+        self.work
+    }
+
     pub fn objects(&self) -> usize {
         self.records.len()
     }
@@ -109,199 +164,116 @@ pub fn ingest_holding(
     limits: &Limits,
     held: u64,
 ) -> Result<Ingested, Error> {
+    let said = pack.get(8..12).map_or(0, |count| {
+        u32::from_be_bytes(count.try_into().expect("four bytes")) as usize
+    });
+    let told = Told::new(existing, said, limits.parents_beside);
+    // an entry is inflated whole to be scanned, beside what the scan keeps
+    let memory = room::scanning(pack.len() as u64, limits, held)?;
+    let mut unkept: Vec<(usize, Meta)> = Vec::new();
+    let mut commits: Vec<CommitRow> = Vec::new();
+    let mut refused = None;
     let (trailer, scanned) = alt_threads::join(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
-            let mut unkept = HashMap::new();
+            // what the scan does not keep is hashed and taken in as it goes by
             scan::scan(pack, limits, KEEP, held, |index, kind, data| {
-                let parsed = object::parse(kind, data);
-                unkept.insert(index, (kind, digest(kind, data), data.len() as u64, parsed));
+                let (oid, blake3) = digest(kind, data);
+                match told.object(index as u32, &oid, kind, data) {
+                    Ok(row) => commits.extend(row),
+                    Err(error) => refused = refused.take().or(Some(error)),
+                }
+                let size = data.len() as u64;
+                unkept.push((index, Meta::plain(oid, blake3, kind, size)));
             })
-            .map(|scanned| (scanned, unkept))
         },
     );
-    let (scanned, unkept) = scanned?;
+    let mut scanned = scanned?;
     if trailer[..] != pack[scanned.body_end..] {
         return Err(Error::Format("pack checksum"));
     }
-    let entries = scanned.entries;
-    let offsets: HashMap<u64, usize> = entries
-        .iter()
-        .enumerate()
-        .map(|(index, raw)| (raw.offset, index))
-        .collect();
-    let mut offset_children: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut by_base: OidMap<Vec<usize>> = OidMap::default();
-    for (index, raw) in entries.iter().enumerate() {
-        match raw.form {
-            Form::Plain(_) => {}
-            Form::Offset(base) => {
-                let base = *offsets
-                    .get(&base)
-                    .ok_or(Error::Format("delta base offset"))?;
-                offset_children.entry(base).or_default().push(index);
-            }
-            Form::Reference(base) => by_base.entry(base).or_default().push(index),
-        }
-    }
-    let waiting = AtomicU64::new(0);
-    let shared = Shared {
-        pack,
-        entries: &entries,
-        by_base: &by_base,
-        limits,
-        waiting: &waiting,
-    };
+    refused.map_or(Ok(()), Err)?;
+    let entries = &scanned.entries;
+    let of = entries.iter().map(|raw| match raw.form {
+        Form::Plain(_) => Ok(Of::Nothing),
+        Form::Offset(base) => entries
+            .binary_search_by_key(&base, |raw| raw.offset)
+            .map(|base| Of::Entry(base as u32))
+            .map_err(|_| Error::Format("delta base offset")),
+        Form::Reference(base) => Ok(Of::Object(base)),
+    });
+    let deltas = Deltas::new(of.collect::<Result<Vec<_>, Error>>()?);
 
-    // Plain entries: object ids for a batch of objects are computed together, several
-    // messages per step of the hash; batches run in parallel.
-    let plain_indexes: Vec<usize> = entries
-        .iter()
-        .enumerate()
-        .filter(|(_, raw)| matches!(raw.form, Form::Plain(_)))
-        .map(|(index, _)| index)
-        .collect();
-    let batches: Vec<&[usize]> = plain_indexes.chunks(32).collect();
-    let plain: Vec<(usize, Meta)> =
-        alt_threads::map(&batches, 1, |batch| -> Result<Vec<(usize, Meta)>, Error> {
-            let batch = *batch;
-            let kept: Vec<(usize, Kind, &[u8])> = batch
-                .iter()
-                .filter_map(|index| {
-                    let raw = &entries[*index];
-                    let Form::Plain(kind) = raw.form else {
-                        return None;
-                    };
-                    raw.data.as_deref().map(|data| (*index, kind, data))
-                })
-                .collect();
-            let headers: Vec<String> = kept
-                .iter()
-                .map(|(_, kind, data)| crate::object_header(*kind, data.len()))
-                .collect();
-            let parts: Vec<[&[u8]; 2]> = headers
-                .iter()
-                .zip(&kept)
-                .map(|(header, (_, _, data))| [header.as_bytes(), *data])
-                .collect();
-            let messages: Vec<&[&[u8]]> = parts.iter().map(|pair| pair.as_slice()).collect();
-            let oids = alt_hash::sha1_many(&messages);
-            let contents: Vec<&[u8]> = kept.iter().map(|(_, _, data)| *data).collect();
-            let digests = alt_hash::blake3::hash_many(&contents);
-            let mut out = Vec::with_capacity(batch.len());
-            for (((index, kind, data), oid), digest) in kept.iter().zip(oids).zip(digests) {
-                out.push((
-                    *index,
-                    Meta {
-                        oid,
-                        blake3: *digest.as_bytes(),
-                        kind: *kind,
-                        size: data.len() as u64,
-                        depth: 0,
-                        base: None,
-                        outside: false,
-                        parsed: object::parse(*kind, data)?,
-                    },
-                ));
-            }
-            for index in batch {
-                // what the scan did not keep, it hashed and parsed itself
-                if entries[*index].data.is_none() {
-                    let (kind, (oid, blake3), size, parsed) = &unkept[index];
-                    out.push((
-                        *index,
-                        Meta {
-                            oid: *oid,
-                            blake3: *blake3,
-                            kind: *kind,
-                            size: *size,
-                            depth: 0,
-                            base: None,
-                            outside: false,
-                            parsed: match parsed {
-                                Ok(parsed) => parsed.clone(),
-                                Err(_) => object::parse(
-                                    *kind,
-                                    &scan::inflate(
-                                        &pack[entries[*index].offset as usize
-                                            + entries[*index].header as usize..],
-                                        *size as usize,
-                                    )?
-                                    .0,
-                                )?,
-                            },
-                        },
-                    ));
-                }
-            }
-            Ok(out)
-        })
-        .into_iter()
-        .collect::<Result<Vec<_>, Error>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let kept = plain::hashed(entries, &told)?;
+    commits.extend(kept.commits);
     let mut metas: Vec<Option<Meta>> = (0..entries.len()).map(|_| None).collect();
     let mut roots = Vec::new();
-    for (index, meta) in plain {
-        if offset_children.contains_key(&index) || by_base.contains_key(&meta.oid) {
-            roots.push((index, meta.oid, meta.kind));
+    for (index, meta) in kept.metas.into_iter().chain(unkept) {
+        if deltas.any(index as u32, &meta.oid) {
+            roots.push(Root {
+                entry: index as u32,
+                oid: meta.oid,
+                kind: meta.kind,
+                depth: 0,
+            });
         }
         metas[index] = Some(meta);
     }
-    let mut engine_roots = Vec::with_capacity(roots.len());
-    for (index, oid, kind) in roots {
-        let mut children = by_base.get(&oid).cloned().unwrap_or_default();
-        if let Some(more) = offset_children.get(&index) {
-            children.extend_from_slice(more);
-        }
-        engine_roots.push((index, kind, children));
-    }
-    let resolve = |roots: Vec<Frame>| -> Result<Vec<(usize, Meta)>, Error> {
-        let parts: Vec<Vec<(usize, Meta)>> =
-            alt_threads::map_owned(roots, 1, |root| descend(&shared, &offset_children, root))
-                .into_iter()
-                .collect::<Result<_, Error>>()?;
-        Ok(parts.into_iter().flatten().collect())
-    };
-    let inside = engine_roots
-        .into_iter()
-        .map(|(index, kind, children)| {
-            let raw = &entries[index];
-            let data = match &raw.data {
-                Some(data) => data.clone(),
-                None => {
-                    let start = raw.offset as usize + raw.header as usize;
-                    scan::inflate(&pack[start..], raw.size as usize)?.0
-                }
-            };
-            Ok(Frame::base(data, kind, 0, Some(index), children))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
-    for (index, meta) in resolve(inside)? {
-        metas[index].get_or_insert(meta);
-    }
-    // thin pack: bases that live in earlier segments
+    // thin pack: bases that live in earlier segments, numbered behind the entries
     let mut outside = Vec::new();
-    for (base, children) in &by_base {
-        if children.iter().all(|child| metas[*child].is_some()) {
-            continue;
+    let mut outer = Vec::new();
+    for named in deltas.by_object() {
+        let base = named[0].0;
+        if let Some(record) = existing.record(&base)? {
+            let entry = u32::try_from(entries.len() + outside.len());
+            outer.push(Root {
+                entry: entry.map_err(|_| Error::Limit("objects"))?,
+                oid: base,
+                kind: record.kind,
+                // the chain goes on below the base, in the segment that holds it
+                depth: record.depth,
+            });
+            outside.push(base);
+            scanned.largest = scanned.largest.max(record.size);
         }
-        let (kind, data) = existing.read(base).map_err(|_| Error::MissingBase(*base))?;
-        // the chain goes on below the base, in the segment that holds it
-        let depth = existing
-            .record(base)?
-            .ok_or(Error::MissingBase(*base))?
-            .depth;
-        outside.push(Frame::base(data, kind, depth, None, children.clone()));
     }
-    for (index, meta) in resolve(outside)? {
-        metas[index].get_or_insert(meta);
+    let budget = Budget::new(
+        (limits.object_bytes, limits.inflated_bytes),
+        (limits.base_bytes, limits.spill_bytes),
+        u32::from(limits.delta_depth),
+        scanned.inflated,
+    );
+    let (walks, _memory) = room::resolving(limits, &mut scanned, memory)?;
+    let mut work = IndexWork::default();
+    for pass in [roots, outer] {
+        let shared = Shared {
+            pack,
+            entries: &scanned.entries,
+            existing,
+            told: &told,
+            deltas: &deltas,
+            budget: &budget,
+            outside: &outside,
+            metas: &metas,
+        };
+        let made = descend::below(&shared, pass, walks)?;
+        commits.extend(made.commits);
+        work.inflated += made.work.inflated;
+        work.applied += made.work.applied;
+        work.hashed += made.work.hashed;
+        for (index, meta) in made.metas {
+            metas[index].get_or_insert(meta);
+        }
     }
-    let metas: Vec<Meta> = metas
-        .into_iter()
-        .map(|meta| meta.ok_or(Error::Format("delta without a resolvable base")))
-        .collect::<Result<_, Error>>()?;
+    (work.held, work.spilled) = budget.most();
+    let entries = &scanned.entries;
+    let resolved = metas.into_iter().zip(entries).map(|(meta, raw)| {
+        meta.ok_or(match raw.form {
+            Form::Reference(base) => Error::MissingBase(base),
+            _ => Error::Format("delta without a resolvable base"),
+        })
+    });
+    let metas: Vec<Meta> = resolved.collect::<Result<_, Error>>()?;
 
     // records sorted by oid, first occurrence wins
     let mut order: Vec<usize> = (0..metas.len()).collect();
@@ -321,28 +293,17 @@ pub fn ingest_holding(
         kept.iter()
             .map(|index| (metas[*index].oid, metas[*index].kind)),
     );
-    alt_threads::try_for_each(&kept, 1024, |index| {
-        let meta = &metas[*index];
-        carried.check(existing, &meta.oid, &meta.parsed)
-    })?;
+    told.wanted
+        .check(&carried, |from| metas[from as usize].oid)?;
     if alt_threads::any(&kept, 1024, |index| {
         existing.locate(&metas[*index].oid).is_some()
     }) {
         flags |= FLAG_OVERLAP;
     }
 
-    let mut commits: Vec<CommitRow> = kept
-        .iter()
-        .filter_map(|index| match &metas[*index].parsed {
-            Parsed::Commit { tree, parents } => Some(CommitRow {
-                oid: metas[*index].oid,
-                tree: *tree,
-                generation: 0,
-                parents: parents.clone(),
-            }),
-            _ => None,
-        })
-        .collect();
+    // an object the pack carries twice told of its commit twice
+    commits.sort_unstable_by_key(|commit| commit.oid);
+    commits.dedup_by(|a, b| a.oid == b.oid);
     crate::generation::assign(&mut commits, existing)?;
     let records = kept
         .iter()
@@ -371,5 +332,6 @@ pub fn ingest_holding(
         commits,
         flags,
         pack_len: pack.len() as u64,
+        work,
     })
 }

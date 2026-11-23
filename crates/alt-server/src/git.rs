@@ -147,7 +147,7 @@ pub fn execute_git(
         _ => return Err(Error::Precondition("not a Git endpoint")),
     };
     let view = store.pack_view_with(credential, &repository, ref_filter(&route))?;
-    execute_git_with_cache(store, credential, route, protocol_v2, source, view)
+    execute_git_with_cache(store, credential, route, protocol_v2, source, view, None)
 }
 
 pub(crate) fn execute_git_with_cache(
@@ -157,6 +157,7 @@ pub(crate) fn execute_git_with_cache(
     protocol_v2: bool,
     source: &mut dyn Read,
     view: alt_server_store::PackView,
+    room: Option<Verifying>,
 ) -> Result<Output> {
     let (repository, receive, advertisement) = match &route {
         Route::GitAdvertise(repository, receive) => (repository.clone(), *receive, true),
@@ -171,7 +172,7 @@ pub(crate) fn execute_git_with_cache(
         if !view.writable {
             return Err(Error::Unauthorized);
         }
-        return crate::git_packs::receive(store, credential, &repository, source, view);
+        return crate::git_packs::receive(store, credential, &repository, source, view, room);
     }
     let command = command(source, advertisement, store.limits())?;
     // the first view authorized the caller without the references; this one checks
@@ -200,6 +201,37 @@ pub(crate) fn execute_git_with_cache(
         _ => view,
     };
     crate::git_read::read(store.limits(), receive, &command, view)
+}
+
+/// The memory the packs of pushes are verified in, all at once, and until when the
+/// pack of one request waits for its part of it.
+#[derive(Clone, Copy)]
+pub(crate) struct Verifying {
+    pub memory: &'static alt_pack_segment::Memory,
+    pub by: std::time::Instant,
+}
+
+/// What verifying the pack of a push may take. A base held while its deltas are
+/// resolved is held as an index of a pack holds it.
+pub(crate) fn pack_limits(
+    limits: alt_remote_protocol::Limits,
+    room: Option<Verifying>,
+) -> alt_pack_segment::Limits {
+    alt_pack_segment::Limits {
+        memory: room.map(|room| room.memory),
+        memory_by: room.map(|room| room.by),
+        ..alt_pack_segment::Limits::of(
+            limits.graph_objects as u64,
+            limits.object_bytes,
+            inflated_bytes(limits.total_bytes),
+        )
+    }
+}
+
+/// The least memory the packs of pushes can be verified in: what one pack takes
+/// that holds an object as large as one may be.
+pub(crate) fn least_verifying_bytes(limits: alt_remote_protocol::Limits) -> u64 {
+    alt_pack_segment::least_memory(&pack_limits(limits, None))
 }
 
 /// What the objects of a push may inflate to, all together, where its pack may

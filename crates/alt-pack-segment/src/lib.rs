@@ -15,19 +15,25 @@ mod generation;
 mod ingest;
 mod merge;
 mod object;
+mod plain;
 mod readback;
+mod room;
 mod scan;
 mod search;
 mod select;
 mod send;
 mod set;
 mod stream;
+mod told;
+mod wanted;
 
+pub use alt_git_pack::{IndexWork, Memory};
 pub use build::{Builder, Built, Compress};
 pub use format::{CommitInfo, Record, Segment};
 pub use ingest::{Ingested, Limits, ingest, ingest_holding};
 pub use merge::merge;
 pub use readback::UNREADABLE;
+pub use room::least_memory;
 pub use select::Selection;
 pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
@@ -82,6 +88,9 @@ pub enum Error {
     MissingBase(Oid),
     Corrupt(&'static str),
     NotFound(Oid),
+    /// what the pack needs is taken by others, and was not given back in the time
+    /// the pack had to wait
+    Busy(&'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -99,6 +108,7 @@ impl std::fmt::Display for Error {
             Self::MissingBase(v) => write!(f, "delta base {} is not available", hex(v)),
             Self::Corrupt(v) => write!(f, "segment corrupt: {v}"),
             Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
+            Self::Busy(v) => write!(f, "pack waits: {v}"),
         }
     }
 }
@@ -115,6 +125,18 @@ impl std::error::Error for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<alt_git_pack::PackError> for Error {
+    fn from(error: alt_git_pack::PackError) -> Self {
+        use alt_git_pack::PackError;
+        match error {
+            PackError::Io(error) => Self::Io(error),
+            PackError::Limit(what) => Self::Limit(what),
+            PackError::Format(_) => Self::Format("delta instructions"),
+            PackError::Busy(what) => Self::Busy(what),
+        }
     }
 }
 

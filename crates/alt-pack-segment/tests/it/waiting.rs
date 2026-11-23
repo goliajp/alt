@@ -1,12 +1,13 @@
-//! Objects that deltas made and that further deltas wait for are counted
-//! against what a pack may inflate to: a pack can be made so that every
-//! link of a chain of deltas waits while the chain goes on.
+//! Objects that deltas made and that further deltas wait for are held within
+//! a limit, whatever the pack is made to keep waiting: beyond it they go to
+//! files, and beyond those they are made again, which counts against what the
+//! pack may inflate to.
 
 use alt_pack_segment::{Error, Limits, SegmentSet, ingest};
 
-const BYTES: usize = 1000;
+pub(crate) const BYTES: usize = 1000;
 
-fn object(n: usize) -> Vec<u8> {
+pub(crate) fn object(n: usize) -> Vec<u8> {
     let mut data = vec![b'a'; BYTES - 10];
     data.extend_from_slice(format!("{n:010}").as_bytes());
     data
@@ -18,7 +19,7 @@ fn id(data: &[u8]) -> [u8; 20] {
     alt_hash::sha1(&whole)
 }
 
-fn header(kind: u8, mut size: usize) -> Vec<u8> {
+pub(crate) fn header(kind: u8, mut size: usize) -> Vec<u8> {
     let mut out = vec![(kind << 4) | (size as u8 & 15)];
     size >>= 4;
     while size > 0 {
@@ -29,19 +30,19 @@ fn header(kind: u8, mut size: usize) -> Vec<u8> {
     out
 }
 
-fn zlib(data: &[u8]) -> Vec<u8> {
+pub(crate) fn zlib(data: &[u8]) -> Vec<u8> {
     alt_deflate::compress(data, 6, alt_deflate::Format::Zlib)
 }
 
 /// The delta that makes `object(n)` of any other of the objects.
-fn delta(n: usize) -> Vec<u8> {
+pub(crate) fn delta(n: usize) -> Vec<u8> {
     // both sizes, the bytes they share copied, the ten that tell them apart
     let mut out = vec![0xe8, 0x07, 0xe8, 0x07, 0x80 | 0x10 | 0x20, 0xde, 0x03, 10];
     out.extend_from_slice(format!("{n:010}").as_bytes());
     out
 }
 
-fn distance(mut distance: usize) -> Vec<u8> {
+pub(crate) fn distance(mut distance: usize) -> Vec<u8> {
     let mut out = vec![(distance & 127) as u8];
     while distance >> 7 > 0 {
         distance = (distance >> 7) - 1;
@@ -81,23 +82,48 @@ fn pack(depth: usize) -> Vec<u8> {
 }
 
 #[test]
-fn the_objects_that_wait_for_further_deltas_count_against_what_a_pack_may_inflate_to() {
+fn the_objects_that_wait_for_further_deltas_are_held_within_a_limit_and_made_again_beyond_it() {
     const DEPTH: usize = 200;
     let pack = pack(DEPTH);
-    let within = |inflated_bytes| {
+    let none = SegmentSet::default();
+    let within = |base_bytes, spill_bytes, inflated_bytes| {
         let limits = Limits {
-            objects: 1 << 20,
-            object_bytes: 1 << 20,
-            inflated_bytes,
-            delta_depth: 4095,
+            base_bytes,
+            spill_bytes,
+            ..Limits::of(1 << 20, 1 << 20, inflated_bytes)
         };
-        ingest(&pack, &SegmentSet::default(), &limits).map(|ingested| ingested.objects())
+        ingest(&pack, &none, &limits).map(|ingested| {
+            let mut index = Vec::new();
+            ingested.write_index(&mut index).unwrap();
+            (ingested.objects(), ingested.work(), index)
+        })
     };
-    // the entries inflate to one object and four hundred small deltas
-    assert_eq!(within(1 << 20).unwrap(), 2 * DEPTH + 1);
-    let refused = within(100_000);
+    // the entries inflate to one object and four hundred small deltas, which make
+    // four hundred objects
+    let entries = (BYTES + 2 * DEPTH * delta(0).len()) as u64;
+    let made = (2 * DEPTH * BYTES) as u64;
+
+    // room for all that waits: the plain object and every link but the last
+    let (objects, work, index) = within(1 << 20, 0, entries + made).unwrap();
+    assert_eq!(objects, 2 * DEPTH + 1);
+    assert_eq!((work.held, work.spilled), (DEPTH * BYTES, 0));
+    assert_eq!(work.applied, 2 * DEPTH as u64);
+
+    // room for five in memory: the others wait in files, and none is made twice
+    let (_, work, in_files) = within(5 * BYTES, 1 << 20, entries + made).unwrap();
+    assert!(work.held <= 6 * BYTES, "{work:?}");
+    assert!(work.spilled >= ((DEPTH - 6) * BYTES) as u64, "{work:?}");
+    assert_eq!(work.applied, 2 * DEPTH as u64);
+    assert_eq!(in_files, index);
+
+    // no room in files either: what was let go of is made again, and that counts
+    let refused = within(5 * BYTES, 0, entries + made).map(|(objects, ..)| objects);
     assert!(
-        matches!(refused, Err(Error::Limit("delta bases"))),
+        matches!(refused, Err(Error::Limit("inflated bytes"))),
         "{refused:?}"
     );
+    let (_, work, again) = within(5 * BYTES, 0, 1 << 30).unwrap();
+    assert!(work.held <= 6 * BYTES, "{work:?}");
+    assert!(work.applied > 2 * DEPTH as u64, "{work:?}");
+    assert_eq!(again, index);
 }

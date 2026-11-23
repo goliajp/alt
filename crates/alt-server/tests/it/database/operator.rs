@@ -85,6 +85,7 @@ impl OperatorDb {
                 trusted_proxies: vec![],
                 receiving_each: None,
                 receiving_megabytes: None,
+                indexing_megabytes: None,
             },
         };
         std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();
