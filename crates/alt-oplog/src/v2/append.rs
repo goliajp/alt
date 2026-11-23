@@ -49,6 +49,18 @@ impl Log {
         Ok(matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT))
     }
 
+    /// [`Self::knows_all`] for a handle that holds no lock on the log: a
+    /// frame that is not found known where the handle has it because the
+    /// log was cut since, or is being cut, is none it does not know, and
+    /// the handle is told that its ops were cut.
+    pub(super) fn knows_all_unlocked(&self) -> Result<bool, OpLogError> {
+        match self.knows_all() {
+            Ok(true) => Ok(true),
+            _ if self.cut_away()? => Err(OpLogError::CutBack),
+            known => Ok(known?),
+        }
+    }
+
     /// Refuses where a frame says nothing is appended after it by whoever
     /// does not know it, and this build does not.
     pub(super) fn may_append(&self) -> Result<(), OpLogError> {

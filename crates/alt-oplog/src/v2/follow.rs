@@ -1,6 +1,8 @@
 //! Reading what other writers appended to a version 2 log since this
 //! handle last read it.
 
+use std::io::ErrorKind;
+
 use crate::lock::{lock_shared, unlock};
 use crate::v2::frame::{KIND_OP, View};
 use crate::v2::log::Log;
@@ -45,7 +47,12 @@ impl Log {
         if size < self.state.end {
             return Ok(false);
         }
-        Ok(self.source().at(self.state.end - 4, 4)? == self.closes)
+        // nor does a file made shorter since `size` was taken hold it
+        match self.source().at(self.state.end - 4, 4) {
+            Ok(closes) => Ok(closes == self.closes),
+            Err(short) if short.kind() == ErrorKind::UnexpectedEof => Ok(false),
+            Err(other) => Err(other.into()),
+        }
     }
 
     /// Whether frames this handle holds are cut off the log, or noted in
@@ -198,5 +205,27 @@ impl Log {
             self.cut_over()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::v2::log::Log;
+    use crate::{Meta, Op, OpLogError};
+
+    #[test]
+    fn a_file_made_shorter_after_its_length_was_taken_does_not_hold_the_last_frame() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        crate::v2::in_boot(Some([1; 16]));
+        crate::v2::create_with(dir.path(), 12).unwrap();
+        let mut log = Log::open_at(dir.path(), None).unwrap();
+        let payload = |_: &[Op]| Ok::<_, OpLogError>(b"x".to_vec());
+        log.append_checked("a", 1, &Meta::default(), payload)
+            .unwrap();
+        let len = log.file.metadata().unwrap().len();
+        assert!(log.holds_head(len).unwrap());
+        log.file.set_len(len - 1).unwrap();
+        // the length is the one the file had before it was cut
+        assert!(!log.holds_head(len).unwrap());
     }
 }

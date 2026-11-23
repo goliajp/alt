@@ -65,7 +65,7 @@ impl Log {
         }
         // over a frame this build would have to know it sets no boundary
         let end = self.state.end;
-        if !self.tail().is_some_and(|tail| tail.synced >= end) {
+        if !self.tail().is_some_and(|tail| tail.synced >= end) && !self.knows_all_unlocked()? {
             self.may_append()?;
         }
         self.sync_to_end()
@@ -76,8 +76,8 @@ impl Log {
     /// a frame this build would have to know, it is the last frame the
     /// handle wrote itself, while that is not synced: what lies past it
     /// may be named by the frame it does not know.
-    pub(super) fn sync_target(&self) -> std::io::Result<Option<(u64, [u8; 4])>> {
-        match self.knows_all()? {
+    pub(super) fn sync_target(&self) -> Result<Option<(u64, [u8; 4])>, OpLogError> {
+        match self.knows_all_unlocked()? {
             true => Ok(Some((self.state.end, self.closes))),
             false => Ok(self.unsynced.then_some(self.wrote)),
         }
