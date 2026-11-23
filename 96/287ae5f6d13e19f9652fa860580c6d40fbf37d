@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: put away a file the index lost with what it holds, and apply the rest of an entry whose untracked file is in the way
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/stash/apply.rs
+touched: crates/alt-cli/src/native/stash/save.rs
+touched: crates/alt-cli/tests/it/like_git.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/stash.rs
+touched: crates/alt-cli/tests/it/stash_matrix.rs
