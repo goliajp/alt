@@ -96,7 +96,7 @@ impl Log {
         }
         self.may_write()?;
         if let Some(sync) = &self.named {
-            sync(&self.named_from(self.synced)?)?;
+            sync(&self.named_unlocked(self.synced)?)?;
         }
         let held = Held::take(&self.dir)?;
         // records were cut since the append: not this one's, or there is

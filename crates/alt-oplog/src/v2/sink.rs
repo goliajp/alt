@@ -40,7 +40,7 @@ impl Log {
             return Ok(());
         }
         let synced = self.tail().map_or(0, |tail| tail.synced);
-        let pending = self.named_from(synced.max(self.synced_here()).max(self.synced))?;
+        let pending = self.named_unlocked(synced.max(self.synced_here()).max(self.synced))?;
         let mut reached = self.deferred.lock().unwrap();
         (reached.target, reached.closes) = (target, closes);
         reached.generation = self.state.generation;
