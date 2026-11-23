@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: begin a read again where a change to a row it takes a share in overtook it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/read.rs
+touched: crates/alt-server-store/src/reading.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/tests/it/database/reading.rs
