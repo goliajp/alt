@@ -32,10 +32,10 @@ impl NativeRepo<'_> {
     /// output as without `--semantic`. A summary replaces the patch.
     pub fn diff(&self, what: &DiffRequest<'_>, out: &mut impl Write) -> Res<()> {
         let (json, semantic) = (what.json, what.semantic);
-        let sides = self.diff_sides(what.revs, what.cached)?;
+        let (sides, paths) = self.diff_sides(&what.words, what.cached)?;
         let disk = sides.disk.as_ref();
         let parse = |given: &String| pathspec::Spec::parse(&self.root, &self.prefix, given);
-        let specs: Vec<pathspec::Spec> = what.paths.iter().map(parse).collect::<Res<_>>()?;
+        let specs: Vec<pathspec::Spec> = paths.iter().map(parse).collect::<Res<_>>()?;
         let given = pathspec::Named::of(&specs);
         // a working-tree file with no index entry is untracked, not a diff
         let changes: Vec<_> = alt_worktree::changes(&sides.old, &sides.new)

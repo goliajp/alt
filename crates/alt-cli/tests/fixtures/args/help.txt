@@ -1315,11 +1315,11 @@ Options:
 ### alt log
 Show commit logs
 
-Usage: alt log [OPTIONS] [REV] [-- <PATHS>...]
+Usage: alt log [OPTIONS] [REV]... [-- <PATHS>...]
 
 Arguments:
-  [REV]            start revision, or a range: `A..B` for what leads to B and not to A, `A...B` for what leads to one of them and not to both [default: HEAD]
-  [-- <PATHS>...]  show only the commits that change these paths
+  [REV]...         start revision, or a range: `A..B` for what leads to B and not to A, `A...B` for what leads to one of them and not to both; then paths, to show only the commits that change them [default: HEAD]
+  [-- <PATHS>...]  paths, where a word before them could be taken for a revision
 
 Options:
       --pretty <PRETTY>        pretty-print commits: raw | oneline (ignored with --json) [default: oneline]

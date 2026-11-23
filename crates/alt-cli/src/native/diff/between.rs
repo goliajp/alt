@@ -5,16 +5,16 @@ use std::collections::BTreeMap;
 
 use super::worktree::Worktree;
 use super::*;
+use crate::rev_or_path::{Tells, Words};
 
 /// What a diff is asked for.
 #[derive(Default)]
 pub struct DiffRequest<'a> {
-    /// no revision for the index against the files, one for that commit
-    /// against the files, two or `A..B` for one commit against another,
-    /// `A...B` for what B has changed since the two parted
-    pub revs: &'a [String],
-    /// only what changed at these paths
-    pub paths: &'a [String],
+    /// revisions, then paths. No revision is for the index against the
+    /// files, one for that commit against the files, two or `A..B` for
+    /// one commit against another, `A...B` for what B has changed since
+    /// the two parted; with paths, only what changed at them
+    pub words: Words<'a>,
     /// the index in place of the files
     pub cached: bool,
     pub json: bool,
@@ -66,8 +66,26 @@ impl NativeRepo<'_> {
         Ok((entries.into_values().collect(), disk))
     }
 
-    /// The sides `revs` and `cached` ask for.
-    pub(super) fn diff_sides(&self, revs: &[String], cached: bool) -> Res<Sides> {
+    /// The sides the revisions among `words` and `cached` ask for, and the
+    /// paths among them.
+    pub(super) fn diff_sides<'a>(
+        &self,
+        words: &Words<'a>,
+        cached: bool,
+    ) -> Res<(Sides, &'a [String])> {
+        let commit = |rev: &str| self.names_commit(rev);
+        let tells = Tells {
+            revision: |word: &str| match crate::log_range::sides(word) {
+                Some((left, right, _)) => Ok(commit(left)? && commit(right)?),
+                None => commit(word),
+            },
+            file: |word: &str| self.file_named(word),
+        };
+        let (revs, paths) = words.revisions_then_paths(&tells)?;
+        Ok((self.sides_of(revs, cached)?, paths))
+    }
+
+    fn sides_of(&self, revs: &[String], cached: bool) -> Res<Sides> {
         let between = |old: ObjectId, new: ObjectId| -> Res<Sides> {
             Ok(Sides {
                 old: self.commit_entries(old)?,

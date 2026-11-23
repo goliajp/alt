@@ -48,8 +48,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             }
         }
         Command::Log(args) => {
+            let args = args.clone().told_apart(repo, at)?;
             let named = args.named().to_owned();
-            log_cmd::run(out, repo, args.clone().map_rev(at_head), at, &named)?
+            log_cmd::run(out, repo, args.map_rev(at_head), at, &named)?
         }
         Command::Show { rev, json } => {
             let spec = at_head(rev.as_deref().unwrap_or("HEAD"));

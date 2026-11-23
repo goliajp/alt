@@ -191,25 +191,22 @@ impl NativeRepo<'_> {
         Ok(self.commit_named(rev)?.is_some())
     }
 
-    /// Refuses `word`, which names a revision and stands where a path
-    /// may, where a file of that name is there as well.
-    pub fn ensure_no_file_named(&self, word: &str) -> Res<()> {
+    /// Whether a file is there by the name `word`, read as a path from
+    /// where the command runs.
+    pub fn file_named(&self, word: &str) -> Res<bool> {
         let spec = pathspec::Spec::parse(&self.root, &self.prefix, word)?;
-        if self.root.join(&spec.path).symlink_metadata().is_err() {
-            return Ok(());
-        }
-        let said = format!(
-            "fatal: ambiguous argument '{word}': both revision and filename\n\
-             Use '--' to separate paths from revisions, like this:\n\
-             'git <command> [<revision>...] -- [<file>...]'\n"
-        );
-        Err(said::refused(&said, 128))
+        Ok(self.root.join(&spec.path).symlink_metadata().is_ok())
     }
 
-    /// Whether `given` names a file that is there or a path of the index.
-    pub fn names_path(&self, given: &str) -> Res<bool> {
-        let spec = pathspec::Spec::parse(&self.root, &self.prefix, given)?;
-        let there = self.root.join(&spec.path).symlink_metadata().is_ok();
-        Ok(there || self.index()?.entries.iter().any(|e| spec.matches(&e.path)))
+    /// What tells the words of a command line apart here: a word that
+    /// names a commit, and one that names a file.
+    pub fn tells(
+        &self,
+    ) -> crate::rev_or_path::Tells<impl Fn(&str) -> Res<bool> + '_, impl Fn(&str) -> Res<bool> + '_>
+    {
+        crate::rev_or_path::Tells {
+            revision: |word: &str| self.names_commit(word),
+            file: |word: &str| self.file_named(word),
+        }
     }
 }

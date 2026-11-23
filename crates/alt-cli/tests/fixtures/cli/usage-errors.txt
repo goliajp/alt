@@ -75,7 +75,7 @@ exit 75
 err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"tag 'absent' not found","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:8>","retryable":false},"schema_version":1}
 $ [repo] alt log --json absent
 exit 128
-err| {"error":{"details":{"operation_ids":[]},"kind":"execution_error","message":"bad revision 'absent'","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"fatal: ambiguous argument 'absent': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"ambiguous argument 'absent': unknown revision or path not in the working tree.","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}
 $ [repo] alt operation status absent --json
 exit 2
 err| {"error":{"details":{"operation_ids":[]},"kind":"usage","message":"operation id must be 64 hexadecimal digits","next_action":"Correct the arguments and submit a new request","operation_id":null,"outcome":"not_applied","request_id":null,"retryable":false},"schema_version":1}

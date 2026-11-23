@@ -146,7 +146,11 @@ impl NativeRepo<'_> {
         let base = parents.first().ok_or("a stashed commit has no parent")?;
         let revs = [base.to_string(), entry.commit.to_string()];
         let request = DiffRequest {
-            revs: &revs,
+            words: crate::rev_or_path::Words {
+                before: &revs,
+                dashed: true,
+                after: &[],
+            },
             json,
             summary: (!patch && !json).then_some(Summary::Stat),
             ..Default::default()

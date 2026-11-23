@@ -72,6 +72,10 @@ fn canonical_matches(matches: &Matches) -> Value {
                 .collect::<Vec<_>>(),
         );
     }
+    // nothing else tells `reset main --` from `reset main`
+    if matches.dashes_alone() {
+        args.insert("--", Vec::new());
+    }
     let subcommand = matches.subcommand().map(|sub| {
         json!({
             "name": sub.name(), "arguments": canonical_matches(sub)

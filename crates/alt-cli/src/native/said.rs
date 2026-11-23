@@ -5,7 +5,7 @@ use super::*;
 /// The failure of a command that changed nothing and says `text` of it,
 /// which is written as it is: the lines git writes, each with its own
 /// `error:` or `fatal:`. The command ends with `code`.
-pub(super) fn refused(text: &str, code: u8) -> Box<dyn std::error::Error> {
+pub(crate) fn refused(text: &str, code: u8) -> Box<dyn std::error::Error> {
     if let Err(e) = crate::diagnostics::emit(text.as_bytes()) {
         return e.into();
     }

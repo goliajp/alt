@@ -88,6 +88,8 @@ pub struct Checkout {
     /// a branch or a revision
     #[arg(last = true, hint = "path-tracked")]
     pub paths: Vec<String>,
+    #[arg(dashed = true)]
+    pub dashed: bool,
     /// Create the branch named before switching to it
     #[arg(short = 'b')]
     pub create: bool,
@@ -111,6 +113,8 @@ pub struct Reset {
     /// Paths, where a name before them could be taken for a revision
     #[arg(last = true, hint = "path-tracked")]
     pub paths: Vec<String>,
+    #[arg(dashed = true)]
+    pub dashed: bool,
     /// Move the branch and leave the index and the files as they are
     #[arg(long, conflicts_with_all = ["mixed", "hard"])]
     pub soft: bool,
@@ -225,6 +229,8 @@ pub struct Diff {
     /// Only what changed at these paths
     #[arg(last = true, hint = "path-tracked")]
     pub paths: Vec<String>,
+    #[arg(dashed = true)]
+    pub dashed: bool,
     /// Compare with the index in place of the files: HEAD, or the commit
     /// given, against what is staged
     #[arg(long, visible_alias = "staged")]
@@ -258,8 +264,11 @@ impl Diff {
             _ => None,
         };
         crate::native::DiffRequest {
-            revs: &self.revs,
-            paths: &self.paths,
+            words: crate::rev_or_path::Words {
+                before: &self.revs,
+                dashed: self.dashed,
+                after: &self.paths,
+            },
             cached: self.cached,
             json: self.json,
             semantic: self.semantic,

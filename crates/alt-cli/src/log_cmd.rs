@@ -6,6 +6,7 @@ use alt_repo::Repository;
 use crate::log_format::{reencode, write_oneline, write_raw};
 use crate::log_range::Selection;
 use crate::native::pathspec::Place;
+use crate::rev_or_path::{Tells, Words};
 
 #[derive(alt_args::Args, Clone)]
 pub struct LogArgs {
@@ -31,12 +32,15 @@ pub struct LogArgs {
     #[arg(long)]
     oneline: bool,
     /// start revision, or a range: `A..B` for what leads to B and not to
-    /// A, `A...B` for what leads to one of them and not to both
-    #[arg(default_value = "HEAD", hint = "rev")]
-    rev: String,
-    /// show only the commits that change these paths
+    /// A, `A...B` for what leads to one of them and not to both; then
+    /// paths, to show only the commits that change them
+    #[arg(id = "rev", value_name = "REV", default_value = "HEAD", hint = "rev")]
+    words: Vec<String>,
+    /// paths, where a word before them could be taken for a revision
     #[arg(last = true, hint = "path-tracked")]
     paths: Vec<String>,
+    #[arg(dashed = true)]
+    dashed: bool,
 }
 
 impl LogArgs {
@@ -52,9 +56,48 @@ impl LogArgs {
             patch: !json,
             combined: true,
             oneline: false,
-            rev,
+            words: vec![rev],
             paths: Vec::new(),
+            dashed: true,
         }
+    }
+
+    /// The same log, of the one revision and the paths its words come to
+    /// where the command runs `at`.
+    pub(crate) fn told_apart(mut self, repo: &Repository, at: &Place) -> Res<Self> {
+        let resolves = |rev: &str| Ok(repo.rev_parse(&at.at_head(rev))?.is_some());
+        let tells = Tells {
+            revision: |word: &str| match crate::log_range::sides(word) {
+                Some((left, right, _)) => Ok(resolves(left)? && resolves(right)?),
+                None => resolves(word),
+            },
+            file: |word: &str| Ok(at.root.join(at.path(word)?).symlink_metadata().is_ok()),
+        };
+        // `HEAD` alone is what no word at all comes to as well
+        let given = self.dashed || self.words != ["HEAD"];
+        let words = Words {
+            before: &self.words,
+            dashed: self.dashed,
+            after: &self.paths,
+        };
+        let (revs, paths) = match given {
+            true => words.revisions_then_paths(&tells)?,
+            false => (&self.words[..], &self.paths[..]),
+        };
+        let rev = match revs {
+            [] => "HEAD".to_owned(),
+            [rev] => rev.clone(),
+            _ => {
+                let usage = "log takes one revision or one range";
+                return Err(crate::machine::Failure::usage(usage).into());
+            }
+        };
+        (self.paths, self.words) = (paths.to_vec(), vec![rev]);
+        Ok(self)
+    }
+
+    fn rev(&self) -> &str {
+        &self.words[0]
     }
 }
 
@@ -62,12 +105,12 @@ impl LogArgs {
     /// The same log, with each revision it names rewritten by `map` (used
     /// to point a bare `HEAD` at the current workspace's HEAD).
     pub(crate) fn map_rev(mut self, map: impl Fn(&str) -> String) -> Self {
-        self.rev = match crate::log_range::sides(&self.rev) {
+        self.words[0] = match crate::log_range::sides(self.rev()) {
             Some((left, right, both)) => {
                 let dots = if both { "..." } else { ".." };
                 format!("{}{dots}{}", map(left), map(right))
             }
-            None => map(&self.rev),
+            None => map(self.rev()),
         };
         self
     }
@@ -96,24 +139,24 @@ impl LogArgs {
 
     /// The revision as it was given.
     pub(crate) fn named(&self) -> &str {
-        &self.rev
+        self.rev()
     }
 
     /// The commits this log is of, newest first, each with the bytes of
     /// its object. `named` is the revision as it was given.
     fn commits<'r>(&self, repo: &'r Repository, at: &Place, named: &str) -> Res<Box<Walked<'r>>> {
         let limit = self.max_count.unwrap_or(usize::MAX);
-        if self.paths.is_empty() && crate::log_range::sides(&self.rev).is_none() {
+        if self.paths.is_empty() && crate::log_range::sides(self.rev()).is_none() {
             let start = repo
-                .rev_parse(&self.rev)?
-                .ok_or_else(|| format!("bad revision '{}'", self.rev))?;
+                .rev_parse(self.rev())?
+                .ok_or_else(|| format!("bad revision '{}'", self.rev()))?;
             let mut walk = repo.rev_walk(start)?;
             let walked = std::iter::from_fn(move || walk.next_with_data());
             let commits = walked.map(|item| item.map(|(oid, _, data)| (oid, data)));
             return Ok(Box::new(commits.map(|item| Ok(item?)).take(limit)));
         }
         let paths: Vec<String> = self.paths.iter().map(|p| at.path(p)).collect::<Res<_>>()?;
-        let selected = Selection::of(repo, &self.rev, named)?.commits(repo, &paths, limit)?;
+        let selected = Selection::of(repo, self.rev(), named)?.commits(repo, &paths, limit)?;
         Ok(Box::new(selected.into_iter().map(Ok)))
     }
 }

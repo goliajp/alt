@@ -73,7 +73,7 @@ pub use restore::Restore;
 mod revert;
 mod rm;
 pub use rm::Rm;
-mod said;
+pub(crate) mod said;
 mod sequence_editor;
 mod settings;
 mod signature;

@@ -36,14 +36,7 @@ pub struct Said {
     pub json: bool,
 }
 
-pub(super) fn not_a_revision(rev: &str) -> Box<dyn std::error::Error> {
-    let said = format!(
-        "fatal: ambiguous argument '{rev}': unknown revision or path not in the working tree.\n\
-         Use '--' to separate paths from revisions, like this:\n\
-         'git <command> [<revision>...] -- [<file>...]'\n"
-    );
-    said::refused(&said, 128)
-}
+pub(super) use crate::rev_or_path::neither as not_a_revision;
 
 impl NativeRepo<'_> {
     /// `alt reset [--soft | --mixed | --hard] [<commit>]`, as git has it.
