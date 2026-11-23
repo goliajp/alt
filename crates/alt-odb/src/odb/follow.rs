@@ -38,7 +38,7 @@ impl Odb {
         });
         self.release();
         if let Some(held) = held.transpose()? {
-            *self.deferred.lock().unwrap() = Some(held);
+            self.deferred.lock().unwrap().whole = Some(held);
         }
         Ok(())
     }

@@ -27,7 +27,7 @@ impl Odb {
     /// pointing at lost content.
     pub fn flush(&mut self) -> Result<(), OdbError> {
         // my durability target = how far my appends reached in each file
-        let target = self.appended()?;
+        let target = self.appended();
         // read under the append lock: a rewind of this batch comes later
         // and moves it
         let generation = Marker::read(&self.durable_path).generation();
@@ -44,12 +44,17 @@ impl Odb {
             true => Some(self.appended_whole()),
             false => None,
         };
-        if let Some(Ok(whole)) = deferred {
-            *self.deferred.lock().unwrap() = Some((whole, generation));
+        if let Some(whole) = &deferred {
+            let mut left = self.deferred.lock().unwrap();
+            match (whole, &target, &indexed) {
+                (Ok(whole), Ok(_), Ok(())) => left.whole = Some((*whole, generation)),
+                _ => left.failed = true,
+            }
         }
         // release the exclusive append lock first, so other writers append (and
         // pile onto the same fsync) instead of waiting behind my durability
         self.release();
+        let target = target?;
         indexed?;
 
         if relaxed {
