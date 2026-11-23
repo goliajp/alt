@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: feat
+summary: have the other reads of a repository wait for no push, and the reads of a cloud instance for no other transaction
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/change_events.rs
+touched: crates/alt-server-store/src/change_queries.rs
+touched: crates/alt-server-store/src/chunks.rs
+touched: crates/alt-server-store/src/cloud.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/portable/lifecycle.rs
+touched: crates/alt-server-store/src/read.rs
+touched: crates/alt-server-store/src/reading.rs
+touched: crates/alt-server-store/src/reading/again.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/src/workbench.rs
+touched: crates/alt-server-store/tests/it/database/reading.rs
