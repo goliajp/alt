@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: wait for a cut of the log before telling what lies past the frames a handle holds
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/passed.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_passed.rs
