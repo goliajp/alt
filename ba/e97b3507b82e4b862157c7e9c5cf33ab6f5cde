@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: perf
+summary: pass over the blocks of a log file that lie in a hole without reading them
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/locate.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/salvage.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
