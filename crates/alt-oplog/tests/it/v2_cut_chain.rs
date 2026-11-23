@@ -2,6 +2,7 @@
 //! finding an op from before a cut costs for it.
 
 use std::fs;
+use std::path::Path;
 
 use alt_oplog::v2::block::FileHeader;
 use alt_oplog::v2::scan::Stop;
@@ -177,4 +178,107 @@ fn the_full_check_takes_what_a_cut_left_past_its_checkpoint_for_no_part_of_the_l
         blocks_met += rest[..to_block].iter().all(|byte| *byte == 0) as usize;
     }
     assert!(blocks_met >= 1);
+}
+
+fn tear(dir: &Path) {
+    let mut torn = fs::read(dir.join("log")).unwrap();
+    torn.extend_from_slice(&[1, 2, 3]);
+    fs::write(dir.join("log"), torn).unwrap();
+}
+
+/// What an open at the anchor of an op reads beyond what an open without
+/// one does, in bytes and in reads, of a log that was cut `cuts` times
+/// since it began: the op lies between the last two cuts, and before
+/// where either read begins.
+fn read_for_an_anchor_before_the_last_cut(cuts: u32) -> (u64, u64) {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    alt_oplog::v2::create_with(dir.path(), 10).unwrap();
+    let mut anchor = None;
+    for _ in 0..cuts {
+        let mut log = OpLog::open(dir.path()).unwrap();
+        anchor = grow(&mut log, "a", 1).pop();
+        drop(log);
+        tear(dir.path());
+        OpLog::open(dir.path()).unwrap().refresh().unwrap();
+    }
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.state().unwrap().generation, cuts);
+    for n in 0..12 {
+        log.append("pad", n, &[n as u8; 150]).unwrap();
+    }
+    log.sync().unwrap();
+    drop(log);
+    let plain = OpLog::open(dir.path()).unwrap();
+    let anchored = OpLog::open_at(dir.path(), anchor).unwrap();
+    assert!(anchored.anchored() && !plain.anchored());
+    (
+        anchored.bytes_read() - plain.bytes_read(),
+        anchored.file_reads() - plain.file_reads(),
+    )
+}
+
+#[test]
+fn an_op_before_the_last_cut_is_found_at_a_cost_the_cuts_before_it_do_not_raise() {
+    let two = read_for_an_anchor_before_the_last_cut(2);
+    assert_eq!(read_for_an_anchor_before_the_last_cut(20), two);
+    assert_eq!(read_for_an_anchor_before_the_last_cut(100), two);
+    // the first bytes of the frame, the frame, and the checkpoint of one cut
+    assert_eq!(two.1, 3);
+}
+
+#[test]
+fn ops_before_cuts_are_found_under_the_generation_each_was_written_in_however_far_back() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 1);
+    drop(log);
+    let linked = Meta {
+        linked: true,
+        ..Meta::default()
+    };
+    let unsynced = alt_os::durability::leave_unsynced(true);
+    let mut named = Vec::new();
+    // before each of twenty cuts an op that changes the index of a
+    // workspace of its own, and a ref transaction before every third
+    for n in 1..=20u8 {
+        let mut log = OpLog::open(dir.path()).unwrap();
+        let staged = Meta {
+            workspace: Some([n; 8]),
+            index_after: Some([n; 20]),
+            ..Meta::default()
+        };
+        log.append_with("s", 1, &[n; 100], &staged).unwrap();
+        named.push(vec![n; 100]);
+        if n % 3 == 0 {
+            let payload = format!("ref transaction {n}").into_bytes();
+            log.append_with("s", 2, &payload, &linked).unwrap();
+            named.push(payload);
+        }
+        drop(log);
+        tear(dir.path());
+        OpLog::open(dir.path()).unwrap().refresh().unwrap();
+    }
+    let mut log = OpLog::open(dir.path()).unwrap();
+    for n in 0..40 {
+        log.append("pad", n, &[n as u8; 150]).unwrap();
+    }
+    drop((log, unsynced));
+
+    let mut log = OpLog::open(dir.path()).unwrap();
+    assert_eq!(log.state().unwrap().generation, 20);
+    let given = collecting(&mut log);
+    log.append_with("c", 3, b"committed", &linked).unwrap();
+    named.push(b"committed".to_vec());
+    // the ref transactions are looked up from the last one back, the
+    // ops of the workspaces from the first one on
+    log.sync().unwrap();
+    let given: Vec<Vec<u8>> = given
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|op| op.payload.clone())
+        .collect();
+    assert_eq!(given, named);
 }

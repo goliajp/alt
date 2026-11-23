@@ -4,22 +4,28 @@
 //! The checkpoint a cut leaves says under which one the frames before it
 //! were written, back to the checkpoint of the cut before, which it names.
 //! A handle that looks a frame up before the last cut reads those
-//! checkpoints once, the header and what it carries beside its body of
-//! each, from the last cut back: as many small reads as the log has cuts,
-//! however many frames it looks up after.
+//! checkpoints, the header and what it carries beside its body of each,
+//! from the last cut back to the first one that does not lie after the
+//! frame, and keeps what it read: as many small reads as cuts were made
+//! since the earliest frame it looked up, however many the log had before
+//! and however many frames it looks up after.
 
 use crate::v2::block::BLOCK_HEADER_LEN;
 use crate::v2::frame::{Ext, HEADER_LEN, KIND_CHECKPOINT};
 use crate::v2::log::Log;
 
 /// The cuts of a log whose last one left the checkpoint at `last` under
-/// `generation`: where the checkpoint of each starts and the generation
-/// of the frames before it, from the last one back.
+/// `generation`, as far back as they were read: where the checkpoint of
+/// each starts and the generation of the frames before it, from the last
+/// one back.
 #[derive(Default)]
 pub(crate) struct Cuts {
     last: u64,
     generation: u32,
     back: Vec<(u64, u32)>,
+    /// where the checkpoint of the cut before those starts, which is not
+    /// read yet: zero where none is left or they do not lead further back
+    next: u64,
 }
 
 /// more than the checkpoint of a cut carries beside its body
@@ -59,19 +65,22 @@ impl Log {
         }
         let mut cuts = self.cuts.borrow_mut();
         if (cuts.last, cuts.generation) != (self.state.cut, self.state.generation) {
-            let mut back = Vec::new();
-            let mut cut = self.state.cut;
-            while cut != 0
-                && let Some((before, generation)) = self.cut_before(cut)?
-            {
-                back.push((cut, generation));
-                // each lies before the one that names it
-                cut = if before < cut { before } else { 0 };
-            }
             *cuts = Cuts {
                 last: self.state.cut,
                 generation: self.state.generation,
-                back,
+                back: Vec::new(),
+                next: self.state.cut,
+            };
+        }
+        while cuts.next > at {
+            let cut = cuts.next;
+            cuts.next = match self.cut_before(cut)? {
+                Some((before, generation)) => {
+                    cuts.back.push((cut, generation));
+                    // each lies before the one that names it
+                    if before < cut { before } else { 0 }
+                }
+                None => 0,
             };
         }
         // the earliest cut after the frame tells
