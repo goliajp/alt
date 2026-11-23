@@ -150,6 +150,30 @@ impl Log {
         }
     }
 
+    /// Says where the log ends what `discarded` holds was cut, in a
+    /// checkpoint of `generation` that is synced, and has the file end
+    /// with it.
+    fn lay_cut(&mut self, discarded: &Discarded, generation: u32) -> Result<(), OpLogError> {
+        let cut = Cut {
+            bytes: discarded.to - discarded.from,
+            ops: discarded.ops.len() as u32,
+            after: self.state.cut,
+            generation: self.state.generation,
+        };
+        let mut state = self.state.clone();
+        state.generation = generation;
+        let bytes = self.composer().checkpoint(&mut state, Some(cut))?;
+        self.put(&bytes, state)?;
+        cut_reached(2)?;
+        self.file.sync_all()?;
+        cut_reached(3)?;
+        self.file.set_len(self.state.end)?;
+        cut_reached(4)?;
+        self.file.sync_all()?;
+        cut_reached(5)?;
+        Ok(())
+    }
+
     /// Cuts the log at `at`, where a frame this handle holds starts or
     /// the last one ends, under the exclusive lock of the log. Nothing is
     /// cut that was recorded as synced. `looked` says that every op
@@ -193,23 +217,7 @@ impl Log {
         };
         tail.write(&self.dir, self.boot, &held)?;
         cut_reached(1)?;
-        let cut = Cut {
-            bytes: discarded.to - discarded.from,
-            ops: discarded.ops.len() as u32,
-            after: self.state.cut,
-            generation: self.state.generation,
-        };
-        let mut state = self.state.clone();
-        state.generation = generation;
-        let bytes = self.composer().checkpoint(&mut state, Some(cut))?;
-        self.put(&bytes, state)?;
-        cut_reached(2)?;
-        self.file.sync_all()?;
-        cut_reached(3)?;
-        self.file.set_len(self.state.end)?;
-        cut_reached(4)?;
-        self.file.sync_all()?;
-        cut_reached(5)?;
+        self.lay_cut(&discarded, generation)?;
         self.unsynced = false;
         tail.stands(generation);
         // with nothing left to look at, the checkpoint is covered too

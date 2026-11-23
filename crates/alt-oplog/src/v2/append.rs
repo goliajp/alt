@@ -12,6 +12,19 @@ use crate::v2::state::State;
 use crate::v2::tail::Tail;
 use crate::{Framed, Meta, Op, OpId, OpLogError, relaxed_durability};
 
+/// What the frame of an op says beside its body, of what `meta` gives.
+fn said_beside(meta: &Meta) -> Ext {
+    Ext {
+        odb: meta.odb,
+        inverse_of: meta.inverse_of,
+        request: meta.request,
+        index_after: meta.index_after,
+        step: meta.step,
+        retired: meta.retired,
+        ..Ext::default()
+    }
+}
+
 impl Log {
     /// Refuses for a log this build may read and not write: nothing of
     /// it is changed then, nor what is noted beside it.
@@ -134,15 +147,7 @@ impl Log {
             kind: KIND_OP,
             flags,
             workspace,
-            ext: Ext {
-                odb: meta.odb,
-                inverse_of: meta.inverse_of,
-                request: meta.request,
-                index_after: meta.index_after,
-                step: meta.step,
-                retired: meta.retired,
-                ..Ext::default()
-            },
+            ext: said_beside(meta),
             body: &body,
             op: Some(id),
             linked: meta.linked,

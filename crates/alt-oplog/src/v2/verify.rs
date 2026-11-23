@@ -23,6 +23,23 @@ pub(crate) struct Full {
     requests: BTreeMap<[u8; 16], (u64, u32)>,
 }
 
+/// Holds the headers of the blocks a frame of `generation` begins or runs
+/// across, after the frames `state` stands for, to what they say of it.
+fn blocks(state: &State, generation: u32, headers: &[BlockHeader]) -> Result<(), OpLogError> {
+    let named = |header: &BlockHeader| header.checkpoint == state.checkpoint;
+    if !headers.iter().all(named) {
+        return Err(OpLogError::Format(
+            "an oplog block names another checkpoint than the one before it",
+        ));
+    }
+    if headers.iter().any(|header| header.generation != generation) {
+        return Err(OpLogError::Format(
+            "an oplog block is of another generation than the frame in it",
+        ));
+    }
+    Ok(())
+}
+
 impl Full {
     /// For a check of the frames that follow `state`.
     pub fn from(state: &State) -> Self {
@@ -43,17 +60,7 @@ impl Full {
         generation: u32,
         headers: &[BlockHeader],
     ) -> Result<(), OpLogError> {
-        let named = |header: &BlockHeader| header.checkpoint == state.checkpoint;
-        if !headers.iter().all(named) {
-            return Err(OpLogError::Format(
-                "an oplog block names another checkpoint than the one before it",
-            ));
-        }
-        if headers.iter().any(|header| header.generation != generation) {
-            return Err(OpLogError::Format(
-                "an oplog block is of another generation than the frame in it",
-            ));
-        }
+        blocks(state, generation, headers)?;
         match view.head.kind {
             KIND_OP => {
                 let id = alt_hash::blake3::hash(view.body);

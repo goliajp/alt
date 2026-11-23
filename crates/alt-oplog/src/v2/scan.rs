@@ -63,6 +63,18 @@ pub(crate) fn read_frame<'a>(
     parse(&Seed::new(&layout.id, generation), bytes)
 }
 
+/// Refuses a frame of a kind this build does not know, unless it says
+/// that whoever does not know it skips it.
+fn readable(view: &View) -> Result<(), OpLogError> {
+    let known = matches!(view.head.kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT);
+    if !known && view.head.flags & SKIPPABLE == 0 {
+        return Err(OpLogError::Format(
+            "the oplog holds a frame of a kind this alt does not know",
+        ));
+    }
+    Ok(())
+}
+
 impl Walk<'_> {
     fn limit(&self) -> u64 {
         self.base + self.data.len() as u64
@@ -153,12 +165,7 @@ impl Walk<'_> {
             if opened.is_some() && kind != KIND_CHECKPOINT {
                 return Ok(Stop::Unread);
             }
-            let known = matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT);
-            if !known && view.head.flags & SKIPPABLE == 0 {
-                return Err(OpLogError::Format(
-                    "the oplog holds a frame of a kind this alt does not know",
-                ));
-            }
+            readable(&view)?;
             if let Some(full) = full.as_deref_mut() {
                 // only a frame of the log is held to what the log promises:
                 // one from before a cut may lie past where the log ends

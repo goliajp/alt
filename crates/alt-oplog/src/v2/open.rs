@@ -10,9 +10,6 @@
 //! begins at a checkpoint within the synced part instead and goes through
 //! everything after it.
 
-use std::cell::Cell;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::scan::parse_body;
@@ -21,6 +18,7 @@ use crate::v2::frame::{KIND_OP, View};
 use crate::v2::locate::locate_past;
 use crate::v2::salvage::salvage;
 use crate::v2::scan::{Located, Stop, Walk};
+pub(crate) use crate::v2::source::Source;
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, walk_file};
 use crate::v2::tail::Tail;
@@ -43,49 +41,6 @@ pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
         request: view.ext.request,
     });
     Ok(op)
-}
-
-/// Bytes of the log file as an open reads them, counted.
-pub(crate) struct Source<'a> {
-    pub file: &'a File,
-    /// how many bytes were read, and in how many reads
-    pub read: &'a Cell<(u64, u64)>,
-}
-
-impl Source<'_> {
-    /// The `len` bytes at `at`, read into memory nothing was written to
-    /// first: a handle of this format writes at offsets and keeps no place
-    /// in the file.
-    pub fn at(&self, at: u64, len: usize) -> std::io::Result<Vec<u8>> {
-        let (bytes, reads) = self.read.get();
-        self.read.set((bytes + len as u64, reads + 1));
-        let mut data = Vec::with_capacity(len);
-        let mut file = self.file;
-        file.seek(SeekFrom::Start(at))?;
-        file.take(len as u64).read_to_end(&mut data)?;
-        match data.len() == len {
-            true => Ok(data),
-            false => Err(std::io::ErrorKind::UnexpectedEof.into()),
-        }
-    }
-
-    /// The stretches of the file between byte `from` and byte `to` that
-    /// hold data, in their order, as far as the file system tells them
-    /// from holes: what lies between them reads as zeros, and nobody has
-    /// to read it to know that no block of the log begins there.
-    pub fn stretches(&self, from: u64, to: u64) -> std::io::Result<Vec<(u64, u64)>> {
-        let mut held = Vec::new();
-        let mut at = from;
-        while at < to
-            && let Some((start, end)) = alt_os::holes::data_from(self.file, at)?
-            && start < to
-            && end > at
-        {
-            held.push((start, end.min(to)));
-            at = end;
-        }
-        Ok(held)
-    }
 }
 
 /// What an open read.
@@ -191,6 +146,82 @@ impl Loaded {
     }
 }
 
+/// A read of the file up to some byte: the checkpoint it began at, what
+/// the frames from there on come to, and what `tail` says of that log.
+struct Found {
+    located: Located,
+    state: State,
+    ops: Vec<Op>,
+    stop: Stop,
+    tail: Option<Tail>,
+    /// the checkpoint it began at is taken on trust
+    fresh: bool,
+}
+
+impl Found {
+    /// Reads the file up to byte `size`, from its first frame when `all`.
+    fn up_to(
+        source: &Source,
+        layout: &Layout,
+        (boot, tail): (Option<[u8; 16]>, Option<Tail>),
+        size: u64,
+        window: &(u64, Vec<u8>),
+        all: bool,
+    ) -> Result<Found, OpLogError> {
+        let mut read = |at: u64, len: usize| held(source, window, at, len);
+        let mut located = Located::empty();
+        if !all {
+            located = locate_past(layout, size, &mut read, &mut |len| source.stretches(0, len))?;
+        }
+        let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, window)?;
+        let tail = tail.filter(|tail| told_of(tail, &state, size, window));
+        let by_boot = located.state.checkpoint != 0 && boot == Some(located.boot);
+        let by_tail = tail.is_some_and(|tail| located.state.end <= tail.judged);
+        let fresh = by_boot || by_tail;
+        if !fresh && located.state.checkpoint != 0 && located.state.end > state.synced {
+            // the machine went down since it was written: begin within what
+            // is synced and read through all that follows
+            let within = state.synced.max(FILE_HEADER_LEN as u64);
+            located = locate_past(layout, within, &mut read, &mut |len| {
+                source.stretches(0, len)
+            })?;
+            (state, ops, stop) = pass(source, layout, &located, size, window)?;
+        }
+        Ok(Found {
+            located,
+            state,
+            ops,
+            stop,
+            tail,
+            fresh,
+        })
+    }
+
+    /// What an open holds of this read, of a file `seen` bytes long.
+    fn loaded(self, hidden: Option<u64>, seen: u64, clamped: bool) -> Loaded {
+        let (tail, fresh) = (self.tail, self.fresh);
+        let synced = self.state.synced.max(tail.map_or(0, |tail| tail.synced));
+        Loaded {
+            closes: [0; 4],
+            began: self.located.state.end,
+            began_linked: self.located.state.linked_at,
+            synced,
+            judged: match tail {
+                // ops somebody of this boot left to be looked at are still there
+                Some(tail) if tail.pending => tail.judged.max(synced),
+                _ if fresh => u64::MAX,
+                _ => self.state.synced,
+            },
+            hidden,
+            seen,
+            clamped,
+            passed: hidden.is_some(),
+            state: self.state,
+            ops: self.ops,
+        }
+    }
+}
+
 /// Reads the log `file` of `dir` as an open does; from its first frame
 /// when `all`. The caller holds a lock on the file.
 pub(crate) fn load(
@@ -220,44 +251,10 @@ pub(crate) fn load(
         false => (size - 1) / layout.block * layout.block,
     };
     let window = (from, source.at(from, (size - from) as usize)?);
+    let found = Found::up_to(source, layout, (boot, tail), size, &window, all)?;
+    let stop = found.stop;
+    let mut loaded = found.loaded(hidden, meta.len(), clamped);
     let mut read = |at: u64, len: usize| held(source, &window, at, len);
-    let mut located = Located::empty();
-    if !all {
-        located = locate_past(layout, size, &mut read, &mut |len| source.stretches(0, len))?;
-    }
-    let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &window)?;
-    let tail = tail.filter(|tail| told_of(tail, &state, size, &window));
-    let by_boot = located.state.checkpoint != 0 && boot == Some(located.boot);
-    let by_tail = tail.is_some_and(|tail| located.state.end <= tail.judged);
-    let fresh = by_boot || by_tail;
-    if !fresh && located.state.checkpoint != 0 && located.state.end > state.synced {
-        // the machine went down since it was written: begin within what
-        // is synced and read through all that follows
-        let within = state.synced.max(FILE_HEADER_LEN as u64);
-        located = locate_past(layout, within, &mut read, &mut |len| {
-            source.stretches(0, len)
-        })?;
-        (state, ops, stop) = pass(source, layout, &located, size, &window)?;
-    }
-    let synced = state.synced.max(tail.map_or(0, |tail| tail.synced));
-    let mut loaded = Loaded {
-        closes: [0; 4],
-        began: located.state.end,
-        began_linked: located.state.linked_at,
-        synced,
-        judged: match tail {
-            // ops somebody of this boot left to be looked at are still there
-            Some(tail) if tail.pending => tail.judged.max(synced),
-            _ if fresh => u64::MAX,
-            _ => state.synced,
-        },
-        hidden,
-        seen: meta.len(),
-        clamped,
-        passed: hidden.is_some(),
-        state,
-        ops,
-    };
     if loaded.state.last != 0 {
         // the window may begin where that frame ends, when none after it reads
         let closes = read(loaded.state.end - 4, 4)?;

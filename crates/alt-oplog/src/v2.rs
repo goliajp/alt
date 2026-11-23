@@ -28,6 +28,7 @@ mod salvage;
 pub mod scan;
 mod since;
 mod sink;
+mod source;
 pub mod state;
 mod stream;
 mod sync;
