@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: take over the remotes of a git repository on import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/import_config.rs
+touched: crates/alt-cli/tests/it/import_config.rs
+touched: crates/alt-cli/tests/it/main.rs
