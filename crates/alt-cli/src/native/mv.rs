@@ -124,10 +124,10 @@ impl NativeRepo<'_> {
             .any(|e| e.path == *from && e.stage() > 0)
         {
             return refused("conflicted");
-        } else if let Ok(there) = target.symlink_metadata() {
-            if !force || there.is_dir() {
-                return refused("destination exists");
-            }
+        } else if let Ok(there) = target.symlink_metadata()
+            && (!force || there.is_dir())
+        {
+            return refused("destination exists");
         }
         if !target.parent().is_some_and(Path::is_dir) {
             return refused("destination directory does not exist");

@@ -80,12 +80,7 @@ impl LogArgs {
 
     /// The commits this log is of, newest first, each with the bytes of
     /// its object. `named` is the revision as it was given.
-    fn commits<'r>(
-        &self,
-        repo: &'r Repository,
-        at: &Place,
-        named: &str,
-    ) -> Res<Box<dyn Iterator<Item = Res<(ObjectId, Vec<u8>)>> + 'r>> {
+    fn commits<'r>(&self, repo: &'r Repository, at: &Place, named: &str) -> Res<Box<Walked<'r>>> {
         let limit = self.max_count.unwrap_or(usize::MAX);
         if self.paths.is_empty() && crate::log_range::sides(&self.rev).is_none() {
             let start = repo
@@ -103,6 +98,9 @@ impl LogArgs {
 }
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+/// The commits of a log, each with the bytes of its object.
+type Walked<'r> = dyn Iterator<Item = Res<(ObjectId, Vec<u8>)>> + 'r;
 
 /// `at` is where the command runs: its HEAD stands for `HEAD`, and its
 /// directory is what paths are named from. `named` is the revision as it
