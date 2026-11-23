@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: end the start of the server on a limit that is no number, and count past the largest without wrapping
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/tests/it/altd_server_told.rs
+touched: crates/alt-cli/tests/it/main.rs
