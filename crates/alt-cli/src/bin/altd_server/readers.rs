@@ -71,6 +71,16 @@ impl RepoHandle {
         }
     }
 
+    /// Whether no request has this repository in hand, and nothing is
+    /// lost with what is kept of it: where a sync of it failed, that it
+    /// did is known by its writer alone.
+    pub(super) fn idle(&self) -> bool {
+        let written = |writer: &Arc<WriteCoordinator>| {
+            Arc::strong_count(writer) == 1 && writer.group.failed().is_none()
+        };
+        Arc::strong_count(&self.readers) == 1 && self.writer.as_ref().is_none_or(written)
+    }
+
     /// The repository as it is now: a push that was answered is seen by
     /// the request that comes after it.
     pub(super) fn open_repo(&self) -> Result<Reading, Box<dyn std::error::Error>> {

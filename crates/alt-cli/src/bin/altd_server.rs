@@ -36,6 +36,8 @@ mod limits;
 mod log;
 #[path = "altd_server/mode.rs"]
 mod mode;
+#[path = "altd_server/nonces.rs"]
+mod nonces;
 #[path = "altd_server/push.rs"]
 mod push;
 #[path = "altd_server/readers.rs"]
@@ -63,6 +65,7 @@ use http::{Header, Method, Response, Server, StatusCode};
 use limits::{max_body_bytes, max_command_bytes, pack_limits, read_body_capped};
 use log::*;
 use mode::*;
+use nonces::*;
 use push::*;
 use readers::RepoHandle;
 use upload::*;

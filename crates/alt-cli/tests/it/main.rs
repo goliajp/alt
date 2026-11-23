@@ -15,6 +15,7 @@ mod altd_server_added_commits;
 mod altd_server_connected;
 mod altd_server_landing;
 mod altd_server_left_unsynced;
+mod altd_server_many_repos;
 mod altd_server_no_new_objects;
 mod altd_server_pack_limits;
 mod altd_server_push_cost;

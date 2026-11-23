@@ -32,6 +32,10 @@ pub(super) struct Told {
     pub(super) workers: usize,
     /// `ALT_SERVER_MAX_CONNECTIONS`
     pub(super) connections: usize,
+    /// `ALT_SERVER_MAX_OPEN_REPOS`: the repositories of a root kept open
+    /// at once. One takes some forty files, with its store and four
+    /// requests reading it, and a process has a thousand by default
+    pub(super) repos: usize,
     /// `ALT_SERVER_IO_TIMEOUT_MS` and `ALT_SERVER_IO_MS_PER_MIB`
     pub(super) io: Limits,
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
@@ -66,6 +70,7 @@ impl Told {
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections: number(lookup, "ALT_SERVER_MAX_CONNECTIONS", 256usize)?,
+            repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
             io: Limits {
                 grace,
                 per_mib: Duration::from_millis(per_mib),
@@ -103,7 +108,10 @@ mod tests {
             (unset.push_bytes, unset.inflated_bytes),
             (1 << 30, 128 << 30)
         );
-        assert_eq!((unset.workers, unset.connections), (4, 256));
+        assert_eq!(
+            (unset.workers, unset.connections, unset.repos),
+            (4, 256, 16)
+        );
         assert_eq!(unset.io.grace, Duration::from_secs(20));
         assert_eq!(unset.io.per_mib, Duration::from_secs(8));
         let names = [
@@ -111,6 +119,7 @@ mod tests {
             "ALT_SERVER_MAX_INFLATED_BYTES",
             "ALT_SERVER_WORKERS",
             "ALT_SERVER_MAX_CONNECTIONS",
+            "ALT_SERVER_MAX_OPEN_REPOS",
             "ALT_SERVER_IO_TIMEOUT_MS",
             "ALT_SERVER_IO_MS_PER_MIB",
             "ALT_SERVER_SHUTDOWN_DEADLINE_MS",

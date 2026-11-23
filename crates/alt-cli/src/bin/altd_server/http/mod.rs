@@ -24,6 +24,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 pub(crate) use head::{Header, Method};
 pub(crate) use paced::Limits;
@@ -76,8 +77,17 @@ impl Server {
         std::thread::Builder::new()
             .name("accept".into())
             .spawn(move || {
+                // a connection that cannot be taken is most often one too
+                // many files open, and stays in the queue: the next try
+                // waits, longer each time, for one to be closed
+                let mut pause = Duration::ZERO;
                 for stream in listener.incoming() {
-                    let Ok(stream) = stream else { continue };
+                    let Ok(stream) = stream else {
+                        pause = (pause * 2).clamp(Duration::from_millis(5), Duration::from_secs(1));
+                        std::thread::sleep(pause);
+                        continue;
+                    };
+                    pause = Duration::ZERO;
                     if shared.open.fetch_add(1, Ordering::AcqRel) >= most {
                         drop(Open(Arc::clone(&shared)));
                         continue;
