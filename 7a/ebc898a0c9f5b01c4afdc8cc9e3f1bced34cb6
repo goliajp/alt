@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: feat
+summary: show a range of commits and those that change paths in log, and take --oneline
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/log_encoding.rs
+touched: crates/alt-cli/src/log_range.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/like_git.rs
+touched: crates/alt-cli/tests/it/log_range.rs
+touched: crates/alt-cli/tests/it/main.rs
