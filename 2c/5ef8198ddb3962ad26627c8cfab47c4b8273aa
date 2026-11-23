@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: read a log that holds a frame this build would have to know without cutting it, and note nothing of the ops before that frame
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/notes.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_features.rs
+touched: crates/alt-oplog/tests/it/v2_full_check.rs
