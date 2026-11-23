@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: read X-Forwarded-For only behind the proxies the configuration names, from its end
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-server/example-config.json
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/caller.rs
+touched: crates/alt-server/src/http/routes.rs
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/tests/fixtures/json/example-config.txt
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/running.rs
+touched: self-hosted/Caddyfile
