@@ -272,3 +272,57 @@ fn an_attempt_refused_for_its_network_takes_nothing_from_what_every_network_shar
     assert!(begin(&mut f, "2001:db8::2").is_err());
     begin(&mut f, "2001:db8:0:1::2").unwrap();
 }
+
+/// Past what one address may attempt there is what the network around it may, and
+/// past what everybody attempts in a minute an address is held to a few attempts:
+/// nobody is refused for the attempts of others alone.
+#[test]
+#[ignore = "requires isolated PostgreSQL; the budgets of an address, of its network and of everybody"]
+fn everybody_being_busy_refuses_an_address_for_its_own_attempts_alone() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    let mut begun = 0;
+    let mut begin = |f: &mut Fixture, network: &str| {
+        begun += 1;
+        let token = alt_browser_auth::token();
+        f.store.begin_device_authorization(
+            &origin(),
+            &format!("{begun:064x}"),
+            &format!("BBBB-{begun:04}"),
+            &alt_server_store::cloud_credential_digest(&token).unwrap(),
+            network.parse().unwrap(),
+        )
+    };
+    let set = |f: &Fixture, key: &str, attempts: i32| {
+        let set = "UPDATE alt_login_budgets SET attempts=$2 WHERE key=$1";
+        assert_eq!(
+            f.client().execute(set, &[&key, &attempts]).unwrap(),
+            1,
+            "{key}"
+        );
+    };
+    let of = |kind: &str, network: &str| format!("{kind}:{}", alt_browser_auth::digest(network));
+
+    // a /24 that has made what it may: another address of it is refused, one of the next is not
+    begin(&mut f, "198.51.100.1").unwrap();
+    set(&f, &of("wider", "198.51.100.0"), 400);
+    assert!(begin(&mut f, "198.51.100.2").is_err());
+    begin(&mut f, "198.51.101.2").unwrap();
+    // an IPv4 address written as an IPv6 one counts as the address it is
+    assert!(begin(&mut f, "::ffff:198.51.100.3").is_err());
+    begin(&mut f, "2001:db8:1::1").unwrap();
+    set(&f, &of("wider", "2001:db8:1::"), 400);
+    assert!(begin(&mut f, "2001:db8:1:ffff::1").is_err());
+    begin(&mut f, "2001:db8:2::1").unwrap();
+
+    // everybody together is far past what a minute usually has
+    set(&f, "global", 1_000_000);
+    for _ in 0..4 {
+        begin(&mut f, "203.0.113.5").unwrap();
+    }
+    begin(&mut f, "203.0.113.5").unwrap();
+    assert!(begin(&mut f, "203.0.113.5").is_err());
+    // and whoever has attempted little is let in still
+    begin(&mut f, "203.0.113.6").unwrap();
+    begin(&mut f, "198.51.101.2").unwrap();
+}
