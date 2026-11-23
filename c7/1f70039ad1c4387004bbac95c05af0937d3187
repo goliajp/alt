@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: read the head and the chunks of a request as strictly as what is in front of the server does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/head.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
