@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: lay a version 2 oplog in blocks of 16 KiB and read them into memory that is not zeroed first
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/examples/oplog_blocks.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
