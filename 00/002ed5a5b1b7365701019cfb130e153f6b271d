@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: give a pack that makes its bases again room for the plain entry it inflates again
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/tests/it/index_pack.rs
