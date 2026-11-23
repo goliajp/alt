@@ -253,3 +253,35 @@ fn a_repository_that_waits_to_be_opened_keeps_no_other_waiting() {
         assert_eq!(waits.join().unwrap(), "200");
     });
 }
+
+/// A name that is no user and a token that is not the user's are answered
+/// with the same words: which names there are is not told.
+#[test]
+fn a_name_that_is_no_user_is_told_what_a_user_with_another_token_is() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    repository(&root.join("served"));
+    let hash = alt_hash::blake3::hash(b"hers").to_hex();
+    fs::write(root.join("users"), format!("alice\t{hash}\n")).unwrap();
+    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
+    let told = |user: &str, token: &str| {
+        let url = format!("http://{}/served/info/refs", server.addr);
+        let out = Command::new("curl")
+            .args([
+                "-sS",
+                "-w",
+                "\n%{http_code}",
+                "-u",
+                &format!("{user}:{token}"),
+            ])
+            .arg(format!("{url}?service=git-upload-pack"))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    assert!(told("alice", "hers").ends_with("\n200"));
+    let refused = told("alice", "another");
+    assert_eq!(refused, "bad credentials\n401");
+    assert_eq!(told("nobody", "hers"), refused);
+    assert_eq!(told("nobody", "another"), refused);
+}
