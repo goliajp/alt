@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: stop the writes of a server over a push that is in the log and did not sync
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/group_commit.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_recorded.rs
+touched: crates/alt-cli/tests/it/altd_server_unsynced_objects.rs
+touched: crates/alt-cli/tests/it/failed_sync.rs
