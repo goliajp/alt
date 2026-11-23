@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: feat
+summary: resolve index stages and several revisions in rev-parse, and add its options for names and places
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native/pathspec.rs
+touched: crates/alt-cli/src/native/tree_edit.rs
+touched: crates/alt-cli/src/rev_parse.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/rev_parse.rs
