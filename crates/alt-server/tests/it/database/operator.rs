@@ -104,7 +104,35 @@ impl OperatorDb {
         command
     }
     fn run(&self, args: &[&str]) -> Output {
+        if matches!(args.first(), Some(&"backup" | &"restore")) {
+            self.tools_match();
+        }
         self.command().args(args).output().unwrap()
+    }
+    /// A backup is made and read with the tools of PostgreSQL that are on the
+    /// path, which refuse a server of a later version than their own. A test that
+    /// needs them says so here, and not with whatever the command makes of it.
+    fn tools_match(&self) {
+        let server = Client::connect(&self.admin)
+            .unwrap()
+            .query_one("SHOW server_version_num", &[])
+            .unwrap();
+        let server = server.get::<_, String>(0).parse::<u32>().unwrap() / 10_000;
+        let told = Command::new("pg_dump").arg("--version").output();
+        let told = told.expect("pg_dump is not on the path: these tests make backups with it");
+        let told = String::from_utf8_lossy(&told.stdout).into_owned();
+        let digits = told.trim_start_matches(|c: char| !c.is_ascii_digit());
+        let major = digits.split(|c: char| !c.is_ascii_digit()).next();
+        let tool: u32 = major
+            .and_then(|major| major.parse().ok())
+            .expect("pg_dump --version");
+        assert!(
+            tool >= server,
+            "pg_dump on the path is of PostgreSQL {tool} and the test server of {server}: \
+             run these tests with tools no older than the server, as with \
+             ALT_SERVER_TEST_POSTGRES_BIN=<the bin directory of a PostgreSQL {server}> \
+             scripts/with-test-postgres.sh … and that directory first on PATH"
+        );
     }
     fn ok(&self, args: &[&str]) -> alt_json::Value {
         let result = self.run(args);
