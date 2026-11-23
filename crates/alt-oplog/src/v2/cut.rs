@@ -191,8 +191,9 @@ impl Log {
         // neither a frame that must be known is cut nor the log after one
         self.may_append()?;
         let held = Held::take(&self.dir)?;
-        let noted = self.tail();
+        let noted = Tail::noted_held(&self.dir, self.boot, &held).says();
         let synced = noted.map_or(0, |tail| tail.synced).max(self.synced);
+        self.synced = synced;
         if at < synced {
             return Err(OpLogError::Lost { synced, holds: at });
         }

@@ -38,6 +38,7 @@ mod v2_model;
 mod v2_more_steps;
 mod v2_named;
 mod v2_note_fields;
+mod v2_note_unread;
 mod v2_notes;
 mod v2_outcomes;
 mod v2_passed;

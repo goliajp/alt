@@ -18,10 +18,18 @@
 //! [64..72) checksum = blake3(the 64 bytes before it)[..8]
 //! ```
 //!
-//! It is never fsynced: one of another boot, or that does not read, says
-//! nothing, and the next command reads more of the log instead. Whoever
-//! writes it holds `lock`, as does whoever fsyncs the log to move `synced`
-//! and whoever cuts the log.
+//! It is never fsynced: one of another boot says nothing, and the next
+//! command reads more of the log instead. Whoever writes it holds `lock`,
+//! as does whoever fsyncs the log to move `synced` and whoever cuts the
+//! log.
+//!
+//! It is written in place, in one write, and read without the lock. A
+//! read that finds it not to read may have met the write halfway: it
+//! takes the lock, which the writer holds, and reads once more. One that
+//! does not read then either was not left so by a writer of this build.
+//! It may have said that ops are left to be looked at, and is taken to
+//! have: an open judges every op past where the log says it is synced,
+//! and whoever changes the note keeps that in it.
 //!
 //! A writer changes it with the log locked and read to its end, and what
 //! it notes stands. A reader holds no lock on the log, which may have
@@ -41,6 +49,7 @@
 //! that is noted as begun, whether it was made or never came to the log.
 
 use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
 
@@ -60,6 +69,38 @@ pub(crate) struct Tail {
     pub judged: u64,
     pub hidden: u64,
     pub ends: u64,
+}
+
+/// What `tail` says to whoever reads it in a boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Noted {
+    /// there is none, or it is of another boot
+    Nothing,
+    /// it is there and does not read
+    Unread,
+    Says(Tail),
+}
+
+impl Noted {
+    pub fn says(self) -> Option<Tail> {
+        match self {
+            Noted::Says(tail) => Some(tail),
+            Noted::Nothing | Noted::Unread => None,
+        }
+    }
+
+    /// What whoever changes `tail` begins with: where it does not read,
+    /// that ops may be left to be looked at from the first frame on.
+    pub fn to_change(self) -> Tail {
+        match self {
+            Noted::Says(tail) => tail,
+            Noted::Nothing => Tail::default(),
+            Noted::Unread => Tail {
+                pending: true,
+                ..Tail::default()
+            },
+        }
+    }
 }
 
 /// `lock` beside the log, held by one at a time of those that fsync the
@@ -125,17 +166,29 @@ impl Tail {
         (self.generation, self.cutting, self.hidden, self.ends) = (generation, false, 0, 0);
     }
 
-    /// What `tail` in `dir` says, when it was written in `boot`.
-    pub fn read(dir: &Path, boot: Option<[u8; 16]>) -> Option<Tail> {
+    /// What `tail` in `dir` says in `boot`, as the file is at this moment.
+    fn noted_now(dir: &Path, boot: Option<[u8; 16]>) -> Noted {
+        let Some(boot) = boot else {
+            return Noted::Nothing;
+        };
+        let file = match File::open(dir.join("tail")) {
+            Ok(file) => file,
+            Err(none) if none.kind() == ErrorKind::NotFound => return Noted::Nothing,
+            Err(_) => return Noted::Unread,
+        };
         let mut bytes = [0u8; LEN];
-        let file = File::open(dir.join("tail")).ok()?;
-        file.read_exact_at(&mut bytes, 0).ok()?;
+        if file.read_exact_at(&mut bytes, 0).is_err() {
+            return Noted::Unread;
+        }
         let sum = alt_hash::blake3::hash(&bytes[..SUMMED]);
-        if bytes[..4] != MAGIC || sum.as_bytes()[..8] != bytes[SUMMED..] || boot? != bytes[8..24] {
-            return None;
+        if bytes[..4] != MAGIC || sum.as_bytes()[..8] != bytes[SUMMED..] {
+            return Noted::Unread;
+        }
+        if boot != bytes[8..24] {
+            return Noted::Nothing;
         }
         let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-        Some(Tail {
+        Noted::Says(Tail {
             pending: bytes[4] & 1 != 0,
             cutting: bytes[4] & 2 != 0,
             generation: u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
@@ -145,6 +198,31 @@ impl Tail {
             hidden: word(48),
             ends: word(56),
         })
+    }
+
+    /// What `tail` in `dir` says in `boot` to whoever holds the lock:
+    /// nobody is writing it.
+    pub fn noted_held(dir: &Path, boot: Option<[u8; 16]>, _held: &Held) -> Noted {
+        Self::noted_now(dir, boot)
+    }
+
+    /// What `tail` in `dir` says in `boot` to whoever holds no lock. One
+    /// that does not read is read again under the lock; the caller does
+    /// not hold it.
+    pub fn noted(dir: &Path, boot: Option<[u8; 16]>) -> Noted {
+        match Self::noted_now(dir, boot) {
+            Noted::Unread => match Held::take(dir) {
+                Ok(held) => Self::noted_held(dir, boot, &held),
+                Err(_) => Noted::Unread,
+            },
+            noted => noted,
+        }
+    }
+
+    /// What `tail` in `dir` says, when it was written in `boot` and
+    /// reads, to whoever holds no lock.
+    pub fn read(dir: &Path, boot: Option<[u8; 16]>) -> Option<Tail> {
+        Self::noted(dir, boot).says()
     }
 
     /// Writes `tail` in `dir` as of `boot`; the caller holds the lock.
@@ -181,7 +259,7 @@ impl Tail {
         change: impl FnOnce(&mut Tail),
     ) -> std::io::Result<()> {
         let held = Held::take(dir)?;
-        let mut tail = Tail::read(dir, boot).unwrap_or_default();
+        let mut tail = Tail::noted_held(dir, boot, &held).to_change();
         change(&mut tail);
         tail.write(dir, boot, &held)
     }

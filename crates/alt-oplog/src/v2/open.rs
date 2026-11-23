@@ -21,7 +21,7 @@ use crate::v2::scan::{Located, Stop, Walk};
 pub(crate) use crate::v2::source::Source;
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, walk_file};
-use crate::v2::tail::Tail;
+use crate::v2::tail::{Noted, Tail};
 use crate::{Framed, Op, OpLogError};
 
 /// The op an op frame at `at..end` holds.
@@ -156,6 +156,8 @@ struct Found {
     tail: Option<Tail>,
     /// the checkpoint it began at is taken on trust
     fresh: bool,
+    /// `tail` is there and does not read
+    unread: bool,
     /// the bytes of the file it holds, from the byte it names on
     window: (u64, Vec<u8>),
 }
@@ -165,10 +167,11 @@ impl Found {
     fn up_to(
         source: &Source,
         layout: &Layout,
-        (boot, tail): (Option<[u8; 16]>, Option<Tail>),
+        (boot, noted): (Option<[u8; 16]>, Noted),
         size: u64,
         all: bool,
     ) -> Result<Found, OpLogError> {
+        let tail = noted.says();
         // one read of the last block serves the search for its checkpoint
         // and the frames after it
         let from = match all {
@@ -202,6 +205,7 @@ impl Found {
             stop,
             tail,
             fresh,
+            unread: noted == Noted::Unread,
             window,
         })
     }
@@ -218,7 +222,8 @@ impl Found {
             judged: match tail {
                 // ops somebody of this boot left to be looked at are still there
                 Some(tail) if tail.pending => tail.judged.max(synced),
-                _ if fresh => u64::MAX,
+                // a note that does not read may have said the same
+                _ if fresh && !self.unread => u64::MAX,
                 _ => self.state.synced,
             },
             hidden,
@@ -244,8 +249,9 @@ pub(crate) fn load(
     let size = crate::settle::read_end(&meta);
     let clamped = size < meta.len();
     let size = size.max(FILE_HEADER_LEN as u64);
-    let tail = Tail::read(dir, boot);
-    let mut found = Found::up_to(source, layout, (boot, tail), size, all)?;
+    let noted = Tail::noted(dir, boot);
+    let tail = noted.says();
+    let mut found = Found::up_to(source, layout, (boot, noted), size, all)?;
     // To whoever opens a file of the length a reader of this boot noted,
     // or a cut that was begun, the log ends where that says: while the
     // log in the file is of the generation it was said of. A file that
@@ -255,7 +261,7 @@ pub(crate) fn load(
     let hidden = tail.filter(ends).map(|tail| tail.ends);
     let size = hidden.map_or(size, |ends| ends.max(FILE_HEADER_LEN as u64));
     if hidden.is_some() {
-        found = Found::up_to(source, layout, (boot, tail), size, all)?;
+        found = Found::up_to(source, layout, (boot, noted), size, all)?;
     }
     let (stop, window) = (found.stop, std::mem::take(&mut found.window));
     let mut loaded = found.loaded(hidden.map(|_| meta.len()), meta.len(), clamped);

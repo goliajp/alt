@@ -89,7 +89,7 @@ impl Sink {
         }
         let held = Held::take(&self.dir)?;
         let mut closes = [0u8; 4];
-        let mut tail = Tail::read(&self.dir, self.boot).unwrap_or_default();
+        let mut tail = Tail::noted_held(&self.dir, self.boot, &held).to_change();
         let in_place = self.file.metadata()?.len() >= reached.target
             && self
                 .file

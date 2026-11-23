@@ -104,7 +104,7 @@ impl Log {
         if !self.holds_head(self.file.metadata()?.len())? {
             return Err(OpLogError::CutBack);
         }
-        let mut tail = Tail::read(&self.dir, self.boot).unwrap_or_default();
+        let mut tail = Tail::noted_held(&self.dir, self.boot, &held).to_change();
         if tail.cuts(self.state.generation, target) {
             return Err(OpLogError::CutBack);
         }
