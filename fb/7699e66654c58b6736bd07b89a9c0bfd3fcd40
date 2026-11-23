@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: keep a base its deltas come back to in a file instead of inflating it again, and count each time one is inflated again
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/held.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/regained.rs
