@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: have a handle that begins at the checkpoint of a cut take that one for the last cut, as a read from the first frame does
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/locate.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/tests/it/v2_cut_chain.rs
+touched: crates/alt-oplog/tests/it/v2_scan.rs
