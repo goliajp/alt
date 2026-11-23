@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: take a look at a log a reader ended early for no look at what lies past that end
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
