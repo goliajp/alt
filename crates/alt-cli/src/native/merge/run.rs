@@ -68,23 +68,22 @@ impl NativeRepo<'_> {
             MergeOutcome::Conflicted(resolved) => {
                 self.start_merge(theirs)?;
                 self.write_conflicted(&resolved)?;
-                let conflicts: Vec<BString> = resolved
-                    .iter()
-                    .filter(|r| r.conflicted)
-                    .map(|r| r.path.clone())
-                    .collect();
-                if json {
-                    self.report_merge(true, out, "conflicted", None, &conflicts, "")?;
-                } else {
-                    cherry_pick::say_conflicts(out, "Merge", &conflicts)?;
-                    writeln!(
-                        out,
-                        "Automatic merge failed; fix conflicts and then commit the result."
-                    )?;
-                }
+                self.say_stopped(&resolved, json, out)?;
                 Ok(true)
             }
         }
+    }
+
+    /// What a merge says that stopped in conflict at paths of `resolved`.
+    fn say_stopped(&self, resolved: &[Resolved], json: bool, out: &mut impl Write) -> Res<()> {
+        let conflicted = resolved.iter().filter(|r| r.conflicted);
+        let conflicts: Vec<BString> = conflicted.map(|r| r.path.clone()).collect();
+        if json {
+            return self.report_merge(true, out, "conflicted", None, &conflicts, "");
+        }
+        cherry_pick::say_conflicts(out, "Merge", &conflicts)?;
+        let fix = "Automatic merge failed; fix conflicts and then commit the result.";
+        Ok(writeln!(out, "{fix}")?)
     }
 
     /// Emits one merge outcome: the human line, or `{schema_version, result,
@@ -139,6 +138,7 @@ impl NativeRepo<'_> {
             if ff != FastForward::Never {
                 return Ok(MergeOutcome::FastForward(theirs));
             }
+            self.ensure_signing()?;
             // the tree of a merge that could have been a fast-forward is theirs
             let entries = self.commit_entries(theirs)?;
             let commit = self.write_merge_commit(ours, theirs, &entries, label, into)?;
@@ -149,6 +149,8 @@ impl NativeRepo<'_> {
                 "Not possible to fast-forward, aborting.".into(),
             ));
         }
+        // nobody to make the commit is found before anything is stored
+        self.ensure_signing()?;
         let base_entries = self.base_entries(&bases)?;
         let ours_entries = self.commit_entries(ours)?;
         let theirs_entries = self.commit_entries(theirs)?;
