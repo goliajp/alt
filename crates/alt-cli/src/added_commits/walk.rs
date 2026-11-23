@@ -56,7 +56,7 @@ impl<'a> Walk<'a> {
             visited: Vec::new(),
             looked: 0,
             bases: HashMap::new(),
-            trees: Trees::default(),
+            trees: Trees::holding(super::trees::BASES),
         }
     }
 
