@@ -170,6 +170,10 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Restore files of the working tree, entries of the index, or both
+    Restore(worktree_args::Restore),
+    /// Switch branches, or restore files of the working tree
+    Checkout(worktree_args::Checkout),
     /// Show a commit: header + per-file unified diff against its first parent
     Show {
         /// Revision to show (default `HEAD`). Accepts any spec `rev-parse` resolves.

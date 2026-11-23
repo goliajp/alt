@@ -188,7 +188,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             max_count,
             json,
         } => repo.verify_commits(commits, *max_count, *json, out)?,
-        _ => return Err("not a native command".into()),
+        _ => return worktree::run(repo, cmd, out),
     }
     Ok(0)
 }

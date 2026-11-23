@@ -146,6 +146,20 @@ impl Pair {
         text(&a)
     }
 
+    /// The same command in both ends with `code`, and alt says what git
+    /// says of it, before its line about the request; what git said.
+    pub fn same_failure(&self, args: &[&str], code: i32) -> String {
+        let said = fails(alt(&self.alt, args), code);
+        let git_said = fails(git(&self.git, args), code);
+        assert!(said.starts_with(&git_said), "alt: {said}\ngit: {git_said}");
+        git_said
+    }
+
+    /// Runs the same command in both, whatever it ends with.
+    pub fn run(&self, args: &[&str]) -> (Output, Output) {
+        (alt(&self.alt, args), git(&self.git, args))
+    }
+
     /// The index, the files and the branches are the same in both.
     pub fn assert_same_state(&self) {
         assert_eq!(index(&self.alt), ok(git(&self.git, &["ls-files", "-s"])));

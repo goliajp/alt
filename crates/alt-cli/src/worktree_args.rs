@@ -51,3 +51,49 @@ impl Status {
         self.untracked_files.as_deref()
     }
 }
+
+#[derive(alt_args::Args)]
+pub struct Restore {
+    /// Paths to restore; `.` is the directory the command runs in
+    #[arg(hint = "path-tracked")]
+    pub paths: Vec<String>,
+    /// Restore the index, from HEAD unless a source is given
+    #[arg(short = 'S', long)]
+    pub staged: bool,
+    /// Restore the files; what is restored where --staged is not given
+    #[arg(short = 'W', long)]
+    pub worktree: bool,
+    /// The commit to restore from: the index for the files alone, else
+    /// HEAD, where none is given
+    #[arg(short = 's', long, value_name = "REV", hint = "rev")]
+    pub source: Option<String>,
+    /// For a path in conflict, restore the file of the current branch
+    #[arg(long, conflicts_with = "theirs")]
+    pub ours: bool,
+    /// For a path in conflict, restore the file of the branch merged in
+    #[arg(long)]
+    pub theirs: bool,
+    /// Emit a structured JSON result instead of printing nothing
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(alt_args::Args)]
+pub struct Checkout {
+    /// A branch to switch to, or paths to restore from the index; a
+    /// revision before the paths restores them from it, index and files
+    #[arg(hint = "path-tracked")]
+    pub names: Vec<String>,
+    /// Create the branch named before switching to it
+    #[arg(short = 'b')]
+    pub create: bool,
+    /// For a path in conflict, check out the file of the current branch
+    #[arg(long, conflicts_with = "theirs")]
+    pub ours: bool,
+    /// For a path in conflict, check out the file of the branch merged in
+    #[arg(long)]
+    pub theirs: bool,
+    /// Emit a structured JSON result instead of the human line
+    #[arg(long)]
+    pub json: bool,
+}

@@ -17,6 +17,7 @@ mod sequence;
 mod task;
 mod task_remote;
 mod vcs;
+mod worktree;
 
 pub use classify::{is_native, mutates_command};
 pub use command::Command;

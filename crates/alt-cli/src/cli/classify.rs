@@ -23,6 +23,8 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Lfs { .. }
             | Command::Meta { .. }
             | Command::Switch { .. }
+            | Command::Restore(_)
+            | Command::Checkout(_)
             | Command::Diff { .. }
             | Command::Merge { .. }
             | Command::Flow { .. }
