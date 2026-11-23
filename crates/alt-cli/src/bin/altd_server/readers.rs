@@ -11,7 +11,7 @@
 //! writer is in the middle of its objects, none of which a ref names yet.
 
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_cli::held::Held;
@@ -21,6 +21,22 @@ use super::WriteCoordinator;
 
 /// The handles of one repository that no request reads through now.
 pub(super) type Readers = Arc<Held<Vec<Repository>>>;
+
+/// Where the repository `name` of a URL lies under `root`. The name is
+/// one directory of the root, and that directory is the repository: one
+/// that is none is not looked for in the directories above it, the
+/// root's own among them.
+pub(super) fn named(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let odd = |c: char| c == '\\' || c.is_control();
+    if name.is_empty() || name.starts_with('.') || name.contains("..") || name.contains(odd) {
+        return Err("invalid repo name in URL".into());
+    }
+    let path = root.join(name);
+    if !path.join(".alt").is_dir() && !path.join(".git").exists() {
+        return Err(format!("repo '{name}' not found under server root"));
+    }
+    Ok(path)
+}
 
 pub(super) fn none() -> Readers {
     Arc::new(Held::new(Vec::new()))

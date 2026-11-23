@@ -18,7 +18,7 @@ pub(super) fn max_body_bytes() -> u64 {
     })
 }
 
-/// Read at most `max_body_bytes()` from `req.as_reader()` into `body`,
+/// Read at most `max` bytes from `req.as_reader()` into `body`,
 /// transparently gunzip'ing when the client set `Content-Encoding:
 /// gzip`. Returns `Err` when the client streamed past the cap — the
 /// handler maps that into a 413, never an OOM. We don't trust
@@ -36,9 +36,9 @@ pub(super) fn max_body_bytes() -> u64 {
 pub(super) fn read_body_capped(
     req: &mut tiny_http::Request,
     body: &mut Vec<u8>,
+    max: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
-    let max = max_body_bytes();
     let gzipped = req
         .headers()
         .iter()
@@ -55,12 +55,20 @@ pub(super) fn read_body_capped(
         limited.read_to_end(body)?;
     }
     if body.len() as u64 > max {
-        return Err(format!(
-            "request body exceeds ALT_SERVER_MAX_PUSH_BYTES={max} (cap is per-request)"
-        )
-        .into());
+        return Err(format!("request body exceeds {max} bytes (cap is per-request)").into());
     }
     Ok(())
+}
+
+/// The most bytes of a request that are held in memory: the commands of
+/// a fetch, and those of a push before its pack. A want or a ref update
+/// is some hundred bytes, so this is room for some hundred thousand of
+/// them, and what a request that is all commands can make the server
+/// hold.
+const COMMANDS: u64 = 64 << 20;
+
+pub(super) fn max_command_bytes() -> u64 {
+    max_body_bytes().min(COMMANDS)
 }
 
 /// How many times the bytes a push may bring its entries and objects may

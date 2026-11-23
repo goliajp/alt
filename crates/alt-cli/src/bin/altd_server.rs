@@ -26,6 +26,8 @@
 
 #[path = "altd_server/auth.rs"]
 mod auth;
+#[path = "altd_server/fetch.rs"]
+mod fetch;
 #[path = "altd_server/limits.rs"]
 mod limits;
 #[path = "altd_server/readers.rs"]
@@ -45,11 +47,12 @@ use alt_wire::caps;
 use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::CommandStatus;
 use auth::{AclRule, AuthOutcome, acl_allows, action_from_request, check_auth};
-use limits::{max_body_bytes, pack_limits, read_body_capped};
+use limits::{max_body_bytes, max_command_bytes, pack_limits, read_body_capped};
 use readers::RepoHandle;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
+const UPLOAD_PACK_RESULT: &str = "application/x-git-upload-pack-result";
 const STOPPED: &str = "writes are stopped until the server is started again: a sync failed";
 
 /// per-request log context filled in as dispatch progresses.
@@ -559,17 +562,11 @@ fn resolve_repo(
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
                 None => (trimmed, ""),
             };
-            if name.is_empty() || name.contains("..") || name.contains('\\') {
-                return Err("invalid repo name in URL".into());
-            }
             let mut cache_g = cache.take();
             if let Some(h) = cache_g.get(name) {
                 return Ok((h.clone(), rest.to_owned(), name.to_owned()));
             }
-            let repo_path = root.join(name);
-            if !repo_path.is_dir() {
-                return Err(format!("repo '{name}' not found under server root").into());
-            }
+            let repo_path = readers::named(root, name)?;
             // Probe once: surfaces "not a repo" errors right at cache
             // insertion rather than on every request.
             Repository::discover(&repo_path)?;
@@ -761,7 +758,7 @@ fn handle_upload_pack(
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
-    if let Err(e) = read_body_capped(&mut req, &mut body) {
+    if let Err(e) = read_body_capped(&mut req, &mut body, max_command_bytes()) {
         let r = Response::from_string(format!("{e}")).with_status_code(StatusCode(413));
         respond_logged(req, r, log)?;
         return Ok(());
@@ -778,8 +775,10 @@ fn handle_upload_pack(
         }
         "fetch" => {
             let (fetch_req, _fmt) = alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&body))?;
-            let pack_bytes = build_pack_for_fetch(repo, &fetch_req)?;
-            alt_wire::fetch::encode_fetch_response_packfile(&mut out, &pack_bytes)?;
+            let mut resp = Response::from_file(fetch::response(repo, &fetch_req)?);
+            resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
+            resp.add_header(header("Cache-Control", "no-cache"));
+            return Ok(respond_logged(req, resp, log)?);
         }
         other => {
             let r = Response::from_string(format!("unknown command={other}"))
@@ -790,10 +789,7 @@ fn handle_upload_pack(
     }
 
     let mut resp = Response::from_data(out);
-    resp.add_header(header(
-        "Content-Type",
-        "application/x-git-upload-pack-result",
-    ));
+    resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
     resp.add_header(header("Cache-Control", "no-cache"));
     respond_logged(req, resp, log)?;
     Ok(())
@@ -830,110 +826,6 @@ fn trim_newline(b: &[u8]) -> &[u8] {
         end -= 1;
     }
     &b[..end]
-}
-
-/// Resolve the fetch request's want/have closure against the served
-/// repo's objects, then stream them through a plain `PackWriter` into a
-/// tempdir — the bytes are the wire payload, we don't keep the pack as
-/// stored state. Mirrors the existing push-side pack build in
-/// `alt-cli::native`.
-fn build_pack_for_fetch(
-    repo: &Repository,
-    req: &alt_wire::fetch::FetchRequest,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let outgoing = repo.reachable_objects(&req.wants, &req.haves)?;
-    if outgoing.is_empty() {
-        return Ok(Vec::new());
-    }
-    // drop objects that the client's filter excludes. The
-    // first cut handles `blob:none` / `blob:limit=<n>` / `tree:0` —
-    // git's three common partial-clone filters.
-    let filter = parse_filter_spec(req.filter.as_deref());
-    let dir = alt_os::temp::tempdir()?;
-    // Two-pass: first decide which objects survive the filter (needs
-    // `read_object` for the `blob:limit` size check), then write them.
-    let mut surviving: Vec<(
-        ObjectId,
-        alt_git_codec::ObjectKind,
-        alt_git_codec::RawObject,
-    )> = Vec::with_capacity(outgoing.len());
-    for (oid, kind) in &outgoing {
-        let obj = repo
-            .read_object(oid)?
-            .ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?;
-        if filter.excludes(*kind, &obj.data) {
-            continue;
-        }
-        surviving.push((*oid, *kind, obj));
-    }
-    if surviving.is_empty() {
-        return Ok(Vec::new());
-    }
-    let count = u32::try_from(surviving.len())
-        .map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
-    let mut writer = alt_git_pack::PackWriter::create(dir.path(), repo.algo()?, count)?;
-    for (oid, kind, obj) in &surviving {
-        writer.add(*oid, *kind, &obj.data)?;
-    }
-    let written = writer.finish()?;
-    Ok(std::fs::read(&written.pack_path)?)
-}
-
-/// The partial-clone filter shapes [`build_pack_for_fetch`] currently
-/// honours. Everything else parses as `None` (no filter) for
-/// forward-compatibility — unknown filters degrade to a full pack
-/// rather than rejecting the fetch, since the wire spec lets the
-/// server be permissive.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct FilterSpec {
-    omit_blobs: bool,
-    blob_limit: Option<usize>,
-    omit_trees: bool,
-}
-
-impl FilterSpec {
-    fn excludes(&self, kind: alt_git_codec::ObjectKind, data: &[u8]) -> bool {
-        match kind {
-            alt_git_codec::ObjectKind::Blob => {
-                if self.omit_blobs || self.omit_trees {
-                    return true;
-                }
-                if let Some(limit) = self.blob_limit
-                    && data.len() >= limit
-                {
-                    return true;
-                }
-                false
-            }
-            alt_git_codec::ObjectKind::Tree => self.omit_trees,
-            _ => false,
-        }
-    }
-}
-
-fn parse_filter_spec(raw: Option<&str>) -> FilterSpec {
-    let mut out = FilterSpec::default();
-    let Some(spec) = raw else {
-        return out;
-    };
-    let spec = spec.trim();
-    match spec {
-        "blob:none" => out.omit_blobs = true,
-        "tree:0" => {
-            out.omit_trees = true;
-            out.omit_blobs = true; // tree:0 implies blob:none semantically
-        }
-        _ => {
-            if let Some(n) = spec.strip_prefix("blob:limit=")
-                && let Ok(limit) = n.parse::<usize>()
-            {
-                out.blob_limit = Some(limit);
-            }
-            // unknown / unsupported filters silently degrade to "send
-            // everything" — git's spec lets the server be permissive.
-        }
-    }
-    out
 }
 
 fn handle_info_refs(
@@ -1046,11 +938,16 @@ fn read_push(
     } else {
         Box::new(req.as_reader().take(max + 1))
     };
-    let head = alt_wire::push::parse_push_request_head(&mut reader, HashAlgo::Sha1)
+    // the commands are held in memory: they get a cap of their own
+    let mut commands = (&mut reader).take(max_command_bytes());
+    let head = alt_wire::push::parse_push_request_head(&mut commands, HashAlgo::Sha1)
         .map_err(|e| format!("{e}"))?;
     let mut tmp = std::fs::File::create(pack).map_err(|e| format!("tempfile: {e}"))?;
-    // not synced: the file is gone when the request is over
-    let n = std::io::copy(&mut reader, &mut tmp).map_err(|e| format!("stream pack: {e}"))?;
+    // the cap is on what the body inflates to as well: a gzip body is
+    // counted as it is written out. Not synced: the file is gone when
+    // the request is over
+    let n = std::io::copy(&mut (&mut reader).take(max + 1), &mut tmp)
+        .map_err(|e| format!("stream pack: {e}"))?;
     Ok((head, n))
 }
 
