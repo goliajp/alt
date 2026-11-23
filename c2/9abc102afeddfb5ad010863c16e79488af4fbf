@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: hold a damaged log to what reading it costs in a file a hole makes far longer, and a commit after ops another boot left to all it is given
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
