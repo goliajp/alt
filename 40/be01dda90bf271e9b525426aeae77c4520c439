@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: say in the log of the instance that no proxy is named, as a line of that log
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/caller.rs
+touched: self-hosted/README.md
