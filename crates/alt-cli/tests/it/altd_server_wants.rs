@@ -77,3 +77,47 @@ fn a_fetch_is_given_what_the_refs_reach_and_nothing_else_of_the_store() {
         "under.txt\n"
     );
 }
+
+/// The status and the body of a `fetch` command of `lines`.
+fn fetched(url: &str, dir: &Path, lines: &[u8]) -> (String, Vec<u8>) {
+    let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4).into_bytes();
+    let mut body = [pkt("command=fetch\n"), b"0001".to_vec(), lines.to_vec()].concat();
+    body.extend([pkt("done\n"), b"0000".to_vec()].concat());
+    fs::write(dir.join("request"), body).unwrap();
+    let out = std::process::Command::new("curl")
+        .current_dir(dir)
+        .args(["-sS", "-w", "%{http_code}", "-o", "answer"])
+        .args(["-H", "Git-Protocol: version=2", "--data-binary", "@request"])
+        .arg(format!("{url}git-upload-pack"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let status = String::from_utf8(out.stdout).unwrap();
+    (status, fs::read(dir.join("answer")).unwrap())
+}
+
+/// A want sent a hundred thousand times is the want it is once, and a
+/// request of more haves than any client sends is not looked at.
+#[test]
+fn the_lines_of_a_fetch_are_taken_once_each_and_within_a_number() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    repository(&origin);
+    let server = spawn_server_with_env(&[("ALT_SERVER_REPO", origin.to_str().unwrap())]);
+    let url = format!("http://{}/", server.addr);
+    let src = source(tmp.path(), "src");
+    let tip = commit(&src, "one.txt");
+    done(push(&src, &url, "one"));
+
+    let once = fetched(&url, tmp.path(), format!("0032want {tip}\n").as_bytes());
+    assert_eq!(once.0, "200");
+    let often = format!("0032want {tip}\n").repeat(100_000);
+    assert_eq!(fetched(&url, tmp.path(), often.as_bytes()), once);
+
+    let haves = format!("0032have {tip}\n").repeat(alt_wire::fetch::MAX_HAVES + 1);
+    let (status, why) = fetched(&url, tmp.path(), haves.as_bytes());
+    assert_eq!(
+        (status.as_str(), &why[..]),
+        ("400", &b"too many have lines"[..])
+    );
+}

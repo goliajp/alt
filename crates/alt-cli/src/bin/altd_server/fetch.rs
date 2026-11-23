@@ -164,6 +164,7 @@ fn pack(
     // only a limit on the size of blobs has an object read to tell
     // whether it goes
     let sized = filter.blob_limit.is_some() && !filter.omit_blobs && !filter.omit_trees;
+    let asked: KeyedIdSet<ObjectId> = req.wants.iter().copied().collect();
     let mut going = Vec::new();
     for (oid, kind) in &outgoing {
         let bytes = match sized && *kind == ObjectKind::Blob {
@@ -172,7 +173,7 @@ fn pack(
         };
         // what is asked for by its id goes whatever the filter: it is how
         // a partial clone gets what it left out
-        if req.wants.contains(oid) || !filter.excludes(*kind, bytes) {
+        if asked.contains(oid) || !filter.excludes(*kind, bytes) {
             going.push((*oid, *kind));
         }
     }

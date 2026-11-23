@@ -775,7 +775,13 @@ fn handle_upload_pack(
             alt_wire::ls_refs::encode_ls_refs_response(&mut out, &refs)?;
         }
         "fetch" => {
-            let (fetch_req, _fmt) = alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&body))?;
+            let fetch_req = match alt_wire::fetch::parse_fetch_request(&mut Cursor::new(&body)) {
+                Ok((fetch_req, _fmt)) => fetch_req,
+                Err(e) => {
+                    let r = Response::from_string(e.to_string()).with_status_code(StatusCode(400));
+                    return respond_logged(req, r, log).map_err(Into::into);
+                }
+            };
             let mut resp = Response::from_file(fetch::response(repo, &fetch_req)?);
             resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
             resp.add_header(header("Cache-Control", "no-cache"));
@@ -1195,8 +1201,9 @@ fn read_refs(
     req: &alt_wire::ls_refs::LsRefsRequest,
 ) -> Result<Vec<RefRecord>, Box<dyn std::error::Error>> {
     let mut out = Vec::new();
+    let prefixes = req.prefixes();
     for (name, oid, sym) in repo.list_refs()? {
-        if !req.ref_prefixes.is_empty() && !req.ref_prefixes.iter().any(|p| name.starts_with(p)) {
+        if !alt_wire::ls_refs::LsRefsRequest::listed(&prefixes, &name) {
             continue;
         }
         let symref_target = if req.symrefs { sym } else { None };

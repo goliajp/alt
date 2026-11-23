@@ -83,13 +83,8 @@ pub(crate) fn read(
     }
     let mut remaining = limits.walk_steps;
     if let Command::Refs(request, unborn) = command {
-        let wanted = |name: &str| {
-            request.ref_prefixes.is_empty()
-                || request
-                    .ref_prefixes
-                    .iter()
-                    .any(|prefix| name.starts_with(prefix))
-        };
+        let prefixes = request.prefixes();
+        let wanted = |name: &str| alt_wire::ls_refs::LsRefsRequest::listed(&prefixes, name);
         let head = view.refs.get(&view.default_branch);
         // HEAD sorts before every name under refs/
         for (name, oid) in head
@@ -154,7 +149,8 @@ pub(crate) fn read(
     }
     let every_tip = match view.ref_scope {
         RefScope::Filtered { other_tips } => !other_tips,
-        _ => tips.iter().all(|tip| wants.contains(tip)),
+        // every want is a tip, and the request has each of its wants once
+        _ => wants.len() == tips.len(),
     };
     let everything = haves.is_empty() && !view.unreachable && set.verbatim() && every_tip;
     if everything {
