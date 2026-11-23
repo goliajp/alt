@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: read the header of a frame that begins in the last bytes of a block past the block header it runs across
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_tables.rs
