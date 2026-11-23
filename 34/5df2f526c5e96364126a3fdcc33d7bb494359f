@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: serve reads through repositories kept open, so that a fetch does not wait for a push
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
+touched: crates/alt-cli/tests/it/altd_server_reads.rs
+touched: crates/alt-cli/tests/it/main.rs
