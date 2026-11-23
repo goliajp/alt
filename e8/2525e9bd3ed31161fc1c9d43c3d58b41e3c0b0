@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: count no sign-in attempt that is refused against what every network shares, and a /64 as one network
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser.rs
+touched: crates/alt-server-store/src/cloud_login.rs
+touched: crates/alt-server-store/src/device_login.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
