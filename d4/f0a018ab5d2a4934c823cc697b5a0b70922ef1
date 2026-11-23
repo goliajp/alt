@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: mark a version 2 log made before the format is settled as a draft and open no other
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
+touched: crates/alt-oplog/tests/it/v2_features.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_image.rs
+touched: fuzz/fuzz_targets/oplog_frames.rs
