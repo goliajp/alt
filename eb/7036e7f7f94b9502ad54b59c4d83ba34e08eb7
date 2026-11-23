@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: test
+summary: hold alt to what git 2.56 says and ends with where an older git differs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mv.rs
+touched: crates/alt-cli/tests/it/of_late.rs
+touched: crates/alt-cli/tests/it/reset_soft.rs
+touched: crates/alt-cli/tests/it/restore.rs
+touched: crates/alt-cli/tests/it/stash.rs
+touched: crates/alt-cli/tests/it/stash_matrix.rs
