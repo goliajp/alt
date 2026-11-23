@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: measure a push among a number of refs given by the environment
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_push_cost.rs
+touched: crates/alt-cli/tests/it/main.rs
