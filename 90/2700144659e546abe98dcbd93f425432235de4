@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: let a scan take the mode of a tracked file from the index where the file's own is not trusted
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/delta.rs
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/src/watch/scans.rs
+touched: crates/alt-worktree/tests/it/delta.rs
+touched: crates/alt-worktree/tests/it/delta_options.rs
+touched: crates/alt-worktree/tests/it/untracked.rs
+touched: crates/alt-worktree/tests/it/watch.rs
+touched: crates/alt-worktree/tests/it/watch_inputs.rs
