@@ -33,6 +33,12 @@
 //! the cut, in blocks whose checkpoints would be begun at for being of
 //! this boot. Whoever opens a file of that length reads it to `ends`, and
 //! a handle that holds frames past it is told they were cut.
+//!
+//! The length of a file tells nothing once the log in it is cut: it may
+//! grow back to that length. What is said of a file of some length is
+//! said of the log of a generation, and holds for no other. The next
+//! writer that reads the log to its end under its lock forgets a cut
+//! that is noted as begun, whether it was made or never came to the log.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
@@ -97,6 +103,20 @@ impl Tail {
     /// holds frames a cut that was begun takes away.
     pub fn cuts(&self, generation: u32, end: u64) -> bool {
         self.cutting && generation < self.generation && self.ends < end
+    }
+
+    /// Whether a file `len` bytes long is, to whoever reads it without
+    /// cutting it, a log up to `ends` and no further, when the log in it
+    /// is of `generation`. A reader says so of the log of the generation
+    /// it read, a cut that was begun of the log as it was before the cut.
+    /// A file that a cut made shorter and that grew back to the length is
+    /// of a later generation than either.
+    pub fn hides(&self, len: u64, generation: u32) -> bool {
+        let of_that_log = match self.cutting {
+            true => generation < self.generation,
+            false => generation == self.generation,
+        };
+        self.hidden != 0 && self.hidden == len && of_that_log
     }
 
     /// Forgets a cut that was begun: for a writer that holds the lock of

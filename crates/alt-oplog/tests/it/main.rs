@@ -17,6 +17,7 @@ mod v2_bounds;
 mod v2_claims;
 mod v2_cut_chain;
 mod v2_cut_ends;
+mod v2_cut_notes;
 mod v2_cuts;
 mod v2_driver;
 #[cfg(target_os = "linux")]

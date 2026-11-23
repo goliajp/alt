@@ -156,6 +156,8 @@ struct Found {
     tail: Option<Tail>,
     /// the checkpoint it began at is taken on trust
     fresh: bool,
+    /// the bytes of the file it holds, from the byte it names on
+    window: (u64, Vec<u8>),
 }
 
 impl Found {
@@ -165,16 +167,22 @@ impl Found {
         layout: &Layout,
         (boot, tail): (Option<[u8; 16]>, Option<Tail>),
         size: u64,
-        window: &(u64, Vec<u8>),
         all: bool,
     ) -> Result<Found, OpLogError> {
-        let mut read = |at: u64, len: usize| held(source, window, at, len);
+        // one read of the last block serves the search for its checkpoint
+        // and the frames after it
+        let from = match all {
+            true => size,
+            false => (size - 1) / layout.block * layout.block,
+        };
+        let window = (from, source.at(from, (size - from) as usize)?);
+        let mut read = |at: u64, len: usize| held(source, &window, at, len);
         let mut located = Located::empty();
         if !all {
             located = locate_past(layout, size, &mut read, &mut |len| source.stretches(0, len))?;
         }
-        let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, window)?;
-        let tail = tail.filter(|tail| told_of(tail, &state, size, window));
+        let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &window)?;
+        let tail = tail.filter(|tail| told_of(tail, &state, size, &window));
         let by_boot = located.state.checkpoint != 0 && boot == Some(located.boot);
         let by_tail = tail.is_some_and(|tail| located.state.end <= tail.judged);
         let fresh = by_boot || by_tail;
@@ -185,7 +193,7 @@ impl Found {
             located = locate_past(layout, within, &mut read, &mut |len| {
                 source.stretches(0, len)
             })?;
-            (state, ops, stop) = pass(source, layout, &located, size, window)?;
+            (state, ops, stop) = pass(source, layout, &located, size, &window)?;
         }
         Ok(Found {
             located,
@@ -194,6 +202,7 @@ impl Found {
             stop,
             tail,
             fresh,
+            window,
         })
     }
 
@@ -232,28 +241,24 @@ pub(crate) fn load(
     all: bool,
 ) -> Result<Loaded, OpLogError> {
     let meta = source.file.metadata()?;
-    let mut size = crate::settle::read_end(&meta);
+    let size = crate::settle::read_end(&meta);
     let clamped = size < meta.len();
-    let tail = Tail::read(dir, boot);
-    // what a reader of this boot found to be no part of the log, or a
-    // cut that was begun takes away
-    let ends = |tail: &Tail| tail.hidden != 0 && tail.hidden == meta.len() && tail.ends < size;
-    let hidden = tail.filter(ends);
-    let hidden = hidden.map(|tail| {
-        size = tail.ends;
-        meta.len()
-    });
     let size = size.max(FILE_HEADER_LEN as u64);
-    // one read of the last block serves the search for its checkpoint and
-    // the frames after it
-    let from = match all {
-        true => size,
-        false => (size - 1) / layout.block * layout.block,
-    };
-    let window = (from, source.at(from, (size - from) as usize)?);
-    let found = Found::up_to(source, layout, (boot, tail), size, &window, all)?;
-    let stop = found.stop;
-    let mut loaded = found.loaded(hidden, meta.len(), clamped);
+    let tail = Tail::read(dir, boot);
+    let mut found = Found::up_to(source, layout, (boot, tail), size, all)?;
+    // To whoever opens a file of the length a reader of this boot noted,
+    // or a cut that was begun, the log ends where that says: while the
+    // log in the file is of the generation it was said of. A file that
+    // was cut since and grew back to the length holds another log.
+    let generation = found.state.generation;
+    let ends = |tail: &Tail| tail.hides(meta.len(), generation) && tail.ends < size;
+    let hidden = tail.filter(ends).map(|tail| tail.ends);
+    let size = hidden.map_or(size, |ends| ends.max(FILE_HEADER_LEN as u64));
+    if hidden.is_some() {
+        found = Found::up_to(source, layout, (boot, tail), size, all)?;
+    }
+    let (stop, window) = (found.stop, std::mem::take(&mut found.window));
+    let mut loaded = found.loaded(hidden.map(|_| meta.len()), meta.len(), clamped);
     let mut read = |at: u64, len: usize| held(source, &window, at, len);
     if loaded.state.last != 0 {
         // the window may begin where that frame ends, when none after it reads

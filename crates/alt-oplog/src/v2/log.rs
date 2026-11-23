@@ -50,8 +50,8 @@ pub(crate) struct Log {
     /// within what is synced, or was appended or read through in the
     /// running boot.
     pub(super) judged: Cell<u64>,
-    /// the length of the file when what follows the frames held is known
-    /// to be no part of the log
+    /// the length of the file when this handle last read it and `tail`
+    /// said that what follows the frames held is no part of the log
     pub(super) hidden: Option<u64>,
     /// how long the file was when this handle last read it as an open does
     pub(super) seen: u64,
