@@ -4,12 +4,20 @@ use alt_pg::{Client, Error, Row, ToSql};
 
 pub(crate) const BATCH_ROWS: usize = 1024;
 
+/// how far the recorded clock of a Cloud instance may be behind before a read moves it on
+const CLOCK_STEP: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub(crate) struct Connection {
     client: Client,
+    /// when this connection last moved the recorded clock of a Cloud instance on
+    clock_moved: Option<std::time::Instant>,
 }
 impl Connection {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            clock_moved: None,
+        }
     }
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
@@ -34,13 +42,38 @@ impl Connection {
         Ok(Transaction {
             inner: self.client.transaction()?,
             cached: true,
+            reading: false,
         })
+    }
+    /// A transaction that only reads, under the one view it takes as it begins.
+    ///
+    /// A Cloud instance records the highest clock it has seen, so that a clock
+    /// set back gives no lease more life. A read writes no row, or it would wait
+    /// for every other and fail where another came first; the clock is moved on
+    /// here instead, by a statement of its own before the read begins and no
+    /// more often than once in [`CLOCK_STEP`] on a connection. Where another
+    /// transaction has the row, that one records the clock and this statement
+    /// leaves it alone. The read then holds the clock to what is recorded like
+    /// every transaction.
+    pub fn reading(&mut self, cloud: bool) -> Result<Transaction<'_>, Error> {
+        if cloud && self.clock_moved.is_none_or(|at| at.elapsed() >= CLOCK_STEP) {
+            self.client.execute("WITH free AS (SELECT singleton FROM alt_cloud_binding WHERE singleton FOR UPDATE SKIP LOCKED) UPDATE alt_cloud_binding b SET clock_high_water=t.now FROM free,(SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS now) t WHERE b.singleton AND b.clock_high_water<t.now", &[])?;
+            self.clock_moved = Some(std::time::Instant::now());
+        }
+        let mut tx = self.transaction()?;
+        // as a statement like the others: the plans the connection keeps
+        // for them are kept
+        tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])?;
+        tx.reading = true;
+        Ok(tx)
     }
 }
 
 pub(crate) struct Transaction<'a> {
     inner: alt_pg::Transaction<'a>,
     cached: bool,
+    /// under one view and writing nothing; see [`Connection::reading`]
+    reading: bool,
 }
 impl<'a> Transaction<'a> {
     /// Operator initialization/migration/backup may borrow an external client.
@@ -49,7 +82,11 @@ impl<'a> Transaction<'a> {
         Self {
             inner: inner.uncached(),
             cached: false,
+            reading: false,
         }
+    }
+    pub fn is_reading(&self) -> bool {
+        self.reading
     }
     pub fn raw_mut(&mut self) -> &mut alt_pg::Transaction<'a> {
         // Raw schema operations may change statement result types or settings.

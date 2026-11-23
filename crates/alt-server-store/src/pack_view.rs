@@ -4,7 +4,7 @@
 use crate::Jsonb;
 use crate::{
     Credential, Error, Refs, Result, Store,
-    store::{instance, integer, snapshot, unsigned},
+    store::{instance, integer, unsigned},
 };
 use alt_pack_segment::SegmentSet;
 use alt_remote_protocol::Scope;
@@ -244,25 +244,14 @@ impl Store {
     }
 
     fn pack_view_locked(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         // nothing durable is written here; row locks alone need no synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
-        crate::reading::begin(&mut tx, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         // the references are read for a caller who may read them, and for no other
-        let (auth, current) = match crate::reading::unread(&mut tx, &self.spec, repository)? {
-            Some(mut current) => {
-                let auth = crate::store::authorize(&mut tx, &self.spec, credential, &current)?;
-                current.refs = crate::reading::refs(&mut tx, repository)?;
-                (auth, current)
-            }
-            None => {
-                let authority =
-                    crate::store::repository_authority(&mut tx, &self.spec, repository)?;
-                let auth = authority.authorize(&mut tx, &self.spec, credential)?;
-                (auth, snapshot(&mut tx, &self.spec, repository)?)
-            }
-        };
+        let mut current = crate::reading::unread(&mut tx, &self.spec, repository)?;
+        let auth = crate::store::authorize(&mut tx, &self.spec, credential, &current)?;
+        current.refs = crate::reading::refs(&mut tx, repository)?;
         let row = tx.query_one(
             "SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1",
             &[&repository],

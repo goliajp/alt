@@ -617,16 +617,16 @@ impl Store {
     }
     /// Original signed fact under current repository read permission. A
     /// migrated or disabled pairing remains history, never live authorization.
-    pub fn change_event(
+    pub(crate) fn change_event_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
     ) -> Result<link::HistoricalEvent> {
         crate::bytes::check_digest(digest)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         if current.scope != *scope {
             return Err(Error::Unauthorized);
         }

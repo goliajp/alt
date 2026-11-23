@@ -1,5 +1,5 @@
 use crate::Jsonb;
-use crate::requests::{active, check_key, request_row, upload_request_row, upload_selection};
+use crate::requests::{active, check_key, request_row, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
 use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store, reading};
 use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
@@ -24,7 +24,7 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         let (spec, signing) = (&self.spec, &self.signing_key);
         let current = reading::open(&mut tx, spec, signing, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
@@ -103,16 +103,16 @@ impl Store {
     }
     /// Early admission for Git receive-pack before reading a potentially large
     /// body. Exact per-ref/path/force checks still occur at publication.
-    pub fn check_git_receive_access(
+    pub(crate) fn check_git_receive_access_once(
         &mut self,
         credential: &Credential,
         repository: &str,
     ) -> Result<()> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if !current.writes_enabled
             || !auth
@@ -151,7 +151,7 @@ impl Store {
         credential: &Credential,
         repository: &str,
     ) -> Result<RepositoryInfo> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         let current = reading::open(&mut tx, &self.spec, &self.signing_key, repository)?;
@@ -223,19 +223,20 @@ impl Store {
         Ok(self.selected_upload_state(credential, key, digest)?.0)
     }
     /// the selected entries, and whether the request already has their content
-    pub(crate) fn selected_upload_state(
+    pub(crate) fn selected_upload_state_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
         digest: &str,
     ) -> Result<(Vec<ContentEntry>, bool)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current =
+            crate::reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = crate::reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         active(&row, now(&mut tx)?)?;
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(
@@ -277,16 +278,16 @@ impl Store {
     /// Download a permanently published raw payload, never a digest guessed
     /// from another request's temporary upload. Open the descriptor under the
     /// same repository lock used by GC; later unlink cannot invalidate it.
-    pub fn open_published_content(
+    pub(crate) fn open_published_content_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
@@ -320,7 +321,7 @@ impl Store {
     /// Select published task bundles by any selected immutable record. Original manifest,
     /// publication and receipt are retained; a receiving client never invents
     /// a local request completion for the originating workspace.
-    pub fn bundles_for_record(
+    pub(crate) fn bundles_for_record_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -335,9 +336,9 @@ impl Store {
         if let Some(digest) = after_digest {
             alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         }
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);

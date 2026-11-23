@@ -2,7 +2,7 @@
 //! credential digests, operator destinations or secret-file configuration.
 use crate::Jsonb;
 use crate::change_events::{binding, integration};
-use crate::store::{authorize, instance, integer, snapshot};
+use crate::store::{authorize, instance, integer};
 use crate::{Credential, Error, Result, Store};
 use alt_remote_protocol::{RequestKey, Scope};
 use golia_change_link as link;
@@ -11,14 +11,14 @@ pub use alt_remote_protocol::change_links::ChangeChannelStatus;
 pub use alt_remote_protocol::change_links::ChangeEventPage;
 pub use alt_remote_protocol::change_links::ChangeEventSummary;
 impl Store {
-    pub fn change_channels(
+    pub(crate) fn change_channels_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
     ) -> Result<Vec<ChangeChannelStatus>> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         if current.scope != *scope {
             return Err(Error::Unauthorized);
         }
@@ -38,7 +38,7 @@ impl Store {
             })
             .collect()
     }
-    pub fn change_events(
+    pub(crate) fn change_events_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -47,9 +47,9 @@ impl Store {
         if let Some(after) = after {
             crate::bytes::check_digest(after)?;
         }
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         if current.scope != *scope {
             return Err(Error::Unauthorized);
         }
@@ -90,15 +90,16 @@ impl Store {
         };
         Ok(ChangeEventPage { entries, next })
     }
-    pub fn change_request_event(
+    pub(crate) fn change_request_event_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
     ) -> Result<Option<link::HistoricalEvent>> {
         key.validate()?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current =
+            crate::reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         if current.scope != key.scope {
             return Err(Error::Unauthorized);
         }

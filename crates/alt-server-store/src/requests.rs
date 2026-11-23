@@ -129,7 +129,7 @@ impl Store {
         key: &RequestKey,
     ) -> Result<RequestObservation> {
         key.validate()?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         let (spec, signing) = (&self.spec, &self.signing_key);
         let current = reading::open(&mut tx, spec, signing, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;

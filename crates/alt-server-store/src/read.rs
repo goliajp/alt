@@ -1,6 +1,6 @@
 mod references;
 
-use crate::store::{authorize, instance, now, repository_authority, unsigned};
+use crate::store::{authorize, instance, now, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_pack_segment::SegmentSet;
@@ -158,7 +158,7 @@ impl Store {
         if ttl_ms == 0 || ttl_ms > 3_600_000 {
             return Err(Error::Limit("read snapshot lifetime or object bound"));
         }
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         let (spec, signing) = (&self.spec, &self.signing_key);
         let current = crate::reading::open(&mut tx, spec, signing, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
@@ -235,13 +235,15 @@ impl Store {
         self.check_read_snapshot(&current, read)?;
         Ok(result)
     }
-    /// The snapshot is still this actor's to read: same repository epoch, current
-    /// grants, and neither the snapshot nor the credential has run out.
-    fn check_read_snapshot(&mut self, credential: &Credential, read: &ReadSnapshot) -> Result<()> {
-        let mut tx = self.client.transaction()?;
+    pub(crate) fn check_read_snapshot_once(
+        &mut self,
+        credential: &Credential,
+        read: &ReadSnapshot,
+    ) -> Result<()> {
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let repository = &read.scope.repository_instance_id;
-        let current = repository_authority(&mut tx, &self.spec, repository)?;
+        let current = crate::reading::authority(&mut tx, &self.spec, repository)?;
         let auth = current.authorize(&mut tx, &self.spec, credential)?;
         if current.scope != read.scope || auth.actor_id != read.actor {
             return Err(Error::Unauthorized);

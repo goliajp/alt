@@ -12,8 +12,11 @@
 //! was committed then, whatever is committed meanwhile, and nobody waits. What a
 //! read is given is what it would have been given had it come a moment earlier.
 //!
-//! A Cloud instance records the clock in a row with every transaction, which such a
-//! view cannot be combined with: there a read locks as before.
+//! A Cloud instance holds every transaction to the clock and the authority it has
+//! recorded, in one row that the others lock and write. A read looks at that row
+//! as its view has it and writes nothing to it.
+
+mod again;
 
 use crate::database::Transaction;
 use crate::store::unsigned;
@@ -39,25 +42,23 @@ pub(crate) fn twice<T>(mut read: impl FnMut() -> Result<T>) -> Result<T> {
     }
 }
 
-/// Begins a read, before the first statement of its transaction.
-pub(crate) fn begin(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
-    if spec.deployment_mode == DeploymentMode::SelfHosted {
-        // as a statement like the others: the plans the connection keeps
-        // for them are kept
-        tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])?;
-    }
-    Ok(())
+/// Begins the transaction of a read.
+pub(crate) fn transaction<'a>(
+    client: &'a mut crate::database::Connection,
+    spec: &InstanceSpec,
+) -> Result<Transaction<'a>> {
+    Ok(client.reading(spec.deployment_mode == DeploymentMode::Cloud)?)
 }
 
-/// Begins a read of `repository` in a transaction that has run no statement yet:
-/// the instance is checked, and the repository is given as the read sees it.
+/// Begins a read of `repository` in the transaction of a read that has run no
+/// statement yet: the instance is checked, and the repository is given as the
+/// read sees it.
 pub(crate) fn open(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     key: &alt_crypto::ed25519::SigningKey,
     repository: &str,
 ) -> Result<RepositorySnapshot> {
-    begin(tx, spec)?;
     crate::store::instance(tx, spec, key)?;
     snapshot(tx, spec, repository)
 }
@@ -68,9 +69,7 @@ pub(crate) fn snapshot(
     spec: &InstanceSpec,
     repository: &str,
 ) -> Result<RepositorySnapshot> {
-    let Some(mut current) = unread(tx, spec, repository)? else {
-        return crate::store::snapshot(tx, spec, repository);
-    };
+    let mut current = unread(tx, spec, repository)?;
     current.refs = refs(tx, repository)?;
     Ok(current)
 }
@@ -84,20 +83,18 @@ pub(crate) fn refs(
     crate::refs::map(refs.get::<_, Option<&str>>(0))
 }
 
-/// The repository without its references; nothing where reads lock as before.
+/// The repository without its references.
 pub(crate) fn unread(
     tx: &mut Transaction<'_>,
     spec: &InstanceSpec,
     repository: &str,
-) -> Result<Option<RepositorySnapshot>> {
-    if spec.deployment_mode != DeploymentMode::SelfHosted {
-        return Ok(None);
-    }
+) -> Result<RepositorySnapshot> {
     let row=tx.query_opt("SELECT recovery_epoch,object_format,policy_version,revocation_generation,policies,writes_enabled AND portable_freeze IS NULL AND portable_import IS NULL FROM alt_repositories WHERE id=$1",&[&repository])?.ok_or(Error::Unauthorized)?;
     if row.get::<_, String>(1) != "sha1" {
         return Err(Error::Precondition("unsupported repository object format"));
     }
-    Ok(Some(RepositorySnapshot {
+    let writes_enabled = row.get::<_, bool>(5) && crate::cloud::writes_enabled(tx, spec)?;
+    Ok(RepositorySnapshot {
         scope: Scope {
             installation_id: spec.installation_id.clone(),
             repository_instance_id: repository.into(),
@@ -110,36 +107,28 @@ pub(crate) fn unread(
         refs: BTreeMap::new(),
         policies: row.get::<_, crate::Jsonb>(4).read()?,
         approved_publications: BTreeSet::new(),
-        writes_enabled: row.get(5),
-    }))
+        writes_enabled,
+    })
 }
 
-/// The reads that are begun again where they were overtaken.
-impl crate::Store {
-    pub fn published_records(
-        &mut self,
-        credential: &crate::Credential,
-        scope: &Scope,
-        kind: alt_remote_protocol::RecordKind,
-        after: Option<&str>,
-        count: usize,
-    ) -> Result<Vec<alt_remote_protocol::RecordRoot>> {
-        twice(|| self.published_records_once(credential, scope, kind, after, count))
-    }
+/// The authority of the repository as the read that was begun sees it.
+pub(crate) fn authority(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    repository: &str,
+) -> Result<crate::store::RepositoryAuthority> {
+    let row = tx.query_opt(
+        "SELECT recovery_epoch,object_format,revocation_generation FROM alt_repositories WHERE id=$1",
+        &[&repository],
+    )?;
+    crate::store::RepositoryAuthority::of(spec, repository, row.ok_or(Error::Unauthorized)?)
+}
 
-    pub fn repository_info(
-        &mut self,
-        credential: &crate::Credential,
-        repository: &str,
-    ) -> Result<alt_remote_protocol::RepositoryInfo> {
-        twice(|| self.repository_info_once(credential, repository))
-    }
-
-    pub fn query(
-        &mut self,
-        credential: &crate::Credential,
-        key: &alt_remote_protocol::RequestKey,
-    ) -> Result<alt_remote_protocol::RequestObservation> {
-        twice(|| self.query_once(credential, key))
-    }
+/// The row of a request that is being uploaded, as the read sees it and without
+/// a lock on it: a lock would fail where the upload went on since the read began.
+pub(crate) fn upload_request(
+    tx: &mut Transaction<'_>,
+    key: &alt_remote_protocol::RequestKey,
+) -> Result<Option<alt_pg::Row>> {
+    Ok(tx.query_opt("SELECT state,expires_at,publication,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4", &[&key.scope.repository_instance_id,&crate::store::integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
 }

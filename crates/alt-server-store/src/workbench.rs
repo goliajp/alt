@@ -1,6 +1,6 @@
 //! Authorized workbench projections over the publication authority.
 use crate::Jsonb;
-use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
+use crate::store::{authorize, credential_row, instance, integer, now, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_remote_protocol::{Publication, RequestKey, Scope};
 
@@ -142,7 +142,7 @@ impl Store {
         tx.commit()?;
         Ok(Page { items, next })
     }
-    pub fn published_record(
+    pub(crate) fn published_record_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -158,9 +158,9 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if current.scope != *scope {
             return Err(Error::Unauthorized);

@@ -113,20 +113,34 @@ pub(crate) fn check_instance(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> R
     if time < unsigned(row.get("clock_high_water"))? {
         return Err(Error::Precondition("Cloud authority clock moved backwards"));
     }
+    if tx.is_reading() {
+        return Ok(());
+    }
     tx.execute(
         "UPDATE alt_cloud_binding SET clock_high_water=$1 WHERE singleton",
         &[&integer(time)?],
     )?;
     Ok(())
 }
+/// The binding, locked against every other transaction that is not a read. A read
+/// sees it as it was when the read began and waits for nobody.
 fn binding(tx: &mut Transaction<'_>) -> Result<alt_pg::Row> {
-    tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton FOR UPDATE", &[])?
-        .ok_or(Error::Precondition("Cloud platform binding required"))
+    let row = if tx.is_reading() {
+        tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton", &[])?
+    } else {
+        tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton FOR UPDATE", &[])?
+    };
+    row.ok_or(Error::Precondition("Cloud platform binding required"))
 }
 fn check_revision(tx: &mut Transaction<'_>, revision: u64) -> Result<()> {
     let row = binding(tx)?;
     if revision < unsigned(row.get("authority_revision"))? {
         return Err(Error::Unauthorized);
+    }
+    // the transaction that stored these claims recorded their revision; a read
+    // records nothing
+    if tx.is_reading() {
+        return Ok(());
     }
     tx.execute(
         "UPDATE alt_cloud_binding SET authority_revision=$1 WHERE singleton",
