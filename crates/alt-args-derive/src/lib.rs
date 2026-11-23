@@ -22,7 +22,9 @@
 //!   `requires = "id"`, `required_unless_present = "id"`,
 //!   `required_unless_present_any = ["id", ...]`, `group = "name"`,
 //!   `trailing_var_arg = true`, `last = true`, `allow_hyphen_values = true`,
-//!   `hint = path`, `hint = dir`, `hint = none`, `hint = "name"`
+//!   `hint = path`, `hint = dir`, `hint = none`, `hint = "name"`;
+//!   `dashed = true` alone on a `bool` that is no argument: whether `--`
+//!   was written
 //!
 //! A field without `long` and `short` is positional. `bool` is a flag,
 //! `Option<T>` an optional value, `Vec<T>` a repeatable one, and any other

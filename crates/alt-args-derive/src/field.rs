@@ -8,6 +8,8 @@ use crate::{Error, attr};
 pub(crate) enum Member {
     Subcommand,
     Flatten,
+    /// whether `--` was written; no argument of its own
+    Dashed,
     Arg(Box<ArgField>),
 }
 
@@ -115,7 +117,15 @@ fn hint(entry: &attr::Entry) -> Result<Hint, Error> {
 impl Member {
     pub(crate) fn parse(field: &Field) -> Result<Self, Error> {
         match attr::entries(&field.attributes, "command")?.first() {
-            None => Ok(Member::Arg(Box::new(ArgField::parse(field)?))),
+            None => match &attr::entries(&field.attributes, "arg")?[..] {
+                [entry] if entry.name == "dashed" && entry.enabled()? => {
+                    if text(&field.ty) != "bool" {
+                        return Err(Error::new(field.span, "`dashed` is for a `bool`"));
+                    }
+                    Ok(Member::Dashed)
+                }
+                _ => Ok(Member::Arg(Box::new(ArgField::parse(field)?))),
+            },
             Some(entry) if entry.name == "subcommand" => Ok(Member::Subcommand),
             Some(entry) if entry.name == "flatten" => Ok(Member::Flatten),
             Some(entry) => Err(Error::new(

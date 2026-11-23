@@ -43,6 +43,7 @@ fn level(scope: &Scope, words: &[String], at: &mut usize) -> Result<Matches, Err
             false => Error::missing_subcommand(scope),
         });
     }
+    let (dashed, dashes_alone) = (level.dashed, level.dashes_alone());
     validate::finish(scope, &mut level.entries)?;
     let own = scope.slots[..scope.own].iter();
     Ok(Matches {
@@ -53,6 +54,8 @@ fn level(scope: &Scope, words: &[String], at: &mut usize) -> Result<Matches, Err
             .collect(),
         entries: level.entries,
         subcommand,
+        dashed,
+        dashes_alone,
     })
 }
 

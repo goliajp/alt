@@ -143,6 +143,7 @@ fn members(fields: &[Field], named: &mut Named) -> Result<Members, Error> {
                 members.items.push(one(2) + &two(named.part(&ty)));
                 format!("<{ty} as ::alt_args::Args>::from_matches(m)")
             }
+            Member::Dashed => "m.dashed()".to_owned(),
             Member::Arg(arg) => {
                 members.items.push(arg_item(&arg, named)?);
                 arg_value(&arg)

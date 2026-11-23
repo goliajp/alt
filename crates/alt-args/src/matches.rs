@@ -18,6 +18,11 @@ pub struct Matches {
     pub(crate) globals: Vec<&'static str>,
     pub(crate) entries: Vec<Matched>,
     pub(crate) subcommand: Option<Box<Matches>>,
+    /// `--` was written among the words of this level
+    pub(crate) dashed: bool,
+    /// `--` was written where a positional is kept for the words after
+    /// it, and none followed
+    pub(crate) dashes_alone: bool,
 }
 
 const CHECKED: &str = "values are checked while parsing";
@@ -38,6 +43,18 @@ impl Matches {
     /// The subcommand level of a command that requires one.
     pub fn sub(&self) -> &Matches {
         self.subcommand().expect("a subcommand is required")
+    }
+
+    /// Whether `--` was written among the words of this level.
+    pub fn dashed(&self) -> bool {
+        self.dashed
+    }
+
+    /// Whether `--` was written with no word after it, where a positional
+    /// is kept for those words: the only place the two dashes alone change
+    /// what a command line says.
+    pub fn dashes_alone(&self) -> bool {
+        self.dashes_alone
     }
 
     pub(crate) fn entry(&self, id: &str) -> Option<&Matched> {

@@ -22,6 +22,8 @@ enum Command {
         rev: Option<String>,
         #[arg(last = true)]
         paths: Vec<String>,
+        #[arg(dashed = true)]
+        dashed: bool,
     },
 }
 
@@ -67,7 +69,7 @@ fn a_word_too_many_before_the_dashes_is_not_taken_for_it() {
     let Ok(cli) = Cli::try_parse_from(line) else {
         panic!("refused")
     };
-    let Command::Show { rev, paths } = cli.command else {
+    let Command::Show { rev, paths, .. } = cli.command else {
         panic!()
     };
     assert_eq!((rev.as_deref(), paths.join(" ")), (Some("a"), "b c".into()));
@@ -97,4 +99,38 @@ fn it_is_described_and_shown_after_the_dashes() {
     };
     let usage = "Usage: t reset [OPTIONS] [REVS]... [-- <PATHS>...]\n";
     assert!(help.to_string().contains(usage), "{help}");
+}
+
+#[test]
+fn whether_the_dashes_were_written_is_told() {
+    let show = |line: &str| {
+        let words = line.split(' ').map(String::from);
+        let matches = alt_args::parse(Cli::command(), words).unwrap_or_else(|e| panic!("{e}"));
+        let alone = matches.sub().dashes_alone();
+        let Command::Show { paths, dashed, .. } = Cli::from_matches(&matches).command else {
+            panic!("{line}")
+        };
+        (dashed, alone, paths.join(" "))
+    };
+    assert_eq!(show("t show a"), (false, false, "".into()));
+    assert_eq!(show("t show a --"), (true, true, "".into()));
+    assert_eq!(show("t show --"), (true, true, "".into()));
+    assert_eq!(show("t show a -- b"), (true, false, "b".into()));
+    assert_eq!(show("t show a -- --"), (true, false, "--".into()));
+    // the field is no argument: it is not described, and no word sets it
+    let command = Cli::command().subcommand("show").unwrap();
+    let ids: Vec<_> = command
+        .items()
+        .flat_map(|item| match item {
+            Item::Group(_, items) => items.collect::<Vec<_>>(),
+            item => vec![item],
+        })
+        .filter_map(|item| match item {
+            Item::Arg(arg) => Some(arg.id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, ["rev", "paths"]);
+    let line = "t show --dashed".split(' ').map(String::from);
+    assert!(Cli::try_parse_from(line).is_err());
 }

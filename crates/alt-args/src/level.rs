@@ -161,6 +161,13 @@ impl<'a> Level<'a> {
             .map(|(at, _)| at)
     }
 
+    /// Whether `--` was read and the positional kept for the words after
+    /// it has none.
+    pub(crate) fn dashes_alone(&self) -> bool {
+        let kept = self.last_positional().map(|at| self.scope.slots[at].arg.id);
+        self.dashed && kept.is_some_and(|id| self.entries.iter().all(|entry| entry.id != id))
+    }
+
     /// The positional the next plain word goes to.
     pub(crate) fn next_positional(&self) -> Option<usize> {
         if let (true, Some(last)) = (self.dashed, self.last_positional()) {
