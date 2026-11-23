@@ -18,13 +18,14 @@ pub(super) fn read_push(
         .headers()
         .iter()
         .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
+    let over = max.saturating_add(1);
     let mut reader: Box<dyn Read> = if gzipped {
         Box::new(alt_inflate::Reader::new(
             alt_inflate::Format::Gzip,
-            req.body(max.saturating_add(1)).take(max + 1),
+            req.body(over).take(over),
         ))
     } else {
-        Box::new(req.body(max.saturating_add(1)).take(max + 1))
+        Box::new(req.body(over).take(over))
     };
     // the commands are held in memory: they get a cap of their own
     let mut commands = (&mut reader).take(max_command_bytes());
@@ -34,7 +35,7 @@ pub(super) fn read_push(
     // the cap is on what the body inflates to as well: a gzip body is
     // counted as it is written out. Not synced: the file is gone when
     // the request is over
-    let n = std::io::copy(&mut (&mut reader).take(max + 1), &mut tmp)
+    let n = std::io::copy(&mut (&mut reader).take(over), &mut tmp)
         .map_err(|e| format!("stream pack: {e}"))?;
     Ok((head, n))
 }

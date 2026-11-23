@@ -7,6 +7,9 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
+const GRACE: Duration = Duration::from_secs(20);
+const LINGER: Duration = Duration::from_secs(2);
+
 mod workers;
 
 /// the bytes on the wire a body may have for the one worker

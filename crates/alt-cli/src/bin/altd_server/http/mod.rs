@@ -24,30 +24,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
 
 pub(crate) use head::{Header, Method};
 pub(crate) use paced::Limits;
 pub(crate) use request::Request;
 pub(crate) use response::{Response, StatusCode};
-
-/// What a peer is given to begin with, where `ALT_SERVER_IO_TIMEOUT_MS`
-/// says nothing else.
-const GRACE: Duration = Duration::from_secs(20);
-/// What a peer is given for each MiB of a body or a response, where
-/// `ALT_SERVER_IO_MS_PER_MIB` says nothing else: a megabit a second.
-const PER_MIB: Duration = Duration::from_secs(8);
-/// How long what a peer still sends is taken on a connection that is
-/// being ended.
-const LINGER: Duration = Duration::from_secs(2);
-/// The connections open at once, where `ALT_SERVER_MAX_CONNECTIONS` says
-/// nothing else.
-const CONNECTIONS: usize = 256;
-
-fn told<T: std::str::FromStr + PartialOrd + Default>(name: &str) -> Option<T> {
-    let value = std::env::var(name).ok()?.parse().ok()?;
-    (value > T::default()).then_some(value)
-}
 
 #[derive(Default)]
 struct Waiting {
@@ -78,24 +59,9 @@ impl Drop for Open {
 }
 
 impl Server {
-    /// Listens at `address` and takes connections from then on, as the
-    /// environment bounds them.
-    pub(crate) fn http(address: &str) -> io::Result<Server> {
-        let grace = told("ALT_SERVER_IO_TIMEOUT_MS").map_or(GRACE, Duration::from_millis);
-        let per_mib = told("ALT_SERVER_IO_MS_PER_MIB").map_or(PER_MIB, Duration::from_millis);
-        let most = told("ALT_SERVER_MAX_CONNECTIONS").unwrap_or(CONNECTIONS);
-        let linger = LINGER.min(grace);
-        let limits = Limits {
-            grace,
-            per_mib,
-            linger,
-        };
-        Server::listen(address, limits, most)
-    }
-
     /// Listens at `address` for `most` connections at once, whose peers are
     /// given `limits`.
-    fn listen(address: &str, limits: Limits, most: usize) -> io::Result<Server> {
+    pub(crate) fn listen(address: &str, limits: Limits, most: usize) -> io::Result<Server> {
         let listener = TcpListener::bind(address)?;
         let shared = Arc::new(Shared {
             waiting: Mutex::default(),
