@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: find nobody to sign a merge before anything is stored, and list the new commands among those asked whether they read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/merge/run.rs
+touched: crates/alt-cli/tests/it/readers/commands.rs
