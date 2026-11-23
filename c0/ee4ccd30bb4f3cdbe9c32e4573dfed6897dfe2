@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: bound what the pack of a push may inflate to
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/group_commit.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_connected.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_pack_limits.rs
+touched: crates/alt-cli/tests/it/failed_sync.rs
+touched: crates/alt-cli/tests/it/main.rs
