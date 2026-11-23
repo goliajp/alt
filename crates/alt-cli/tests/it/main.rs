@@ -182,6 +182,7 @@ mod store_refresh;
 mod submission_records;
 mod switch_carry;
 mod switch_kinds;
+mod switch_picking;
 mod sync_order;
 #[cfg(target_os = "linux")]
 mod synced_files;

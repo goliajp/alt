@@ -86,6 +86,23 @@ fn local_changes(
 }
 
 impl NativeRepo<'_> {
+    /// `alt switch` as the command of that name: refused while a
+    /// cherry-pick is under way, as by git, which `checkout` is not.
+    pub fn switch_command(
+        &mut self,
+        name: &str,
+        create: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        if let Some(in_progress::OperationKind::CherryPick) = self.operation_kind()? {
+            let said = "fatal: cannot switch branch while cherry-picking\n\
+                            Consider \"git cherry-pick --quit\" or \"git worktree add\".\n";
+            return Err(said::refused(said, 128));
+        }
+        self.switch(name, create, json, out)
+    }
+
     /// `alt switch <name>`: point HEAD at branch `name` and materialize its
     /// tree into the working tree. `-c` creates the branch first. Staged
     /// and unstaged changes are kept where the commit switched to has the

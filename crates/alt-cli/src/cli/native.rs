@@ -90,7 +90,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             tag.json,
             out,
         )?,
-        Command::Switch { name, create, json } => repo.switch(name, *create, *json, out)?,
+        Command::Switch { name, create, json } => repo.switch_command(name, *create, *json, out)?,
         Command::Diff(args) => repo.diff(&args.request(), out)?,
         Command::Meta { op } => match op {
             MetaOp::Show { rev, json } => repo.meta_show(rev, *json, out)?,
