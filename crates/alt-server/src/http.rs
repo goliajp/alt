@@ -6,6 +6,7 @@ mod encoding;
 mod expiry;
 mod file_body;
 mod handle;
+mod hashers;
 mod observation;
 mod pack_body;
 use alt_server_telemetry::{Outcome, Phase};
@@ -145,7 +146,7 @@ struct App {
     workers: Arc<Semaphore>,
     receiving: Arc<receiving::Receiving>,
     browser: Option<WebOptions>,
-    passwords: Arc<Semaphore>,
+    passwords: hashers::Hashers,
 }
 pub fn authorization(headers: &HeaderMap) -> Option<String> {
     if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
@@ -241,7 +242,7 @@ pub async fn serve_with_browser(
         receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
         options,
         browser,
-        passwords: Arc::new(Semaphore::new(2)),
+        passwords: hashers::Hashers::new(2),
     });
     if !state.factory.change_links.is_empty() {
         background.spawn(crate::change_links::worker(

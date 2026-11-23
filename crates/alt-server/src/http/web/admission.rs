@@ -15,23 +15,26 @@ fn busy(message: &str) -> Refusal {
     ))
 }
 
-/// The worker a request runs on and, where it hashes a password, one of the two
-/// that do.
+/// The worker a request of `caller` runs on and, where it hashes a password, one
+/// of the two places among those that do, which it waits for.
 ///
 /// An unauthenticated password flood cannot allocate one Argon2 arena per
 /// HTTP connection, nor starve all normal publication workers.
-fn admit(
+async fn admit(
     state: &App,
+    caller: &str,
     password: bool,
 ) -> std::result::Result<(OwnedSemaphorePermit, Option<OwnedSemaphorePermit>), Refusal> {
+    let hashing = match password {
+        true => {
+            let place = state.passwords.place(caller, state.options.work_timeout);
+            Some(place.await.ok_or_else(|| busy("Sign-in service is busy"))?)
+        }
+        false => None,
+    };
     let worker = state.workers.clone().try_acquire_owned();
     let worker = worker.map_err(|_| busy("Instance is busy"))?;
-    if !password {
-        return Ok((worker, None));
-    }
-    let hashing = state.passwords.clone().try_acquire_owned();
-    let hashing = hashing.map_err(|_| busy("Sign-in service is busy"))?;
-    Ok((worker, Some(hashing)))
+    Ok((worker, hashing))
 }
 
 /// The body of a request of `caller`, of `max` bytes at most and within the time a
@@ -103,10 +106,10 @@ pub(super) async fn admitted(
             false => 0,
         };
         let (source, _) = receive(state, &caller, body, small).await?;
-        let (permit, hashing) = admit(state, password)?;
+        let (permit, hashing) = admit(state, &caller, password).await?;
         return Ok((source, permit, hashing));
     };
-    let (permit, hashing) = admit(state, password)?;
+    let (permit, hashing) = admit(state, &caller, password).await?;
     let bound = portable_bound(state, browser, selected.clone(), token.clone(), permit);
     let max = match bound.await {
         Ok(max) => max,
