@@ -25,7 +25,9 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Begins a read, before the first statement of its transaction.
 pub(crate) fn begin(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
     if spec.deployment_mode == DeploymentMode::SelfHosted {
-        tx.batch_execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")?;
+        // as a statement like the others: the plans the connection keeps
+        // for them are kept
+        tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", &[])?;
     }
     Ok(())
 }
