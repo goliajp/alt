@@ -180,28 +180,7 @@ pub enum Command {
         json: bool,
     },
     /// Line-by-line origin attribution for one file (`git blame`-style)
-    Blame {
-        /// Path to the file to blame (relative to the current directory).
-        #[arg(hint = "path-tracked")]
-        path: String,
-        /// Revision to start the walk from (default `HEAD`).
-        #[arg(hint = "rev")]
-        rev: Option<String>,
-        /// Trace lines moved within the file. A number against the letter
-        /// is how many letters and digits they must carry (20 if absent).
-        #[arg(short = 'M', action = attached)]
-        moves: Vec<String>,
-        /// Accepted for command lines written before renames were always
-        /// followed; it changes nothing.
-        #[arg(long = "follow")]
-        follow: bool,
-        /// Trace lines copied from files changed in the same commit; twice,
-        /// from any file when the blamed file is created; three times, from
-        /// any file in every commit. Implies -M. A number against the
-        /// letter works as for -M (40 if absent).
-        #[arg(short = 'C', action = attached)]
-        copies: Vec<String>,
-    },
+    Blame(crate::blame::Blame),
     /// Show or change the metadata recorded with a commit (kept in git
     /// notes under refs/notes/alt/meta; the commit itself never changes)
     Meta {
@@ -285,28 +264,7 @@ pub enum Command {
         unset: Option<String>,
     },
     /// List, create (lightweight or annotated), or delete tags
-    Tag {
-        /// Tag name to create. Omit (and omit `-d`) to list all tags.
-        #[arg(hint = none)]
-        name: Option<String>,
-        /// Revision the new tag should point to (default HEAD). Only
-        /// honoured when creating a tag.
-        #[arg(hint = "rev")]
-        rev: Option<String>,
-        /// Delete a tag by name. Mutually exclusive with `name`.
-        #[arg(short = 'd', long, hint = "tag")]
-        delete: Option<String>,
-        /// Create an *annotated* tag (writes a tag object carrying the
-        /// message + tagger ident, instead of a bare ref).
-        #[arg(short = 'a', long)]
-        annotate: bool,
-        /// Annotated-tag message. Required when `-a` is set.
-        #[arg(short = 'm', long, hint = none)]
-        message: Option<String>,
-        /// JSON output for list mode (ignored otherwise).
-        #[arg(long)]
-        json: bool,
-    },
+    Tag(sequence_args::Tag),
     /// Show changes between the index and the working tree (or HEAD)
     Diff {
         /// Show staged changes (HEAD vs index) instead of unstaged

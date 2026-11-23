@@ -48,3 +48,27 @@ impl Merge {
         }
     }
 }
+
+#[derive(alt_args::Args)]
+pub struct Tag {
+    /// Tag name to create. Omit (and omit `-d`) to list all tags.
+    #[arg(hint = none)]
+    pub name: Option<String>,
+    /// Revision the new tag should point to (default HEAD). Only
+    /// honoured when creating a tag.
+    #[arg(hint = "rev")]
+    pub rev: Option<String>,
+    /// Delete a tag by name. Mutually exclusive with `name`.
+    #[arg(short = 'd', long, hint = "tag")]
+    pub delete: Option<String>,
+    /// Create an *annotated* tag (writes a tag object carrying the
+    /// message + tagger ident, instead of a bare ref).
+    #[arg(short = 'a', long)]
+    pub annotate: bool,
+    /// Annotated-tag message. Required when `-a` is set.
+    #[arg(short = 'm', long, hint = none)]
+    pub message: Option<String>,
+    /// JSON output for list mode (ignored otherwise).
+    #[arg(long)]
+    pub json: bool,
+}

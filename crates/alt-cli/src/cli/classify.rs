@@ -125,11 +125,11 @@ fn native_mutates(cmd: &Command) -> bool {
                 delete: None,
                 ..
             }
-            | Command::Tag {
+            | Command::Tag(crate::sequence_args::Tag {
                 name: None,
                 delete: None,
                 ..
-            }
+            })
             | Command::Workspace {
                 op: WorkspaceOp::List,
                 ..

@@ -67,15 +67,9 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             let args = crate::log_cmd::LogArgs::for_show(spec, *json);
             crate::log_cmd::run(out, repo, args, &at.head)?;
         }
-        Command::Blame {
-            path,
-            rev,
-            moves,
-            copies,
-            follow: _,
-        } => {
-            let options = crate::blame::Options::of(moves, copies);
-            at.blame(out, repo, path, rev.as_deref(), options)?;
+        Command::Blame(args) => {
+            let options = crate::blame::Options::of(&args.moves, &args.copies);
+            at.blame(out, repo, &args.path, args.rev.as_deref(), options)?;
         }
         Command::Config {
             key,

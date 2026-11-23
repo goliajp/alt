@@ -28,6 +28,30 @@ pub use walk::Options;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
+#[derive(alt_args::Args)]
+pub struct Blame {
+    /// Path to the file to blame (relative to the current directory).
+    #[arg(hint = "path-tracked")]
+    pub path: String,
+    /// Revision to start the walk from (default `HEAD`).
+    #[arg(hint = "rev")]
+    pub rev: Option<String>,
+    /// Trace lines moved within the file. A number against the letter
+    /// is how many letters and digits they must carry (20 if absent).
+    #[arg(short = 'M', action = attached)]
+    pub moves: Vec<String>,
+    /// Accepted for command lines written before renames were always
+    /// followed; it changes nothing.
+    #[arg(long = "follow")]
+    pub follow: bool,
+    /// Trace lines copied from files changed in the same commit; twice,
+    /// from any file when the blamed file is created; three times, from
+    /// any file in every commit. Implies -M. A number against the
+    /// letter works as for -M (40 if absent).
+    #[arg(short = 'C', action = attached)]
+    pub copies: Vec<String>,
+}
+
 /// `alt blame <path> [<rev>]`, the revision `rev` given as `named`. Writes
 /// one row per line to `out`:
 /// `<short-oid> (<author-name> <YYYY-MM-DD> <line-no>) <line content>`
