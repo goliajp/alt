@@ -1,0 +1,106 @@
+//! The first pass over a pack: where each entry lies, what it is a delta
+//! of, and the id of each plain entry.
+
+use alt_git_codec::{ObjectId, ObjectKind};
+
+use super::{IndexLimits, IndexWork};
+use crate::{EntryKind, Pack, PackError};
+
+/// The fewest bytes an entry takes: a byte of header and the zlib stream
+/// of nothing.
+const ENTRY_MIN: usize = 9;
+
+pub(super) enum Form {
+    Plain(ObjectKind),
+    /// a delta of the entry at this index
+    Ofs(u32),
+    /// a delta of the object with this id
+    Ref(ObjectId),
+}
+
+pub(super) struct Entry {
+    pub offset: u64,
+    /// where its zlib stream starts
+    pub data_at: u64,
+    /// what the stream inflates to: the object of a plain entry, the
+    /// instructions of a delta
+    pub size: u64,
+    pub form: Form,
+    /// of the raw bytes, header and stream
+    pub crc32: u32,
+}
+
+pub(super) struct Scanned {
+    pub entries: Vec<Entry>,
+    /// the id of each plain entry
+    pub oids: Vec<Option<ObjectId>>,
+    /// what the entries inflate to, all together
+    pub inflated: u64,
+    pub body_end: usize,
+}
+
+pub(super) fn scan(
+    pack: &Pack,
+    count: u32,
+    limits: &IndexLimits,
+    work: &mut IndexWork,
+) -> Result<Scanned, PackError> {
+    let map = pack.bytes();
+    let body_end = map.len() - pack.algo().raw_len();
+    // the count is as the sender wrote it: room is made for no more
+    // entries than the body can hold
+    let room = (count as usize).min(body_end / ENTRY_MIN);
+    let mut entries: Vec<Entry> = Vec::with_capacity(room);
+    let mut oids = Vec::with_capacity(room);
+    let mut inflated = 0u64;
+    let mut payload = Vec::new();
+    let mut pos = 12usize;
+    for _ in 0..count {
+        if pos >= body_end {
+            return Err(PackError::Format("pack header count exceeds body"));
+        }
+        let info = pack.entry_info(pos as u64)?;
+        if info.size > limits.object_bytes {
+            return Err(PackError::Limit("object bytes"));
+        }
+        inflated = inflated
+            .checked_add(info.size)
+            .filter(|total| *total <= limits.inflated_bytes)
+            .ok_or(PackError::Limit("inflated bytes"))?;
+        let next = pack.inflate_into(info.data_at, info.size, body_end, &mut payload)?;
+        work.inflated += 1;
+        let (form, oid) = match info.kind {
+            EntryKind::Plain(kind) => {
+                work.hashed += 1;
+                let oid = ObjectId::hash_object(pack.algo(), kind, &payload);
+                (Form::Plain(kind), Some(oid))
+            }
+            // entries are in file order: the base lies before this one
+            EntryKind::OfsDelta { base_at } => {
+                let base = entries
+                    .binary_search_by_key(&base_at, |entry| entry.offset)
+                    .map_err(|_| PackError::Format("ofs-delta base offset not found"))?;
+                (Form::Ofs(base as u32), None)
+            }
+            EntryKind::RefDelta { base } => (Form::Ref(base), None),
+        };
+        entries.push(Entry {
+            offset: pos as u64,
+            data_at: info.data_at,
+            size: info.size,
+            form,
+            crc32: alt_hash::crc32(&map[pos..next]),
+        });
+        oids.push(oid);
+        pos = next;
+    }
+    if pos != body_end {
+        return Err(PackError::Format("pack body has trailing bytes"));
+    }
+    Ok(Scanned {
+        entries,
+        oids,
+        inflated,
+        body_end,
+    })
+}

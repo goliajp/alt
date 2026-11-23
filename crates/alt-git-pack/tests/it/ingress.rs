@@ -15,18 +15,18 @@ fn limits() -> IngressLimits {
         steps: 10000,
     }
 }
-fn finish(mut bytes: Vec<u8>) -> Vec<u8> {
+pub(crate) fn finish(mut bytes: Vec<u8>) -> Vec<u8> {
     let digest = alt_hash::sha1(&bytes);
     bytes.extend_from_slice(&digest);
     bytes
 }
-fn pack_header(n: u32) -> Vec<u8> {
+pub(crate) fn pack_header(n: u32) -> Vec<u8> {
     let mut b = b"PACK".to_vec();
     b.extend_from_slice(&2u32.to_be_bytes());
     b.extend_from_slice(&n.to_be_bytes());
     b
 }
-fn entry_header(kind: u8, mut size: u64) -> Vec<u8> {
+pub(crate) fn entry_header(kind: u8, mut size: u64) -> Vec<u8> {
     let mut b = vec![(kind << 4) | (size as u8 & 15)];
     size >>= 4;
     while size > 0 {
@@ -37,7 +37,7 @@ fn entry_header(kind: u8, mut size: u64) -> Vec<u8> {
     }
     b
 }
-fn zlib(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn zlib(bytes: &[u8]) -> Vec<u8> {
     alt_deflate::compress(bytes, 6, alt_deflate::Format::Zlib)
 }
 fn plain(data: &[u8]) -> Vec<u8> {
@@ -218,7 +218,7 @@ fn thin_pack_requires_scoped_base_and_checks_base_bytes_and_delta_limits() {
         .is_err()
     );
 }
-fn ofs(mut distance: usize) -> Vec<u8> {
+pub(crate) fn ofs(mut distance: usize) -> Vec<u8> {
     let mut v = vec![(distance & 127) as u8];
     while distance >> 7 > 0 {
         distance = (distance >> 7) - 1;
