@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: receive the body of a caller not yet known before a worker is kept for it
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/admission.rs
+touched: crates/alt-server/src/http/web/cloud_login.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/unknown_callers.rs
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
