@@ -1,0 +1,19 @@
+schema: alt-meta/1
+type: feat
+summary: add rm and mv
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/classify.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/worktree.rs
+touched: crates/alt-cli/src/client.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/src/native/pathspec/spec.rs
+touched: crates/alt-cli/src/native/rm.rs
+touched: crates/alt-cli/src/native/tree_edit.rs
+touched: crates/alt-cli/src/worktree_args.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mv.rs
+touched: crates/alt-cli/tests/it/rm.rs
