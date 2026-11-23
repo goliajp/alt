@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: keep what a push is looked at by of each commit, parsed, from one push to the next
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits.rs
+touched: crates/alt-cli/src/added_commits/tests.rs
+touched: crates/alt-cli/src/added_commits/trees.rs
+touched: crates/alt-cli/src/added_commits/walk.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/batch.rs
+touched: crates/alt-cli/src/receive/kept.rs
+touched: crates/alt-cli/src/receive/signed.rs
+touched: crates/alt-cli/tests/it/altd_server_connected.rs
