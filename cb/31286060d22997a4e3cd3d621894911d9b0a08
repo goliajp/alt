@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: take a push that is sent thin, its deltas made of objects the server has
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_connected.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_thin.rs
+touched: crates/alt-cli/tests/it/main.rs
