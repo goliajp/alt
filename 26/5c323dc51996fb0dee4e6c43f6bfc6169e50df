@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: perf
+summary: write the table of workspaces out now and then, and into the checkpoints between the rows that changed
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/checkpoint.rs
+touched: crates/alt-oplog/src/v2/compose.rs
+touched: crates/alt-oplog/src/v2/locate.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/src/v2/verify.rs
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_scan.rs
+touched: crates/alt-oplog/tests/it/v2_tables.rs
