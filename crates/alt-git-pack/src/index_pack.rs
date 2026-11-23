@@ -66,6 +66,9 @@ pub struct IndexLimits {
     /// the bytes of delta bases held in memory while their deltas are
     /// resolved
     pub base_bytes: usize,
+    /// whether the pack is kept: its index is synced then before it
+    /// takes its name. One that is read and removed again needs no sync
+    pub kept: bool,
 }
 
 impl Default for IndexLimits {
@@ -76,6 +79,7 @@ impl Default for IndexLimits {
             object_bytes: u64::MAX,
             inflated_bytes: u64::MAX,
             base_bytes: crate::cache::DEFAULT_BUDGET,
+            kept: true,
         }
     }
 }
@@ -158,7 +162,9 @@ pub fn index_pack_within(
     {
         let mut f = File::create(&tmp_idx)?;
         f.write_all(&idx_bytes)?;
-        f.sync_all()?;
+        if limits.kept {
+            f.sync_all()?;
+        }
     }
     std::fs::rename(&tmp_idx, &idx_path)?;
 
