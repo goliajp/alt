@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: count the objects that wait for further deltas against what a pack may inflate to
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/descend.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/waiting.rs
