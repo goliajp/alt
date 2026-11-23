@@ -15,6 +15,7 @@ mod cut;
 mod follow;
 pub mod frame;
 mod log;
+mod named;
 mod open;
 pub mod receipt;
 mod salvage;

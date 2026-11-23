@@ -171,7 +171,7 @@ impl Log {
         self.may_write()?;
         let upto = self.state.end;
         if let Some(sync) = self.named.clone() {
-            let left = self.ops_from(self.judged.get());
+            let left = self.named_from(self.judged.get())?;
             let _ = unlock(&self.file);
             let synced = sync(&left);
             lock_exclusive(&self.file)?;
@@ -190,11 +190,5 @@ impl Log {
         self.judged.set(u64::MAX);
         self.note_synced(upto);
         Ok(())
-    }
-
-    /// The ops held whose frames start at or after `from`.
-    pub(super) fn ops_from(&self, from: u64) -> Vec<Op> {
-        let after = |op: &&Op| op.frame.is_some_and(|frame| frame.at >= from);
-        self.ops.iter().filter(after).cloned().collect()
     }
 }

@@ -59,7 +59,7 @@ impl Log {
     /// The op whose frame starts at `at`, with the frame it names as the
     /// ref transaction before it: `None` where no op frame reads there. A
     /// frame from before a cut reads under an earlier generation.
-    fn op_at(&self, at: u64) -> Result<Option<(Op, Option<u64>)>, OpLogError> {
+    pub(super) fn op_at(&self, at: u64) -> Result<Option<(Op, Option<u64>)>, OpLogError> {
         let limit = self.state.end;
         let left = limit
             .checked_sub(at)

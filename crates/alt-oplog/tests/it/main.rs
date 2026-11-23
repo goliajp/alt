@@ -19,6 +19,7 @@ mod v2_fields;
 mod v2_format;
 mod v2_image;
 mod v2_log;
+mod v2_named;
 mod v2_scan;
 mod v2_synced;
 mod v2_tables;

@@ -30,13 +30,15 @@ pub(crate) type Deferred = Arc<Mutex<Reached>>;
 impl Log {
     /// Leaves what this handle appended so far for its sink to sync and
     /// to record.
-    pub(super) fn defer_sync(&mut self) {
-        let pending = self.ops_from(self.synced_here().max(self.synced));
+    pub(super) fn defer_sync(&mut self) -> Result<(), OpLogError> {
+        let synced = self.tail().map_or(0, |tail| tail.synced);
+        let pending = self.named_from(synced.max(self.synced_here()).max(self.synced))?;
         let mut reached = self.deferred.lock().unwrap();
         reached.target = self.state.end;
         reached.closes = self.closes;
         reached.generation = self.state.generation;
         reached.pending = pending;
+        Ok(())
     }
 
     pub(super) fn note_synced(&self, synced: u64) {

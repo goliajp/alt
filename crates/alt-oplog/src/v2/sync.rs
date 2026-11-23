@@ -24,8 +24,7 @@ impl Log {
         if self.defer {
             // the sink fsyncs off the write path and records how far
             self.write_count += 1;
-            self.defer_sync();
-            return Ok(());
+            return self.defer_sync();
         }
         self.sync_to_end()
     }
@@ -78,7 +77,7 @@ impl Log {
         }
         self.may_write()?;
         if let Some(sync) = &self.named {
-            sync(&self.ops_from(self.synced))?;
+            sync(&self.named_from(self.synced)?)?;
         }
         let held = Held::take(&self.dir)?;
         // records were cut since the append: not this one's, or there is
