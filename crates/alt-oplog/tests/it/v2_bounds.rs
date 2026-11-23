@@ -245,7 +245,7 @@ fn a_log_with_a_feature_this_build_does_not_know_is_read_or_refused_as_the_featu
     assert_eq!(fs::read(&path).unwrap()[64..], written[64..]);
 
     with(FileHeader {
-        incompatible: 1,
+        incompatible: 1 | 4,
         ..header
     });
     let said = "the oplog uses a feature this alt does not know";

@@ -88,7 +88,7 @@ pub fn create_with(dir: &Path, block_exp: u8) -> std::io::Result<()> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
         let header = block::FileHeader {
             block_exp,
-            incompatible: 0,
+            incompatible: block::DRAFT,
             read_compatible: 0,
             compatible: 0,
             id,

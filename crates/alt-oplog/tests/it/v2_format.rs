@@ -162,7 +162,7 @@ fn the_file_header_tells_what_a_build_may_do_with_the_log() {
         other => panic!("{other:?}"),
     };
     let unknown = FileHeader {
-        incompatible: 1,
+        incompatible: 1 | 8,
         ..plain
     };
     assert_eq!(

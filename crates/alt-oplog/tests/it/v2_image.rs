@@ -18,7 +18,7 @@ pub struct Image {
 pub fn header(block_exp: u8) -> FileHeader {
     FileHeader {
         block_exp,
-        incompatible: 0,
+        incompatible: 1,
         read_compatible: 0,
         compatible: 0,
         id: *b"an oplog's name.",

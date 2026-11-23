@@ -4,7 +4,8 @@
 //! file header (64 bytes)
 //! [0..4)   "ALTL"            [4]      version, 2
 //! [5]      the block size as a power of two
-//! [8..12)  features a reader must know to read or write the log
+//! [8..12)  features a reader must know to read or write the log; bit 0
+//!          for a log of the format before it is settled
 //! [12..16) features a writer must know to write it
 //! [16..20) features nobody has to know
 //! [20..36) the identity of this log, random
@@ -38,6 +39,10 @@ pub const VERSION: u8 = 2;
 /// Blocks of 16 KiB: an open reads up to a block, and takes some 90
 /// thousand instructions for a full one of this size.
 pub const BLOCK_EXP: u8 = 14;
+/// Among the features a build must know to read a log: the log is laid
+/// out as builds lay it while the format is not settled. The build that
+/// settles the format writes no such log and opens none.
+pub const DRAFT: u32 = 1;
 
 const MAGIC: [u8; 4] = *b"ALTL";
 const BLOCK_MAGIC: [u8; 4] = *b"ALTB";
@@ -93,9 +98,14 @@ impl FileHeader {
             id: bytes[20..36].try_into().unwrap(),
             created_ms: u64::from_le_bytes(bytes[36..44].try_into().unwrap()),
         };
-        if header.incompatible != 0 {
+        if header.incompatible & !DRAFT != 0 {
             return Err(OpLogError::Format(
                 "the oplog uses a feature this alt does not know",
+            ));
+        }
+        if header.incompatible & DRAFT == 0 {
+            return Err(OpLogError::Format(
+                "the oplog is not of the draft format this alt reads",
             ));
         }
         Ok(header)

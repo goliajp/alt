@@ -13,6 +13,7 @@ mod synced_marker;
 mod synced_writers;
 mod unconfirmed;
 mod v2_bounds;
+mod v2_features;
 mod v2_format;
 mod v2_image;
 mod v2_log;

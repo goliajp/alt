@@ -14,7 +14,7 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     let header = FileHeader {
         block_exp: 10,
-        incompatible: 0,
+        incompatible: 1,
         read_compatible: 0,
         compatible: 0,
         id: [0; 16],
