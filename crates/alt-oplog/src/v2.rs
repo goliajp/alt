@@ -12,6 +12,7 @@ pub mod block;
 pub mod checkpoint;
 pub mod compose;
 mod cut;
+mod follow;
 pub mod frame;
 mod log;
 mod open;
