@@ -41,6 +41,7 @@
 //! [`IndexLimits::inflated_bytes`], and a chain is refused past
 //! [`MAX_DELTA_DEPTH`].
 
+mod held;
 mod idx;
 mod memory;
 mod resolve;
@@ -74,6 +75,10 @@ pub struct IndexLimits {
     /// the bytes of delta bases held in memory while their deltas are
     /// resolved
     pub base_bytes: usize,
+    /// the bytes of delta bases written to files of their own, to be read
+    /// again, when memory has no room for them while their deltas are
+    /// resolved
+    pub spill_bytes: u64,
     /// whether the pack is kept: its index is synced then before it
     /// takes its name. One that is read and removed again needs no sync
     pub kept: bool,
@@ -92,6 +97,7 @@ impl Default for IndexLimits {
             object_bytes: u64::MAX,
             inflated_bytes: u64::MAX,
             base_bytes: crate::cache::DEFAULT_BUDGET,
+            spill_bytes: 16 * crate::cache::DEFAULT_BUDGET as u64,
             kept: true,
             memory: None,
             memory_by: None,
@@ -110,6 +116,8 @@ pub struct IndexWork {
     pub applied: u64,
     /// the most bytes of delta bases held at once
     pub held: usize,
+    /// the most bytes of delta bases in files at once
+    pub spilled: u64,
 }
 
 /// Result of indexing a `.pack` file.

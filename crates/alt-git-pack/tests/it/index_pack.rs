@@ -66,9 +66,12 @@ pub(crate) fn written(dir: &TempDir, entries: &[Vec<u8>]) -> std::path::PathBuf 
     path
 }
 
+/// Room in memory for so many bytes of bases, and none in files: what
+/// does not fit is let go of and made again.
 fn limits(base_bytes: usize) -> IndexLimits {
     IndexLimits {
         base_bytes,
+        spill_bytes: 0,
         ..IndexLimits::default()
     }
 }
