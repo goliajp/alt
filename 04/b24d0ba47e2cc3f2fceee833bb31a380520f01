@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: keep the version 2 format tests and the scan tests in files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_scan.rs
