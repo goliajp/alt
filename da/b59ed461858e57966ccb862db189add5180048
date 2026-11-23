@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: count the bodies of each host of the link the server is on for that host
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/receiving.rs
