@@ -97,7 +97,7 @@ const IN_HEAD: [fn(&mut Head, u64); 4] = [
     |head, to| head.seq = to,
 ];
 
-const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 12] = [
+const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 13] = [
     |said, to| said.generation = to as u32,
     |said, to| said.seq = to,
     |said, to| said.head_at = to,
@@ -106,6 +106,7 @@ const IN_CHECKPOINT: [fn(&mut Checkpoint, u64); 12] = [
     |said, to| said.linked_at = to,
     |said, to| said.linked = to,
     |said, to| said.migrated = to,
+    |said, to| said.base = to,
     |said, to| said.workspaces[0].last = to,
     |said, to| said.workspaces[0].undoable = to,
     |said, to| said.workspaces[0].index_at = to,
@@ -324,7 +325,12 @@ fn a_checkpoint_that_names_a_place_past_itself_is_not_begun_at() {
             boot(in_boot);
             // the checkpoint before it is, and the frames lead to the same log
             let log = OpLog::open(dir.path()).unwrap();
-            assert_eq!(log.state(), written.state(), "field {field}");
+            // but for whether the table was written out whole there,
+            // which that frame says of itself
+            let mut led_to = log.state().unwrap().clone();
+            let expected = written.state().unwrap();
+            (led_to.base, led_to.changed) = (expected.base, expected.changed.clone());
+            assert_eq!(&led_to, expected, "field {field}");
             assert_eq!(log.bounded_to(), written.bounded_to(), "field {field}");
             assert_eq!(log.unsettled(), in_boot == 3, "field {field}");
         }

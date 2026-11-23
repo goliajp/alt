@@ -2,7 +2,7 @@
 //! goes and what it has to say of the ones before it.
 
 use crate::v2::block::FILE_HEADER_LEN;
-use crate::v2::checkpoint::{Checkpoint, Workspace, generation_of};
+use crate::v2::checkpoint::{Checkpoint, Workspace, base_of, generation_of};
 use crate::v2::frame::{KIND_CHECKPOINT, KIND_OP, OdbBounds, REQUIRED, Step, UNDOABLE, View};
 use crate::{OpId, OpLogError, ROOT};
 
@@ -28,6 +28,11 @@ pub struct State {
     /// where the last frame starts that says nothing is appended after it
     /// by whoever does not know it, or zero
     pub required: u64,
+    /// where the last checkpoint starts that holds the whole table of
+    /// workspaces, or zero
+    pub base: u64,
+    /// the workspaces whose rows changed since, in the order of their ids
+    pub changed: Vec<[u8; 8]>,
     pub workspaces: Vec<Workspace>,
 }
 
@@ -49,13 +54,24 @@ impl State {
             linked: 0,
             migrated: 0,
             required: 0,
+            base: 0,
+            changed: Vec::new(),
             workspaces: Vec::new(),
         }
     }
 
-    /// The log as the checkpoint frame at `at..end` says it stands.
-    pub fn of(checkpoint: Checkpoint, at: u64, end: u64) -> Self {
+    /// The log as the checkpoint frame at `at..end` says it stands:
+    /// `checkpoint` with the whole table, of which the rows of
+    /// `changed` are the ones the frame itself holds where it names
+    /// another for the table.
+    pub fn of(checkpoint: Checkpoint, changed: Vec<[u8; 8]>, at: u64, end: u64) -> Self {
         State {
+            base: if checkpoint.base == 0 {
+                at
+            } else {
+                checkpoint.base
+            },
+            changed,
             generation: checkpoint.generation,
             end,
             last: at,
@@ -74,10 +90,25 @@ impl State {
         }
     }
 
+    /// The row of each workspace that changed since the table was last
+    /// written out whole; one without a last op for a workspace that is
+    /// gone.
+    fn changes(&self) -> Vec<Workspace> {
+        let gone = |id: &[u8; 8]| Workspace {
+            id: *id,
+            ..Workspace::default()
+        };
+        let row = |id: &[u8; 8]| self.workspace(id).copied().unwrap_or_else(|| gone(id));
+        self.changed.iter().map(row).collect()
+    }
+
     /// The body of a checkpoint written now in `boot`, by a writer that
-    /// knows the log synced up to `synced`.
-    pub fn checkpoint(&self, boot: [u8; 16], synced: u64) -> Checkpoint {
+    /// knows the log synced up to `synced`: with the whole table of
+    /// workspaces, or with the rows that changed since the last one that
+    /// has it.
+    pub fn checkpoint(&self, boot: [u8; 16], synced: u64, whole: bool) -> Checkpoint {
         Checkpoint {
+            base: if whole { 0 } else { self.base },
             boot,
             generation: self.generation,
             seq: self.seq,
@@ -90,7 +121,10 @@ impl State {
             linked: self.linked,
             migrated: self.migrated,
             required: self.required,
-            workspaces: self.workspaces.clone(),
+            workspaces: match whole {
+                true => self.workspaces.clone(),
+                false => self.changes(),
+            },
         }
     }
 
@@ -129,6 +163,11 @@ impl State {
                 let Some(generation) = said.filter(|said| *said >= self.generation) else {
                     return Ok(false);
                 };
+                match base_of(view.body) {
+                    Some(0) => (self.base, self.changed) = (at, Vec::new()),
+                    Some(_) => {}
+                    None => return Ok(false),
+                }
                 self.generation = generation;
                 self.checkpoint = at;
             }
@@ -163,6 +202,9 @@ impl State {
         let id = view.head.workspace;
         if id == [0; 8] {
             return;
+        }
+        if let Err(at) = self.changed.binary_search(&id) {
+            self.changed.insert(at, id);
         }
         let found = self.workspaces.binary_search_by(|row| row.id.cmp(&id));
         if view.ext.retired {

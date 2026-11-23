@@ -43,10 +43,8 @@ impl Full {
         generation: u32,
         headers: &[BlockHeader],
     ) -> Result<(), OpLogError> {
-        if headers
-            .iter()
-            .any(|header| header.checkpoint != state.checkpoint)
-        {
+        let named = |header: &BlockHeader| header.checkpoint == state.checkpoint;
+        if !headers.iter().all(named) {
             return Err(OpLogError::Format(
                 "an oplog block names another checkpoint than the one before it",
             ));
@@ -68,10 +66,11 @@ impl Full {
             }
             KIND_CHECKPOINT => {
                 let said = Checkpoint::decode(view.body);
-                // the boot and the generation are the checkpoint's own to say
+                // the boot and the generation are the checkpoint's own to
+                // say, as is whether it holds the whole table
                 let derived = said.as_ref().map(|said| Checkpoint {
                     generation: said.generation,
-                    ..state.checkpoint(said.boot, view.head.synced)
+                    ..state.checkpoint(said.boot, view.head.synced, said.base == 0)
                 });
                 if said.is_none() || said != derived {
                     return Err(OpLogError::Format(

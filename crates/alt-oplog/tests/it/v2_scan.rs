@@ -359,7 +359,10 @@ fn the_state_a_checkpoint_gives_is_the_state_before_it() {
         let (_, mut expected, _) =
             walked(image.layout(), &image.bytes[..at as usize], false).unwrap();
         (expected.last, expected.end, expected.checkpoint) = (at, end, at);
-        assert_eq!(State::of(said, at, end), expected);
+        // it holds the whole table, and nothing changed since
+        assert_eq!(said.base, 0);
+        (expected.base, expected.changed) = (at, Vec::new());
+        assert_eq!(State::of(said, Vec::new(), at, end), expected);
         checked += 1;
     }
     assert!(checked >= 6);

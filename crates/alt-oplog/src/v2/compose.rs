@@ -3,6 +3,7 @@
 //! block, the header of the next one and its checkpoint.
 
 use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, Layout};
+use crate::v2::checkpoint::WORKSPACE_LEN;
 use crate::v2::frame::{Cut, Ext, Head, KIND_CHECKPOINT, KIND_OP, Seed, View, encode, frame_len};
 use crate::v2::state::State;
 use crate::{OpId, OpLogError};
@@ -70,13 +71,30 @@ impl Composer {
         ext
     }
 
+    /// Whether a checkpoint written now holds the whole table of
+    /// workspaces: one that takes no more than an eighth of a block
+    /// always. Of a longer one the rows that changed are written, while
+    /// they take no more than half a block, until writing them into
+    /// every block since the table was written out has cost as much as
+    /// the table takes: it is then written out again, and the rows that
+    /// changed are none.
+    fn whole(&self, state: &State) -> bool {
+        let row = WORKSPACE_LEN as u64;
+        let table = row * state.workspaces.len() as u64;
+        let changed = row * state.changed.len() as u64;
+        let block = self.layout.block;
+        let blocks = state.end.saturating_sub(state.base) / block;
+        state.base == 0 || table <= block / 8 || changed > block / 2 || changed * blocks > table
+    }
+
     fn put_checkpoint(
         &self,
         state: &mut State,
         cut: Option<Cut>,
         out: &mut Vec<u8>,
     ) -> Result<(), OpLogError> {
-        let body = state.checkpoint(self.boot, self.synced).encode();
+        let whole = self.whole(state);
+        let body = state.checkpoint(self.boot, self.synced, whole).encode();
         let ext = Ext {
             cut,
             ..Ext::default()
@@ -102,7 +120,8 @@ impl Composer {
         cut: Option<Cut>,
         out: &mut Vec<u8>,
     ) -> Result<(), OpLogError> {
-        let body = state.checkpoint(self.boot, self.synced).encode();
+        let whole = self.whole(state);
+        let body = state.checkpoint(self.boot, self.synced, whole).encode();
         if !self.layout.opens_block(state.end) {
             let room = self.layout.room(state.end);
             out.resize(out.len() + room as usize, 0);

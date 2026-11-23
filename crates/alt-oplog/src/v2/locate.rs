@@ -25,14 +25,14 @@ impl Located {
     }
 }
 
-/// The state the checkpoint frame at `at` gives, when one reads there
-/// and ends within `len`.
-pub(crate) fn checkpoint_at(
+/// What the checkpoint frame at `at` says, and where it ends, when one
+/// reads there and ends within `len`.
+fn said_at(
     layout: &Layout,
     len: u64,
     at: u64,
     read: &mut ReadAt,
-) -> std::io::Result<Option<Located>> {
+) -> std::io::Result<Option<(Checkpoint, u64)>> {
     let Some(left) = len
         .checked_sub(at)
         .filter(|left| *left >= HEADER_LEN as u64)
@@ -59,11 +59,37 @@ pub(crate) fn checkpoint_at(
         return Ok(None);
     };
     let body = &bytes[body_at(header)..bytes.len() - 8];
-    let said = Checkpoint::decode(body).filter(|said| said.precedes(at));
-    Ok(said.map(|said| Located {
-        boot: said.boot,
-        state: State::of(said, at, end),
-    }))
+    Ok(Checkpoint::decode(body).map(|said| (said, end)))
+}
+
+/// The state the checkpoint frame at `at` gives, when one reads there
+/// and ends within `len`: with the table of the checkpoint it names,
+/// which lies before it, where it holds the rows that changed since.
+pub(crate) fn checkpoint_at(
+    layout: &Layout,
+    len: u64,
+    at: u64,
+    read: &mut ReadAt,
+) -> std::io::Result<Option<Located>> {
+    let Some((said, end)) = said_at(layout, len, at, read)? else {
+        return Ok(None);
+    };
+    let (boot, mut changed) = (said.boot, Vec::new());
+    let whole = match said.base {
+        0 => Some(said),
+        base if base < at => {
+            changed = said.workspaces.iter().map(|row| row.id).collect();
+            let table = said_at(layout, at, base, read)?;
+            table.and_then(|(table, _)| said.over(table))
+        }
+        _ => None,
+    };
+    Ok(whole
+        .filter(|whole| whole.precedes(at))
+        .map(|whole| Located {
+            boot,
+            state: State::of(whole, changed, at, end),
+        }))
 }
 
 /// Where a read of a log `len` bytes long begins: the state of the

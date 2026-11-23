@@ -10,11 +10,20 @@
 //! [before where the ops may be of the kinds a version 1 log held u64]
 //! [the last frame that says nothing is appended after it by whoever does
 //!  not know it u64, or zero]
-//! [workspaces u32], each
+//! [the checkpoint whose table its rows are changes to u64, or zero]
+//! [rows u32], each a workspace
 //!   [id 8][its last op's frame u64][its last op that can be undone u64]
 //!   [its last op that changed the index u64][the index's checksum then 20]
 //!   [the frame that began the step it is in u64, or zero]
 //! ```
+//!
+//! The rows are the whole table of workspaces, or, of a checkpoint that
+//! names another, the rows that changed since that one was written: it
+//! holds the whole table, and a row whose workspace has no last op says
+//! the workspace is gone from it. A table of many workspaces is so
+//! written out now and then, and the checkpoints of the blocks between
+//! cost what the workspaces at work take. Which of the two a checkpoint
+//! holds is its writer's to choose.
 //!
 //! Everything in it follows from the frames before it, and a full check
 //! derives it again.
@@ -23,10 +32,13 @@ use crate::OpId;
 use crate::v2::frame::OdbBounds;
 
 const VERSION: u8 = 1;
-const FIXED_LEN: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 8 + 4;
-const WORKSPACE_LEN: usize = 8 + 8 + 8 + 8 + 20 + 8;
+const FIXED_LEN: usize = BASE_AT + 8 + 4;
+/// how long a row of the table is
+pub const WORKSPACE_LEN: usize = 8 + 8 + 8 + 8 + 20 + 8;
 /// where the generation lies in the body
 const GENERATION_AT: usize = 17;
+/// where the checkpoint it names for its table does
+const BASE_AT: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 8;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Workspace {
@@ -52,6 +64,9 @@ pub struct Checkpoint {
     pub linked: u64,
     pub migrated: u64,
     pub required: u64,
+    /// the checkpoint that holds the table the rows are changes to, or
+    /// zero where they are the whole table
+    pub base: u64,
     /// in the order of their ids
     pub workspaces: Vec<Workspace>,
 }
@@ -61,6 +76,13 @@ pub struct Checkpoint {
 pub fn generation_of(body: &[u8]) -> Option<u32> {
     let bytes = body.get(GENERATION_AT..GENERATION_AT + 4)?;
     Some(u32::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+/// The checkpoint the one with this body names for its table: zero for
+/// one that holds the whole of it.
+pub fn base_of(body: &[u8]) -> Option<u64> {
+    let bytes = body.get(BASE_AT..BASE_AT + 8)?;
+    Some(u64::from_le_bytes(bytes.try_into().unwrap()))
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -86,8 +108,28 @@ impl Checkpoint {
         OpId(self.head)
     }
 
+    /// The checkpoint with the whole table: the rows of `whole`, which
+    /// this one names, as its own rows change them. `None` where `whole`
+    /// is itself one of changes.
+    pub fn over(mut self, whole: Checkpoint) -> Option<Checkpoint> {
+        let mut table = whole.workspaces;
+        for row in std::mem::take(&mut self.workspaces) {
+            match (
+                table.binary_search_by(|held| held.id.cmp(&row.id)),
+                row.last,
+            ) {
+                (Ok(at), 0) => drop(table.remove(at)),
+                (Ok(at), _) => table[at] = row,
+                (Err(_), 0) => {}
+                (Err(at), _) => table.insert(at, row),
+            }
+        }
+        self.workspaces = table;
+        (whole.base == 0).then_some(self)
+    }
+
     /// Whether every place it names lies before `at` as the places of a
-    /// log do that a checkpoint at `at` stands for.
+    /// log do that a checkpoint at `at` stands for, its table whole.
     pub fn precedes(&self, at: u64) -> bool {
         let rows = self.workspaces.iter().all(|row| {
             row.last <= self.head_at
@@ -102,6 +144,7 @@ impl Checkpoint {
             && self.synced <= at
             && self.migrated <= at
             && self.required < at
+            && self.base < at
             && self.linked_at <= self.head_at
             && self.linked <= self.seq
     }
@@ -120,7 +163,8 @@ impl Checkpoint {
             out.extend_from_slice(&len.to_le_bytes());
         }
         out.extend_from_slice(&self.odb.generation.to_le_bytes());
-        for word in [self.linked_at, self.linked, self.migrated, self.required] {
+        let words = [self.linked_at, self.linked, self.migrated];
+        for word in words.into_iter().chain([self.required, self.base]) {
             out.extend_from_slice(&word.to_le_bytes());
         }
         out.extend_from_slice(&(self.workspaces.len() as u32).to_le_bytes());
@@ -160,6 +204,7 @@ impl Checkpoint {
         checkpoint.linked = read.word()?;
         checkpoint.migrated = read.word()?;
         checkpoint.required = read.word()?;
+        checkpoint.base = read.word()?;
         let count = read.part()? as usize;
         if read.0.len() != count.checked_mul(WORKSPACE_LEN)? {
             return None;
