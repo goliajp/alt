@@ -1,7 +1,7 @@
 //! Resolves the deltas below one base of a received pack.
 
 use crate::{
-    Error, Kind, Oid,
+    Error, Kind, OidMap,
     ingest::{Limits, Meta, digest},
     object,
     scan::{self, Raw},
@@ -15,7 +15,7 @@ use std::{
 pub(crate) struct Shared<'a> {
     pub pack: &'a [u8],
     pub entries: &'a [Raw],
-    pub by_base: &'a HashMap<Oid, Vec<usize>>,
+    pub by_base: &'a OidMap<Vec<usize>>,
     pub limits: &'a Limits,
     /// bytes of the objects that deltas made and further deltas wait for, on every
     /// thread together

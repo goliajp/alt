@@ -6,11 +6,11 @@
 //! the repository. Whoever may read a repository may ask for all that its
 //! refs reach, and for nothing else that is in its store.
 
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
+use alt_hash::KeyedIdSet;
 use alt_repo::Repository;
 use alt_wire::fetch::{FetchRequest, encode_fetch_response_packfile};
 
@@ -88,8 +88,8 @@ fn read(repo: &Repository, oid: &ObjectId) -> Res<alt_git_codec::RawObject> {
 /// out are asked for one by one, and are looked for from the refs down.
 fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
     let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
-    let mut seen: HashSet<ObjectId> = tips.iter().copied().collect();
-    let mut sought: HashSet<ObjectId> = req.wants.iter().copied().collect();
+    let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
+    let mut sought: KeyedIdSet<ObjectId> = req.wants.iter().copied().collect();
     sought.retain(|want| !seen.contains(want));
     let algo = repo.algo()?;
     let mut ahead = tips;

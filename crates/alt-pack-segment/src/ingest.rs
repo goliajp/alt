@@ -1,7 +1,7 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
+    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, OidMap, Record, SegmentSet,
     carried::Carried,
     descend::{Frame, Shared, descend},
     format::{self, CommitRow, Delta, NO_BASE},
@@ -131,7 +131,7 @@ pub fn ingest_holding(
         .map(|(index, raw)| (raw.offset, index))
         .collect();
     let mut offset_children: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut by_base: HashMap<Oid, Vec<usize>> = HashMap::new();
+    let mut by_base: OidMap<Vec<usize>> = OidMap::default();
     for (index, raw) in entries.iter().enumerate() {
         match raw.form {
             Form::Plain(_) => {}

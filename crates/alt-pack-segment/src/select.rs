@@ -7,10 +7,10 @@
 //! same paths, from the trees of the commits it has.
 
 use crate::{
-    Error, Kind, Oid, SegmentSet,
+    Error, Kind, Oid, OidMap, OidSet, SegmentSet,
     object::{self, Parsed},
 };
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap};
 
 const WANT: u8 = 1;
 const HAVE: u8 = 2;
@@ -23,7 +23,7 @@ const EXACT_FROM: u64 = 256 * 1024;
 pub struct Selection {
     pub(crate) objects: Vec<Oid>,
     /// objects the client is known to hold; usable as delta bases of a thin pack
-    pub(crate) known: HashSet<Oid>,
+    pub(crate) known: OidSet,
 }
 
 impl Selection {
@@ -43,7 +43,7 @@ impl Selection {
 /// adds `bit` to a commit's flags, queueing it on first sight; `open` counts queued commits
 /// that are wanted and not known to be held
 fn mark(
-    flags: &mut HashMap<Oid, u8>,
+    flags: &mut OidMap<u8>,
     heap: &mut BinaryHeap<(u32, Oid)>,
     open: &mut usize,
     oid: Oid,
@@ -107,12 +107,12 @@ fn entries(data: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
 struct Found {
     /// candidates in the order found, with whether each is a blob
     objects: Vec<(Oid, bool)>,
-    seen: HashSet<Oid>,
-    known: HashSet<Oid>,
+    seen: OidSet,
+    known: OidSet,
     /// trees whose whole content is in `known`
-    walked: HashSet<Oid>,
+    walked: OidSet,
     /// comparisons made: a tree and the tree it was compared with
-    compared: HashSet<(Oid, Option<Oid>)>,
+    compared: alt_hash::KeyedIdSet<(Oid, Option<Oid>)>,
 }
 
 impl Found {
@@ -243,7 +243,7 @@ impl SegmentSet {
     /// objects reachable from `wants` and not from `haves`; unknown haves are ignored
     pub fn select(&self, wants: &[Oid], haves: &[Oid]) -> Result<Selection, Error> {
         let mut found = Found::default();
-        let mut flags: HashMap<Oid, u8> = HashMap::new();
+        let mut flags: OidMap<u8> = OidMap::default();
         let mut heap = BinaryHeap::new();
         let mut open = 0usize;
         let mut trees = Vec::new();

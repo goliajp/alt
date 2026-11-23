@@ -11,13 +11,13 @@
 //! inflated and hashed again, so a merge can only publish what verifies.
 
 use crate::{
-    Error, Kind, Limits, Oid, Segment, SegmentSet,
+    Error, Kind, Limits, OidMap, Segment, SegmentSet,
     format::Delta,
     ingest,
     scan::{self, Form},
     send::{entry_header, pack_header},
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// A delta this deep is stored whole. Git's own packs stop at fifty.
 const DEPTH: u16 = 50;
@@ -42,7 +42,7 @@ pub fn merge(parts: &[Arc<Segment>], older: &SegmentSet) -> Result<Vec<u8>, Erro
     let all = SegmentSet::new(all);
     let mut pack = pack_header(0)?.to_vec();
     // where each object was written, and how long the delta chain under it is
-    let mut written: HashMap<Oid, (u64, u16)> = HashMap::new();
+    let mut written: OidMap<(u64, u16)> = OidMap::default();
     for part in parts {
         let mut order = Vec::with_capacity(part.len());
         for index in 0..part.len() {

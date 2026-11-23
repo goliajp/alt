@@ -8,7 +8,7 @@ use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, Reques
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::BTreeSet,
     io::{Read, Write},
     os::unix::fs::OpenOptionsExt,
     sync::Arc,
@@ -43,7 +43,7 @@ fn ancestor(set: &SegmentSet, old: &Oid, new: &Oid, remaining: &mut usize) -> Re
     let Some(floor) = set.commit(old).map(|commit| commit.generation) else {
         return Ok(false);
     };
-    let mut seen = HashSet::new();
+    let mut seen = alt_hash::KeyedIdSet::default();
     let mut pending = vec![*new];
     while let Some(oid) = pending.pop() {
         *remaining = remaining

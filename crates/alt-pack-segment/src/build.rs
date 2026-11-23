@@ -10,16 +10,13 @@
 //! `finish` that has not been inflated and compared with what was handed over.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
+    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, OidMap, Record, SegmentSet,
     format::{self, CommitRow, Delta, NO_BASE},
     object::{self, Parsed},
     object_id,
     send::{entry_header, pack_header},
 };
-use std::{
-    collections::HashMap,
-    io::{BufReader, Read, Seek, SeekFrom, Write},
-};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 
 /// the zlib stream of one object's bytes
 pub type Compress = fn(&[u8]) -> Vec<u8>;
@@ -39,9 +36,9 @@ pub struct Builder<'a, W> {
     declared: usize,
     records: Vec<Record>,
     commits: Vec<CommitRow>,
-    seen: HashMap<Oid, Kind>,
+    seen: OidMap<Kind>,
     /// referenced and not handed over yet: the kind expected and one object that refers to it
-    wanted: HashMap<Oid, (Kind, Oid)>,
+    wanted: OidMap<(Kind, Oid)>,
     flags: u32,
 }
 
@@ -82,8 +79,8 @@ impl<'a, W: Read + Write + Seek> Builder<'a, W> {
             declared: objects as usize,
             records: Vec::with_capacity(objects as usize),
             commits: Vec::new(),
-            seen: HashMap::with_capacity(objects as usize),
-            wanted: HashMap::new(),
+            seen: OidMap::with_capacity_and_hasher(objects as usize, Default::default()),
+            wanted: OidMap::default(),
             flags: 0,
         };
         builder.put(&pack_header(objects)?)?;

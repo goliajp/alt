@@ -1,12 +1,11 @@
 //! Generation numbers of the commits a new segment carries.
 
-use crate::{Error, Oid, SegmentSet, format::CommitRow};
-use std::collections::HashMap;
+use crate::{Error, OidMap, SegmentSet, format::CommitRow};
 
 /// Sets each commit's generation to one more than the largest among its parents,
 /// which are other rows of `commits` or commits of `existing`.
 pub(crate) fn assign(commits: &mut [CommitRow], existing: &SegmentSet) -> Result<(), Error> {
-    let slot: HashMap<Oid, usize> = commits
+    let slot: OidMap<usize> = commits
         .iter()
         .enumerate()
         .map(|(at, commit)| (commit.oid, at))

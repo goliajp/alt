@@ -7,7 +7,7 @@ use crate::{
     scan::{self, Form},
     select::Selection,
 };
-use std::{collections::HashSet, io::Write, sync::Arc};
+use std::{io::Write, sync::Arc};
 
 struct Hashing<'a, W: Write> {
     inner: &'a mut W,
@@ -122,7 +122,7 @@ impl SegmentSet {
         thin: bool,
         out: &mut impl Write,
     ) -> Result<(), Error> {
-        let chosen: HashSet<&Oid> = selection.objects.iter().collect();
+        let chosen: alt_hash::KeyedIdSet<&Oid> = selection.objects.iter().collect();
         let mut out = Hashing {
             inner: out,
             hasher: alt_hash::Sha1::new(),

@@ -569,8 +569,7 @@ impl Repository {
         roots: &[ObjectId],
         excludes: &[ObjectId],
     ) -> Result<Vec<(ObjectId, ObjectKind)>, RepoError> {
-        use std::collections::HashSet;
-        let mut uninteresting: HashSet<ObjectId> = HashSet::new();
+        let mut uninteresting = alt_hash::KeyedIdSet::<ObjectId>::default();
         let mut stack: Vec<ObjectId> = excludes.to_vec();
         while let Some(oid) = stack.pop() {
             if !uninteresting.insert(oid) {
@@ -579,7 +578,7 @@ impl Repository {
             self.expand_into(oid, &mut stack)?;
         }
 
-        let mut seen: HashSet<ObjectId> = HashSet::new();
+        let mut seen = alt_hash::KeyedIdSet::<ObjectId>::default();
         let mut out: Vec<(ObjectId, ObjectKind)> = Vec::new();
         let mut work: Vec<ObjectId> = roots
             .iter()

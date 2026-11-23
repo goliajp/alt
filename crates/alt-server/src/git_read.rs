@@ -7,11 +7,11 @@ use crate::{
     git_packs::{id, raw, segment_error},
 };
 use alt_git_codec::{HashAlgo, ObjectKind};
+use alt_hash::KeyedIdSet;
 use alt_pack_segment::{Kind, Oid, SegmentSet};
 use alt_repository_service::{Node, parse_node};
 use alt_server_store::{Error, PackView, RefScope, Result};
 use alt_wire::pkt;
-use std::collections::HashSet;
 
 const UPLOAD_RESULT: &str = "application/x-git-upload-pack-result";
 
@@ -128,7 +128,7 @@ pub(crate) fn read(
         return Err(Error::Integrity("empty Git wants"));
     }
     // as in Git's default configuration, only current ref tips can be asked for
-    let tips: HashSet<Oid> = view.refs.values().map(raw).collect();
+    let tips: KeyedIdSet<Oid> = view.refs.values().map(raw).collect();
     let wants: Vec<Oid> = request.wants.iter().map(|oid| raw(*oid)).collect();
     if wants.iter().any(|oid| !tips.contains(oid)) {
         return Err(Error::Unauthorized);
@@ -164,7 +164,7 @@ pub(crate) fn read(
     }
     let mut selection = set.select(&wants, &haves).map_err(segment_error)?;
     if request.include_tag {
-        let chosen: HashSet<&Oid> = selection.objects().iter().collect();
+        let chosen: KeyedIdSet<&Oid> = selection.objects().iter().collect();
         let mut more = wants.clone();
         for (name, oid) in view.refs.iter() {
             let tag = raw(oid);

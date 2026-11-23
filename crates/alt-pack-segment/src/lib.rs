@@ -34,6 +34,9 @@ pub use set::SegmentSet;
 pub use stream::ObjectStream;
 
 pub type Oid = [u8; 20];
+/// Tables keyed by ids a peer chooses.
+pub(crate) type OidMap<V> = alt_hash::KeyedIdMap<Oid, V>;
+pub(crate) type OidSet = alt_hash::KeyedIdSet<Oid>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
