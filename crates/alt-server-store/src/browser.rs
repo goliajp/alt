@@ -9,7 +9,7 @@ use alt_remote_protocol::DeploymentMode;
 mod budget;
 mod login;
 pub(crate) use budget::login_budget;
-pub use login::PasswordProof;
+pub use login::{PasswordAttempt, PasswordProof};
 
 #[derive(Clone, alt_json::ToJson)]
 pub struct LocalUser {

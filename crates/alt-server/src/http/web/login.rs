@@ -29,14 +29,13 @@ pub(super) fn run(
     store: &mut Store,
     browser: &WebOptions,
     key: &alt_crypto::ed25519::SigningKey,
-    peer: IpAddr,
+    attempt: Option<alt_server_store::PasswordAttempt>,
     claim: &Claim,
     raw: &[u8],
 ) -> Result<(Output, Option<String>)> {
     let input: Login = alt_json::from_slice(raw)?;
-    let proof = store
-        .verify_browser_password(&browser.origin, &input.login_name, &input.password, peer)?
-        .ok_or(Error::Unauthorized)?;
+    let attempt = attempt.ok_or(Error::Unauthorized)?;
+    let proof = attempt.check(&input.password)?.ok_or(Error::Unauthorized)?;
     if !claim.decide(WRITING) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,

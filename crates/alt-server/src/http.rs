@@ -136,6 +136,8 @@ pub struct HttpOptions {
     pub receiving_bytes: u64,
     /// how often requests whose time to upload ran out are ended
     pub expiry_interval: Duration,
+    /// the passwords that are checked at once: each takes the memory of one hash
+    pub password_places: usize,
     pub native: NativeOptions,
 }
 struct App {
@@ -243,9 +245,9 @@ pub async fn serve_with_browser(
         factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
         receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
+        passwords: hashers::Hashers::new(options.password_places),
         options,
         browser,
-        passwords: hashers::Hashers::new(2),
     });
     if !state.factory.change_links.is_empty() {
         background.spawn(crate::change_links::worker(

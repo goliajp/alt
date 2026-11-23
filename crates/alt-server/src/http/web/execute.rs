@@ -13,6 +13,8 @@ pub(super) struct Call {
     pub(super) token: Option<String>,
     pub(super) peer: IpAddr,
     pub(super) claim: Arc<login::Claim>,
+    /// the sign-in attempt that was let in, where the request is one
+    pub(super) attempt: Option<alt_server_store::PasswordAttempt>,
 }
 impl Call {
     /// the output and, when the session changes, the cookie to set
@@ -28,6 +30,7 @@ impl Call {
             token,
             peer,
             claim,
+            attempt,
         } = self;
         let mut source = source;
         source.as_file_mut().rewind()?;
@@ -66,7 +69,7 @@ impl Call {
                 &mut store,
                 &browser,
                 &factory.signing_key,
-                peer,
+                attempt,
                 &claim,
                 &raw,
             );

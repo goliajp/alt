@@ -98,3 +98,49 @@ fn sign_in_whose_session_write_outlives_its_request_reports_an_unknown_outcome()
     drop(server);
     assert_eq!(sessions(&f), 1);
 }
+
+/// the status and the message of what a sign-in was answered with, and how long it took
+fn answered(server: &Running) -> (u16, String, Duration) {
+    let body = alt_json::to_vec(&alt_json::json!({"login_name":"reader","password":PASSWORD}));
+    let began = std::time::Instant::now();
+    let response = match ureq::post(&format!("{}/web/login", server.url))
+        .timeout(Duration::from_secs(30))
+        .set("Origin", ORIGIN)
+        .set("Content-Type", "application/json")
+        .send_bytes(&body.unwrap())
+    {
+        Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+        Err(error) => panic!("{error}"),
+    };
+    let (status, taken) = (response.status(), began.elapsed());
+    let failure: alt_json::Value = json::body(response);
+    let message = failure["message"].as_str().unwrap().to_owned();
+    (status, message, taken)
+}
+
+/// No place to check a password in comes free. A sign-in that is let in waits for
+/// one as long as a request may run. One that is refused for the number of
+/// sign-ins there have been is refused before it would wait: it takes no place,
+/// and keeps nobody who is let in from one.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_sign_in_refused_for_how_many_there_were_waits_for_no_place_to_check_its_password_in() {
+    let mut f = Fixture::new();
+    let wait = Duration::from_secs(3);
+    let server = start(&mut f, |_, options| {
+        options.password_places = 0;
+        options.work_timeout = wait;
+    });
+    let (status, message, taken) = answered(&server);
+    assert_eq!((status, message.as_str()), (503, "Sign-in service is busy"));
+    assert!(taken >= wait, "{taken:?}");
+    // every count of sign-ins is at what it may be
+    let spent = f
+        .client()
+        .execute("UPDATE alt_login_budgets SET attempts=1000000", &[])
+        .unwrap();
+    assert!(spent >= 3, "{spent} counts were kept of the sign-in");
+    let (status, message, taken) = answered(&server);
+    assert_eq!(status, 409, "{message}");
+    assert!(taken < wait, "{taken:?}");
+}

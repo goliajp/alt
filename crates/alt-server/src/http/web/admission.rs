@@ -1,5 +1,6 @@
 //! What a browser request waits for before it runs: its body and a worker.
 use super::*;
+use alt_server_store::PasswordAttempt;
 use tokio::sync::OwnedSemaphorePermit;
 
 /// the response to a request that is not gone on with
@@ -106,8 +107,14 @@ pub(super) async fn admitted(
             false => 0,
         };
         let (source, _) = receive(state, &caller, body, small).await?;
+        // a sign-in is counted, and refused where there were too many, before
+        // it waits for a place to have its password checked in
+        let attempt = match route {
+            WebRoute::Login => Some(let_in(state, browser, peer, source.path()).await?),
+            _ => None,
+        };
         let (permit, hashing) = admit(state, &caller, password).await?;
-        return Ok((source, permit, hashing));
+        return Ok((source, permit, hashing, attempt));
     };
     let (permit, hashing) = admit(state, &caller, password).await?;
     let bound = portable_bound(state, browser, selected.clone(), token.clone(), permit);
@@ -121,15 +128,53 @@ pub(super) async fn admitted(
     let (source, slot) = receive(state, &caller, body, max).await?;
     let permit = receiving::worker(state, None).await?;
     drop(slot);
-    Ok((source, permit, hashing))
+    Ok((source, permit, hashing, None))
 }
 
-/// the body of a request, its worker and its place among those that hash passwords
+/// the body of a request, its worker, its place among those that hash passwords,
+/// and the sign-in attempt that was let in
 type Admitted = (
     alt_os::temp::NamedTempFile,
     OwnedSemaphorePermit,
     Option<OwnedSemaphorePermit>,
+    Option<PasswordAttempt>,
 );
+
+/// The sign-in attempt in the body at `body`, counted and let in, on a worker it
+/// has for no longer than that takes.
+async fn let_in(
+    state: &App,
+    browser: &WebOptions,
+    peer: IpAddr,
+    body: &std::path::Path,
+) -> std::result::Result<PasswordAttempt, Refusal> {
+    let worker = state.workers.clone().try_acquire_owned();
+    let worker = worker.map_err(|_| busy("Instance is busy"))?;
+    let (factory, origin, body) = (
+        state.factory.clone(),
+        browser.origin.clone(),
+        body.to_owned(),
+    );
+    let counted = tokio::time::timeout(
+        state.options.work_timeout,
+        crate::http::spawn_observed(Phase::Execute, move || {
+            let _worker = worker;
+            let input: super::input::Login = alt_json::from_slice(&std::fs::read(body)?)?;
+            let mut store = factory.open()?;
+            store.check_browser_binding(Some(&origin))?;
+            let attempt =
+                store.admit_browser_password(&origin, &input.login_name, &input.password, peer)?;
+            Ok::<_, Error>(attempt)
+        }),
+    )
+    .await;
+    match counted {
+        Ok(Ok(Ok(attempt))) => Ok(attempt),
+        Ok(Ok(Err(Error::Unauthorized))) => Err(Box::new(unauthenticated())),
+        Ok(Ok(Err(error))) => Err(Box::new(store_failure(error, None))),
+        _ => Err(busy("Sign-in could not be counted in time")),
+    }
+}
 
 /// the body bound of a migration request, once its caller is authorized on the
 /// worker `permit` is of; no error means the check did not finish

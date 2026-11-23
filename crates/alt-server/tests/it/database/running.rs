@@ -60,6 +60,7 @@ impl Running {
             receiving_each: 4,
             receiving_bytes: 1 << 30,
             expiry_interval: Duration::from_secs(3600),
+            password_places: 2,
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),

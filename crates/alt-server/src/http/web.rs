@@ -198,7 +198,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     }
     let body = request.into_body();
     let admitted = admission::admitted(&state, &browser, &route, &token, peer, body, writing);
-    let (source, permit, password_permit) = match admitted.await {
+    let (source, permit, password_permit, attempt) = match admitted.await {
         Ok(admitted) => admitted,
         Err(refusal) => return *refusal,
     };
@@ -210,6 +210,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         token,
         peer,
         claim: claim.clone(),
+        attempt,
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
