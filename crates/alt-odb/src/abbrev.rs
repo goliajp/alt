@@ -30,6 +30,12 @@ impl Abbrev<'_> {
         bits.div_ceil(2).max(7)
     }
 
+    /// The same, starting from `len` digits in place of the default.
+    pub fn from_len(mut self, len: usize) -> Self {
+        self.min = len;
+        self
+    }
+
     /// The default number of digits for this store.
     pub fn min_len(&self) -> usize {
         self.min

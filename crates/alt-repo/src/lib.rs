@@ -9,6 +9,7 @@
 mod alt_backend;
 mod object_format;
 mod odb;
+mod revspec;
 mod revwalk;
 mod ssh_url;
 
@@ -410,123 +411,7 @@ impl Repository {
         }
     }
 
-    /// Resolves a revision spec: full hex, or a ref name through git's
-    /// DWIM lookup order, optionally followed by ancestor operators
-    /// `~N` / `^N` (git rev-parse §SPECIFYING REVISIONS).
-    ///
-    /// Ancestor operators applied left-to-right against the base oid:
-    /// - `<rev>~`     == one first-parent step
-    /// - `<rev>~N`    == N first-parent steps (N=0 is a no-op)
-    /// - `<rev>^`     == first parent (= `<rev>^1`)
-    /// - `<rev>^N`    == N-th parent (`^2` picks the merge's second parent)
-    /// - `<rev>^0`    == the commit itself, after peeling any tag
-    ///
-    /// They compose: `HEAD~2^^~3` walks first parent twice, then takes
-    /// first parent twice, then first parent three more times.
-    pub fn rev_parse(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
-        let split = spec.find(['~', '^']);
-        let (base, suffix) = match split {
-            None => (spec, ""),
-            Some(i) => (&spec[..i], &spec[i..]),
-        };
-        let Some(mut oid) = self.resolve_base(base)? else {
-            return Ok(None);
-        };
-
-        let bytes = suffix.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            let op = bytes[i];
-            i += 1;
-            // Optional numeric count attached to the operator.
-            let mut n: usize = 0;
-            let mut had_digit = false;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                let Some(next) = n
-                    .checked_mul(10)
-                    .and_then(|v| v.checked_add((bytes[i] - b'0') as usize))
-                else {
-                    return Ok(None);
-                };
-                n = next;
-                i += 1;
-                had_digit = true;
-            }
-            let n = if had_digit { n } else { 1 };
-
-            // Peel tags before reading the commit; ancestor operators
-            // are commit-relative even when the user named a tag.
-            let (peeled, _) = self.peel(oid)?;
-            let commit = self.read_commit(&peeled)?;
-            oid = match op {
-                b'~' => {
-                    let mut cur = peeled;
-                    let mut cur_commit = commit;
-                    for _ in 0..n {
-                        let Some(p) = cur_commit.parents().next() else {
-                            return Ok(None);
-                        };
-                        cur = p;
-                        cur_commit = self.read_commit(&cur)?;
-                    }
-                    cur
-                }
-                b'^' => {
-                    if n == 0 {
-                        peeled
-                    } else {
-                        let Some(p) = commit.parents().nth(n - 1) else {
-                            return Ok(None);
-                        };
-                        p
-                    }
-                }
-                _ => return Ok(None),
-            };
-        }
-        Ok(Some(oid))
-    }
-
-    /// The non-suffix portion of `rev_parse`: full hex, or a ref name
-    /// through git's DWIM lookup order. Pulled out so the suffix walker
-    /// can recurse on the base independently of operator parsing.
-    fn resolve_base(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
-        if spec.is_empty() {
-            return Ok(None);
-        }
-        if let Ok(oid) = ObjectId::from_hex(spec.as_bytes())
-            && oid.algo() == self.algo()?
-        {
-            return Ok(Some(oid));
-        }
-        for candidate in [
-            spec.to_owned(),
-            format!("refs/{spec}"),
-            format!("refs/tags/{spec}"),
-            format!("refs/heads/{spec}"),
-            format!("refs/remotes/{spec}"),
-            format!("refs/remotes/{spec}/HEAD"),
-        ] {
-            if let Some(oid) = self.resolve_ref(&candidate)? {
-                return Ok(Some(oid));
-            }
-        }
-        // Short hex prefix as the final DWIM step: ≥ 4 hex chars, less
-        // than the full hex length (the full-hex case is already handled
-        // above), and unique within the odb. Returns
-        // AmbiguousShortOid when multiple objects match, so the caller
-        // surfaces a clear message instead of a silent miss.
-        if spec.len() >= 4
-            && spec.chars().all(|c| c.is_ascii_hexdigit())
-            && spec.len() < self.algo()?.hex_len()
-            && let Some(oid) = self.resolve_short_oid(spec)?
-        {
-            return Ok(Some(oid));
-        }
-        Ok(None)
-    }
-
-    fn resolve_short_oid(&self, prefix: &str) -> Result<Option<ObjectId>, RepoError> {
+    pub(crate) fn resolve_short_oid(&self, prefix: &str) -> Result<Option<ObjectId>, RepoError> {
         match &self.backend {
             Backend::Alt(alt) => {
                 let matches = alt.odb()?.lookup_by_prefix(prefix, 4)?;
