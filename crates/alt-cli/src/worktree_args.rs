@@ -181,7 +181,7 @@ pub struct Mv {
 
 #[derive(alt_args::Args)]
 pub struct Stash {
-    /// What to do: push (the default), list, apply, pop, drop or clear;
+    /// What to do: push (the default), list, show, apply, pop, drop or clear;
     /// then the entry it is done to, as `stash@{1}` or `1`, the latest
     /// where none is named
     #[arg(hint = none)]
@@ -195,6 +195,9 @@ pub struct Stash {
     /// With apply and pop: bring back as staged what was staged
     #[arg(long)]
     pub index: bool,
+    /// With show: the patch of the entry instead of the summary
+    #[arg(short = 'p', long)]
+    pub patch: bool,
     /// Do not say what was saved, applied or dropped
     #[arg(short = 'q', long)]
     pub quiet: bool,
@@ -206,6 +209,61 @@ pub struct Stash {
 impl Stash {
     /// Whether the command only reads the stack.
     pub fn reads(&self) -> bool {
-        self.words.first().is_some_and(|verb| verb == "list")
+        self.words
+            .first()
+            .is_some_and(|verb| verb == "list" || verb == "show")
+    }
+}
+
+#[derive(alt_args::Args)]
+pub struct Diff {
+    /// What to compare: nothing for the index and the files; one commit
+    /// for that commit and the files; two commits, or `A..B`, for one and
+    /// the other; `A...B` for what B changed since the two parted
+    #[arg(hint = "rev")]
+    pub revs: Vec<String>,
+    /// Only what changed at these paths
+    #[arg(last = true, hint = "path-tracked")]
+    pub paths: Vec<String>,
+    /// Compare with the index in place of the files: HEAD, or the commit
+    /// given, against what is staged
+    #[arg(long, visible_alias = "staged")]
+    pub cached: bool,
+    /// Emit a structured JSON diff instead of unified text
+    #[arg(long)]
+    pub json: bool,
+    /// Show an AST-level diff per supported language: item-level
+    /// logical vs format-only changes for `.rs` files; line/binary diff
+    /// for files without a parser.
+    #[arg(long)]
+    pub semantic: bool,
+    /// Print the path of each file that changed and nothing else
+    #[arg(long = "name-only", conflicts_with_all = ["name_status", "stat", "json"])]
+    pub name_only: bool,
+    /// Print a letter for how each file changed, and its path
+    #[arg(long = "name-status", conflicts_with_all = ["stat", "json"])]
+    pub name_status: bool,
+    /// Print how many lines changed in each file, and in all
+    #[arg(long, conflicts_with = "json")]
+    pub stat: bool,
+}
+
+impl Diff {
+    pub fn request(&self) -> crate::native::DiffRequest<'_> {
+        use crate::native::Summary;
+        let summary = match (self.name_only, self.name_status, self.stat) {
+            (true, ..) => Some(Summary::NameOnly),
+            (_, true, _) => Some(Summary::NameStatus),
+            (_, _, true) => Some(Summary::Stat),
+            _ => None,
+        };
+        crate::native::DiffRequest {
+            revs: &self.revs,
+            paths: &self.paths,
+            cached: self.cached,
+            json: self.json,
+            semantic: self.semantic,
+            summary,
+        }
     }
 }

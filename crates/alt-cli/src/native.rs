@@ -33,6 +33,7 @@ mod convert;
 mod coord;
 pub use coord::{Coord, branch_at, resolve_workspace};
 mod diff;
+pub use diff::{DiffRequest, Summary};
 mod flow;
 mod http_auth;
 mod identity;

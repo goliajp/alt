@@ -1,4 +1,5 @@
-//! `alt diff`: index to working tree, or HEAD to index with `--cached`.
+//! `alt diff`: index to working tree, a commit to either of them, or one
+//! commit to another.
 
 use super::*;
 use crate::file_header::{FileHeader, Side, Style};
@@ -15,38 +16,34 @@ struct Pair<'a> {
     similarity: Option<u32>,
 }
 
+mod between;
+mod summary;
 mod worktree;
 
+pub use between::{DiffRequest, Summary};
 use worktree::Worktree;
 
 impl NativeRepo<'_> {
-    /// `alt diff` (index → working tree) or `alt diff --cached` (HEAD →
-    /// index): a git-style unified diff of the tracked changes. With `json`,
-    /// emits the structured per-file/per-hunk schema. With
-    /// `semantic`, item-level AST diff replaces the unified diff for
-    /// files in a language we have a parser for (`.rs` today); other files
-    /// fall back to the same line/binary output as without `--semantic`.
-    pub fn diff(&self, cached: bool, json: bool, semantic: bool, out: &mut impl Write) -> Res<()> {
-        // old side is always read from the object store; the new side is the
-        // index (cached) or the live working tree (default).
-        let (old, new, disk): (Vec<WorkEntry>, Vec<WorkEntry>, Option<Worktree>) = if cached {
-            let staged = self.staged_changes()?;
-            let side = |pick: fn(alt_worktree::Staged) -> Option<WorkEntry>| {
-                staged.iter().cloned().filter_map(pick).collect()
-            };
-            (side(|s| s.old), side(|s| s.new), None)
-        } else {
-            let (old, new, disk) = self.worktree_sides()?;
-            (old, new, Some(disk))
-        };
+    /// `alt diff`: a git-style unified diff of the two sides `what` asks
+    /// for, at the paths it names. With `json`, emits the structured
+    /// per-file/per-hunk schema. With `semantic`, item-level AST diff
+    /// replaces the unified diff for files in a language we have a parser
+    /// for (`.rs` today); other files fall back to the same line/binary
+    /// output as without `--semantic`. A summary replaces the patch.
+    pub fn diff(&self, what: &DiffRequest<'_>, out: &mut impl Write) -> Res<()> {
+        let (json, semantic) = (what.json, what.semantic);
+        let sides = self.diff_sides(what.revs, what.cached)?;
+        let disk = sides.disk.as_ref();
+        let parse = |given: &String| pathspec::Spec::parse(&self.root, &self.prefix, given);
+        let specs: Vec<pathspec::Spec> = what.paths.iter().map(parse).collect::<Res<_>>()?;
+        let given = pathspec::Named::of(&specs);
         // a working-tree file with no index entry is untracked, not a diff
-        let show_added = cached;
-        let disk = disk.as_ref();
-
-        let changes: Vec<_> = alt_worktree::changes(&old, &new)
+        let changes: Vec<_> = alt_worktree::changes(&sides.old, &sides.new)
             .into_iter()
-            .filter(|ch| ch.old.is_some() || show_added)
+            .filter(|ch| ch.old.is_some() || sides.added)
+            .filter(|ch| specs.is_empty() || given.has(ch.path))
             .collect();
+        let cached = sides.added;
 
         let settings = self.settings()?;
         let info = self.store.alt_dir.join("git-import/info/attributes");
@@ -61,6 +58,10 @@ impl NativeRepo<'_> {
         if json {
             let pairs = self.pairs(&changes, cached)?;
             return self.diff_json(&pairs, disk, semantic, &style.sections, out);
+        }
+        if let Some(summary) = what.summary {
+            let pairs = self.pairs(&changes, cached)?;
+            return self.summarize(&pairs, disk, summary, &style, out);
         }
         let mut buf = Vec::new();
         for pair in self.pairs(&changes, cached)? {
@@ -81,10 +82,10 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// The changes as the patch shows them. Between HEAD and the index a
-    /// removed file and an added file that are one file renamed become one
-    /// entry, reported at the new path, as in git; the working tree never
-    /// adds a file to a diff, so there is nothing to pair there.
+    /// The changes as the patch shows them. Where the new side can add a
+    /// file (`cached`: any diff but index to working tree), a removed file
+    /// and an added file that are one file renamed become one entry,
+    /// reported at the new path, as in git.
     fn pairs<'c>(
         &self,
         changes: &'c [alt_worktree::Change<'c>],
@@ -384,18 +385,5 @@ impl NativeRepo<'_> {
             buf.extend_from_slice(&hunks);
         }
         Ok(())
-    }
-
-    /// The content one side of a change is diffed as. A gitlink has no blob
-    /// in this store: it diffs as the line git prints for a submodule.
-    fn side_bytes(&self, side: Option<&WorkEntry>, disk: Option<&Worktree>) -> Res<Vec<u8>> {
-        match (side, disk) {
-            (None, _) => Ok(Vec::new()),
-            (Some(w), _) if w.mode == 0o160000 => {
-                Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
-            }
-            (Some(w), Some(disk)) => self.worktree_bytes(w, disk),
-            (Some(w), None) => self.blob_bytes(w.oid),
-        }
     }
 }

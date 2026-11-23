@@ -28,6 +28,7 @@ mod crash;
 pub mod daemon;
 pub mod daemon_meta;
 pub mod diagnostics;
+mod diffstat;
 pub mod fsck;
 pub mod group_commit;
 pub mod hardening;

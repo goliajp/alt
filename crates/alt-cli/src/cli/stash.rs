@@ -30,12 +30,16 @@ pub(super) fn run<W: Write>(repo: &mut NativeRepo, args: &Stash, out: &mut W) ->
     if verb != "push" && (args.message.is_some() || args.include_untracked) {
         return Err(usage("-m and -u go with stash push"));
     }
+    if verb != "show" && args.patch {
+        return Err(usage("-p goes with stash show"));
+    }
     if !matches!(verb, "apply" | "pop") && args.index {
         return Err(usage("--index goes with stash apply and stash pop"));
     }
     match verb {
         "push" => repo.stash_push(args.message.as_deref(), args.include_untracked, said, out)?,
         "list" => repo.stash_list(args.json, out)?,
+        "show" => repo.stash_show(entry, args.patch, args.json, out)?,
         "drop" => repo.stash_drop(entry, said, out)?,
         "clear" => repo.stash_clear(args.json, out)?,
         "apply" | "pop" => {

@@ -45,6 +45,9 @@ fn canonical_matches(matches: &Matches) -> Value {
                 | "no_ff"
                 | "ff_only"
                 | "oneline"
+                | "name_only"
+                | "name_status"
+                | "stat"
         );
         if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;

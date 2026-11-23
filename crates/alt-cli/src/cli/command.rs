@@ -277,20 +277,8 @@ pub enum Command {
     },
     /// List, create (lightweight or annotated), or delete tags
     Tag(sequence_args::Tag),
-    /// Show changes between the index and the working tree (or HEAD)
-    Diff {
-        /// Show staged changes (HEAD vs index) instead of unstaged
-        #[arg(long, visible_alias = "staged")]
-        cached: bool,
-        /// Emit a structured JSON diff instead of unified text
-        #[arg(long)]
-        json: bool,
-        /// Show an AST-level diff per supported language: item-level
-        /// logical vs format-only changes for `.rs` files; line/binary diff
-        /// for files without a parser.
-        #[arg(long)]
-        semantic: bool,
-    },
+    /// Show changes between the index, the working tree and commits
+    Diff(worktree_args::Diff),
     /// Join another branch into the current one
     Merge {
         #[command(flatten)]

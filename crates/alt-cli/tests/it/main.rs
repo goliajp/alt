@@ -57,6 +57,7 @@ mod daemon_server;
 mod daemon_stop;
 mod damage_messages;
 mod diff;
+mod diff_between;
 mod diff_git;
 mod eol;
 mod exclude_dirs;

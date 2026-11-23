@@ -36,7 +36,7 @@ pub struct Said {
     pub json: bool,
 }
 
-fn not_a_revision(rev: &str) -> Box<dyn std::error::Error> {
+pub(super) fn not_a_revision(rev: &str) -> Box<dyn std::error::Error> {
     let said = format!(
         "fatal: ambiguous argument '{rev}': unknown revision or path not in the working tree.\n\
          Use '--' to separate paths from revisions, like this:\n\

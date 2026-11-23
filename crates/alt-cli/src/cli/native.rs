@@ -91,11 +91,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             out,
         )?,
         Command::Switch { name, create, json } => repo.switch(name, *create, *json, out)?,
-        Command::Diff {
-            cached,
-            json,
-            semantic,
-        } => repo.diff(*cached, *json, *semantic, out)?,
+        Command::Diff(args) => repo.diff(&args.request(), out)?,
         Command::Meta { op } => match op {
             MetaOp::Show { rev, json } => repo.meta_show(rev, *json, out)?,
             MetaOp::Set {

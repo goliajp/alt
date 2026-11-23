@@ -131,6 +131,29 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// `alt stash show [-p] [<entry>]`: what the entry changed in the
+    /// tracked files since the commit it was made on, as a summary or as
+    /// the patch.
+    pub fn stash_show(
+        &self,
+        named: Option<&str>,
+        patch: bool,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let (_, entry, _) = self.stash_entry(named)?;
+        let parents = self.commit_parents(entry.commit)?;
+        let base = parents.first().ok_or("a stashed commit has no parent")?;
+        let revs = [base.to_string(), entry.commit.to_string()];
+        let request = DiffRequest {
+            revs: &revs,
+            json,
+            summary: (!patch && !json).then_some(Summary::Stat),
+            ..Default::default()
+        };
+        self.diff(&request, out)
+    }
+
     /// `alt stash drop [<entry>]`: the entry out of the stack.
     pub fn stash_drop(
         &mut self,

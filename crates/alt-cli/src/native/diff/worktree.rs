@@ -56,4 +56,21 @@ impl NativeRepo<'_> {
         disk.attrs.check()?;
         Ok(stored.unwrap_or(content))
     }
+
+    /// The content one side of a change is diffed as. A gitlink has no blob
+    /// in this store: it diffs as the line git prints for a submodule.
+    pub(super) fn side_bytes(
+        &self,
+        side: Option<&WorkEntry>,
+        disk: Option<&Worktree>,
+    ) -> Res<Vec<u8>> {
+        match (side, disk) {
+            (None, _) => Ok(Vec::new()),
+            (Some(w), _) if w.mode == 0o160000 => {
+                Ok(format!("Subproject commit {}\n", w.oid).into_bytes())
+            }
+            (Some(w), Some(disk)) => self.worktree_bytes(w, disk),
+            (Some(w), None) => self.blob_bytes(w.oid),
+        }
+    }
 }

@@ -55,7 +55,7 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
     let excludes = match cmd {
         Add { args } => !args.renormalize,
         Commit { validate, .. } => !validate,
-        Diff { cached, .. } => *cached,
+        Diff(args) => args.cached,
         Switch { create, .. } => !create,
         // a sequence under way is ended or gone on with all the same
         Rebase { upstream, .. } => upstream.is_some(),

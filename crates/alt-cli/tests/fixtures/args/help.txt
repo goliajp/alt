@@ -37,7 +37,7 @@ Commands:
   cherry-pick  Apply the changes from a commit on top of the current branch
   config       Read or update git-style config keys (`user.name`, …)
   tag          List, create (lightweight or annotated), or delete tags
-  diff         Show changes between the index and the working tree (or HEAD)
+  diff         Show changes between the index, the working tree and commits
   merge        Join another branch into the current one
   flow         git-flow workflow operations (atomic, undoable)
   undo         Undo the last branch/HEAD operation (inverts one op log entry)
@@ -1542,12 +1542,13 @@ Put away what is not committed, and bring it back
 Usage: alt stash [OPTIONS] [WORDS]...
 
 Arguments:
-  [WORDS]...  What to do: push (the default), list, apply, pop, drop or clear; then the entry it is done to, as `stash@{1}` or `1`, the latest where none is named
+  [WORDS]...  What to do: push (the default), list, show, apply, pop, drop or clear; then the entry it is done to, as `stash@{1}` or `1`, the latest where none is named
 
 Options:
   -m, --message <MESSAGE>      With push: the message of the entry
   -u, --include-untracked      With push: put the untracked files away as well
       --index                  With apply and pop: bring back as staged what was staged
+  -p, --patch                  With show: the patch of the entry instead of the summary
   -q, --quiet                  Do not say what was saved, applied or dropped
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
@@ -1839,14 +1840,21 @@ Options:
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
 ### alt diff
-Show changes between the index and the working tree (or HEAD)
+Show changes between the index, the working tree and commits
 
-Usage: alt diff [OPTIONS]
+Usage: alt diff [OPTIONS] [REVS]... [-- <PATHS>...]
+
+Arguments:
+  [REVS]...        What to compare: nothing for the index and the files; one commit for that commit and the files; two commits, or `A..B`, for one and the other; `A...B` for what B changed since the two parted
+  [-- <PATHS>...]  Only what changed at these paths
 
 Options:
-      --cached                 Show staged changes (HEAD vs index) instead of unstaged [aliases: --staged]
+      --cached                 Compare with the index in place of the files: HEAD, or the commit given, against what is staged [aliases: --staged]
       --json                   Emit a structured JSON diff instead of unified text
       --semantic               Show an AST-level diff per supported language: item-level logical vs format-only changes for `.rs` files; line/binary diff for files without a parser
+      --name-only              Print the path of each file that changed and nothing else
+      --name-status            Print a letter for how each file changed, and its path
+      --stat                   Print how many lines changed in each file, and in all
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
