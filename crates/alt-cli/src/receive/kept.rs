@@ -96,7 +96,6 @@ mod tests {
         assert!(first.get(&elsewhere.0).unwrap().is_none());
 
         // and once that store has it, it is read there as anywhere
-        drop([first, second]);
         odbs[1].put(here.0, ObjectKind::Commit, &here.1).unwrap();
         odbs[1].flush().unwrap();
         let second = Objects {
