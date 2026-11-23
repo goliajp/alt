@@ -1,7 +1,7 @@
 //! `alt reset --soft` is refused while the index holds a conflict, as by
 //! git, whatever left the conflict there.
 
-use crate::like_git::{Pair, alt, files, git, heads, index, ok};
+use crate::like_git::{Pair, alt, fails, files, git, heads, index, ok};
 
 /// `main` and `side` both rewrite `f`.
 fn diverged() -> Pair {
@@ -45,8 +45,8 @@ fn a_soft_reset_is_refused_where_a_stash_came_back_in_conflict() {
     pair.both(&["stash"]);
     pair.write("f", "main two\n");
     pair.commit_all("main two");
-    assert!(!alt(&pair.alt, &["stash", "pop"]).status.success());
-    assert!(!git(&pair.git, &["stash", "pop"]).status.success());
+    fails(alt(&pair.alt, &["stash", "pop"]), 1);
+    fails(git(&pair.git, &["stash", "pop"]), 1);
     assert_soft_reset_refused(&pair);
 }
 

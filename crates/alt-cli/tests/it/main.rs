@@ -94,6 +94,7 @@ mod json_outputs;
 mod left_snapshots;
 mod lfs;
 mod like_git;
+mod of_late;
 mod lock_order;
 mod log_patch;
 mod log_range;

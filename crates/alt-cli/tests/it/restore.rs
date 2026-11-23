@@ -1,6 +1,7 @@
 //! `alt restore` and the path form of `alt checkout`, each beside git.
 
 use crate::like_git::{Pair, alt, alt_daemon, fails, files, git, index, index_at, ok};
+use crate::of_late;
 
 /// Two commits on `main`: the second changes `a` and adds `d/n`.
 fn history() -> Pair {
@@ -59,13 +60,13 @@ fn a_path_that_names_nothing_and_no_path_at_all_are_refused() {
         "error: pathspec 'nope' did not match any file(s) known to git\n"
     );
     pair.same_failure(&["restore"], 128);
-    // git words this one differently from one version to the next
-    let said = fails(alt(&pair.alt, &["restore", "--source", "nosuch", "a"]), 128);
-    assert!(
-        said.starts_with("fatal: could not resolve 'nosuch'\n"),
-        "{said}"
+    let unresolved = "fatal: could not resolve 'nosuch'\n";
+    of_late::same_failure(
+        &pair,
+        &["restore", "--source", "nosuch", "a"],
+        128,
+        unresolved,
     );
-    fails(git(&pair.git, &["restore", "--source", "nosuch", "a"]), 128);
     pair.assert_same_state();
 }
 

@@ -2,6 +2,7 @@
 //! index and in the tree, and what it refuses.
 
 use crate::like_git::{Pair, alt, alt_daemon, fails, files, git, index, index_at, ok};
+use crate::of_late;
 
 fn tree() -> Pair {
     let pair = Pair::new();
@@ -105,11 +106,8 @@ fn what_cannot_be_moved_is_refused_as_git_refuses_it() {
         let refused = pair.same_failure(args, 128);
         assert_eq!(refused, format!("fatal: {said}\n"), "{args:?}");
     }
-    // git words this one differently from one version to the next
-    let refused = fails(alt(&pair.alt, &["mv", "a", "nodir/a3"]), 128);
     let said = "fatal: destination directory does not exist, source=a, destination=nodir/a3\n";
-    assert!(refused.starts_with(said), "{refused}");
-    fails(git(&pair.git, &["mv", "a", "nodir/a3"]), 128);
+    of_late::same_failure(&pair, &["mv", "a", "nodir/a3"], 128, said);
     pair.write("e/d/z", "z\n");
     let refused = pair.same_failure(&["mv", "d", "e"], 128);
     assert_eq!(

@@ -3,7 +3,8 @@
 
 use std::os::unix::fs::PermissionsExt;
 
-use crate::like_git::{Pair, alt, files, git_version, index, ok};
+use crate::like_git::{Pair, alt, files, index, ok};
+use crate::of_late;
 use crate::stash::assert_same_stack;
 
 /// One path for each case, named after it: what HEAD has, what the index
@@ -98,11 +99,7 @@ fn each_combination_is_put_away_and_comes_back_as_by_git() {
         // a file the index had lost is put away twice by `-u`, as tracked
         // and as untracked, and the second is in the way of the first
         let failed = push.len() == 2;
-        assert_eq!(theirs.status.success(), !failed, "{told}");
-        match git_version() >= (2, 56) {
-            true => assert_eq!(ours.status.code(), theirs.status.code(), "{told}"),
-            false => assert_eq!(ours.status.success(), !failed, "{told}"),
-        }
+        of_late::same_status(&ours, &theirs, if failed { 128 } else { 0 }, &told);
         if failed {
             let said = String::from_utf8(ours.stderr).unwrap();
             let git_said = String::from_utf8(theirs.stderr).unwrap();

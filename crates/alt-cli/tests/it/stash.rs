@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use crate::like_git::{Pair, alt, alt_daemon, export, fails, files, git, heads, index, ok};
+use crate::of_late;
 
 fn tree() -> Pair {
     let pair = Pair::new();
@@ -161,7 +162,8 @@ fn an_apply_over_a_change_that_would_be_lost_is_refused() {
     pair.both(&["stash", "-u"]);
     pair.write("a", "mine\n");
     let (applied, git_applied) = pair.run(&["stash", "apply"]);
-    assert!(!applied.status.success() && !git_applied.status.success());
+    assert_eq!(applied.status.code(), Some(1));
+    assert_eq!(git_applied.status.code(), Some(1));
     let said = String::from_utf8(applied.stderr).unwrap();
     assert!(
         said.contains(
@@ -178,7 +180,7 @@ fn an_apply_over_a_change_that_would_be_lost_is_refused() {
     pair.both(&["restore", "a"]);
     pair.write("u", "in the way\n");
     let (applied, git_applied) = pair.run(&["stash", "apply"]);
-    assert!(!applied.status.success() && !git_applied.status.success());
+    of_late::same_status(&applied, &git_applied, 128, "an untracked file in the way");
     let said = String::from_utf8(applied.stderr).unwrap();
     assert!(said.contains("u already exists, no checkout\n"), "{said}");
     // as by git, the rest of the entry is applied all the same
@@ -208,16 +210,8 @@ fn entries_are_dropped_by_name_and_all_at_once() {
     pair.same_failure(&["stash", "apply", "stash@{4}"], 128);
     pair.same(&["stash", "clear"]);
     assert_eq!(exported_stack(&pair.alt), "");
-    // git ends with 128 here since 2.5x, with 1 before
     for verb in ["pop", "drop", "apply"] {
-        let none = fails(alt(&pair.alt, &["stash", verb]), 128);
-        assert!(none.starts_with("No stash entries found.\n"), "{none}");
-        let git_none = git(&pair.git, &["stash", verb]);
-        assert!(!git_none.status.success());
-        assert_eq!(
-            String::from_utf8_lossy(&git_none.stderr),
-            "No stash entries found.\n"
-        );
+        of_late::same_failure(&pair, &["stash", verb], 128, "No stash entries found.\n");
     }
 }
 
