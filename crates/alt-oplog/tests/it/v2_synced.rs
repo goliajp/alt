@@ -101,6 +101,42 @@ fn a_frame_appended_while_what_the_ops_name_is_synced_lies_past_the_boundary() {
 }
 
 #[test]
+fn a_writer_that_appends_after_what_another_boot_left_has_what_it_names_synced_first() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    log.append("a", 3, b"left by boot 1").unwrap();
+    let left = log.appended_len();
+    drop(log);
+    boot(2);
+    let given = Arc::new(Mutex::new(Vec::new()));
+    let seen = given.clone();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.sync_named_with(Arc::new(move |ops| {
+        let mut seen = seen.lock().unwrap();
+        seen.extend(ops.iter().map(|op| op.payload.clone()));
+        match seen.len() {
+            1 => Err(std::io::Error::other("what it names is not there")),
+            _ => Ok(()),
+        }
+    }));
+    // whoever syncs what ops name refuses: nothing is appended after the op
+    assert!(matches!(log.append("b", 4, b"x"), Err(OpLogError::Io(_))));
+    assert_eq!((file_len(dir.path()), log.len()), (left, 3));
+    assert_eq!(alt_oplog::bounded_in(dir.path()), None);
+    // it sees to it: the log is synced up to that op, and then appended to
+    log.append("b", 4, b"next").unwrap();
+    assert_eq!(
+        *given.lock().unwrap(),
+        [b"left by boot 1", b"left by boot 1"]
+    );
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(left));
+    assert_eq!(frames(dir.path()).1.synced, left);
+    assert!(!OpLog::open(dir.path()).unwrap().unsettled());
+}
+
+#[test]
 fn a_sync_another_committer_covered_is_not_made_again() {
     let dir = alt_os::temp::tempdir().unwrap();
     let mut first = new_log(dir.path());
