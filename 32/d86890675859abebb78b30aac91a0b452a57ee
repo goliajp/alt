@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: read the checkpoints of cuts back only as far as the frame looked up lies
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cuts.rs
+touched: crates/alt-oplog/tests/it/v2_cut_chain.rs
