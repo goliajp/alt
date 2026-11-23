@@ -2,7 +2,7 @@
 
 use crate::v2::block::{BLOCK_HEADER_LEN, Layout};
 use crate::v2::checkpoint::Checkpoint;
-use crate::v2::frame::{HEADER_LEN, KIND_CHECKPOINT, body_at, len_of};
+use crate::v2::frame::{HEADER_LEN, KIND_CHECKPOINT, len_of};
 use crate::v2::scan::{lift_frame, read_frame};
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, read_claimed};
@@ -25,14 +25,15 @@ impl Located {
     }
 }
 
-/// What the checkpoint frame at `at` says, and where it ends, when one
-/// reads there and ends within `len`.
+/// What the checkpoint frame at `at` says, where it ends, and whether
+/// it says the log was cut before it, when one reads there and ends
+/// within `len`.
 fn said_at(
     layout: &Layout,
     len: u64,
     at: u64,
     read: &mut ReadAt,
-) -> std::io::Result<Option<(Checkpoint, u64)>> {
+) -> std::io::Result<Option<(Checkpoint, u64, bool)>> {
     let Some(left) = len
         .checked_sub(at)
         .filter(|left| *left >= HEADER_LEN as u64)
@@ -54,12 +55,14 @@ fn said_at(
     let Some(data) = read_claimed(read, layout, (at, end), frame)? else {
         return Ok(None);
     };
-    let read = lift_frame(layout, &data, at, at, &mut |_| {});
-    let Some((bytes, _)) = read.filter(|(bytes, _)| read_frame(layout, bytes, 0).is_some()) else {
+    let Some((bytes, _)) = lift_frame(layout, &data, at, at, &mut |_| {}) else {
         return Ok(None);
     };
-    let body = &bytes[body_at(header)..bytes.len() - 8];
-    Ok(Checkpoint::decode(body).map(|said| (said, end)))
+    let Some(view) = read_frame(layout, &bytes, 0) else {
+        return Ok(None);
+    };
+    let cut = view.ext.cut.is_some();
+    Ok(Checkpoint::decode(view.body).map(|said| (said, end, cut)))
 }
 
 /// The state the checkpoint frame at `at` gives, when one reads there
@@ -71,7 +74,7 @@ pub(crate) fn checkpoint_at(
     at: u64,
     read: &mut ReadAt,
 ) -> std::io::Result<Option<Located>> {
-    let Some((said, end)) = said_at(layout, len, at, read)? else {
+    let Some((said, end, cut)) = said_at(layout, len, at, read)? else {
         return Ok(None);
     };
     let (boot, mut changed) = (said.boot, Vec::new());
@@ -80,7 +83,7 @@ pub(crate) fn checkpoint_at(
         base if base < at => {
             changed = said.workspaces.iter().map(|row| row.id).collect();
             let table = said_at(layout, at, base, read)?;
-            table.and_then(|(table, _)| said.over(table))
+            table.and_then(|(table, ..)| said.over(table))
         }
         _ => None,
     };
@@ -88,7 +91,7 @@ pub(crate) fn checkpoint_at(
         .filter(|whole| whole.precedes(at))
         .map(|whole| Located {
             boot,
-            state: State::of(whole, changed, at, end),
+            state: State::of(whole, changed, (at, end), cut),
         }))
 }
 

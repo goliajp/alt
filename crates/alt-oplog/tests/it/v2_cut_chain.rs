@@ -8,7 +8,7 @@ use alt_oplog::{Meta, OpLog, OpLogError};
 use super::v2_cuts::{but_gone, told};
 use super::v2_fields::Laid;
 use super::v2_full_check::rewritten;
-use super::v2_log::{boot, grow, new_log};
+use super::v2_log::{boot, frames, grow, new_log};
 use super::v2_named::{collecting, staged_by_another};
 
 /// What a sync reads of the log to find the ops it has to see to by
@@ -109,4 +109,32 @@ fn the_full_check_holds_a_cut_to_the_cut_before_it_and_the_generation_since() {
             ))
         ));
     }
+}
+
+#[test]
+fn a_handle_that_begins_at_the_checkpoint_of_a_cut_holds_the_log_a_full_read_does() {
+    let mut opened_blocks = 0;
+    // with more ops each time, until the cut opens a block and after
+    for ops in 1..=12 {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        alt_oplog::v2::create_with(dir.path(), 10).unwrap();
+        let mut log = OpLog::open(dir.path()).unwrap();
+        grow(&mut log, "a", ops);
+        drop(log);
+        let path = dir.path().join("log");
+        let mut torn = fs::read(&path).unwrap();
+        torn.extend_from_slice(&[1, 2, 3]);
+        fs::write(&path, torn).unwrap();
+        OpLog::open(dir.path()).unwrap().refresh().unwrap();
+        let (all, state) = frames(dir.path());
+        let cut = all.last().unwrap();
+        assert!(cut.3.is_some() && state.cut == cut.0);
+        opened_blocks += (cut.0 % 1024 == 32) as usize;
+        let log = OpLog::open(dir.path()).unwrap();
+        assert_eq!(log.state().unwrap(), &state, "{ops} ops");
+        assert_eq!(log.ops().unwrap().len(), ops);
+        log.verify().unwrap();
+    }
+    assert!(opened_blocks >= 1);
 }

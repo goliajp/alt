@@ -364,7 +364,7 @@ fn the_state_a_checkpoint_gives_is_the_state_before_it() {
         // it holds the whole table, and nothing changed since
         assert_eq!(said.base, 0);
         (expected.base, expected.changed) = (at, Vec::new());
-        assert_eq!(State::of(said, Vec::new(), at, end), expected);
+        assert_eq!(State::of(said, Vec::new(), (at, end), false), expected);
         checked += 1;
     }
     assert!(checked >= 6);

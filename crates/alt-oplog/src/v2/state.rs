@@ -67,8 +67,14 @@ impl State {
     /// The log as the checkpoint frame at `at..end` says it stands:
     /// `checkpoint` with the whole table, of which the rows of
     /// `changed` are the ones the frame itself holds where it names
-    /// another for the table.
-    pub fn of(checkpoint: Checkpoint, changed: Vec<[u8; 8]>, at: u64, end: u64) -> Self {
+    /// another for the table. `cut` tells that the frame says the log
+    /// was cut before it: it is then the last that does.
+    pub fn of(
+        checkpoint: Checkpoint,
+        changed: Vec<[u8; 8]>,
+        (at, end): (u64, u64),
+        cut: bool,
+    ) -> Self {
         State {
             base: if checkpoint.base == 0 {
                 at
@@ -90,7 +96,7 @@ impl State {
             linked: checkpoint.linked,
             migrated: checkpoint.migrated,
             required: checkpoint.required,
-            cut: checkpoint.cut,
+            cut: if cut { at } else { checkpoint.cut },
             workspaces: checkpoint.workspaces,
         }
     }
