@@ -246,8 +246,10 @@ fn bases_that_have_to_wait_are_held_within_their_limit_and_made_again_at_the_cos
     assert!(few.work.held <= 5000, "{:?}", few.work);
     // a base that was let go of is made again from the one held below
     // it, or from the pack
-    let again = few.work.applied - all.work.applied;
-    assert!(again > 0, "{:?}", few.work);
+    assert!(few.work.applied > all.work.applied, "{:?}", few.work);
+    // each object made again is one more stream inflated: the delta that
+    // makes it or, for the plain entry the chain begins with, the entry
+    let again = few.work.inflated - all.work.inflated;
     reads_back(&pack, objects.into_iter());
 
     // what is made again is counted: with room for what the pack
