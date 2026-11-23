@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: feat
+summary: tell revisions from paths in log, diff, reset and checkout as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/cli/worktree.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/log_cmd.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/native/diff/between.rs
+touched: crates/alt-cli/src/native/reset.rs
+touched: crates/alt-cli/src/native/said.rs
+touched: crates/alt-cli/src/native/stash.rs
+touched: crates/alt-cli/src/native/tree_edit.rs
+touched: crates/alt-cli/src/rev_or_path.rs
+touched: crates/alt-cli/src/worktree_args.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/fixtures/cli/usage-errors.txt
+touched: crates/alt-cli/tests/it/ambiguous_args.rs
