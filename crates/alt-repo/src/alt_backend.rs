@@ -146,4 +146,24 @@ impl Repository {
         }
         Ok(alt.odb.follow()?)
     }
+
+    /// [`Self::follow`] for a repository that serves reads while others
+    /// write to it. While the refs are as this handle last read them, a
+    /// writer in the middle of its objects is not waited for: it stores
+    /// them before the ref that names them, so no ref read here names one
+    /// of them.
+    pub fn follow_behind_writers(&mut self) -> Result<(), RepoError> {
+        let Backend::Alt(alt) = &mut self.backend else {
+            return self.refresh();
+        };
+        let Some(refs) = alt.refs.get_mut() else {
+            return Ok(alt.odb.follow()?);
+        };
+        let was = refs.head_op();
+        refs.follow()?;
+        match refs.head_op() == was {
+            true => Ok(alt.odb.follow_behind_writer()?),
+            false => Ok(alt.odb.follow()?),
+        }
+    }
 }
