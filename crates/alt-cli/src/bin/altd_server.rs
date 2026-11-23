@@ -1100,6 +1100,62 @@ fn handle_info_refs(
     Ok(())
 }
 
+/// Reads the head of a push off the connection and streams the pack
+/// behind it into the file at `pack`, so that only the head is ever in
+/// memory, and a push that is refused for its signature never has its
+/// pack looked at. One byte past `max` is read at most: the caller tells
+/// a body over the cap by the count. The reader's borrow of `req` ends
+/// here, before the response is sent.
+fn read_push(
+    req: &mut tiny_http::Request,
+    max: u64,
+    pack: &std::path::Path,
+) -> Result<(alt_wire::push::PushHead, u64), String> {
+    use std::io::Read;
+    let gzipped = req
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
+    let mut reader: Box<dyn Read> = if gzipped {
+        Box::new(alt_inflate::Reader::new(
+            alt_inflate::Format::Gzip,
+            req.as_reader().take(max + 1),
+        ))
+    } else {
+        Box::new(req.as_reader().take(max + 1))
+    };
+    let head = alt_wire::push::parse_push_request_head(&mut reader, HashAlgo::Sha1)
+        .map_err(|e| format!("{e}"))?;
+    let mut tmp = std::fs::File::create(pack).map_err(|e| format!("tempfile: {e}"))?;
+    let n = std::io::copy(&mut reader, &mut tmp).map_err(|e| format!("stream pack: {e}"))?;
+    tmp.sync_all().map_err(|e| format!("fsync: {e}"))?;
+    Ok((head, n))
+}
+
+/// The `report-status` of a push: how the unpack went and, for each
+/// command, whether the refs moved or why they did not.
+fn report_status(
+    head: &alt_wire::push::PushHead,
+    unpack: &Result<(), String>,
+    moved: &Result<(), String>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let status = |u: &alt_wire::push::RefUpdate| match moved {
+        Ok(()) => CommandStatus::Ok(u.name.clone()),
+        Err(reason) => CommandStatus::Ng {
+            name: u.name.clone(),
+            reason: reason.clone(),
+        },
+    };
+    let command_status: Vec<CommandStatus> = head.updates.iter().map(status).collect();
+    let unpack = unpack.as_ref().map(|_| ()).map_err(|s| s.as_str());
+    let mut out = Vec::new();
+    match head.capabilities.iter().any(|c| c == "side-band-64k") {
+        true => alt_wire::push::encode_report_status_sideband(&mut out, unpack, &command_status)?,
+        false => alt_wire::push::encode_report_status(&mut out, unpack, &command_status)?,
+    }
+    Ok(out)
+}
+
 /// POST /git-receive-pack: parse the client's ref-update list
 /// and raw pack, ingest objects into the alt odb, then commit the ref
 /// changes through `RefStore::commit` so the whole push lands as one
@@ -1113,49 +1169,10 @@ fn handle_receive_pack(
     log: &mut LogCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = &writer.store;
-    use std::io::Read;
-    // Streaming path. The push body is parsed in two halves:
-    //   1. Head (updates + capabilities + flush) — parsed straight off
-    //      the connection. Only the small head bytes ever live in RAM.
-    //   2. Pack bytes — `io::copy`'d into a tempfile so a 1 GiB push
-    //      never costs us a 1 GiB Vec<u8> allocation. `index_pack`
-    //      reads straight off the file path we just wrote.
-    //
-    // The signature gate runs after step 1 and *before* step 2,
-    // so a require-signed push that misses the cap is rejected without
-    // ever reading the pack body — saving the bandwidth + RAM.
     let max = max_body_bytes();
-    let gzipped = req
-        .headers()
-        .iter()
-        .any(|h| h.field.equiv("Content-Encoding") && h.value.as_str().contains("gzip"));
-    // Stream-and-parse in one scope so the reader's borrow on `req`
-    // ends *before* the response is sent. The outcome carries
-    // everything downstream needs (head + tempfile path + on-wire
-    // bytes streamed) so the response phase is owned-only.
     let pack_tmp_dir = alt_os::temp::tempdir()?;
     let pack_tmp_path = pack_tmp_dir.path().join("incoming.pack");
-    let parse_outcome: Result<(alt_wire::push::PushHead, u64), String> = {
-        let mut reader: Box<dyn Read> = if gzipped {
-            Box::new(alt_inflate::Reader::new(
-                alt_inflate::Format::Gzip,
-                req.as_reader().take(max + 1),
-            ))
-        } else {
-            Box::new(req.as_reader().take(max + 1))
-        };
-        match alt_wire::push::parse_push_request_head(&mut reader, HashAlgo::Sha1) {
-            Ok(head) => {
-                let mut tmp =
-                    std::fs::File::create(&pack_tmp_path).map_err(|e| format!("tempfile: {e}"))?;
-                let n = std::io::copy(&mut reader, &mut tmp)
-                    .map_err(|e| format!("stream pack: {e}"))?;
-                tmp.sync_all().map_err(|e| format!("fsync: {e}"))?;
-                Ok((head, n))
-            }
-            Err(e) => Err(format!("{e}")),
-        }
-    };
+    let parse_outcome = read_push(&mut req, max, &pack_tmp_path);
     let (head, pack_bytes_streamed) = match parse_outcome {
         Ok(t) => t,
         Err(reason) => {
@@ -1219,33 +1236,7 @@ fn handle_receive_pack(
         log.fsync_seq = Some(writer.group.fsync_count());
         durable.map_err(|e| format!("durability: {e}"))
     });
-    let command_status: Vec<CommandStatus> = head
-        .updates
-        .iter()
-        .map(|u| match &moved {
-            Ok(()) => CommandStatus::Ok(u.name.clone()),
-            Err(reason) => CommandStatus::Ng {
-                name: u.name.clone(),
-                reason: reason.clone(),
-            },
-        })
-        .collect();
-
-    let mut out = Vec::new();
-    let want_sideband = head.capabilities.iter().any(|c| c == "side-band-64k");
-    if want_sideband {
-        alt_wire::push::encode_report_status_sideband(
-            &mut out,
-            unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
-            &command_status,
-        )?;
-    } else {
-        alt_wire::push::encode_report_status(
-            &mut out,
-            unpack_result.as_ref().map(|_| ()).map_err(|s| s.as_str()),
-            &command_status,
-        )?;
-    }
+    let out = report_status(&head, &unpack_result, &moved)?;
     let mut resp = Response::from_data(out);
     resp.add_header(header(
         "Content-Type",
