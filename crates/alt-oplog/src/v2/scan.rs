@@ -46,7 +46,11 @@ fn lift_frame<'a>(
 
 /// The frame `bytes` are when they read: a checkpoint under the
 /// generation it names itself, any other under `generation`.
-fn read_frame<'a>(layout: &Layout, bytes: &'a [u8], generation: u32) -> Option<View<'a>> {
+pub(crate) fn read_frame<'a>(
+    layout: &Layout,
+    bytes: &'a [u8],
+    generation: u32,
+) -> Option<View<'a>> {
     let header: &[u8; HEADER_LEN] = bytes.first_chunk()?;
     let generation = match header[0] {
         KIND_CHECKPOINT => generation_of(bytes.get(body_at(header)..)?)?,
@@ -157,14 +161,32 @@ impl Walk<'_> {
     }
 }
 
+/// Where a read begins: the log as a checkpoint says it stands, or the
+/// empty log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Located {
+    pub state: State,
+    /// the boot the checkpoint was written in, zeros for the empty log
+    pub boot: [u8; 16],
+}
+
+impl Located {
+    pub(crate) fn empty() -> Self {
+        Located {
+            state: State::empty(),
+            boot: [0; 16],
+        }
+    }
+}
+
 /// The state the checkpoint frame at `at` gives, when one reads there
 /// and ends within `len`.
-fn checkpoint_at(
+pub(crate) fn checkpoint_at(
     layout: &Layout,
     len: u64,
     at: u64,
     read: &mut dyn FnMut(u64, usize) -> std::io::Result<Vec<u8>>,
-) -> std::io::Result<Option<State>> {
+) -> std::io::Result<Option<Located>> {
     if at + HEADER_LEN as u64 > len {
         return Ok(None);
     }
@@ -188,10 +210,13 @@ fn checkpoint_at(
         return Ok(None);
     };
     let body = &bytes[body_at(header)..bytes.len() - 8];
-    Ok(Checkpoint::decode(body).map(|said| State::of(said, at, end)))
+    Ok(Checkpoint::decode(body).map(|said| Located {
+        boot: said.boot,
+        state: State::of(said, at, end),
+    }))
 }
 
-/// The state a read of a log `len` bytes long begins from: that of the
+/// Where a read of a log `len` bytes long begins: the state of the
 /// last checkpoint a block header leads to which reads and ends within
 /// `len`, or of the empty log where there is none. `read` gives bytes of
 /// the file.
@@ -199,7 +224,7 @@ pub fn locate(
     layout: &Layout,
     len: u64,
     read: &mut dyn FnMut(u64, usize) -> std::io::Result<Vec<u8>>,
-) -> std::io::Result<State> {
+) -> std::io::Result<Located> {
     let mut block = len.saturating_sub(1) / layout.block;
     while block > 0 {
         let start = block * layout.block;
@@ -214,7 +239,7 @@ pub fn locate(
                 return Ok(state);
             }
             match header.checkpoint {
-                0 => return Ok(State::empty()),
+                0 => return Ok(Located::empty()),
                 at => {
                     if let Some(state) = checkpoint_at(layout, len, at, read)? {
                         return Ok(state);
@@ -224,5 +249,5 @@ pub fn locate(
         }
         block -= 1;
     }
-    Ok(State::empty())
+    Ok(Located::empty())
 }

@@ -36,7 +36,8 @@ fuzz_target!(|data: &[u8]| {
         let end = (at as usize + len).min(file.len());
         Ok(file.get(at as usize..end).unwrap_or_default().to_vec())
     };
-    if let Ok(mut began) = locate(&layout, file.len() as u64, &mut read) {
+    if let Ok(began) = locate(&layout, file.len() as u64, &mut read) {
+        let mut began = began.state;
         let walk = Walk {
             layout,
             data: &file,

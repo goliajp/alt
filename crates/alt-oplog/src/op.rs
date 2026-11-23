@@ -85,6 +85,25 @@ pub struct Op {
     pub actor: String,
     /// Opaque to the log; the caller's encoding of what happened.
     pub payload: Vec<u8>,
+    /// Where a version 2 log holds the op; `None` for an op of a version
+    /// 1 log and for one made of a body alone.
+    pub frame: Option<Framed>,
+}
+
+/// The frame of an op in a version 2 log: where it lies and what it says
+/// of the op beside its body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Framed {
+    pub at: u64,
+    pub end: u64,
+    /// the op's number in the log, counted from one
+    pub seq: u64,
+    pub flags: u8,
+    /// zeros for an op of no workspace
+    pub workspace: [u8; 8],
+    /// the frame of the op this one undoes
+    pub inverse_of: Option<u64>,
+    pub request: Option<[u8; 16]>,
 }
 
 impl Op {

@@ -2,7 +2,7 @@
 
 use std::fs::File;
 
-use crate::OpLog;
+use crate::v1::OpLog;
 
 impl OpLog {
     /// Runs `run` with the exclusive lock on the log taken. The lock is

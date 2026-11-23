@@ -27,7 +27,8 @@ use crate::lock::unlock;
 use crate::read::{read_at, read_log, scan};
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN};
 use crate::synced::{self, Marker};
-use crate::{Op, OpLog, OpLogError};
+use crate::v1::OpLog;
+use crate::{Op, OpLogError};
 
 /// The ops at the end of the log from the first one on that was never
 /// synced and names content that is not stored.

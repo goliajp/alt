@@ -5,12 +5,13 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::OpLogError;
 use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
 use crate::read::read_at;
 use crate::scan::CHECKSUM_LEN;
 use crate::synced::{self, Marker, SyncNamed};
-use crate::{OpLog, OpLogError};
+use crate::v1::OpLog;
 
 /// What a handle's appends reached when it last asked for them to be
 /// synced, for its sink to record, and how far the handle and its sink

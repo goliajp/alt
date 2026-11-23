@@ -151,7 +151,7 @@ fn a_frame_longer_than_a_block_runs_across_block_headers_and_a_checkpoint_follow
         let len = image.bytes.len() as u64;
         let mut read = |at: u64, len: usize| Ok(image.bytes[at as usize..][..len].to_vec());
         let began = locate(&image.layout(), len, &mut read).unwrap();
-        assert!(began.checkpoint >= end, "payload {payload}");
+        assert!(began.state.checkpoint >= end, "payload {payload}");
     }
 }
 
@@ -166,7 +166,7 @@ fn the_checkpoint_found_from_the_end_of_a_file_of_any_length_is_the_last_one_a_s
         let (frames, state, _) = walked(layout, data, false).unwrap();
         let last = frames.iter().rev().find(|frame| frame.2 == KIND_CHECKPOINT);
         let mut read = |at: u64, len: usize| Ok(data[at as usize..][..len].to_vec());
-        let mut began = locate(&layout, len as u64, &mut read).unwrap();
+        let mut began = locate(&layout, len as u64, &mut read).unwrap().state;
         assert_eq!(
             began.checkpoint,
             last.map_or(0, |frame| frame.0),
