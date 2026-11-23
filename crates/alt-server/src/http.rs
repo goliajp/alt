@@ -229,7 +229,10 @@ pub async fn serve_with_browser(
         return Err(std::io::Error::other("invalid HTTP limits"));
     }
     if options.trusted_proxies.is_empty() {
-        eprintln!("{}", caller::UNNAMED);
+        // in the log like everything the instance says: a line of its own
+        // kind would be no line of the log to whoever reads it
+        let log = alt_server_telemetry::BackgroundLog::current();
+        log.failed("configuration", "", &caller::UNNAMED);
     }
     let mut background = tokio::task::JoinSet::new();
     let connections = Arc::new(Semaphore::new(options.connections));
