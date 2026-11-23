@@ -60,10 +60,7 @@ pub enum Command {
     /// Provide contents or details of repository objects
     CatFile(CatFileArgs),
     /// Pick out and massage parameters
-    RevParse {
-        #[arg(hint = "rev")]
-        rev: String,
-    },
+    RevParse(crate::rev_parse::RevParse),
     /// Show commit logs
     Log(log_cmd::LogArgs),
     /// Verify and independently import a supported Git source for tasks

@@ -31,10 +31,7 @@ pub struct CatFileArgs {
 pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut W) -> Res<()> {
     let at_head = |spec: &str| at.at_head(spec);
     match cmd {
-        Command::RevParse { rev } => {
-            let oid = resolve(repo, &at_head(rev))?;
-            writeln!(out, "{oid}")?;
-        }
+        Command::RevParse(args) => args.run(out, repo, at)?,
         Command::CatFile(args) => {
             let oid = resolve(repo, &at_head(&args.object))?;
             let obj = repo

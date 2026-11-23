@@ -175,12 +175,7 @@ impl NativeRepo<'_> {
     /// The commit `rev` names, `HEAD` being that of this workspace; `None`
     /// where it names nothing.
     pub(super) fn commit_named(&self, rev: &str) -> Res<Option<ObjectId>> {
-        let spec = match rev.strip_prefix("HEAD").or_else(|| rev.strip_prefix('@')) {
-            Some(rest) if rest.is_empty() || rest.starts_with(['~', '^']) => {
-                format!("{}{rest}", self.head_ref)
-            }
-            _ => rev.to_owned(),
-        };
+        let spec = pathspec::at_head(&self.head_ref, rev);
         let repo = self.store.git_view()?;
         let Some(named) = repo.rev_parse(&spec)? else {
             return Ok(None);

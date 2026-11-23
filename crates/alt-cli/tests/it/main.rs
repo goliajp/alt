@@ -127,6 +127,7 @@ mod replay_refused;
 mod request_operations;
 mod reset;
 mod restore;
+mod rev_parse;
 mod revert;
 mod rm;
 mod scan_cache;

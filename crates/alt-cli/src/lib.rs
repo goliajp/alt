@@ -53,6 +53,7 @@ pub mod prompt;
 pub mod quote;
 pub mod receive;
 pub mod request;
+pub mod rev_parse;
 pub mod runner;
 pub mod sequence_args;
 pub mod shell;

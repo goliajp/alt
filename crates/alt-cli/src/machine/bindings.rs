@@ -13,6 +13,32 @@ impl Parsed {
     }
 }
 
+/// The flags that came after bindings were first recorded.
+const LATER: &[&str] = &[
+    "renormalize",
+    "forced",
+    "update",
+    "all",
+    "continue_pick",
+    "abort_pick",
+    "abort_merge",
+    "no_ff",
+    "ff_only",
+    "oneline",
+    "name_only",
+    "name_status",
+    "stat",
+    "show_toplevel",
+    "show_git_dir",
+    "absolute_git_dir",
+    "show_prefix",
+    "is_inside_work_tree",
+    "abbrev_ref",
+    "symbolic_full_name",
+    "verify_one",
+    "quiet",
+];
+
 /// The argument values a durable request is bound to. Stored bindings are
 /// compared with this on a retry, so its shape must never change.
 fn canonical_matches(matches: &Matches) -> Value {
@@ -33,22 +59,7 @@ fn canonical_matches(matches: &Matches) -> Value {
         }
         // a flag that came after bindings were first recorded binds only
         // when it is set: the commands recorded before it keep theirs
-        let later = matches!(
-            entry.id,
-            "renormalize"
-                | "forced"
-                | "update"
-                | "all"
-                | "continue_pick"
-                | "abort_pick"
-                | "abort_merge"
-                | "no_ff"
-                | "ff_only"
-                | "oneline"
-                | "name_only"
-                | "name_status"
-                | "stat"
-        );
+        let later = LATER.contains(&entry.id);
         if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;
         }

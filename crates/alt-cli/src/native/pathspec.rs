@@ -108,6 +108,18 @@ pub fn shown_from(prefix: &str, path: &[u8]) -> Vec<u8> {
     shown
 }
 
+/// `spec` with `head` in place of the `HEAD` or `@` it begins with, for a
+/// workspace whose HEAD is the ref `head`.
+pub fn at_head(head: &str, spec: &str) -> String {
+    let follows = |rest: &str| rest.is_empty() || rest.starts_with(['~', '^', ':']);
+    match (spec.strip_prefix("HEAD"), spec.strip_prefix('@')) {
+        (Some(rest), _) if follows(rest) || rest.starts_with("@{") => format!("{head}{rest}"),
+        (_, Some(rest)) if follows(rest) => format!("{head}{rest}"),
+        (_, Some(rest)) if rest.starts_with('{') => format!("{head}{spec}"),
+        _ => spec.to_owned(),
+    }
+}
+
 /// What a command of the git layer goes by besides the repository: the
 /// ref `HEAD` stands for, and where in which tree it was run.
 pub struct Place {
@@ -145,16 +157,12 @@ impl Place {
         Ok(Place { head, root, prefix })
     }
 
-    /// `HEAD` in a revision (also `HEAD~n`, `HEAD^`, `HEAD:path`) means the
-    /// current workspace's HEAD, which outside the default workspace lives in
-    /// `workspaces/<name>/HEAD` rather than the repository's bare `HEAD`.
+    /// `HEAD` in a revision (also `HEAD~n`, `HEAD^`, `HEAD:path`, `@` and
+    /// `@{u}`) means the current workspace's HEAD, which outside the
+    /// default workspace lives in `workspaces/<name>/HEAD` rather than the
+    /// repository's bare `HEAD`.
     pub fn at_head(&self, spec: &str) -> String {
-        match spec.strip_prefix("HEAD") {
-            Some(rest) if rest.is_empty() || rest.starts_with(['~', '^', ':']) => {
-                format!("{}{rest}", self.head)
-            }
-            _ => spec.to_owned(),
-        }
+        at_head(&self.head, spec)
     }
 
     /// `blame` of the file `given` names as it is written, from `rev`.

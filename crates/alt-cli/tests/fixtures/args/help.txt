@@ -1293,12 +1293,22 @@ Options:
 ### alt rev-parse
 Pick out and massage parameters
 
-Usage: alt rev-parse [OPTIONS] <REV>
+Usage: alt rev-parse [OPTIONS] [REV]...
 
 Arguments:
-  <REV>  
+  [REV]...  Revisions to resolve: an id, a ref, `HEAD~2`, `HEAD^2`, `v1^{commit}`, `@{u}`, `<rev>:<path>`, or `:<path>` and `:<n>:<path>` for what the index has, at stage n
 
 Options:
+      --show-toplevel          Print the root of the working tree
+      --git-dir                Print the directory the repository is kept in: `.alt` from the root of its tree, else in full
+      --absolute-git-dir       Print the directory the repository is kept in, in full
+      --show-prefix            Print where the command runs, from the root of the tree
+      --is-inside-work-tree    Print `true`: the command runs in a working tree
+      --abbrev-ref             Print the short name of the branch or ref a revision is, where it is one: `main` for `HEAD`, `origin/main` for `@{u}`
+      --symbolic-full-name     Print the full name of the ref a revision is, where it is one
+      --short[=<LENGTH>]       Print ids shortened to as many digits as tell them apart, at least LENGTH of them
+      --verify                 Take one revision and fail where it names no object
+  -q, --quiet                  With --verify, say nothing where the revision names no object
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
