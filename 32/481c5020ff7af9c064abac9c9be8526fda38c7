@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: have a push wait no longer than it is told for the memory packs are indexed in, and answer it 503 then
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_index_memory.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/memory.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/index_memory.rs
