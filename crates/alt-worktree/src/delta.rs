@@ -46,6 +46,24 @@ pub struct ScanOptions<'a> {
     pub clock: Clock,
 }
 
+impl ScanOptions<'_> {
+    /// A scan of the whole tree that began at `clock`, of the tracked
+    /// files and those of the files the index does not have that
+    /// `untracked` asks for, each compared as it is, by no ignore file
+    /// outside the tree.
+    pub fn plain(untracked: Untracked, clock: Clock) -> Self {
+        ScanOptions {
+            file_mode: true,
+            untracked,
+            within: &[],
+            clean: None,
+            head: None,
+            excludes: &[],
+            clock,
+        }
+    }
+}
+
 /// The paths where the working tree differs from the index, each list in
 /// path order.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -191,6 +209,17 @@ fn submodules(
     delta.submodules.sort();
 }
 
+/// The mode a file found with the mode `found` is compared as, where the
+/// index has `staged` for it: its own, or the one the index has where
+/// both are regular files and the file's is not trusted.
+fn mode_of(file_mode: bool, found: u32, staged: u32) -> u32 {
+    let regular = |mode: u32| mode & 0o170000 == 0o100000;
+    match !file_mode && regular(found) && regular(staged) {
+        true => staged,
+        false => found,
+    }
+}
+
 /// A suspect's content as the working tree has it, with its blob id.
 struct Read {
     content: Vec<u8>,
@@ -247,11 +276,7 @@ fn compare(
                 continue;
             };
             let i = i as usize;
-            let regular = |mode: u32| mode & 0o170000 == 0o100000;
-            let mode = match (st.git_mode(), snapshot.entries[i].mode) {
-                (found, staged) if !opts.file_mode && regular(found) && regular(staged) => staged,
-                (found, _) => found,
-            };
+            let mode = mode_of(opts.file_mode, st.git_mode(), snapshot.entries[i].mode);
             let staged = snapshot.entries[i].oid;
             let cleaned = match mode {
                 0o120000 => None,

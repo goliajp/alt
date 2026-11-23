@@ -1,23 +1,31 @@
 //! The stack of stashed entries, written as git keeps it: the log of
 //! `refs/stash`.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use alt_git_codec::{Commit, HashAlgo, ObjectId};
 pub use alt_git_refs::stash::{ENTRIES, TOP, entry_number};
 use alt_git_refs::stash::{Logged, write_log as write};
 use alt_odb::NativeOdb;
+use alt_refs::{RefStore, RefTarget};
 
 use crate::ExportError;
 
-/// Writes the log of `refs/stash` for `entries`, each with its number;
-/// nothing where there are none.
+/// Writes the log of `refs/stash` for the entries among `refs`, but
+/// those that name one of the `unstored`; nothing where there are none.
 pub(crate) fn write_log(
     odb: &NativeOdb,
     git_dir: &Path,
-    mut entries: Vec<(u64, ObjectId)>,
+    refs: &RefStore,
+    unstored: &HashSet<ObjectId>,
     algo: HashAlgo,
 ) -> Result<(), ExportError> {
+    let entry = |(name, target): (&str, &RefTarget)| match target {
+        RefTarget::Oid(oid) if !unstored.contains(oid) => Some((entry_number(name)?, *oid)),
+        _ => None,
+    };
+    let mut entries: Vec<(u64, ObjectId)> = refs.iter().filter_map(entry).collect();
     entries.sort();
     let mut commits = Vec::new();
     for (_, commit) in &entries {

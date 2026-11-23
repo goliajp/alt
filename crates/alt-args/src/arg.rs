@@ -71,44 +71,33 @@ pub struct Arg {
     rest: &'static str,
 }
 
-pub(crate) const HELP: Arg = Arg {
-    id: "help",
-    long: "help",
-    short: Some('h'),
-    // value name, help, listed values, hint
-    rest: "\0\0\u{a}Print help\0\0\0",
-    kind: Kind::Help,
-    ..Arg::NEW
-};
-
-pub(crate) const VERSION: Arg = Arg {
-    id: "version",
-    long: "version",
-    short: Some('V'),
-    rest: "\0\0\u{d}Print version\0\0\0",
-    kind: Kind::Version,
-    ..Arg::NEW
-};
-
 impl Arg {
-    const NEW: Arg = Arg {
-        id: "",
-        long: "",
-        short: None,
-        kind: Kind::Flag,
-        required: false,
-        global: false,
-        trailing: false,
-        last: false,
-        hyphen_values: false,
-        checked: false,
-        typed: false,
-        listed: false,
-        rare: 0,
-        number: 0,
-        node: None,
-        rest: "",
-    };
+    /// An argument every command has, a flag: `--<id>` and `-<short>`.
+    pub(crate) const fn builtin(
+        short: char,
+        kind: Kind,
+        id: &'static str,
+        rest: &'static str,
+    ) -> Arg {
+        Arg {
+            id,
+            long: id,
+            short: Some(short),
+            kind,
+            required: false,
+            global: false,
+            trailing: false,
+            last: false,
+            hyphen_values: false,
+            checked: false,
+            typed: false,
+            listed: false,
+            rare: 0,
+            number: 0,
+            node: None,
+            rest,
+        }
+    }
 
     /// Reads the argument `reader` stands at and leaves it behind it.
     pub(crate) fn read(node: Node, reader: &mut Reader) -> Arg {

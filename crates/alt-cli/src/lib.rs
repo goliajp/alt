@@ -38,7 +38,7 @@ pub mod json;
 mod log2;
 pub mod log_cmd;
 pub mod log_count;
-mod log_encoding;
+mod log_format;
 mod log_range;
 pub mod machine;
 pub mod meta;

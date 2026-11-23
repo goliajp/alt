@@ -1,6 +1,7 @@
 //! One command level with the arguments it accepts.
 
-use crate::arg::{Arg, HELP, VERSION};
+use crate::arg::Arg;
+use crate::builtin::{HELP, VERSION};
 use crate::settings::Kind;
 use crate::spec::{Command, Item, Items};
 

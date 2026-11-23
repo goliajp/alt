@@ -20,7 +20,7 @@ mod task_remote;
 mod vcs;
 mod worktree;
 
-pub use classify::{is_native, mutates_command};
+pub use classify::{is_native, may_conflict, mutates_command};
 pub use command::Command;
 pub use git::{CatFileArgs, run_git, run_on_store};
 pub use native::run_native;

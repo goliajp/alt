@@ -71,6 +71,91 @@ pub(crate) fn renamed(old: &[u8], new: &[u8]) -> Vec<u8> {
     shown
 }
 
+/// How wide each part of a line is.
+struct Widths {
+    name: usize,
+    number: usize,
+    graph: usize,
+    /// the most lines one file changed
+    max_change: usize,
+}
+
+fn changed(file: &FileStat) -> usize {
+    match file.change {
+        Change::Lines(added, removed) => added + removed,
+        Change::Binary(..) => 0,
+    }
+}
+
+impl Widths {
+    /// git's division of the columns among the names, the counts and the
+    /// bars: a name gets what it needs where the bars leave it, and bars
+    /// that do not fit are scaled down to what is left.
+    fn of(files: &[FileStat]) -> Widths {
+        let max_change = files.iter().map(changed).max().unwrap_or(0);
+        let max_name = files.iter().map(|file| file.name.len()).max().unwrap_or(0);
+        // "Bin 1 -> 22 bytes" where a binary file changed size
+        let bin = |file: &FileStat| match file.change {
+            Change::Binary(0, 0) | Change::Lines(..) => 0,
+            Change::Binary(old, new) => 14 + digits(old) + digits(new),
+        };
+        let bin_width = files.iter().map(bin).max().unwrap_or(0);
+        let mut number = digits(max_change);
+        if bin_width > 0 && number < 3 {
+            number = 3;
+        }
+        let width = WIDTH.max(16 + 6 + number);
+        let mut graph = match max_change + 4 > bin_width {
+            true => max_change,
+            false => bin_width - 4,
+        };
+        let mut name = max_name;
+        if name + number + 6 + graph > width {
+            if graph > width * 3 / 8 - number - 6 {
+                graph = (width * 3 / 8 - number - 6).max(6);
+            }
+            if name > width - number - 6 - graph {
+                name = width - number - 6 - graph;
+            } else {
+                graph = width - number - 6 - name;
+            }
+        }
+        Widths {
+            name,
+            number,
+            graph,
+            max_change,
+        }
+    }
+
+    /// The count of a file and its bar: `added` pluses and `removed`
+    /// minuses, scaled where the longest bar does not fit.
+    fn bar(&self, added: usize, removed: usize) -> String {
+        let (mut plus, mut minus) = (added, removed);
+        if self.graph <= self.max_change {
+            let mut total = scaled(added + removed, self.graph, self.max_change);
+            if total < 2 && added > 0 && removed > 0 {
+                total = 2;
+            }
+            if added < removed {
+                plus = scaled(added, self.graph, self.max_change);
+                minus = total - plus;
+            } else {
+                minus = scaled(removed, self.graph, self.max_change);
+                plus = total - minus;
+            }
+        }
+        let count = added + removed;
+        let gap = if count > 0 { " " } else { "" };
+        let number = self.number;
+        format!(
+            " {count:>number$}{gap}{}{}",
+            "+".repeat(plus),
+            "-".repeat(minus)
+        )
+    }
+}
+
 /// The summary of `files`, its last line the totals; nothing where there
 /// are no files.
 pub(crate) fn render(files: &[FileStat]) -> Vec<u8> {
@@ -78,45 +163,15 @@ pub(crate) fn render(files: &[FileStat]) -> Vec<u8> {
     if files.is_empty() {
         return out;
     }
-    let changed = |file: &FileStat| match file.change {
-        Change::Lines(added, removed) => added + removed,
-        Change::Binary(..) => 0,
-    };
-    let max_change = files.iter().map(changed).max().unwrap_or(0);
-    let max_name = files.iter().map(|file| file.name.len()).max().unwrap_or(0);
-    // "Bin 1 -> 22 bytes" where a binary file changed size
-    let bin = |file: &FileStat| match file.change {
-        Change::Binary(0, 0) | Change::Lines(..) => 0,
-        Change::Binary(old, new) => 14 + digits(old) + digits(new),
-    };
-    let bin_width = files.iter().map(bin).max().unwrap_or(0);
-    let mut number_width = digits(max_change);
-    if bin_width > 0 && number_width < 3 {
-        number_width = 3;
-    }
-    let width = WIDTH.max(16 + 6 + number_width);
-    let mut graph_width = match max_change + 4 > bin_width {
-        true => max_change,
-        false => bin_width - 4,
-    };
-    let mut name_width = max_name;
-    if name_width + number_width + 6 + graph_width > width {
-        if graph_width > width * 3 / 8 - number_width - 6 {
-            graph_width = (width * 3 / 8 - number_width - 6).max(6);
-        }
-        if name_width > width - number_width - 6 - graph_width {
-            name_width = width - number_width - 6 - graph_width;
-        } else {
-            graph_width = width - number_width - 6 - name_width;
-        }
-    }
+    let widths = Widths::of(files);
+    let number = widths.number;
     let (mut inserted, mut deleted) = (0, 0);
     for file in files {
         // a name too long loses its beginning, up to a slash where there is one
         let mut name = &file.name[..];
         let mut cut = "";
-        if name.len() > name_width {
-            name = &name[name.len() - name_width + 3..];
+        if name.len() > widths.name {
+            name = &name[name.len() - widths.name + 3..];
             if let Some(slash) = name.iter().position(|b| *b == b'/') {
                 name = &name[slash..];
             }
@@ -124,40 +179,18 @@ pub(crate) fn render(files: &[FileStat]) -> Vec<u8> {
         }
         out.extend_from_slice(format!(" {cut}").as_bytes());
         out.extend_from_slice(name);
-        let padding = name_width.saturating_sub(cut.len() + name.len());
+        let padding = widths.name.saturating_sub(cut.len() + name.len());
         out.extend(std::iter::repeat_n(b' ', padding));
         out.extend_from_slice(b" |");
-        match file.change {
-            Change::Binary(0, 0) => {
-                out.extend_from_slice(format!(" {:>number_width$}", "Bin").as_bytes());
-            }
-            Change::Binary(old, new) => {
-                let said = format!(" {:>number_width$} {old} -> {new} bytes", "Bin");
-                out.extend_from_slice(said.as_bytes());
-            }
+        let told = match file.change {
+            Change::Binary(0, 0) => format!(" {:>number$}", "Bin"),
+            Change::Binary(old, new) => format!(" {:>number$} {old} -> {new} bytes", "Bin"),
             Change::Lines(added, removed) => {
                 (inserted, deleted) = (inserted + added, deleted + removed);
-                let (mut plus, mut minus) = (added, removed);
-                if graph_width <= max_change {
-                    let mut total = scaled(added + removed, graph_width, max_change);
-                    if total < 2 && added > 0 && removed > 0 {
-                        total = 2;
-                    }
-                    if added < removed {
-                        plus = scaled(added, graph_width, max_change);
-                        minus = total - plus;
-                    } else {
-                        minus = scaled(removed, graph_width, max_change);
-                        plus = total - minus;
-                    }
-                }
-                let count = added + removed;
-                let gap = if count > 0 { " " } else { "" };
-                out.extend_from_slice(format!(" {count:>number_width$}{gap}").as_bytes());
-                out.extend(std::iter::repeat_n(b'+', plus));
-                out.extend(std::iter::repeat_n(b'-', minus));
+                widths.bar(added, removed)
             }
-        }
+        };
+        out.extend_from_slice(told.as_bytes());
         out.push(b'\n');
     }
     let plural = |count: usize| if count == 1 { "" } else { "s" };

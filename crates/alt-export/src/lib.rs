@@ -216,6 +216,15 @@ fn write_objects(
     Ok(writer.finish()?.objects)
 }
 
+/// The objects the refs name.
+fn named_objects(refs: &RefStore) -> HashSet<ObjectId> {
+    let named = |(_, target): (&str, &RefTarget)| match target {
+        RefTarget::Oid(oid) => Some(*oid),
+        RefTarget::Symbolic(_) => None,
+    };
+    refs.iter().filter_map(named).collect()
+}
+
 fn write_git(
     alt_dir: &Path,
     git_dir: &Path,
@@ -227,13 +236,7 @@ fn write_git(
     let stored = odb.stored_past_cuts();
     let refs = RefStore::open_confirmed(alt_dir, also, |oid| stored(oid).unwrap_or(true))?;
     drop(stored);
-    let mut unstored: HashSet<ObjectId> = refs
-        .iter()
-        .filter_map(|(_, target)| match target {
-            RefTarget::Oid(oid) => Some(*oid),
-            RefTarget::Symbolic(_) => None,
-        })
-        .collect();
+    let mut unstored = named_objects(&refs);
     let objects = write_objects(&odb, git_dir, algo, &mut unstored)?;
 
     let mut head = None;
@@ -261,11 +264,7 @@ fn write_git(
         }
     }
     alt_git_refs::write_loose(git_dir, head.as_ref(), &loose)?;
-    let entry = |(name, target): (&str, &RefTarget)| match target {
-        RefTarget::Oid(oid) if !unstored.contains(oid) => Some((stash::entry_number(name)?, *oid)),
-        _ => None,
-    };
-    stash::write_log(&odb, git_dir, refs.iter().filter_map(entry).collect(), algo)?;
+    stash::write_log(&odb, git_dir, &refs, &unstored, algo)?;
     Ok(ExportReport {
         objects,
         refs: loose.len(),

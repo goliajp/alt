@@ -49,6 +49,7 @@
 //! rules and says what may stand at the cursor, for shell completion.
 
 mod arg;
+mod builtin;
 pub mod complete;
 mod error;
 mod help;

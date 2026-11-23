@@ -7,10 +7,12 @@ use alt_repo::Repository;
 
 use super::Res;
 
+mod head;
 mod set;
 mod spec;
 mod wild;
 
+pub use head::at_head;
 pub use set::Named;
 pub use spec::{Spec, keep_named};
 
@@ -106,18 +108,6 @@ pub fn shown_from(prefix: &str, path: &[u8]) -> Vec<u8> {
         shown.extend_from_slice(b"./");
     }
     shown
-}
-
-/// `spec` with `head` in place of the `HEAD` or `@` it begins with, for a
-/// workspace whose HEAD is the ref `head`.
-pub fn at_head(head: &str, spec: &str) -> String {
-    let follows = |rest: &str| rest.is_empty() || rest.starts_with(['~', '^', ':']);
-    match (spec.strip_prefix("HEAD"), spec.strip_prefix('@')) {
-        (Some(rest), _) if follows(rest) || rest.starts_with("@{") => format!("{head}{rest}"),
-        (_, Some(rest)) if follows(rest) => format!("{head}{rest}"),
-        (_, Some(rest)) if rest.starts_with('{') => format!("{head}{spec}"),
-        _ => spec.to_owned(),
-    }
 }
 
 /// What a command of the git layer goes by besides the repository: the

@@ -47,6 +47,19 @@ pub fn is_native(cmd: &Command) -> bool {
     )
 }
 
+/// Whether `cmd` may stop on a conflict: status 1 from it is a conflict
+/// left for the user, with part of the command done.
+pub fn may_conflict(cmd: &Command) -> bool {
+    matches!(
+        cmd,
+        Command::Merge { .. }
+            | Command::CherryPick { .. }
+            | Command::Rebase { .. }
+            | Command::Revert { .. }
+            | Command::Stash(_)
+    )
+}
+
 pub fn mutates_command(cmd: &Command) -> bool {
     match cmd {
         Command::Task { op, .. } => {

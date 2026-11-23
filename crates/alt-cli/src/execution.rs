@@ -269,14 +269,7 @@ impl Execution {
                 operations,
                 writing: self.writing,
                 observed_outcome: Some(&self.outcome),
-                conflict_on_failure: matches!(
-                    self.parsed.cli.command,
-                    Command::Merge { .. }
-                        | Command::CherryPick { .. }
-                        | Command::Rebase { .. }
-                        | Command::Revert { .. }
-                        | Command::Stash(_)
-                ),
+                conflict_on_failure: crate::cli::may_conflict(&self.parsed.cli.command),
             },
         )
     }

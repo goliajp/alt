@@ -22,6 +22,18 @@ use crate::{RepoError, Repository};
 /// What follows `@{` in a revision that asks for an upstream.
 const UPSTREAM: [&str; 2] = ["@{u}", "@{upstream}"];
 
+/// The number written at `bytes[*at..]`, which `at` is left behind: 1
+/// where there is none, `None` where it is too large to be one.
+fn count(bytes: &[u8], at: &mut usize) -> Option<usize> {
+    let mut n: Option<usize> = None;
+    while let Some(digit) = bytes.get(*at).filter(|b| b.is_ascii_digit()) {
+        let more = n.unwrap_or(0).checked_mul(10)?;
+        n = Some(more.checked_add(usize::from(digit - b'0'))?);
+        *at += 1;
+    }
+    Some(n.unwrap_or(1))
+}
+
 impl Repository {
     /// The object `spec` names; `None` where it names nothing.
     pub fn rev_parse(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
@@ -59,21 +71,9 @@ impl Repository {
                 i += end + 1;
                 continue;
             }
-            // Optional numeric count attached to the operator.
-            let mut n: usize = 0;
-            let mut had_digit = false;
-            while i < bytes.len() && bytes[i].is_ascii_digit() {
-                let Some(next) = n
-                    .checked_mul(10)
-                    .and_then(|v| v.checked_add((bytes[i] - b'0') as usize))
-                else {
-                    return Ok(None);
-                };
-                n = next;
-                i += 1;
-                had_digit = true;
-            }
-            let n = if had_digit { n } else { 1 };
+            let Some(n) = count(bytes, &mut i) else {
+                return Ok(None);
+            };
             // Peel tags before reading the commit; ancestor operators
             // are commit-relative even when the user named a tag.
             let (peeled, object) = self.peel(oid)?;

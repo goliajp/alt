@@ -24,6 +24,23 @@ fn same(a: Option<&WorkEntry>, b: Option<&WorkEntry>) -> bool {
     }
 }
 
+/// The index as a merge that stopped leaves it: each path as it resolved,
+/// a conflict in its stages.
+fn as_merged(resolved: &[Resolved]) -> Vec<IndexEntry> {
+    let mut index = Vec::new();
+    for r in resolved {
+        let stages = r
+            .stages
+            .iter()
+            .map(|(stage, entry)| stage_entry(entry, *stage));
+        match r.conflicted {
+            true => index.extend(stages),
+            false => index.extend(r.entry.iter().map(|e| stage_entry(e, 0))),
+        }
+    }
+    index
+}
+
 impl NativeRepo<'_> {
     /// `alt stash apply [--index] [<entry>]`, and `pop`, which takes the
     /// entry out of the stack as well when nothing conflicts. Returns
@@ -67,27 +84,10 @@ impl NativeRepo<'_> {
             .collect();
         let mut edit = TreeEdit::of(index);
         if !conflicts.is_empty() {
-            // as a merge leaves it: each path as it resolved, a conflict in its stages
-            edit.index = Vec::new();
-            for r in &resolved {
-                let stages = r
-                    .stages
-                    .iter()
-                    .map(|(stage, entry)| stage_entry(entry, *stage));
-                match r.conflicted {
-                    true => edit.index.extend(stages),
-                    false => edit.index.extend(r.entry.iter().map(|e| stage_entry(e, 0))),
-                }
-            }
+            edit.index = as_merged(&resolved);
         } else if with_index {
             let wanted = self.commit_entries(*staged)?;
-            let merged = self.merge_trees_named(&base, &ours, &wanted, SIDES)?;
-            if merged.iter().any(|r| r.conflicted) {
-                let said = "error: Conflicts in index. Try without --index.\n";
-                return Err(said::refused(said, 1));
-            }
-            let entries: Vec<WorkEntry> = merged.into_iter().filter_map(|r| r.entry).collect();
-            edit.index = tree_edit::fresh(&entries);
+            edit.index = self.with_staged(&base, &ours, &wanted)?;
         } else {
             // what the entry adds is staged, as by git; the rest is left unstaged
             for r in changed.iter().filter(|r| !have.contains_key(&r.path)) {
@@ -123,6 +123,23 @@ impl NativeRepo<'_> {
             out,
         )?;
         Ok(!conflicts.is_empty())
+    }
+
+    /// The index `ours` with what the entry had staged, `wanted`, merged
+    /// into it over `base`; refused where the two cannot be merged.
+    fn with_staged(
+        &mut self,
+        base: &[WorkEntry],
+        ours: &[WorkEntry],
+        wanted: &[WorkEntry],
+    ) -> Res<Vec<IndexEntry>> {
+        let merged = self.merge_trees_named(base, ours, wanted, SIDES)?;
+        if merged.iter().any(|r| r.conflicted) {
+            let said = "error: Conflicts in index. Try without --index.\n";
+            return Err(said::refused(said, 1));
+        }
+        let entries: Vec<WorkEntry> = merged.into_iter().filter_map(|r| r.entry).collect();
+        Ok(tree_edit::fresh(&entries))
     }
 
     /// Refuses, before anything is written, an apply that would write

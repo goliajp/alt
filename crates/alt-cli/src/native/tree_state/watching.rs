@@ -342,15 +342,9 @@ mod linux {
             root: &Path,
             clean: Option<alt_worktree::CleanTracked<'a>>,
         ) -> ScanOptions<'a> {
-            ScanOptions {
-                file_mode: true,
-                untracked: alt_worktree::Untracked::Normal,
-                within: &[],
-                clean,
-                head: None,
-                excludes: &[],
-                clock: alt_worktree::Clock::read(&root.join(".alt")).unwrap(),
-            }
+            let clock = alt_worktree::Clock::read(&root.join(".alt")).unwrap();
+            let plain = ScanOptions::plain(alt_worktree::Untracked::Normal, clock);
+            ScanOptions { clean, ..plain }
         }
 
         #[test]

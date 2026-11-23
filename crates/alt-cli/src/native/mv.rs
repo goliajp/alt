@@ -84,18 +84,16 @@ impl NativeRepo<'_> {
         Ok(renamed)
     }
 
-    /// Adds the move of `from` to `to` to `edit`, refused as git refuses
-    /// it where it cannot be made. Returns the renames of the tracked
-    /// files beneath `from` where that is a directory.
-    fn plan_move(
+    /// Refuses the move of `from` to `to` as git refuses it where it
+    /// cannot be made; whether `from` is a directory.
+    fn ensure_movable(
         &self,
         index: &Index,
         from: &BString,
         to: &BString,
         force: bool,
-        edit: &mut TreeEdit,
-    ) -> Res<Vec<Renamed>> {
-        let refused = |why: &str| -> Res<Vec<Renamed>> {
+    ) -> Res<bool> {
+        let refused = |why: &str| -> Res<bool> {
             let said = format!("{why}, source={from}, destination={to}");
             Err(settings::fatal(said))
         };
@@ -132,6 +130,21 @@ impl NativeRepo<'_> {
         if !target.parent().is_some_and(Path::is_dir) {
             return refused("destination directory does not exist");
         }
+        Ok(found.is_dir())
+    }
+
+    /// Adds the move of `from` to `to` to `edit`, refused as git refuses
+    /// it where it cannot be made. Returns the renames of the tracked
+    /// files beneath `from` where that is a directory.
+    fn plan_move(
+        &self,
+        index: &Index,
+        from: &BString,
+        to: &BString,
+        force: bool,
+        edit: &mut TreeEdit,
+    ) -> Res<Vec<Renamed>> {
+        let is_dir = self.ensure_movable(index, from, to, force)?;
         let moved = |path: &[u8]| -> BString {
             let mut name = to.to_vec();
             name.extend_from_slice(&path[from.len()..]);
@@ -144,7 +157,7 @@ impl NativeRepo<'_> {
         let mut beneath = Vec::new();
         for entry in entries {
             let to = moved(&entry.path);
-            if found.is_dir() {
+            if is_dir {
                 beneath.push(Renamed {
                     from: entry.path.clone(),
                     to: to.clone(),
@@ -158,7 +171,7 @@ impl NativeRepo<'_> {
             edit.index.push(stage_entry(&entry, 0));
         }
         beneath.sort_by(|a, b| a.from.cmp(&b.from));
-        let files = match found.is_dir() {
+        let files = match is_dir {
             true => self.files_beneath(from)?,
             false => vec![from.clone()],
         };

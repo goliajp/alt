@@ -126,18 +126,23 @@ impl Member {
     }
 }
 
+/// How many values a field of the type `ty` takes, and the type of one.
+fn shape_of(ty: &[TokenTree]) -> (Shape, String) {
+    if text(ty) == "bool" {
+        (Shape::Flag, text(ty))
+    } else if let Some(inner) = unwrap(ty, "Option") {
+        (Shape::Optional, text(inner))
+    } else if let Some(inner) = unwrap(ty, "Vec") {
+        (Shape::Repeated, text(inner))
+    } else {
+        (Shape::Required, text(ty))
+    }
+}
+
 impl ArgField {
     fn parse(field: &Field) -> Result<Self, Error> {
         let name = field.name.trim_start_matches("r#");
-        let (mut shape, value_type) = if text(&field.ty) == "bool" {
-            (Shape::Flag, text(&field.ty))
-        } else if let Some(inner) = unwrap(&field.ty, "Option") {
-            (Shape::Optional, text(inner))
-        } else if let Some(inner) = unwrap(&field.ty, "Vec") {
-            (Shape::Repeated, text(inner))
-        } else {
-            (Shape::Required, text(&field.ty))
-        };
+        let (mut shape, value_type) = shape_of(&field.ty);
         let mut arg = ArgField {
             id: name.to_owned(),
             long: None,

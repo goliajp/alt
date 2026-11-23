@@ -52,18 +52,11 @@ pub(crate) fn index_of(root: &Path) -> Index {
 /// A scan that began at `now` by the clock of the filesystem under test.
 pub(crate) fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
     let dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
-    ScanOptions {
-        file_mode: true,
-        untracked: match untracked {
-            true => Untracked::All,
-            false => Untracked::No,
-        },
-        within: &[],
-        clean: None,
-        head: None,
-        excludes: &[],
-        clock: Clock { now, dev },
-    }
+    let untracked = match untracked {
+        true => Untracked::All,
+        false => Untracked::No,
+    };
+    ScanOptions::plain(untracked, Clock { now, dev })
 }
 
 type View = (Vec<(BString, ChangeKind)>, Vec<BString>);
