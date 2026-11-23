@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: tell a command whether -- was written on its line
+author-type: human
+author: doracawl
+touched: crates/alt-args-derive/src/field.rs
+touched: crates/alt-args-derive/src/generate.rs
+touched: crates/alt-args-derive/src/lib.rs
+touched: crates/alt-args/src/level.rs
+touched: crates/alt-args/src/matches.rs
+touched: crates/alt-args/src/parse.rs
+touched: crates/alt-args/tests/it/last.rs
