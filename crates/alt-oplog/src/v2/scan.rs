@@ -3,14 +3,15 @@
 use std::borrow::Cow;
 
 use crate::OpLogError;
-use crate::v2::block::{BLOCK_HEADER_LEN, Layout};
-use crate::v2::checkpoint::{Checkpoint, generation_of};
+use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, Layout};
+use crate::v2::checkpoint::generation_of;
 use crate::v2::frame::{
     HEADER_LEN, KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT, SKIPPABLE, Seed, View, body_at, len_of,
     parse,
 };
 pub use crate::v2::locate::{Located, locate};
 use crate::v2::state::State;
+use crate::v2::verify::Full;
 
 /// Why a walk stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,16 +33,19 @@ pub struct Walk<'a> {
 }
 
 /// The bytes of the frame that starts at `at`, without the block headers
-/// among them, and where it ends: `None` where `data` does not hold as
-/// many bytes as its header says, laid out as a frame's are.
+/// among them, which are given to `crossed`, and where it ends: `None`
+/// where `data` does not hold as many bytes as its header says, laid out
+/// as a frame's are.
 pub(crate) fn lift_frame<'a>(
     layout: &Layout,
     data: &'a [u8],
     base: u64,
     at: u64,
+    crossed: &mut dyn FnMut(&BlockHeader),
 ) -> Option<(Cow<'a, [u8]>, u64)> {
     let header = layout.lift_start(data, base, at, HEADER_LEN)?;
-    layout.lift(data, base, at, len_of(header.first_chunk()?)?)
+    let len = len_of(header.first_chunk()?)?;
+    layout.lift_across(data, base, at, len, crossed)
 }
 
 /// The frame `bytes` are when they read: a checkpoint under the
@@ -72,57 +76,23 @@ impl Walk<'_> {
     }
 
     /// Where the frame after the one that ends at `at` starts, past the
-    /// zeros that end a block and the header of the next one; whether it
-    /// opens a block. `None` where those do not read.
-    fn next_start(&self, state: &State, mut at: u64) -> Result<Option<(u64, bool)>, OpLogError> {
+    /// zeros that end a block and the header of the next one, with that
+    /// header where it opens a block. `None` where those do not read.
+    fn next_start(&self, mut at: u64) -> Option<(u64, Option<BlockHeader>)> {
         if !self.layout.opens_block(at) && self.from(at).first() == Some(&0) {
             let block_end = at + self.layout.room(at);
             let zeros = &self.from(at)[..(block_end.min(self.limit()) - at) as usize];
             if block_end >= self.limit() || zeros.iter().any(|byte| *byte != 0) {
-                return Ok(None);
+                return None;
             }
             at = block_end;
         }
         if !self.layout.opens_block(at) {
-            return Ok(Some((at, false)));
+            return Some((at, None));
         }
         let header = self.layout.decode_header(self.from(at), at);
-        let Some(header) = header.filter(|header| header.first as usize == BLOCK_HEADER_LEN) else {
-            return Ok(None);
-        };
-        if self.strict && header.checkpoint != state.checkpoint {
-            return Err(OpLogError::Format(
-                "an oplog block names another checkpoint than the one before it",
-            ));
-        }
-        Ok(Some((at + BLOCK_HEADER_LEN as u64, true)))
-    }
-
-    /// What a full check holds a frame to beyond its checksum.
-    fn verify(&self, state: &State, view: &View) -> Result<(), OpLogError> {
-        match view.head.kind {
-            KIND_OP => {
-                let id = alt_hash::blake3::hash(view.body);
-                if view.op.is_none_or(|op| op.0 != *id.as_bytes()) {
-                    return Err(OpLogError::Format("an op's id is not the hash of its body"));
-                }
-            }
-            KIND_CHECKPOINT => {
-                let said = Checkpoint::decode(view.body);
-                // the boot and the generation are the checkpoint's own to say
-                let derived = said.as_ref().map(|said| Checkpoint {
-                    generation: said.generation,
-                    ..state.checkpoint(said.boot, view.head.synced)
-                });
-                if said.is_none() || said != derived {
-                    return Err(OpLogError::Format(
-                        "an oplog checkpoint disagrees with the frames before it",
-                    ));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
+        let header = header.filter(|header| header.first as usize == BLOCK_HEADER_LEN)?;
+        Some((at + BLOCK_HEADER_LEN as u64, Some(header)))
     }
 
     /// Reads the frames that follow `state` and takes each into it, then
@@ -132,15 +102,34 @@ impl Walk<'_> {
         state: &mut State,
         each: &mut dyn FnMut(u64, u64, &View) -> Result<(), OpLogError>,
     ) -> Result<Stop, OpLogError> {
+        let mut full = self.strict.then(|| Full::from(state));
+        self.run_with(state, full.as_mut(), each)
+    }
+
+    /// [`Self::run`], as a part of the full check `full` when there is
+    /// one, whatever `strict` says.
+    pub(crate) fn run_with(
+        &self,
+        state: &mut State,
+        mut full: Option<&mut Full>,
+        each: &mut dyn FnMut(u64, u64, &View) -> Result<(), OpLogError>,
+    ) -> Result<Stop, OpLogError> {
         let mut seed = (
             state.generation,
             Seed::new(&self.layout.id, state.generation),
         );
         while state.end < self.limit() {
-            let Some((at, opens)) = self.next_start(state, state.end)? else {
+            let Some((at, opened)) = self.next_start(state.end) else {
                 return Ok(Stop::Unread);
             };
-            let Some((bytes, end)) = lift_frame(&self.layout, self.data, self.base, at) else {
+            let mut headers: Vec<BlockHeader> = opened.into_iter().collect();
+            let mut crossed = |header: &BlockHeader| {
+                if full.is_some() {
+                    headers.push(*header);
+                }
+            };
+            let lifted = lift_frame(&self.layout, self.data, self.base, at, &mut crossed);
+            let Some((bytes, end)) = lifted else {
                 return Ok(Stop::Unread);
             };
             // a checkpoint names the generation it and what follows are of
@@ -158,7 +147,7 @@ impl Walk<'_> {
                 return Ok(Stop::Unread);
             };
             let kind = view.head.kind;
-            if opens && kind != KIND_CHECKPOINT {
+            if opened.is_some() && kind != KIND_CHECKPOINT {
                 return Ok(Stop::Unread);
             }
             let known = matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT);
@@ -167,8 +156,8 @@ impl Walk<'_> {
                     "the oplog holds a frame of a kind this alt does not know",
                 ));
             }
-            if self.strict {
-                self.verify(state, &view)?;
+            if let Some(full) = full.as_deref_mut() {
+                full.frame(state, at, &view, seed.0, &headers)?;
             }
             if !state.take(at, end, &view)? {
                 return Ok(Stop::Unread);

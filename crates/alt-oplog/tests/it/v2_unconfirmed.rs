@@ -272,7 +272,7 @@ fn a_handle_that_reads_the_history_after_its_ops_were_cut_is_told_they_were_cut(
         cut_back(held_open.ops().map(|_| ()));
         cut_back(held_open.get(&head).map(|_| ()));
         cut_back(held_open.since(&synced[0]).map(|_| ()));
-        cut_back(held_open.verify());
+        cut_back(held_open.verify().map(|_| ()));
         cut_back(held_open.passed().map(|_| ()));
         cut_back(held_open.passed_ops().map(|_| ()));
         let mut held_open = held_open;

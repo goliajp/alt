@@ -133,6 +133,7 @@ impl Log {
     /// Writes the bytes that append `new` where the log ends, all at once.
     pub(super) fn write(&mut self, new: &New) -> Result<(), OpLogError> {
         self.may_write()?;
+        self.may_append()?;
         let composer = self.composer();
         let mut state = self.state.clone();
         let bytes = composer.frame(&mut state, new)?;

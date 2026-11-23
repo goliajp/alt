@@ -23,17 +23,19 @@ pub fn varied(dir: &Path) {
     boot(1);
     alt_oplog::v2::create_with(dir, 10).unwrap();
     let mut log = OpLog::open(dir).unwrap();
-    let of = |workspace: u8, linked: bool| Meta {
-        workspace: (workspace != 0).then_some([workspace; 8]),
-        undoable: workspace == 1,
-        index_after: (workspace == 2).then_some([workspace; 20]),
-        request: linked.then_some([workspace; 16]),
-        linked,
+    // op `n`: of a workspace or none, and every few a ref transaction
+    // that a request made
+    let of = |n: u8, requested: bool| Meta {
+        workspace: (!n.is_multiple_of(3)).then_some([n % 3; 8]),
+        undoable: n % 3 == 1,
+        index_after: (n % 3 == 2).then_some([n; 20]),
+        request: requested.then_some([n; 16]),
+        linked: requested,
         ..Meta::default()
     };
-    let receipt = |first_op: u64| {
+    let receipt = |n: u8, first_op: u64| {
         let mut receipt = Receipt {
-            request: [1; 16],
+            request: [n; 16],
             binding: [2; 32],
             outcome: Outcome::Executed,
             exit: 0,
@@ -48,11 +50,11 @@ pub fn varied(dir: &Path) {
         receipt
     };
     for n in 0..9u8 {
-        log.append_with("a", n as u64, &[n; 40], &of(n % 3, n % 4 == 0))
+        log.append_with("a", n as u64, &[n; 40], &of(n, n % 4 == 0))
             .unwrap();
         if n % 4 == 0 {
             let first = log.anchor().unwrap().start;
-            log.append_receipt(&receipt(first)).unwrap();
+            log.append_receipt(&receipt(n, first)).unwrap();
         }
         log.sync().unwrap();
     }
@@ -65,17 +67,17 @@ pub fn varied(dir: &Path) {
     let held = |op: &Op| Ok::<_, OpLogError>(op.payload != b"gone");
     assert!(log.settle(held).unwrap().is_some());
     for n in 11..17u8 {
-        log.append_with("b", n as u64, &[n; 70], &of(n % 3, n % 2 == 0))
+        log.append_with("b", n as u64, &[n; 70], &of(n, false))
             .unwrap();
         log.sync().unwrap();
     }
     let _unsynced = alt_os::durability::leave_unsynced(true);
     for n in 17..30u8 {
-        log.append_with("b", n as u64, &[n; 90], &of(n % 3, n % 5 == 0))
+        log.append_with("b", n as u64, &[n; 90], &of(n, n == 29))
             .unwrap();
     }
     let first = log.anchor().unwrap().start;
-    log.append_receipt(&receipt(first)).unwrap();
+    log.append_receipt(&receipt(29, first)).unwrap();
     log.verify().unwrap();
     assert_eq!(log.state().unwrap().generation, 1);
 }

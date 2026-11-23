@@ -8,6 +8,8 @@
 //! [the object store's four synced lengths 4 x u64][its generation u32]
 //! [the last ref transaction's frame u64][ref transactions so far u64]
 //! [before where the ops may be of the kinds a version 1 log held u64]
+//! [the last frame that says nothing is appended after it by whoever does
+//!  not know it u64, or zero]
 //! [workspaces u32], each
 //!   [id 8][its last op's frame u64][its last op that can be undone u64]
 //!   [its last op that changed the index u64][the index's checksum then 20]
@@ -21,7 +23,7 @@ use crate::OpId;
 use crate::v2::frame::OdbBounds;
 
 const VERSION: u8 = 1;
-const FIXED_LEN: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 4;
+const FIXED_LEN: usize = 1 + 16 + 4 + 8 + 32 + 8 + 8 + 8 + 36 + 8 + 8 + 8 + 8 + 4;
 const WORKSPACE_LEN: usize = 8 + 8 + 8 + 8 + 20 + 8;
 /// where the generation lies in the body
 const GENERATION_AT: usize = 17;
@@ -49,6 +51,7 @@ pub struct Checkpoint {
     pub linked_at: u64,
     pub linked: u64,
     pub migrated: u64,
+    pub required: u64,
     /// in the order of their ids
     pub workspaces: Vec<Workspace>,
 }
@@ -98,6 +101,7 @@ impl Checkpoint {
             && self.head_end <= at
             && self.synced <= at
             && self.migrated <= at
+            && self.required < at
             && self.linked_at <= self.head_at
             && self.linked <= self.seq
     }
@@ -116,7 +120,7 @@ impl Checkpoint {
             out.extend_from_slice(&len.to_le_bytes());
         }
         out.extend_from_slice(&self.odb.generation.to_le_bytes());
-        for word in [self.linked_at, self.linked, self.migrated] {
+        for word in [self.linked_at, self.linked, self.migrated, self.required] {
             out.extend_from_slice(&word.to_le_bytes());
         }
         out.extend_from_slice(&(self.workspaces.len() as u32).to_le_bytes());
@@ -155,6 +159,7 @@ impl Checkpoint {
         checkpoint.linked_at = read.word()?;
         checkpoint.linked = read.word()?;
         checkpoint.migrated = read.word()?;
+        checkpoint.required = read.word()?;
         let count = read.part()? as usize;
         if read.0.len() != count.checked_mul(WORKSPACE_LEN)? {
             return None;

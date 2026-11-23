@@ -54,7 +54,7 @@ pub(crate) fn checkpoint_at(
         return Ok(None);
     };
     let data = read(at, (end - at) as usize)?;
-    let read = lift_frame(layout, &data, at, at);
+    let read = lift_frame(layout, &data, at, at, &mut |_| {});
     let Some((bytes, _)) = read.filter(|(bytes, _)| read_frame(layout, bytes, 0).is_some()) else {
         return Ok(None);
     };

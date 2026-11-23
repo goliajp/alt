@@ -7,6 +7,7 @@ use crate::v2::block::{BLOCK_HEADER_LEN, Layout};
 use crate::v2::frame::{CLOSE_LEN, HEADER_LEN, View, len_of};
 use crate::v2::scan::{Stop, Walk};
 use crate::v2::state::State;
+use crate::v2::verify::Full;
 
 /// Gives the bytes of the file at an offset, as many as asked for.
 pub(crate) type ReadAt<'a> = dyn FnMut(u64, usize) -> std::io::Result<Vec<u8>> + 'a;
@@ -62,6 +63,7 @@ pub(crate) fn walk_file(
     each: &mut dyn FnMut(u64, u64, &View) -> Result<(), OpLogError>,
 ) -> Result<Stop, OpLogError> {
     let mut reach = STRETCH;
+    let mut full = strict.then(|| Full::from(state));
     while state.end < limit {
         let base = state.end;
         let len = reach.min(limit - base);
@@ -72,7 +74,7 @@ pub(crate) fn walk_file(
             base,
             strict,
         };
-        walk.run(state, each)?;
+        walk.run_with(state, full.as_mut(), each)?;
         if state.end > base {
             reach = STRETCH;
             continue;

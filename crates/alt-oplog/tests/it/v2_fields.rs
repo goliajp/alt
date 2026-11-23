@@ -15,19 +15,19 @@ use alt_oplog::{OpId, OpLog, OpLogError};
 use super::v2_log::{boot, grow, new_log};
 use super::v2_untrusted::{anchors, read_through, varied};
 
-struct Laid {
-    at: u64,
-    end: u64,
-    head: Head,
-    ext: Ext,
-    body: Vec<u8>,
-    op: Option<OpId>,
-    generation: u32,
+pub struct Laid {
+    pub at: u64,
+    pub end: u64,
+    pub head: Head,
+    pub ext: Ext,
+    pub body: Vec<u8>,
+    pub op: Option<OpId>,
+    pub generation: u32,
 }
 
 /// The frames of the log `bytes` are, each with the generation it was
 /// written under.
-fn laid(bytes: &[u8]) -> (Layout, Vec<Laid>) {
+pub fn laid(bytes: &[u8]) -> (Layout, Vec<Laid>) {
     let layout = FileHeader::decode(bytes).unwrap().layout();
     let (mut generation, mut frames) = (0, Vec::new());
     let walk = Walk {
@@ -73,7 +73,7 @@ fn values(len: u64, at: u64) -> [u64; 10] {
 }
 
 impl Laid {
-    fn of(other: &Laid) -> Laid {
+    pub fn of(other: &Laid) -> Laid {
         Laid {
             ext: other.ext.clone(),
             body: other.body.clone(),
@@ -83,7 +83,7 @@ impl Laid {
 
     /// The frame with `head` and `body` in place of its own, where it
     /// lies in one piece; its checksum holds.
-    fn with(&self, layout: &Layout, head: &Head, body: &[u8]) -> Option<Vec<u8>> {
+    pub fn with(&self, layout: &Layout, head: &Head, body: &[u8]) -> Option<Vec<u8>> {
         let seed = Seed::new(&layout.id, self.generation);
         let frame = encode(&seed, head, &self.ext, body, self.op.as_ref()).unwrap();
         (frame.len() as u64 == self.end - self.at).then_some(frame)
@@ -199,7 +199,7 @@ pub fn tail(in_boot: u8, generation: u32, pending: bool, fields: [u64; 3]) -> [u
     bytes
 }
 
-fn written(dir: &Path) -> (Vec<u8>, Vec<u8>) {
+pub fn written(dir: &Path) -> (Vec<u8>, Vec<u8>) {
     let read = |name: &str| fs::read(dir.join(name)).unwrap();
     (read("log"), read("tail"))
 }

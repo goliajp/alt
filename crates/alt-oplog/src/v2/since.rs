@@ -5,7 +5,7 @@
 use std::borrow::Cow;
 
 use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, FILE_HEADER_LEN};
-use crate::v2::frame::{HEADER_LEN, KIND_OP, View, len_of};
+use crate::v2::frame::{HEADER_LEN, KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT, View, len_of};
 use crate::v2::locate::checkpoint_at;
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
@@ -145,17 +145,20 @@ impl Log {
     }
 
     /// Reads the log from its first frame to the last one held, as a full
-    /// check does when `strict`, and gives its ops. No lock is held: where
-    /// the frames do not lead to the last one held because the log was cut
-    /// meanwhile, that is what is told.
-    fn read_through(&self, strict: bool) -> Result<Vec<Op>, OpLogError> {
+    /// check does when `strict`, and gives its ops with how many frames
+    /// of kinds this build does not know lie among them. No lock is held:
+    /// where the frames do not lead to the last one held because the log
+    /// was cut meanwhile, that is what is told.
+    fn read_through(&self, strict: bool) -> Result<(Vec<Op>, u64), OpLogError> {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
         let mut state = State::empty();
-        let mut ops = Vec::new();
+        let (mut ops, mut skipped) = (Vec::new(), 0);
         let mut each = |at: u64, end: u64, view: &View| {
-            if view.head.kind == KIND_OP {
-                ops.push(op_of(at, end, view)?);
+            match view.head.kind {
+                KIND_OP => ops.push(op_of(at, end, view)?),
+                KIND_CHECKPOINT | KIND_RECEIPT => {}
+                _ => skipped += 1,
             }
             Ok(())
         };
@@ -174,7 +177,7 @@ impl Log {
         }
         walked?;
         match led {
-            true => Ok(ops),
+            true => Ok((ops, skipped)),
             false => Err(OpLogError::Format(
                 "the oplog does not lead to where it ends",
             )),
@@ -188,12 +191,12 @@ impl Log {
         if let Some(full) = self.full.get() {
             return Ok(full);
         }
-        let all = self.read_through(false)?;
+        let (all, _) = self.read_through(false)?;
         Ok(self.full.get_or_init(|| all))
     }
 
-    pub fn verify(&self) -> Result<(), OpLogError> {
-        self.read_through(true).map(|_| ())
+    pub fn verify(&self) -> Result<u64, OpLogError> {
+        self.read_through(true).map(|(_, skipped)| skipped)
     }
 
     pub fn anchor_within(&self, bound: u64) -> Option<(Anchor, usize)> {

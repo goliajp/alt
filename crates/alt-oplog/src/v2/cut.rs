@@ -144,6 +144,8 @@ impl Log {
     /// as synced.
     fn cut_at(&mut self, at: u64, discarded: Discarded) -> Result<(), OpLogError> {
         self.may_write()?;
+        // neither a frame that must be known is cut nor the log after one
+        self.may_append()?;
         let held = Held::take(&self.dir)?;
         let synced = self.tail().map_or(0, |tail| tail.synced).max(self.synced);
         if at < synced {
@@ -151,6 +153,7 @@ impl Log {
         }
         if at != self.state.end {
             self.read_to(at)?;
+            self.may_append()?;
         }
         let cut = Cut {
             bytes: discarded.to - discarded.from,

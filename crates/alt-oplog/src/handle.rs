@@ -247,10 +247,12 @@ impl OpLog {
 
     /// Reads every byte of the log and holds it to all the format
     /// promises, what an open takes on trust included: for the full check.
-    /// A version 1 log is held to all of it by [`Self::ops`].
-    pub fn verify(&self) -> Result<(), OpLogError> {
+    /// Gives how many frames of kinds this build does not know it read
+    /// past. A version 1 log is held to all of it by [`Self::ops`], and
+    /// holds no such frames.
+    pub fn verify(&self) -> Result<u64, OpLogError> {
         match &self.0 {
-            Inner::V1(log) => log.ops().map(|_| ()),
+            Inner::V1(log) => log.ops().map(|_| 0),
             Inner::V2(log) => log.verify(),
         }
     }

@@ -20,6 +20,7 @@ mod v2_faults;
 mod v2_features;
 mod v2_fields;
 mod v2_format;
+mod v2_full_check;
 mod v2_image;
 mod v2_log;
 mod v2_named;

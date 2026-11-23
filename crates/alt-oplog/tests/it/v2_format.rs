@@ -97,6 +97,7 @@ fn a_checkpoint_and_a_receipt_read_back_as_they_were_written() {
         linked_at: 300,
         linked: 3,
         migrated: 64,
+        required: 200,
         workspaces: vec![workspace(1), workspace(2)],
     };
     for checkpoint in [checkpoint.clone(), Checkpoint::default()] {

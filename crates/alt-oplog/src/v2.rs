@@ -28,6 +28,7 @@ pub mod state;
 mod stream;
 mod sync;
 mod tail;
+mod verify;
 
 use std::cell::Cell;
 use std::fs::OpenOptions;

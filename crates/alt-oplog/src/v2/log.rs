@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use crate::lock::{lock_shared, unlock};
 use crate::read::read_at;
 use crate::v2::block::{FILE_HEADER_LEN, FileHeader, Layout};
+use crate::v2::frame::{KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT};
 use crate::v2::open::{Loaded, Source, load};
 use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::sink::Deferred;
@@ -276,6 +277,22 @@ impl Log {
             true => Ok(()),
             false => Err(OpLogError::Format(
                 "the oplog uses a feature this alt does not know to write",
+            )),
+        }
+    }
+
+    /// Refuses where the last frame that says nothing is appended after
+    /// it by whoever does not know it is of a kind this build skips.
+    pub(super) fn may_append(&self) -> Result<(), OpLogError> {
+        let at = self.state.required;
+        if at == 0 || at >= self.state.end {
+            return Ok(());
+        }
+        let kind = self.source().at(at, 1)?[0];
+        match matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT) {
+            true => Ok(()),
+            false => Err(OpLogError::Format(
+                "the oplog holds a frame this alt must know to append after it",
             )),
         }
     }

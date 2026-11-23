@@ -3,6 +3,7 @@
 use alt_oplog::v2::block::{FileHeader, Layout};
 use alt_oplog::v2::compose::{Composer, New};
 use alt_oplog::v2::frame::{Ext, KIND_OP, KIND_RECEIPT, View};
+use alt_oplog::v2::receipt::{Outcome, Receipt};
 use alt_oplog::v2::scan::{Stop, Walk};
 use alt_oplog::v2::state::State;
 use alt_oplog::{OpId, OpLogError};
@@ -92,10 +93,29 @@ impl Image {
         id
     }
 
-    pub fn receipt(&mut self, body: &[u8]) {
+    /// The receipt of a request that appended no op and answered
+    /// `response`.
+    pub fn receipt(&mut self, response: &[u8]) {
+        let mut receipt = Receipt {
+            request: [response.len() as u8; 16],
+            binding: [0; 32],
+            outcome: Outcome::Refused,
+            exit: 1,
+            first_op: 0,
+            ops: 0,
+            finished_ms: 0,
+            digest: [0; 32],
+            len: 0,
+            response: None,
+        };
+        receipt.answer(response);
         self.append(&New {
             kind: KIND_RECEIPT,
-            body,
+            ext: Ext {
+                request: Some(receipt.request),
+                ..Ext::default()
+            },
+            body: &receipt.encode(),
             ..New::default()
         });
     }

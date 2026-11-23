@@ -3,7 +3,7 @@
 
 use crate::v2::block::FILE_HEADER_LEN;
 use crate::v2::checkpoint::{Checkpoint, Workspace, generation_of};
-use crate::v2::frame::{KIND_CHECKPOINT, KIND_OP, OdbBounds, Step, UNDOABLE, View};
+use crate::v2::frame::{KIND_CHECKPOINT, KIND_OP, OdbBounds, REQUIRED, Step, UNDOABLE, View};
 use crate::{OpId, OpLogError, ROOT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,9 @@ pub struct State {
     pub linked_at: u64,
     pub linked: u64,
     pub migrated: u64,
+    /// where the last frame starts that says nothing is appended after it
+    /// by whoever does not know it, or zero
+    pub required: u64,
     pub workspaces: Vec<Workspace>,
 }
 
@@ -45,6 +48,7 @@ impl State {
             linked_at: 0,
             linked: 0,
             migrated: 0,
+            required: 0,
             workspaces: Vec::new(),
         }
     }
@@ -65,6 +69,7 @@ impl State {
             linked_at: checkpoint.linked_at,
             linked: checkpoint.linked,
             migrated: checkpoint.migrated,
+            required: checkpoint.required,
             workspaces: checkpoint.workspaces,
         }
     }
@@ -84,6 +89,7 @@ impl State {
             linked_at: self.linked_at,
             linked: self.linked,
             migrated: self.migrated,
+            required: self.required,
             workspaces: self.workspaces.clone(),
         }
     }
@@ -140,6 +146,9 @@ impl State {
             _ => {}
         }
         (self.last, self.end) = (at, end);
+        if view.head.flags & REQUIRED != 0 {
+            self.required = at;
+        }
         self.synced = self.synced.max(view.head.synced);
         if let Some(odb) = view.ext.odb {
             self.odb = odb;

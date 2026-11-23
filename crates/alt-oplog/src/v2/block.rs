@@ -257,6 +257,19 @@ impl Layout {
         at: u64,
         len: u64,
     ) -> Option<(Cow<'a, [u8]>, u64)> {
+        self.lift_across(data, base, at, len, &mut |_| {})
+    }
+
+    /// [`Self::lift`], with each block header the frame runs across
+    /// given to `crossed`.
+    pub fn lift_across<'a>(
+        &self,
+        data: &'a [u8],
+        base: u64,
+        at: u64,
+        len: u64,
+        crossed: &mut dyn FnMut(&BlockHeader),
+    ) -> Option<(Cow<'a, [u8]>, u64)> {
         let end = self.end_of(at, len)?;
         let from = usize::try_from(at.checked_sub(base)?).ok()?;
         let held = data.get(from..usize::try_from(end - base).ok()?)?;
@@ -280,6 +293,7 @@ impl Layout {
             if header.first as usize != expected {
                 return None;
             }
+            crossed(&header);
             let part = left.min(each);
             frame.extend_from_slice(&rest[BLOCK_HEADER_LEN..BLOCK_HEADER_LEN + part]);
             rest = &rest[BLOCK_HEADER_LEN + part..];
