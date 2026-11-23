@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: style
+summary: write the comment on what hides the end of a file as the others are written
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/open.rs
