@@ -116,26 +116,55 @@ impl NativeRepo<'_> {
         let index_tree = self.store_tree(&staged)?;
         let index_commit = self.stash_commit(index_tree, &[head], &format!("index on {on}\n"))?;
         let mut parents = vec![head, index_commit];
+        let work = self.tracked_as_found(head, index, staged, unsaved)?;
+        if !unsaved.loose.is_empty() {
+            let (mut entries, modes) = (Vec::new(), self.staged_modes()?);
+            for path in &unsaved.loose {
+                let meta = std::fs::symlink_metadata(self.abs(path)?)?;
+                let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
+                entries.push(self.stored_entry(path, mode, index)?);
+            }
+            let tree = self.store_tree(&entries)?;
+            let message = format!("untracked files on {on}\n");
+            parents.push(self.stash_commit(tree, &[], &message)?);
+        }
+        let work_tree = self.store_tree(&work)?;
+        let commit = self.stash_commit(work_tree, &parents, subject)?;
+        self.store.odb.flush()?;
+        Ok(commit)
+    }
+
+    /// The file at `path` stored as a blob, as an entry of `mode`.
+    fn stored_entry(&mut self, path: &BString, mode: u32, index: &Index) -> Res<WorkEntry> {
+        let (lfs, attrs) = (self.lfs_rules()?, self.converter()?);
+        let stored = self.stored(path, mode, lfs.as_ref(), &attrs, index)?;
+        Ok(WorkEntry {
+            path: path.clone(),
+            oid: stored.oid,
+            mode,
+        })
+    }
+
+    /// The tree an entry made on `head` records of the tracked files, as
+    /// git works it out: what is `staged`, each path with the file that
+    /// is there in its place, and without the files that are gone.
+    fn tracked_as_found(
+        &mut self,
+        head: ObjectId,
+        index: &Index,
+        staged: Vec<WorkEntry>,
+        unsaved: &Unsaved,
+    ) -> Res<Vec<WorkEntry>> {
         let mut work: BTreeMap<BString, WorkEntry> =
             staged.into_iter().map(|e| (e.path.clone(), e)).collect();
-        let (lfs, attrs) = (self.lfs_rules()?, self.converter()?);
-        let stored = |repo: &mut Self, path: &BString, mode: u32| -> Res<WorkEntry> {
-            let stored = repo.stored(path, mode, lfs.as_ref(), &attrs, index)?;
-            Ok(WorkEntry {
-                path: path.clone(),
-                oid: stored.oid,
-                mode,
-            })
-        };
         for file in &unsaved.changed {
             // what a submodule has checked out is recorded as the commit it is at
             let entry = match file.mode {
                 0o160000 => file.clone(),
-                mode => stored(self, &file.path, mode)?,
+                mode => self.stored_entry(&file.path, mode, index)?,
             };
             work.insert(entry.path.clone(), entry);
         }
-        let modes = self.staged_modes()?;
         let in_head = self.commit_entries(head)?;
         let in_head: HashSet<&BString> = in_head.iter().map(|entry| &entry.path).collect();
         // a file that is gone and was never committed is no change from
@@ -145,32 +174,20 @@ impl NativeRepo<'_> {
         }
         // a file the index has lost and the tree still has is put away
         // as it is in the tree
-        let lost = in_head.iter().filter(|path| !work.contains_key(**path));
-        for path in lost.copied().collect::<Vec<_>>() {
+        let modes = self.staged_modes()?;
+        let mut lost: Vec<&BString> = in_head.into_iter().collect();
+        lost.retain(|path| !work.contains_key(*path));
+        lost.sort();
+        for path in lost {
             let Ok(meta) = std::fs::symlink_metadata(self.abs(path)?) else {
                 continue;
             };
             if !meta.is_dir() {
                 let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
-                work.insert(path.clone(), stored(self, path, mode)?);
+                work.insert(path.clone(), self.stored_entry(path, mode, index)?);
             }
         }
-        if !unsaved.loose.is_empty() {
-            let mut entries = Vec::new();
-            for path in &unsaved.loose {
-                let meta = std::fs::symlink_metadata(self.abs(path)?)?;
-                let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
-                entries.push(stored(self, path, mode)?);
-            }
-            let tree = self.store_tree(&entries)?;
-            let message = format!("untracked files on {on}\n");
-            parents.push(self.stash_commit(tree, &[], &message)?);
-        }
-        let work: Vec<WorkEntry> = work.into_values().collect();
-        let work_tree = self.store_tree(&work)?;
-        let commit = self.stash_commit(work_tree, &parents, subject)?;
-        self.store.odb.flush()?;
-        Ok(commit)
+        Ok(work.into_values().collect())
     }
 
     /// Puts `commit` on the stack and brings the index and the files to

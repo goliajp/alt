@@ -122,7 +122,18 @@ impl NativeRepo<'_> {
             self.say_applied(&conflicts, popped, said, out)?;
             return Ok(!conflicts.is_empty());
         }
-        // as by git, the rest of the entry is applied and the entry stays
+        self.fail_blocked(&blocked, pop, said, out)
+    }
+
+    /// Ends an apply that left the untracked files `blocked` out. As by
+    /// git, the rest of the entry is applied and the entry stays.
+    fn fail_blocked(
+        &self,
+        blocked: &[BString],
+        pop: bool,
+        said: Stashing,
+        out: &mut impl Write,
+    ) -> Res<bool> {
         if !said.quiet && !said.json {
             self.status(None, false, out)?;
             if pop {
@@ -131,7 +142,7 @@ impl NativeRepo<'_> {
         }
         out.flush()?;
         let mut told = String::new();
-        for path in &blocked {
+        for path in blocked {
             told.push_str(&format!("{path} already exists, no checkout\n"));
         }
         told.push_str("error: could not restore untracked files from stash\n");
@@ -202,17 +213,21 @@ impl NativeRepo<'_> {
                 "Please move or remove them before you merge.",
             ));
         }
-        // an untracked file of the entry does not go where a file is
-        // once the rest is applied
-        let written: BTreeMap<&BString, bool> = changed
-            .iter()
-            .map(|r| (&r.path, r.conflicted || r.entry.is_some()))
-            .collect();
+        self.blocked_by(changed, loose)
+    }
+
+    /// The untracked files `loose` of an entry that a file is in the way
+    /// of once the changes `changed` are applied.
+    fn blocked_by(&self, changed: &[&Resolved], loose: &[WorkEntry]) -> Res<Vec<BString>> {
         let mut blocked = Vec::new();
         for file in loose {
-            let stays = match written.get(&file.path) {
-                Some(written) => *written,
-                None => there(&file.path)?,
+            let written = changed.iter().find(|r| r.path == file.path);
+            let stays = match written {
+                Some(r) => r.conflicted || r.entry.is_some(),
+                None => {
+                    let meta = self.abs(&file.path)?.symlink_metadata();
+                    meta.is_ok_and(|m| !m.is_dir())
+                }
             };
             if stays {
                 blocked.push(file.path.clone());
