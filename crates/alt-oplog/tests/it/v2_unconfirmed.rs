@@ -126,6 +126,11 @@ fn a_reader_is_told_where_the_ops_start_and_the_next_reader_ends_there() {
     // the next reader of this boot takes the log to end there, unasked
     let log = OpLog::open_read_only(dir.path(), None).unwrap();
     assert_eq!((log.len(), log.appended_len()), (4, at));
+    assert_eq!(
+        log.bounded_to(),
+        Some(left[0].start),
+        "as the frames it left out said"
+    );
     assert!(log.passed_over());
     assert_eq!(
         payloads(&log.passed_ops().unwrap()),
@@ -138,6 +143,17 @@ fn a_reader_is_told_where_the_ops_start_and_the_next_reader_ends_there() {
     assert!(log.unsettled());
     assert_eq!(log.settle(held).unwrap(), Some(Unconfirmed { at, ops: 2 }));
     assert_eq!(file_len(dir.path()), log.appended_len());
+
+    // where the first op left is the one, no frame still read says how
+    // far the log is synced: the note does
+    let dir = alt_os::temp::tempdir().unwrap();
+    let left = left_by_boot_1(dir.path(), &[b"gone"]);
+    boot(2);
+    let log = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert!(log.unconfirmed(held).unwrap().is_some());
+    let log = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert_eq!((log.len(), log.bounded_to()), (3, Some(left[0].start)));
+    assert!(log.confirmed() && log.unsettled());
 
     // where every op is vouched for, a reader notes that and nothing is asked again
     let dir = alt_os::temp::tempdir().unwrap();

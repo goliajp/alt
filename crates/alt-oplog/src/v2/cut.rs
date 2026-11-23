@@ -72,9 +72,11 @@ impl Log {
     /// now is no part of the log.
     fn note_judged(&self, judged: u64) -> std::io::Result<()> {
         let len = self.file.metadata()?.len();
-        let generation = self.state.generation;
+        let (generation, synced) = (self.state.generation, self.synced);
         Tail::update(&self.dir, self.boot, |tail| {
             tail.generation = generation;
+            // the frames that said so may be among those no longer read
+            tail.raise(synced, None);
             tail.judged = judged;
             tail.hidden = if len > judged { len } else { 0 };
         })
