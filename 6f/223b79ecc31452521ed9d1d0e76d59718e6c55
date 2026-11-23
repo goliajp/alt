@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: serve a fetch what the refs reach, and nothing else that is in the store
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server_untrusted.rs
+touched: crates/alt-cli/tests/it/altd_server_wants.rs
+touched: crates/alt-cli/tests/it/main.rs
