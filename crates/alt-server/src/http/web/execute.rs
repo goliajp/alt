@@ -13,7 +13,6 @@ pub(super) struct Call {
     pub(super) token: Option<String>,
     pub(super) peer: IpAddr,
     pub(super) claim: Arc<login::Claim>,
-    /// the sign-in attempt that was let in, where the request is one
     pub(super) attempt: Option<alt_server_store::PasswordAttempt>,
 }
 impl Call {
@@ -65,14 +64,8 @@ impl Call {
             ));
         }
         if route == WebRoute::Login {
-            return login::run(
-                &mut store,
-                &browser,
-                &factory.signing_key,
-                attempt,
-                &claim,
-                &raw,
-            );
+            let key = &factory.signing_key;
+            return login::run(&mut store, &browser, key, attempt, &claim, &raw);
         }
         let token = token.ok_or(Error::Unauthorized)?;
         let credential = factory.authenticate(&mut store, &token)?;

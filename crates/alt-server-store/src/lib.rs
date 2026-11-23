@@ -23,6 +23,7 @@ mod read;
 mod refs;
 pub use refs::Refs;
 mod registration;
+mod repository_authority;
 mod requests;
 mod retention;
 pub use publication::*;

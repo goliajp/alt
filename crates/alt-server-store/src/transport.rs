@@ -24,7 +24,7 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         let (spec, signing) = (&self.spec, &self.signing_key);
         let current = reading::open(&mut tx, spec, signing, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
@@ -108,11 +108,11 @@ impl Store {
         credential: &Credential,
         repository: &str,
     ) -> Result<()> {
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = crate::reading::snapshot(&mut tx, &self.spec, repository)?;
+        let current = reading::snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if !current.writes_enabled
             || !auth
@@ -151,7 +151,7 @@ impl Store {
         credential: &Credential,
         repository: &str,
     ) -> Result<RepositoryInfo> {
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         let current = reading::open(&mut tx, &self.spec, &self.signing_key, repository)?;
@@ -230,13 +230,12 @@ impl Store {
         digest: &str,
     ) -> Result<(Vec<ContentEntry>, bool)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current =
-            crate::reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = crate::reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         active(&row, now(&mut tx)?)?;
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(
@@ -285,9 +284,9 @@ impl Store {
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
@@ -336,9 +335,9 @@ impl Store {
         if let Some(digest) = after_digest {
             alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         }
-        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);

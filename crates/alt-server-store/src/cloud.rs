@@ -1,5 +1,7 @@
 //! Persisted platform authority. HTTP and encryption belong to the caller; this
 //! module validates leases again against the database clock inside each use.
+mod held;
+
 use crate::Jsonb;
 use crate::database::Transaction;
 use crate::store::{instance, integer, now, token_digest, unsigned};
@@ -11,6 +13,8 @@ use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
 use golia_platform_contract::{
     AccountAuthorization, AltServiceAuthorization, Audience, Capability, Product,
 };
+pub(crate) use held::check_instance;
+use held::{binding, check_revision};
 
 /// Authenticated ciphertext, never the upstream bearer grant. No Debug output.
 pub struct CloudRefresh {
@@ -99,52 +103,6 @@ pub(crate) fn initialize_binding(
     tx.execute(
         "INSERT INTO alt_browser_binding(singleton,public_origin) VALUES(true,$1)",
         &[&audience.origin.as_str()],
-    )?;
-    Ok(())
-}
-/// This barrier precedes repository and credential locks. It serializes cache
-/// installation, revocation, quota accounting and authority use across workers.
-/// A backwards wall clock never gives a previously accepted lease extra life.
-pub(crate) fn check_instance(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
-    let row = binding(tx)?;
-    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
-    audience_matches(spec, &audience)?;
-    let time = now(tx)?;
-    if time < unsigned(row.get("clock_high_water"))? {
-        return Err(Error::Precondition("Cloud authority clock moved backwards"));
-    }
-    if tx.is_reading() {
-        return Ok(());
-    }
-    tx.execute(
-        "UPDATE alt_cloud_binding SET clock_high_water=$1 WHERE singleton",
-        &[&integer(time)?],
-    )?;
-    Ok(())
-}
-/// The binding, locked against every other transaction that is not a read. A read
-/// sees it as it was when the read began and waits for nobody.
-fn binding(tx: &mut Transaction<'_>) -> Result<alt_pg::Row> {
-    let row = if tx.is_reading() {
-        tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton", &[])?
-    } else {
-        tx.query_opt("SELECT audience,runtime_key_digest,provision_digest,clock_high_water,authority_revision,service,service_denied_at FROM alt_cloud_binding WHERE singleton FOR UPDATE", &[])?
-    };
-    row.ok_or(Error::Precondition("Cloud platform binding required"))
-}
-fn check_revision(tx: &mut Transaction<'_>, revision: u64) -> Result<()> {
-    let row = binding(tx)?;
-    if revision < unsigned(row.get("authority_revision"))? {
-        return Err(Error::Unauthorized);
-    }
-    // the transaction that stored these claims recorded their revision; a read
-    // records nothing
-    if tx.is_reading() {
-        return Ok(());
-    }
-    tx.execute(
-        "UPDATE alt_cloud_binding SET authority_revision=$1 WHERE singleton",
-        &[&integer(revision)?],
     )?;
     Ok(())
 }
