@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: keep the stash stack as a ref for each entry, written and read as git's log of refs/stash
+author-type: human
+author: doracawl
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-export/src/stash.rs
+touched: crates/alt-git-refs/src/lib.rs
+touched: crates/alt-git-refs/src/stash.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-import/src/refs.rs
