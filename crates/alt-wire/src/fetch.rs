@@ -47,6 +47,10 @@ use alt_git_codec::{HashAlgo, ObjectId};
 
 use crate::pkt::{self, Frame, PktError};
 
+mod served;
+
+pub use served::{MAX_HAVES, MAX_WANTS, encode_fetch_response_packfile, parse_fetch_request};
+
 /// Client-side fetch arguments. Maps directly to protocol v2's optional
 /// argument lines (see module docs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -186,6 +190,8 @@ pub enum FetchError {
     BadSideband(u8),
     /// A packfile sideband pkt-line was empty (no channel byte at all).
     EmptySidebandPkt,
+    /// A request has more lines of this kind than a server takes.
+    TooMany(&'static str),
 }
 
 impl std::fmt::Display for FetchError {
@@ -200,6 +206,7 @@ impl std::fmt::Display for FetchError {
             Self::ServerError(msg) => write!(f, "server error (sideband band 3): {msg}"),
             Self::BadSideband(band) => write!(f, "invalid sideband channel: {band}"),
             Self::EmptySidebandPkt => f.write_str("sideband pkt-line missing channel byte"),
+            Self::TooMany(what) => write!(f, "too many {what} lines"),
         }
     }
 }
@@ -212,6 +219,7 @@ impl std::error::Error for FetchError {
             | Self::UnknownSection(_)
             | Self::ServerError(_)
             | Self::BadSideband(_)
+            | Self::TooMany(_)
             | Self::EmptySidebandPkt => None,
         }
     }
@@ -428,124 +436,12 @@ fn parse_oid(s: &str, algo: HashAlgo, line: &[u8], section: &str) -> Result<Obje
         })
 }
 
-fn trim_newline(b: &[u8]) -> &[u8] {
+pub(crate) fn trim_newline(b: &[u8]) -> &[u8] {
     let mut end = b.len();
     while end > 0 && (b[end - 1] == b'\n' || b[end - 1] == b'\r') {
         end -= 1;
     }
     &b[..end]
-}
-
-/// Server-side parse of a `fetch` request body. Mirror image
-/// of [`encode_fetch_request`]: reads `command=fetch` + optional
-/// `object-format=…`, the delim, the boolean args + want/have/done
-/// lines, then the trailing flush.
-///
-/// Returns the parsed request together with the `object-format`
-/// discriminator the client asked for (defaulting to `None` — the
-/// server should treat as `sha1`).
-pub fn parse_fetch_request<R: Read>(
-    r: &mut R,
-) -> Result<(FetchRequest, Option<String>), FetchError> {
-    let mut req = FetchRequest::default();
-    let mut object_format = None;
-    let algo = HashAlgo::Sha1; // for parsing want/have oid hex; sha256 lands when we wire it
-    let mut scratch = Vec::new();
-    // Pre-delim header: command + optional object-format.
-    loop {
-        let f = pkt::read_frame(r, &mut scratch)?;
-        match f {
-            Frame::Delim => break,
-            Frame::Flush => return Ok((req, object_format)),
-            Frame::ResponseEnd => return Ok((req, object_format)),
-            Frame::Data(line) => {
-                let line = trim_newline(line);
-                let s = std::str::from_utf8(line).map_err(|_| FetchError::BadLine {
-                    section: "header".into(),
-                    line: line.to_vec(),
-                })?;
-                if s == "command=fetch" {
-                    continue;
-                }
-                if let Some(v) = s.strip_prefix("object-format=") {
-                    object_format = Some(v.trim().to_owned());
-                }
-                // unknown header lines: ignore — forward compatibility
-            }
-        }
-    }
-    // Post-delim args: flags + want/have/done.
-    loop {
-        let f = pkt::read_frame(r, &mut scratch)?;
-        match f {
-            Frame::Flush => break,
-            Frame::Delim | Frame::ResponseEnd => break,
-            Frame::Data(line) => {
-                let line = trim_newline(line);
-                let s = std::str::from_utf8(line).map_err(|_| FetchError::BadLine {
-                    section: "args".into(),
-                    line: line.to_vec(),
-                })?;
-                match s {
-                    "done" => req.done = true,
-                    "no-progress" => req.no_progress = true,
-                    "thin-pack" => req.thin_pack = true,
-                    "ofs-delta" => req.ofs_delta = true,
-                    "include-tag" => req.include_tag = true,
-                    _ => {
-                        if let Some(hex) = s.strip_prefix("want ") {
-                            let oid = parse_oid_str(hex.trim(), algo, line)?;
-                            req.wants.push(oid);
-                        } else if let Some(hex) = s.strip_prefix("have ") {
-                            let oid = parse_oid_str(hex.trim(), algo, line)?;
-                            req.haves.push(oid);
-                        } else if let Some(spec) = s.strip_prefix("filter ") {
-                            req.filter = Some(spec.trim().to_owned());
-                        }
-                        // unknown arg lines: ignore (forward compat)
-                    }
-                }
-            }
-        }
-    }
-    Ok((req, object_format))
-}
-
-fn parse_oid_str(s: &str, algo: HashAlgo, line: &[u8]) -> Result<ObjectId, FetchError> {
-    s.parse::<ObjectId>()
-        .ok()
-        .filter(|o| o.algo() == algo)
-        .ok_or_else(|| FetchError::BadLine {
-            section: "want/have".into(),
-            line: line.to_vec(),
-        })
-}
-
-/// Server-side encode of a `fetch` response that only carries a
-/// packfile section (client sends `done` so the
-/// server skips the acknowledgments section and goes straight to the
-/// pack). Wraps `pack_bytes` in v2's sideband framing:
-///
-///   pkt: "packfile\n"
-///   loop over `pack_bytes` in ≤65515-byte chunks:
-///     pkt: "\x01" + chunk        # band 1 = pack data
-///   flush
-pub fn encode_fetch_response_packfile<W: Write>(
-    w: &mut W,
-    pack_bytes: &[u8],
-) -> std::io::Result<()> {
-    pkt::write_data(w, b"packfile\n")?;
-    // pkt-line payload max = MAX_LINE_LEN; minus the 4-byte length prefix
-    // pkt::write_data uses + the 1-byte sideband channel discriminator we
-    // prepend, leaves this much room for actual pack bytes per frame.
-    const SIDEBAND_CHUNK: usize = crate::pkt::MAX_LINE_LEN - 5;
-    for chunk in pack_bytes.chunks(SIDEBAND_CHUNK) {
-        let mut framed = Vec::with_capacity(chunk.len() + 1);
-        framed.push(0x01); // band 1: pack data
-        framed.extend_from_slice(chunk);
-        pkt::write_data(w, &framed)?;
-    }
-    pkt::write_flush(w)
 }
 
 #[cfg(test)]
