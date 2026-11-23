@@ -22,6 +22,7 @@ use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
 
 mod config;
+mod logs;
 pub mod stash;
 
 #[derive(Debug)]
@@ -249,6 +250,11 @@ fn write_git(
     }
     alt_git_refs::write_loose(git_dir, head.as_ref(), &loose)?;
     stash::write_log(&odb, git_dir, &refs, &unstored, algo)?;
+    let names = loose
+        .iter()
+        .filter_map(|(name, _)| std::str::from_utf8(name).ok());
+    let names = names.chain(head.iter().map(|_| "HEAD"));
+    logs::write_logs(alt_dir, git_dir, names, also, algo)?;
     Ok(ExportReport {
         objects,
         refs: loose.len(),

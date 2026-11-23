@@ -11,6 +11,7 @@
 //! worst, never a ref pointing at missing objects. Re-running converges:
 //! object puts dedup, an unchanged ref set records no op at all.
 
+mod kept;
 mod refs;
 mod report;
 pub use report::ImportReport;
@@ -229,15 +230,7 @@ pub fn import_git_with(
         Some(refs.commit(actor, timestamp_ms, &changes)?)
     };
 
-    // --- compatibility contract 2: preserve the source config verbatim ---
-    alt_repo::kept_config::take(repo.git_dir(), alt_dir)?;
-    // the repository's own attributes decide how files are checked out
-    let attributes_src = repo.git_dir().join("info/attributes");
-    if attributes_src.is_file() {
-        let dst_dir = alt_dir.join("git-import/info");
-        fs::create_dir_all(&dst_dir)?;
-        fs::copy(&attributes_src, dst_dir.join("attributes"))?;
-    }
+    kept::keep(repo, alt_dir, refs.head_op().map(|op| op.to_string()))?;
 
     Ok(ImportReport {
         objects_seen: seen,
