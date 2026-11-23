@@ -162,37 +162,44 @@ impl State {
                 .is_none_or(|linked| linked == self.linked_at)
     }
 
-    /// Takes the frame at `at..end` in, when it follows the frames before
-    /// it. An op that follows them by everything but the parent its body
-    /// names breaks the chain.
-    pub fn take(&mut self, at: u64, end: u64, view: &View) -> Result<bool, OpLogError> {
+    /// Whether the frame at `at` is one this state takes in: it follows
+    /// the frames before it, and is whole as a frame of its kind is. An
+    /// op that follows them by everything but the parent its body names
+    /// breaks the chain.
+    pub fn admits(&self, at: u64, view: &View) -> Result<bool, OpLogError> {
         if !self.follows(at, view) {
             return Ok(false);
         }
         match view.head.kind {
             KIND_CHECKPOINT => {
-                let said = generation_of(view.body);
-                let Some(generation) = said.filter(|said| *said >= self.generation) else {
-                    return Ok(false);
-                };
-                match base_of(view.body) {
-                    Some(0) => (self.base, self.changed) = (at, Vec::new()),
-                    Some(_) => {}
-                    None => return Ok(false),
+                let later = generation_of(view.body).is_some_and(|said| said >= self.generation);
+                Ok(later && base_of(view.body).is_some())
+            }
+            KIND_OP if view.op.is_none() || view.body.len() < 32 => Ok(false),
+            KIND_OP if view.body[..32] != self.head.0 => {
+                Err(OpLogError::Format("oplog chain broken"))
+            }
+            _ => Ok(true),
+        }
+    }
+
+    /// Takes the frame at `at..end` in, when it is one this state admits.
+    pub fn take(&mut self, at: u64, end: u64, view: &View) -> Result<bool, OpLogError> {
+        if !self.admits(at, view)? {
+            return Ok(false);
+        }
+        match (view.head.kind, view.op) {
+            (KIND_CHECKPOINT, _) => {
+                if base_of(view.body) == Some(0) {
+                    (self.base, self.changed) = (at, Vec::new());
                 }
-                self.generation = generation;
+                self.generation = generation_of(view.body).unwrap_or(self.generation);
                 self.checkpoint = at;
                 if view.ext.cut.is_some() {
                     self.cut = at;
                 }
             }
-            KIND_OP => {
-                let Some(op) = view.op.filter(|_| view.body.len() >= 32) else {
-                    return Ok(false);
-                };
-                if view.body[..32] != self.head.0 {
-                    return Err(OpLogError::Format("oplog chain broken"));
-                }
+            (KIND_OP, Some(op)) => {
                 (self.seq, self.head) = (view.head.seq, op);
                 (self.head_at, self.head_end) = (at, end);
                 self.take_op(at, view);

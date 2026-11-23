@@ -3,11 +3,14 @@
 
 use std::fs;
 
+use alt_oplog::v2::block::FileHeader;
+use alt_oplog::v2::scan::Stop;
 use alt_oplog::{Meta, OpLog, OpLogError};
 
 use super::v2_cuts::{but_gone, told};
 use super::v2_fields::Laid;
 use super::v2_full_check::rewritten;
+use super::v2_image::walked;
 use super::v2_log::{boot, frames, grow, new_log};
 use super::v2_named::{collecting, staged_by_another};
 
@@ -137,4 +140,41 @@ fn a_handle_that_begins_at_the_checkpoint_of_a_cut_holds_the_log_a_full_read_doe
         log.verify().unwrap();
     }
     assert!(opened_blocks >= 1);
+}
+
+#[test]
+fn the_full_check_takes_what_a_cut_left_past_its_checkpoint_for_no_part_of_the_log() {
+    let mut blocks_met = 0;
+    // an op to cut of every length about that of the checkpoint, after
+    // so many ops that it ends a block for some
+    for (before, len) in (1..=5).flat_map(|before| (70..100).map(move |len| (before, len))) {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        alt_oplog::v2::create_with(dir.path(), 10).unwrap();
+        let mut log = OpLog::open(dir.path()).unwrap();
+        grow(&mut log, "a", before);
+        log.append("gone", 1, &vec![7; len]).unwrap();
+        for n in 0..12 {
+            log.append("a", n, &[n as u8; 150]).unwrap();
+        }
+        drop(log);
+        // the cut dies with its checkpoint synced and the file as long as it was
+        boot(2);
+        let mut log = OpLog::open(dir.path()).unwrap();
+        alt_oplog::v2::cut_dies_after(Some(3));
+        let died = log.settle(|op| Ok::<_, OpLogError>(op.actor != "gone"));
+        alt_oplog::v2::cut_dies_after(None);
+        assert!(matches!(died, Err(OpLogError::Io(_))));
+        let bytes = fs::read(dir.path().join("log")).unwrap();
+        let layout = FileHeader::decode(&bytes).unwrap().layout();
+        // what follows the checkpoint is frames of the generation before:
+        // zeros that end a block and a block of them, for some
+        let (laid, state, stop) = walked(layout, &bytes, true).unwrap();
+        assert_eq!((stop, state.generation), (Stop::Unread, 1));
+        assert_eq!(laid.last().unwrap().1, state.end);
+        let rest = &bytes[state.end as usize..];
+        let to_block = (1024 - state.end % 1024) as usize;
+        blocks_met += rest[..to_block].iter().all(|byte| *byte == 0) as usize;
+    }
+    assert!(blocks_met >= 1);
 }

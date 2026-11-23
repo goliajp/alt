@@ -160,6 +160,11 @@ impl Walk<'_> {
                 ));
             }
             if let Some(full) = full.as_deref_mut() {
+                // only a frame of the log is held to what the log promises:
+                // one from before a cut may lie past where the log ends
+                if !state.admits(at, &view)? {
+                    return Ok(Stop::Unread);
+                }
                 full.frame(state, at, &view, seed.0, &headers)?;
             }
             if !state.take(at, end, &view)? {
