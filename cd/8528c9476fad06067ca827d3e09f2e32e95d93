@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: make a failed sync of a group of writes the last one, and refuse writes after it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd.rs
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/group_commit.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/failed_sync.rs
+touched: crates/alt-cli/tests/it/main.rs
