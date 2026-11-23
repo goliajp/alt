@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: end the requests whose time to upload ran out, in every repository, without being asked by an operator
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/gc.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/expiry.rs
