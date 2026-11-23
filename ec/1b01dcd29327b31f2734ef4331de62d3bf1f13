@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: keep a number of the repositories of a root open, close one that was replaced, and wait where no connection can be taken
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/tests/it/altd_server_many_repos.rs
+touched: crates/alt-cli/tests/it/main.rs
