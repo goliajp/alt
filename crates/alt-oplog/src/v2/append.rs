@@ -5,7 +5,7 @@ use std::os::unix::fs::FileExt;
 use crate::lock::{lock_exclusive, unlock};
 use crate::scan::encode_body;
 use crate::v2::compose::{Composer, New};
-use crate::v2::frame::{Ext, KIND_OP, KIND_RECEIPT, REQUIRED, UNDOABLE, UNSYNCED};
+use crate::v2::frame::{Ext, KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT, REQUIRED, UNDOABLE, UNSYNCED};
 use crate::v2::log::Log;
 use crate::v2::receipt::Receipt;
 use crate::v2::state::State;
@@ -13,6 +13,33 @@ use crate::v2::tail::Tail;
 use crate::{Framed, Meta, Op, OpId, OpLogError, relaxed_durability};
 
 impl Log {
+    /// Refuses for a log this build may read and not write: nothing of
+    /// it is changed then, nor what is noted beside it.
+    pub(super) fn may_write(&self) -> Result<(), OpLogError> {
+        match self.writable {
+            true => Ok(()),
+            false => Err(OpLogError::Format(
+                "the oplog uses a feature this alt does not know to write",
+            )),
+        }
+    }
+
+    /// Refuses where the last frame that says nothing is appended after
+    /// it by whoever does not know it is of a kind this build skips.
+    pub(super) fn may_append(&self) -> Result<(), OpLogError> {
+        let at = self.state.required;
+        if at == 0 || at >= self.state.end {
+            return Ok(());
+        }
+        let kind = self.source().at(at, 1)?[0];
+        match matches!(kind, KIND_OP | KIND_CHECKPOINT | KIND_RECEIPT) {
+            true => Ok(()),
+            false => Err(OpLogError::Format(
+                "the oplog holds a frame this alt must know to append after it",
+            )),
+        }
+    }
+
     /// Runs `run` with the exclusive lock on the log taken; it is given
     /// up when `run` is over, also by a panic.
     pub(super) fn locked<T>(&mut self, run: impl FnOnce(&mut Self) -> T) -> std::io::Result<T> {
