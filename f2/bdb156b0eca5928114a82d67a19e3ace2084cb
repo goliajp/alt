@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: feat
+summary: compare commits in diff, with --name-only, --name-status and --stat, and show a stash
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/cli/prepare.rs
+touched: crates/alt-cli/src/cli/stash.rs
+touched: crates/alt-cli/src/diffstat.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/diff.rs
+touched: crates/alt-cli/src/native/diff/between.rs
+touched: crates/alt-cli/src/native/diff/summary.rs
+touched: crates/alt-cli/src/native/diff/worktree.rs
+touched: crates/alt-cli/src/native/reset.rs
+touched: crates/alt-cli/src/native/stash.rs
+touched: crates/alt-cli/src/worktree_args.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/diff_between.rs
+touched: crates/alt-cli/tests/it/main.rs
