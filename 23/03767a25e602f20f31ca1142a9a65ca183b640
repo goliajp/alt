@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: hold block headers and receipts to what the log says in the full check, and append nothing after a frame that must be known and is not
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/checkpoint.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/locate.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/src/v2/stream.rs
+touched: crates/alt-oplog/src/v2/verify.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_full_check.rs
+touched: crates/alt-oplog/tests/it/v2_image.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
