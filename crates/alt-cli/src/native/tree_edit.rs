@@ -163,6 +163,8 @@ impl NativeRepo<'_> {
             }
             (false, true) => drop(self.commit_refs_only(verb, refs)?),
             (false, false) => {
+                // whatever refuses the files refuses before the refs move
+                self.ensure_directories_replaceable(&intent)?;
                 self.checkout_intent = Some(intent.clone());
                 let result = self.commit_refs(verb, refs);
                 self.checkout_intent = None;

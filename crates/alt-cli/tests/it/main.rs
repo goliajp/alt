@@ -60,6 +60,7 @@ mod damage_messages;
 mod diff;
 mod diff_between;
 mod diff_git;
+mod edit_order;
 mod eol;
 mod exclude_dirs;
 mod exclude_order;
