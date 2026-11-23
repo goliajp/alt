@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: hold the attempts for a login from one network to a number of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
