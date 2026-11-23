@@ -3,14 +3,15 @@
 //!
 //! ```text
 //! [0..4)   "ALTT"            [8..24)  the boot it was written in
+//! [4]      bit 0, pending: among the frames from `judged` on are some
+//!          another boot left that nobody vouched for
 //! [24..28) the generation of the log
 //! [28..32) the four bytes of the log before `synced`
 //! [32..40) synced: up to here the log was fsynced, and what its frames
 //!          name with it
-//! [40..48) judged: the frames up to here were read through in this boot
-//!          and what they name was vouched for
+//! [40..48) judged: a frame that starts before here needs no vouching for
 //! [48..56) hidden: when the file is this long, what follows `judged` in
-//!          it is no part of the log; zero for none
+//!          it is no part of the log to a reader; zero for none
 //! [56..64) checksum = blake3(the 56 bytes before it)[..8]
 //! ```
 //!
@@ -18,6 +19,11 @@
 //! nothing, and the next command reads more of the log instead. Whoever
 //! writes it holds `lock`, as does whoever fsyncs the log to move `synced`
 //! and whoever cuts the log.
+//!
+//! A writer changes it with the log locked and read to its end, and what
+//! it notes stands. A reader holds no lock on the log, which may have
+//! grown or been cut since it read: it notes its look only where nothing
+//! there says more than it knows.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
@@ -30,6 +36,7 @@ const MAGIC: [u8; 4] = *b"ALTT";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Tail {
+    pub pending: bool,
     pub generation: u32,
     pub closes: [u8; 4],
     pub synced: u64,
@@ -79,6 +86,7 @@ impl Tail {
         }
         let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
         Some(Tail {
+            pending: bytes[4] & 1 != 0,
             generation: u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
             closes: bytes[28..32].try_into().unwrap(),
             synced: word(32),
@@ -95,6 +103,7 @@ impl Tail {
         };
         let mut bytes = [0u8; LEN];
         bytes[..4].copy_from_slice(&MAGIC);
+        bytes[4] = self.pending as u8;
         bytes[8..24].copy_from_slice(&boot);
         bytes[24..28].copy_from_slice(&self.generation.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.closes);

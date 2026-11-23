@@ -67,21 +67,45 @@ impl Log {
         Ok(None)
     }
 
-    /// Notes in `tail` that the frames up to `judged` were looked at in
-    /// this boot, and that what follows them in a file as long as it is
-    /// now is no part of the log.
-    fn note_judged(&self, judged: u64) -> std::io::Result<()> {
+    /// Notes in `tail` what a reader's look came to: every op it holds
+    /// vouched for, or the first one that is not at `unheld`, from which
+    /// on a file as long as the one it read is no log to a reader. It
+    /// holds no lock on the log: of a log that was cut since it read, or
+    /// that somebody noted or synced further than it knows, it notes
+    /// nothing.
+    fn note_look(&self, unheld: Option<u64>) -> std::io::Result<()> {
         if !self.writable {
             return Ok(());
         }
-        let len = self.file.metadata()?.len();
         let (generation, synced) = (self.state.generation, self.synced);
+        let (end, seen) = (self.state.end, self.seen);
         Tail::update(&self.dir, self.boot, |tail| {
+            let other = *tail != Tail::default() && tail.generation != generation;
+            let further = unheld.is_some_and(|at| tail.judged > at || tail.synced > at);
+            if other || tail.pending || further {
+                return;
+            }
             tail.generation = generation;
             // the frames that said so may be among those no longer read
             tail.raise(synced, None);
-            tail.judged = judged;
-            tail.hidden = if len > judged { len } else { 0 };
+            match unheld {
+                Some(at) => (tail.pending, tail.judged, tail.hidden) = (true, at, seen),
+                None => tail.judged = tail.judged.max(end),
+            }
+        })
+    }
+
+    /// Notes in `tail` that every op of the log was vouched for, by a
+    /// writer that holds its lock and has read it to its end.
+    fn note_settled(&self) -> std::io::Result<()> {
+        if !self.writable {
+            return Ok(());
+        }
+        let (generation, synced, end) = (self.state.generation, self.synced, self.state.end);
+        Tail::update(&self.dir, self.boot, |tail| {
+            tail.generation = generation;
+            tail.raise(synced, None);
+            (tail.pending, tail.judged, tail.hidden) = (false, end, 0);
         })
     }
 
@@ -95,14 +119,9 @@ impl Log {
         }
         let found = self.first_unheld(from, held)?;
         // a note that is not written costs the next command this look
-        match found {
-            Some(found) => {
-                let _ = self.note_judged(found.at);
-            }
-            None => {
-                let _ = self.note_judged(self.state.end);
-                self.judged.set(u64::MAX);
-            }
+        let _ = self.note_look(found.map(|found| found.at));
+        if found.is_none() {
+            self.judged.set(u64::MAX);
         }
         Ok(found)
     }
@@ -132,7 +151,7 @@ impl Log {
             return Ok(None);
         }
         let Some(cut) = self.first_unheld(from, held)? else {
-            self.note_judged(self.state.end).map_err(OpLogError::from)?;
+            self.note_settled().map_err(OpLogError::from)?;
             self.judged.set(u64::MAX);
             return Ok(None);
         };
@@ -181,6 +200,7 @@ impl Log {
         self.file.sync_all()?;
         self.unsynced = false;
         let tail = Tail {
+            pending: false,
             generation: self.state.generation,
             closes: [0; 4],
             synced,

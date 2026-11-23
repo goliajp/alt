@@ -183,10 +183,12 @@ fn each_changed_header(whole: &[u8], mut with: impl FnMut(Vec<u8>, String)) {
     }
 }
 
-/// `tail` as it says `fields` of the log in boot `in_boot`.
-fn tail(in_boot: u8, generation: u32, fields: [u64; 3]) -> [u8; 64] {
+/// `tail` as it says `fields` of the log in boot `in_boot`, and whether
+/// ops are left to be looked at.
+pub fn tail(in_boot: u8, generation: u32, pending: bool, fields: [u64; 3]) -> [u8; 64] {
     let mut bytes = [0u8; 64];
     bytes[..4].copy_from_slice(b"ALTT");
+    bytes[4] = pending as u8;
     bytes[8..24].copy_from_slice(&[in_boot; 16]);
     bytes[24..28].copy_from_slice(&generation.to_le_bytes());
     for (n, field) in fields.iter().enumerate() {
@@ -242,15 +244,18 @@ fn a_note_beside_the_log_that_says_any_number_is_read_with_or_refused() {
     let word = |at: usize| u64::from_le_bytes(noted[at..at + 8].try_into().unwrap());
     let said = [word(32), word(40), word(48)];
     let len = whole.len() as u64;
-    for field in 0..4 {
+    let fields = [(0, false), (1, false), (2, false), (3, false)];
+    for (field, pending) in fields.into_iter().chain([(1, true), (2, true), (3, true)]) {
         for to in values(len, said[1].min(len)) {
             let (mut generation, mut fields) = (1, said);
             match field {
                 0 => generation = to as u32,
                 n => fields[n - 1] = to,
             }
-            fs::write(dir.path().join("tail"), tail(2, generation, fields)).unwrap();
-            read_through(dir.path(), &anchors, &format!("note field {field} = {to}"));
+            let note = tail(2, generation, pending, fields);
+            fs::write(dir.path().join("tail"), note).unwrap();
+            let case = format!("note field {field} = {to}, pending {pending}");
+            read_through(dir.path(), &anchors, &case);
         }
     }
 }

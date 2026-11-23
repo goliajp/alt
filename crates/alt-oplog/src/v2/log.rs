@@ -49,6 +49,8 @@ pub(crate) struct Log {
     /// the length of the file when what follows the frames held is known
     /// to be no part of the log
     pub(super) hidden: Option<u64>,
+    /// how long the file was when this handle last read it as an open does
+    pub(super) seen: u64,
     pub(super) defer: bool,
     pub(super) write_count: u64,
     pub(super) unsynced: bool,
@@ -93,6 +95,7 @@ impl Log {
             synced: 0,
             judged: Cell::new(0),
             hidden: None,
+            seen: 0,
             defer: false,
             write_count: 0,
             unsynced: false,
@@ -132,6 +135,7 @@ impl Log {
             synced,
             judged,
             hidden,
+            seen,
             clamped,
             passed,
         } = loaded;
@@ -140,7 +144,8 @@ impl Log {
         (self.base, self.recent_from, self.full) = (None, 0, OnceLock::new());
         self.synced = self.synced.max(synced);
         self.judged.set(judged);
-        (self.hidden, self.clamped, self.passed) = (hidden, clamped, passed);
+        (self.hidden, self.seen) = (hidden, seen);
+        (self.clamped, self.passed) = (clamped, passed);
         Ok(())
     }
 

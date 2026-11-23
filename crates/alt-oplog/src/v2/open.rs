@@ -79,6 +79,8 @@ pub(crate) struct Loaded {
     /// the ops whose frames start before this need no vouching for
     pub judged: u64,
     pub hidden: Option<u64>,
+    /// how long the file was
+    pub seen: u64,
     pub clamped: bool,
     pub passed: bool,
 }
@@ -181,7 +183,8 @@ pub(crate) fn load(
     let clamped = size < meta.len();
     let tail = Tail::read(dir, boot);
     // what a reader of this boot found to be no part of the log
-    let hidden = tail.filter(|tail| tail.hidden == meta.len() && tail.judged < size);
+    let ends = |tail: &Tail| tail.pending && tail.hidden == meta.len() && tail.judged < size;
+    let hidden = tail.filter(ends);
     let hidden = hidden.map(|tail| {
         size = tail.judged;
         meta.len()
@@ -210,18 +213,20 @@ pub(crate) fn load(
         located = locate(layout, state.synced.max(FILE_HEADER_LEN as u64), &mut read)?;
         (state, ops, stop) = pass(source, layout, &located, size, &window)?;
     }
+    let synced = state.synced.max(tail.map_or(0, |tail| tail.synced));
     let mut loaded = Loaded {
         closes: [0; 4],
         began: located.state.end,
         began_linked: located.state.linked_at,
-        synced: state.synced.max(tail.map_or(0, |tail| tail.synced)),
+        synced,
         judged: match tail {
-            // what a reader of this boot would not vouch for is still there
-            Some(tail) if tail.hidden != 0 => tail.judged,
+            // ops somebody of this boot left to be looked at are still there
+            Some(tail) if tail.pending => tail.judged.max(synced),
             _ if fresh => u64::MAX,
             _ => state.synced,
         },
         hidden,
+        seen: meta.len(),
         clamped,
         passed: hidden.is_some(),
         state,
