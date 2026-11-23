@@ -235,8 +235,12 @@ fn a_damaged_frame_after_the_checkpoint_an_open_went_back_to_is_damage_when_it_w
 #[test]
 fn a_long_hole_after_the_log_is_passed_over_in_little_memory_and_cut_by_the_next_append() {
     const HOLE: u64 = 1 << 28;
-    // the hole alone, and one that begins as a frame of 200 MiB would
-    for claimed in [None, Some(200u32 << 20)] {
+    // the hole alone; one that begins as a frame of 200 MiB would; and
+    // as frames would whose last block holds a part of the eight bytes a
+    // frame closes with, or little more than those
+    let parted = |last: u32| 4096 - 88 + 50_000 * 4064 + last;
+    let claims = [200 << 20, parted(2), parted(4), parted(6), parted(20)];
+    for claimed in [None].into_iter().chain(claims.map(Some)) {
         let dir = alt_os::temp::tempdir().unwrap();
         boot(1);
         let mut log = new_log(dir.path());
@@ -249,6 +253,13 @@ fn a_long_hole_after_the_log_is_passed_over_in_little_memory_and_cut_by_the_next
             .open(dir.path().join("log"));
         let file = file.unwrap();
         file.set_len(len + HOLE).unwrap();
+        // as an op frame is long that fills its block, runs through
+        // 50,000 more and has `last` bytes in the one after
+        let filling = (4096 - len % 4096) as u32;
+        let claimed = claimed.map(|body| match body == 200 << 20 {
+            true => body,
+            false => body - 4096 + filling,
+        });
         if let Some(body) = claimed {
             let mut header = [0u8; 48];
             header[0] = 1;

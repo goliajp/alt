@@ -14,6 +14,7 @@ mod synced_marker;
 mod synced_writers;
 mod unconfirmed;
 mod v2_bounds;
+mod v2_claims;
 mod v2_cut_ends;
 mod v2_cuts;
 #[cfg(target_os = "linux")]

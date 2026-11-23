@@ -11,7 +11,7 @@ use crate::v2::log::Log;
 use crate::v2::open::op_of;
 use crate::v2::scan::{Stop, read_frame};
 use crate::v2::state::State;
-use crate::v2::stream::walk_file;
+use crate::v2::stream::{read_claimed, walk_file};
 use crate::{Anchor, Op, OpLogError};
 
 impl Log {
@@ -76,7 +76,11 @@ impl Log {
         let Some((len, end)) = len.zip(end).filter(|(_, end)| *end <= limit) else {
             return Ok(None);
         };
-        let data = self.source().at(at, (end - at) as usize)?;
+        let source = self.source();
+        let mut read = |at: u64, len: usize| source.at(at, len);
+        let Some(data) = read_claimed(&mut read, &self.layout, (at, end), len)? else {
+            return Ok(None);
+        };
         let Some((bytes, _)) = self.layout.lift(&data, at, at, len) else {
             return Ok(None);
         };

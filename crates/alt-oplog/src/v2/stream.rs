@@ -36,20 +36,45 @@ fn wanted(layout: &Layout, data: &[u8], base: u64, limit: u64) -> Option<(u64, O
 }
 
 /// Whether a frame of `len` bytes may end at `end`: by the length it
-/// closes with, where a block header does not part that from the frame.
+/// closes with, which is read around the block header where one parts it.
 fn closes(read: &mut ReadAt, layout: &Layout, end: u64, len: u64) -> std::io::Result<bool> {
-    let at = end - CLOSE_LEN as u64;
-    let block = at / layout.block * layout.block;
-    let parted = at / layout.block != (end - 1) / layout.block
-        || (block != 0 && at - block < BLOCK_HEADER_LEN as u64);
-    if parted {
-        return Ok(true);
-    }
-    let said = read(at, 4)?;
+    let close = CLOSE_LEN as u64;
+    let block = (end - 1) / layout.block * layout.block;
+    let header = if block == 0 { 0 } else { BLOCK_HEADER_LEN } as u64;
+    // how much of the frame lies in the block it ends in, when it began
+    // in an earlier one
+    let Some(within) = (end - block).checked_sub(header) else {
+        return Ok(false);
+    };
+    let said = match within.checked_sub(close) {
+        Some(_) => read(end - close, 4)?,
+        None => {
+            let before = close - within;
+            let mut said = read(block - before, before as usize)?;
+            said.extend(read(block + header, within as usize)?);
+            said
+        }
+    };
     Ok(said
         .first_chunk()
         .map(|said| u32::from_le_bytes(*said) as u64)
         == Some(len))
+}
+
+/// The bytes `at..end` of the file, where the header of the frame at `at`
+/// says that frame of `len` bytes ends. As much as a walk reads at once
+/// is read on its word; for more, the frame has to close there with that
+/// length, which a header that says anything does not bring about.
+pub(crate) fn read_claimed(
+    read: &mut ReadAt,
+    layout: &Layout,
+    (at, end): (u64, u64),
+    len: u64,
+) -> std::io::Result<Option<Vec<u8>>> {
+    if end - at > STRETCH && !closes(read, layout, end, len)? {
+        return Ok(None);
+    }
+    read(at, (end - at) as usize).map(Some)
 }
 
 /// Reads the frames that follow `state` in the file up to byte `limit`

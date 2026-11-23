@@ -5,7 +5,7 @@ use crate::v2::checkpoint::Checkpoint;
 use crate::v2::frame::{HEADER_LEN, KIND_CHECKPOINT, body_at, len_of};
 use crate::v2::scan::{lift_frame, read_frame};
 use crate::v2::state::State;
-use crate::v2::stream::ReadAt;
+use crate::v2::stream::{ReadAt, read_claimed};
 
 /// Where a read begins: the log as a checkpoint says it stands, or the
 /// empty log.
@@ -46,14 +46,14 @@ fn said_at(
         return Ok(None);
     };
     let header: &[u8; HEADER_LEN] = header.first_chunk().unwrap();
-    let end = match len_of(header) {
-        Some(frame) if header[0] == KIND_CHECKPOINT => layout.end_of(at, frame),
-        _ => None,
-    };
-    let Some(end) = end.filter(|end| *end <= len) else {
+    let frame = len_of(header).filter(|_| header[0] == KIND_CHECKPOINT);
+    let end = frame.and_then(|frame| layout.end_of(at, frame));
+    let Some((frame, end)) = frame.zip(end).filter(|(_, end)| *end <= len) else {
         return Ok(None);
     };
-    let data = read(at, (end - at) as usize)?;
+    let Some(data) = read_claimed(read, layout, (at, end), frame)? else {
+        return Ok(None);
+    };
     let read = lift_frame(layout, &data, at, at, &mut |_| {});
     let Some((bytes, _)) = read.filter(|(bytes, _)| read_frame(layout, bytes, 0).is_some()) else {
         return Ok(None);
