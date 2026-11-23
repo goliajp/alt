@@ -13,6 +13,7 @@ use crate::untracked::Untracked;
 /// directories as one path, of the paths `within`.
 fn held_for<'a>(opts: &ScanOptions<'a>, within: &'a [&'a [u8]]) -> ScanOptions<'a> {
     ScanOptions {
+        file_mode: opts.file_mode,
         untracked: Untracked::Normal,
         within,
         clean: opts.clean,

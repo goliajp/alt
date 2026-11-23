@@ -36,6 +36,10 @@ pub struct ScanOptions<'a> {
     /// the ignore files outside the working tree, a later one above an
     /// earlier and every `.gitignore` above them all
     pub excludes: &'a [&'a Path],
+    /// `core.fileMode`: whether a file can be executed is told from its
+    /// stat. Where not, a file the index has is taken to have the mode
+    /// the index has for it
+    pub file_mode: bool,
     /// when the scan began: a file changed at or after it is compared but
     /// not recorded as unchanged, because a later change within the same
     /// tick of the clock would leave its stat as it is
@@ -115,7 +119,7 @@ pub(crate) fn scan_seeing(
         Untracked::No | Untracked::Hidden => IgnoreStack::new(),
         _ => IgnoreStack::of_files(opts.excludes)?,
     };
-    let mut found = walk::walk(root, snapshot, opts.untracked, opts.within, &ignore)?;
+    let mut found = walk::walk(root, snapshot, opts, &ignore)?;
     let seen = came_by(&mut found, snapshot);
     let mut delta = Delta::default();
     found.suspects.sort_unstable_by_key(|s| s.0);
@@ -243,7 +247,11 @@ fn compare(
                 continue;
             };
             let i = i as usize;
-            let mode = st.git_mode();
+            let regular = |mode: u32| mode & 0o170000 == 0o100000;
+            let mode = match (st.git_mode(), snapshot.entries[i].mode) {
+                (found, staged) if !opts.file_mode && regular(found) && regular(staged) => staged,
+                (found, _) => found,
+            };
             let staged = snapshot.entries[i].oid;
             let cleaned = match mode {
                 0o120000 => None,

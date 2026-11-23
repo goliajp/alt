@@ -85,6 +85,7 @@ fn ignore_files_outside_the_tree_are_followed_from_the_tick_they_are_written_in(
     std::fs::write(&own, "/out/\n").unwrap();
     let files = [user.as_path(), own.as_path()];
     let with = |clock: Clock| ScanOptions {
+        file_mode: true,
         excludes: &files,
         clock,
         ..options(Untracked::Normal, &root)

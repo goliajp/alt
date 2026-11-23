@@ -97,6 +97,7 @@ fn scanned(root: &Path, untracked: Untracked) -> Vec<String> {
 fn scanned_within(root: &Path, untracked: Untracked, within: &[&[u8]]) -> Vec<String> {
     let mut snapshot = Snapshot::of_index(&index(root), b"id", ALGO, None);
     let options = ScanOptions {
+        file_mode: true,
         untracked,
         within,
         clean: None,

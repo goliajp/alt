@@ -30,6 +30,8 @@ pub(crate) struct Walk<'a> {
     /// the paths to look at; all when there are none
     within: Within<'a>,
     pub(crate) untracked: Untracked,
+    /// whether a file can be executed is told from its stat
+    file_mode: bool,
 }
 
 /// A directory in the one being walked, which takes a walk of its own:
@@ -48,14 +50,15 @@ struct Below {
 pub(crate) fn walk(
     root: &Path,
     snapshot: &Snapshot,
-    untracked: Untracked,
-    within: &[&[u8]],
+    opts: &crate::ScanOptions<'_>,
     ignore: &IgnoreStack,
 ) -> io::Result<Found> {
+    let (untracked, within) = (opts.untracked, opts.within);
     let walk = Walk {
         snapshot,
         within: Within::new(within),
         untracked,
+        file_mode: opts.file_mode,
     };
     let reach = match within.is_empty() {
         true => Reach::Inside,
@@ -130,9 +133,17 @@ impl Walk<'_> {
             found.unmerged.push(first as u32);
         } else if kind_of(stat.mode) == Kind::Other {
             found.deleted.push(first as u32);
-        } else if entry.stat != Some(stat) {
+        } else if entry.stat != Some(stat) || self.other_mode(entry.mode, stat) {
             found.suspects.push((first as u32, stat));
         }
+    }
+
+    /// Whether the file with `stat` is to have its mode looked at though it
+    /// shows the stat recorded for it: the stat was recorded while the
+    /// mode of a file was not told from its stat, and tells another mode
+    /// than the index has.
+    fn other_mode(&self, staged: u32, stat: FileStat) -> bool {
+        self.file_mode && staged & 0o170000 == 0o100000 && stat.git_mode() != staged
     }
 
     /// The entries `first..end` have nothing in place.

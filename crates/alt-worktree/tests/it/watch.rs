@@ -18,6 +18,7 @@ pub(crate) struct Tree {
 
 pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static> {
     ScanOptions {
+        file_mode: true,
         untracked,
         within: &[],
         clean: None,
@@ -32,6 +33,7 @@ pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static>
 /// Starts watching as a command would that began just now.
 pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::Result<Watched> {
     let opts = ScanOptions {
+        file_mode: true,
         untracked: Untracked::Normal,
         within: &[],
         clean: None,

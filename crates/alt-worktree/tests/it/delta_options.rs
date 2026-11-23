@@ -53,6 +53,7 @@ fn a_submodule_entry_follows_the_commit_checked_out_in_its_directory() {
         let at = |_: &Path| head;
         for untracked in [true, false] {
             let opts = ScanOptions {
+                file_mode: true,
                 head: Some(&at),
                 ..options(untracked, LATER)
             };
@@ -82,6 +83,7 @@ fn a_clean_filter_decides_what_a_file_is_stored_as() {
         (path == b"f.txt" && content == b"working copy\r\n").then(|| b"stored\n".to_vec())
     };
     let opts = ScanOptions {
+        file_mode: true,
         clean: Some(&clean),
         ..options(true, LATER)
     };
@@ -123,6 +125,7 @@ fn a_scan_limited_to_some_paths_reports_nothing_outside_them() {
     for within in cases {
         for untracked in [true, false] {
             let opts = ScanOptions {
+                file_mode: true,
                 within,
                 ..options(untracked, LATER)
             };

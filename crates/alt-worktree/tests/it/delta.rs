@@ -53,6 +53,7 @@ pub(crate) fn index_of(root: &Path) -> Index {
 pub(crate) fn options(untracked: bool, now: Stamp) -> ScanOptions<'static> {
     let dev = std::fs::metadata(std::env::temp_dir()).unwrap().dev();
     ScanOptions {
+        file_mode: true,
         untracked: match untracked {
             true => Untracked::All,
             false => Untracked::No,
