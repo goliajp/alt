@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: fix
+summary: read places and lengths a version 2 log gives with checked arithmetic, and the file a stretch at a time
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/checkpoint.rs
+touched: crates/alt-oplog/src/v2/compose.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/salvage.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/src/v2/stream.rs
+touched: crates/alt-oplog/tests/it/counted.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_fields.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
