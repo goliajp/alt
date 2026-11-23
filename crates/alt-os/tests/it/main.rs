@@ -13,6 +13,7 @@ macro_rules! tests {
     };
 }
 
+mod holes;
 mod layout;
 mod map;
 mod random;
@@ -191,6 +192,7 @@ pub extern "C" fn main(
         child(&mode);
     }
     let suites = [
+        ("holes", holes::TESTS),
         ("layout", layout::TESTS),
         ("map", map::TESTS),
         ("random", random::TESTS),
