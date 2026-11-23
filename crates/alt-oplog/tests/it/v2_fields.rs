@@ -215,12 +215,14 @@ fn a_log_with_any_number_changed_under_a_checksum_that_holds_is_read_or_refused(
     let (whole, _) = written(dir.path());
     let anchors = anchors(dir.path());
     let mut cases = 0;
+    let len = whole.len() as u64;
     let mut read = |changed: Vec<u8>, case: String| {
         fs::write(dir.path().join("log"), changed).unwrap();
         // in the boot that wrote its end, and after the machine went down
         for in_boot in [2, 3] {
             boot(in_boot);
-            read_through(dir.path(), &anchors, &format!("{case} in boot {in_boot}"));
+            let case = format!("{case} in boot {in_boot}");
+            read_through(dir.path(), &anchors, (len, 0), &case);
         }
         cases += 1;
     };
@@ -263,7 +265,7 @@ fn a_note_beside_the_log_that_says_any_number_is_read_with_or_refused() {
                 let note = tail(2, generation, (pending, cutting), fields);
                 fs::write(dir.path().join("tail"), note).unwrap();
                 let case = format!("note field {field} = {to}, {pending} {cutting}");
-                read_through(dir.path(), &anchors, &case);
+                read_through(dir.path(), &anchors, (len, 0), &case);
                 cases += 1;
             }
         }

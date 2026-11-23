@@ -101,18 +101,19 @@ pub fn anchors(dir: &Path) -> Vec<Anchor> {
 
 /// Opens the log in `dir`, whatever its bytes are, in every way and
 /// reads all of it: that ends in what the log holds or in an error. What
-/// the reading costs stays within a multiple of how long the file is.
-pub fn read_through(dir: &Path, anchors: &[Anchor], case: &str) {
-    let len = file_len(dir);
+/// the reading costs stays within a multiple of `len`, how long the log
+/// was written, and `beside` that: however long the file is.
+pub fn read_through(dir: &Path, anchors: &[Anchor], (len, beside): (u64, u64), case: &str) {
     // a place that is not in the file is one that does not read, no failed read
     let no_io = |read: Result<(), &OpLogError>| assert!(!matches!(read, Err(OpLogError::Io(_))));
+    let most = 8 * len + 8192 + beside;
     let read = catch_unwind(AssertUnwindSafe(|| {
         for anchor in anchors {
             let (opened, held) = peak(|| OpLog::open_at(dir, Some(*anchor)));
-            assert!(held as u64 <= 8 * len + 8192, "{held} bytes held");
+            assert!(held as u64 <= most, "{held} bytes held");
             no_io(opened.as_ref().map(|_| ()));
             if let Ok(log) = opened {
-                assert!(log.bytes_read() <= 8 * len, "{} read", log.bytes_read());
+                assert!(log.bytes_read() <= most, "{} read", log.bytes_read());
             }
         }
         for read_only in [true, false] {
@@ -122,7 +123,7 @@ pub fn read_through(dir: &Path, anchors: &[Anchor], case: &str) {
             });
             no_io(opened.as_ref().map(|_| ()));
             let Ok(log) = opened else {
-                assert!(held as u64 <= 4 * len + 8192, "{held} bytes held");
+                assert!(held as u64 <= 4 * len + 8192 + beside, "{held} bytes held");
                 continue;
             };
             let ((), held) = peak(|| {
@@ -132,8 +133,8 @@ pub fn read_through(dir: &Path, anchors: &[Anchor], case: &str) {
                 let head = log.head().map(|head| log.get(&head));
                 assert!(ops.is_err() || !matches!(head, Some(Ok(None))));
             });
-            assert!(held as u64 <= 8 * len + 8192, "{held} bytes held");
-            assert!(log.bytes_read() <= 8 * len, "{} read", log.bytes_read());
+            assert!(held as u64 <= most, "{held} bytes held");
+            assert!(log.bytes_read() <= most, "{} read", log.bytes_read());
         }
     }));
     if let Err(panic) = read {
@@ -145,22 +146,33 @@ pub fn read_through(dir: &Path, anchors: &[Anchor], case: &str) {
 
 #[test]
 fn a_log_with_any_byte_changed_is_read_as_far_as_it_reads_or_refused() {
+    // what a walk reads at once past the log, a few times over
+    const BESIDE: u64 = 1 << 20;
+    const HOLE: u64 = 1 << 26;
     let dir = alt_os::temp::tempdir().unwrap();
     varied(dir.path());
     let path = dir.path().join("log");
     let whole = fs::read(&path).unwrap();
-    assert!(whole.len() > 8 * 1024);
+    let len = whole.len() as u64;
+    assert!(len > 8 * 1024);
     let anchors = anchors(dir.path());
-    read_through(dir.path(), &anchors, "as it was written");
-    // in the boot that wrote its end, and after the machine went down
-    for (in_boot, change) in [(2, 0x01), (3, 0xff)] {
+    read_through(dir.path(), &anchors, (len, 0), "as it was written");
+    // in the boot that wrote its end; and after the machine went down,
+    // in a file that a hole makes thousands of times as long as the log
+    for (in_boot, change, hole) in [(2, 0x01, 0), (3, 0xff, HOLE)] {
         boot(in_boot);
+        let beside = if hole == 0 { 0 } else { BESIDE };
+        assert!(8 * len + beside < hole / 16 || hole == 0);
         for at in 0..whole.len() {
             let mut changed = whole.clone();
             changed[at] ^= change;
             fs::write(&path, &changed).unwrap();
+            if hole != 0 {
+                let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+                file.set_len(len + hole).unwrap();
+            }
             let case = format!("byte {at} in boot {in_boot}");
-            read_through(dir.path(), &anchors, &case);
+            read_through(dir.path(), &anchors, (len, beside), &case);
         }
     }
 }

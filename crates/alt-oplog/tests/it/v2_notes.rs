@@ -191,9 +191,16 @@ fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_
                 false => Err(std::io::Error::other("what it names is not there")),
             }
         }));
-        // a writer that syncs has what was left seen to before it appends
+        // a writer that syncs has what was left seen to before it appends:
+        // the ref transaction, and of each workspace the op that last staged
         let appended = log.append("c", 1, b"committed");
-        assert_eq!(given.lock().unwrap()[0], b"left");
+        let named = [
+            b"left".to_vec(),
+            vec![37; 120],
+            vec![38; 120],
+            vec![39; 120],
+        ];
+        assert_eq!(*given.lock().unwrap(), named);
         if stored {
             appended.unwrap();
             assert_eq!(alt_oplog::bounded_in(dir.path()), Some(len));
