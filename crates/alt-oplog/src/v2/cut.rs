@@ -127,13 +127,30 @@ impl Log {
             },
             unread: 0,
         };
-        self.cut_at(cut.at, discarded)?;
+        self.cut_at(cut.at, discarded, true)?;
         Ok(Some(cut))
     }
 
     /// Cuts off what follows the last frame held, which is no frame.
+    /// Nobody looked at the ops before it for that.
     pub(super) fn cut_end(&mut self, discarded: Discarded) -> Result<(), OpLogError> {
-        self.cut_at(self.state.end, discarded)
+        self.cut_at(self.state.end, discarded, false)
+    }
+
+    /// What `tail` says after a cut at `at` of the ops another boot left:
+    /// whether some are still to be looked at, and from where. `noted` is
+    /// what it said of the log before the cut. A cut that followed a look
+    /// at every op (`looked`) leaves none. Any other says no more than was
+    /// known before it: the checkpoint it writes is of this boot, and tells
+    /// nothing of the frames before it.
+    fn left_after(&self, noted: Option<Tail>, at: u64, looked: bool) -> (bool, u64) {
+        let judged = self.judged.get().min(at);
+        let noted = noted.filter(|tail| tail.pending && tail.generation == self.state.generation);
+        match (looked, noted) {
+            (true, _) => (false, at),
+            (false, Some(tail)) => (true, tail.judged.max(judged).min(at)),
+            (false, None) => (judged < at, judged),
+        }
     }
 
     /// Cuts the log at `at`, where a frame this handle holds starts or
@@ -141,16 +158,18 @@ impl Log {
     /// says so before anything is gone: a checkpoint under the next
     /// generation is written over what is cut and synced, and only then
     /// is the file made to end with it. Nothing is cut that was recorded
-    /// as synced.
-    fn cut_at(&mut self, at: u64, discarded: Discarded) -> Result<(), OpLogError> {
+    /// as synced. `looked` says that every op before `at` was vouched for.
+    fn cut_at(&mut self, at: u64, discarded: Discarded, looked: bool) -> Result<(), OpLogError> {
         self.may_write()?;
         // neither a frame that must be known is cut nor the log after one
         self.may_append()?;
         let held = Held::take(&self.dir)?;
-        let synced = self.tail().map_or(0, |tail| tail.synced).max(self.synced);
+        let noted = self.tail();
+        let synced = noted.map_or(0, |tail| tail.synced).max(self.synced);
         if at < synced {
             return Err(OpLogError::Lost { synced, holds: at });
         }
+        let (pending, judged) = self.left_after(noted, at, looked);
         if at != self.state.end {
             self.read_to(at)?;
             self.may_append()?;
@@ -169,15 +188,18 @@ impl Log {
         self.file.sync_all()?;
         self.unsynced = false;
         let tail = Tail {
-            pending: false,
+            pending,
             generation: self.state.generation,
             closes: [0; 4],
             synced,
-            judged: self.state.end,
+            // with nothing left to look at, the checkpoint is covered too
+            judged: if pending { judged } else { self.state.end },
             hidden: 0,
         };
         tail.write(&self.dir, self.boot, &held)?;
-        self.judged.set(u64::MAX);
+        if looked {
+            self.judged.set(u64::MAX);
+        }
         self.hidden = None;
         self.discarded.push(discarded);
         Ok(())
