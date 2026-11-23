@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: give the options of the task server the places to check passwords in
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
