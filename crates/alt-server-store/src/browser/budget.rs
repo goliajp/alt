@@ -16,6 +16,11 @@ fn networks(address: std::net::IpAddr) -> [std::net::IpAddr; 2] {
     };
     match address {
         V4(v4) => [address, V4((u32::from(v4) >> 8 << 8).into())],
+        // an address of the link the server is on stands for a host by
+        // itself: every host of the link has the same first 64 bits
+        V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => {
+            [address, V6((u128::from(v6) >> 64 << 64).into())]
+        }
         V6(v6) => {
             let bits = u128::from(v6);
             [V6((bits >> 64 << 64).into()), V6((bits >> 80 << 80).into())]
@@ -30,14 +35,23 @@ const NETWORK_ATTEMPTS: i32 = 400;
 /// everywhere. The first is what holds a guesser back; were it the only number
 /// and counted for the login alone, whoever knows a login could keep its owner
 /// out by guessing at it. The second bounds the guessing of many addresses.
+///
+/// Between the two is what the network around an address may attempt for one
+/// login. Whoever has a network has many addresses in it, a household some
+/// hundreds of /64 and more: without this number ten of them would spend what
+/// everywhere may attempt, and the owner of the login would be refused with them.
+/// With it that takes five networks, each a /24 or a /48. The price is that the
+/// owner is held to this number where the guesser is in the same network.
 const LOGIN_ATTEMPTS: i32 = 10;
+const LOGIN_NETWORK_ATTEMPTS: i32 = 20;
 const LOGIN_EVERYWHERE: i32 = 100;
 /// The attempts of everybody in a minute past which an address is held to
 /// [`BUSY_ATTEMPTS`]. Nobody is refused for this number alone: whoever can reach
-/// it from many addresses would otherwise refuse everyone else with it. It keeps
-/// what a minute writes here within what the database takes: a row or two for each
-/// attempt.
-const BUSY: i32 = 6000;
+/// it from many addresses would otherwise refuse everyone else with it. It is what
+/// the instance can check of passwords in a minute: one takes three tenths of a
+/// second and two are checked at once, which is four hundred. Past it the attempts
+/// outrun the checking, and each address is held to the few that one person makes.
+const BUSY: i32 = 400;
 const BUSY_ATTEMPTS: i32 = 5;
 
 /// Where this refuses, the caller lets go of its transaction: committed, the attempt
@@ -58,6 +72,10 @@ pub(crate) fn login_budget(
         (
             key("login-at", &format!("{login}\n{address}")),
             LOGIN_ATTEMPTS,
+        ),
+        (
+            key("login-in", &format!("{login}\n{wider}")),
+            LOGIN_NETWORK_ATTEMPTS,
         ),
         (key("login", login), LOGIN_EVERYWHERE),
     ];

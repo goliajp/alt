@@ -429,3 +429,43 @@ fn the_attempts_for_a_login_from_one_address_keep_no_other_address_out() {
         Err(alt_server_store::Error::Unauthorized)
     ));
 }
+
+/// Whoever has a network has more addresses than a login may be attempted from
+/// before everybody is refused for it. Their attempts end with what the network
+/// may attempt for the login, and the owner of the login, in another network, is
+/// let in.
+#[test]
+#[ignore = "requires isolated PostgreSQL; the attempts for one login from the addresses of one network"]
+fn the_attempts_for_a_login_from_one_network_keep_no_other_network_out() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    let looked = |f: &mut Fixture, address: &str| {
+        let address = address.parse().unwrap();
+        let looked = f
+            .store
+            .device_consent(&parent, &origin(), "ZZZZ-9999", address);
+        matches!(looked, Err(alt_server_store::Error::Unauthorized))
+    };
+    // ten attempts from each of sixteen hosts of one /48, and of one /24
+    for host in 0..16 {
+        for _ in 0..10 {
+            looked(&mut f, &format!("2001:db8:0:{host:x}::1"));
+        }
+    }
+    assert!(looked(&mut f, "2001:db9::1"));
+    for host in 0..16 {
+        for _ in 0..10 {
+            looked(&mut f, &format!("192.0.2.{host}"));
+        }
+    }
+    assert!(looked(&mut f, "198.51.100.9"));
+    // what each network was let in for the login: twenty, and its hosts no more
+    let let_in = |f: &mut Fixture, address: &str| (0..3).filter(|_| looked(f, address)).count();
+    assert_eq!(let_in(&mut f, "2001:db8:0:ff::1"), 0);
+    assert_eq!(let_in(&mut f, "192.0.2.200"), 0);
+}
