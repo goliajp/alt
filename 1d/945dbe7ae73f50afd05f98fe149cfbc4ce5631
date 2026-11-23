@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: tell whether freed memory stays with a process by what is resident after it is freed, not by page faults that huge pages make fewer
+author-type: human
+author: doracawl
+touched: crates/alt-os/tests/it/heap.rs
+touched: crates/alt-os/tests/it/main.rs
