@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave the ops another boot left to be looked at when what was never finished is cut off the log
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_ends.rs
