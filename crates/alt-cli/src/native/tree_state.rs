@@ -142,6 +142,7 @@ impl NativeRepo<'_> {
         let excludes: Vec<&Path> = inputs.excludes.iter().map(PathBuf::as_path).collect();
         let files: Vec<&Path> = inputs.files.iter().map(PathBuf::as_path).collect();
         let options = ScanOptions {
+            file_mode: inputs.file_mode,
             untracked,
             within,
             clean: Some(&clean),

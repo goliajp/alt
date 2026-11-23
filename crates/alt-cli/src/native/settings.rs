@@ -13,6 +13,8 @@ pub(super) struct ScanInputs {
     pub(super) branch: Vec<u8>,
     /// the ignore files, a later one above an earlier
     pub(super) excludes: Vec<PathBuf>,
+    /// `core.fileMode`
+    pub(super) file_mode: bool,
 }
 
 impl NativeRepo<'_> {
@@ -32,6 +34,7 @@ impl NativeRepo<'_> {
             files,
             branch,
             excludes: self.exclude_files(&settings)?,
+            file_mode: crate::git_settings::file_mode(&settings)?,
         })
     }
 

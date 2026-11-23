@@ -40,6 +40,7 @@ impl NativeRepo<'_> {
             .map(|w| (w.path.as_slice(), w))
             .collect();
         let (mut stats, mut blocked) = (Vec::new(), Vec::new());
+        let modes = self.staged_modes()?;
         for &path in taken {
             self.ensure_path_allowed(path)?;
             // a submodule is recorded by the commit it has checked out,
@@ -59,17 +60,12 @@ impl NativeRepo<'_> {
                 continue;
             }
             if meta.is_dir() {
-                let why = [
-                    b"error: '",
-                    &path[..],
-                    b"' does not have a commit checked out\n",
-                ];
-                crate::diagnostics::emit(&why.concat())?;
-                blocked.push(path.clone());
+                blocked.push(no_commit(path)?);
                 continue;
             }
             let stat = FileStat::of(&meta);
-            entries.push(self.stored(path, stat.git_mode(), lfs.as_ref(), &attrs, before)?);
+            let mode = modes.of(path, stat.git_mode());
+            entries.push(self.stored(path, mode, lfs.as_ref(), &attrs, before)?);
             stats.push((path.clone(), stat));
         }
         Ok(Stored { stats, blocked })
@@ -95,6 +91,51 @@ impl NativeRepo<'_> {
         let oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Blob, &bytes);
         self.store.odb.put(oid, ObjectKind::Blob, &bytes)?;
         Ok(staged_entry(path, oid, mode))
+    }
+}
+
+/// Says, as git does, that the directory at `path` is a repository with
+/// no commit, and gives the path back as one that was not stored.
+fn no_commit(path: &BString) -> Res<BString> {
+    let why = [
+        b"error: '",
+        &path[..],
+        b"' does not have a commit checked out\n",
+    ];
+    crate::diagnostics::emit(&why.concat())?;
+    Ok(path.clone())
+}
+
+/// The mode a file is stored with. Where `core.fileMode` is off, whether
+/// a file can be executed is not told from the file: one the index has
+/// keeps the mode it has there, and a new one is not executable.
+pub(in crate::native) struct StagedModes {
+    /// `None` where the mode found is the mode stored
+    staged: Option<HashMap<BString, u32>>,
+}
+
+impl StagedModes {
+    pub(in crate::native) fn of(&self, path: &BString, found: u32) -> u32 {
+        let regular = |mode: u32| mode & 0o170000 == 0o100000;
+        match &self.staged {
+            Some(staged) if regular(found) => staged.get(path).copied().unwrap_or(0o100644),
+            _ => found,
+        }
+    }
+}
+
+impl NativeRepo<'_> {
+    pub(in crate::native) fn staged_modes(&self) -> Res<StagedModes> {
+        if crate::git_settings::file_mode(&self.settings()?)? {
+            return Ok(StagedModes { staged: None });
+        }
+        let regular = |e: &&IndexEntry| e.mode & 0o170000 == 0o100000;
+        let index = self.index()?;
+        let staged = index.entries.iter().filter(regular);
+        let staged = staged.map(|e| (e.path.clone(), e.mode)).collect();
+        Ok(StagedModes {
+            staged: Some(staged),
+        })
     }
 }
 

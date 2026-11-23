@@ -343,6 +343,7 @@ mod linux {
             clean: Option<alt_worktree::CleanTracked<'a>>,
         ) -> ScanOptions<'a> {
             ScanOptions {
+                file_mode: true,
                 untracked: alt_worktree::Untracked::Normal,
                 within: &[],
                 clean,

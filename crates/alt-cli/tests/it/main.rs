@@ -63,6 +63,7 @@ mod eol;
 mod exclude_dirs;
 mod exclude_order;
 mod fetch;
+mod file_mode;
 mod flow;
 mod flow_enforce;
 mod flow_kill;

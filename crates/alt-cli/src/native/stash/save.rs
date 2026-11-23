@@ -88,10 +88,10 @@ impl NativeRepo<'_> {
             work.remove(path);
         }
         if !loose.is_empty() {
-            let mut entries = Vec::new();
+            let (mut entries, modes) = (Vec::new(), self.staged_modes()?);
             for path in &loose {
                 let meta = std::fs::symlink_metadata(self.abs(path)?)?;
-                let mode = alt_worktree::FileStat::of(&meta).git_mode();
+                let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
                 let stored = self.stored(path, mode, lfs.as_ref(), &attrs, &index)?;
                 entries.push(WorkEntry {
                     path: path.clone(),

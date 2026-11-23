@@ -194,6 +194,14 @@ pub(crate) fn repository(repo: &alt_repo::Repository) -> Res<Cow<'_, Config>> {
     Ok(Cow::Owned(repo.config_at(theirs)?))
 }
 
+/// `core.fileMode`: whether the executable bit of a file in the working
+/// tree is what git records of it. Where it is off, a change of that bit
+/// alone is no change, and a new file is not executable.
+pub(crate) fn file_mode(settings: &Config) -> Res<bool> {
+    let set = settings.get_bool("core", None, "filemode").transpose()?;
+    Ok(set.unwrap_or(true))
+}
+
 /// A failure that changed nothing, with the exit status git has for it.
 pub(crate) fn fatal(message: String) -> Box<dyn std::error::Error> {
     let refusal = crate::machine::Failure::refusal("execution_error", message);
