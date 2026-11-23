@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: keep the nonces of a repository while it is closed, and tell the one repository of a server from another put in its place
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
+touched: crates/alt-cli/tests/it/altd_server_many_repos.rs
