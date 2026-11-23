@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: hold to the full check only a frame that follows the log, not one a cut left past its checkpoint
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/tests/it/v2_cut_chain.rs
