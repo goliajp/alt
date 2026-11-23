@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: take an ipv4 network written as an ipv6 one for the ipv4 network it is, among the proxies trusted
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/caller.rs
