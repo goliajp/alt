@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say which objects a fetch is given and why
+author-type: human
+author: doracawl
+touched: README.md
