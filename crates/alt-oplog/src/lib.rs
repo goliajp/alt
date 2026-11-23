@@ -36,6 +36,7 @@ mod sink;
 mod sync;
 mod synced;
 mod tail;
+pub mod v2;
 
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};

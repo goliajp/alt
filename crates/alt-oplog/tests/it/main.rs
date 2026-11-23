@@ -12,3 +12,5 @@ mod sink_generation;
 mod synced_marker;
 mod synced_writers;
 mod unconfirmed;
+mod v2_format;
+mod v2_image;
