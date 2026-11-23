@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: have a reader take a cut that is noted as begun for made once the log read on is of its generation
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/tests/it/v2_cut_notes.rs
