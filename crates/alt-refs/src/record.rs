@@ -4,7 +4,9 @@ use super::*;
 
 impl RefStore {
     /// Records a non-ref op (import, future workflow ops) in the shared
-    /// log. The ref-transaction kind byte is reserved.
+    /// log. The ref-transaction kind byte is reserved. An error can come
+    /// with the op in the log, when it is the sync after the append that
+    /// failed: nothing in the error tells.
     pub fn record_op(
         &mut self,
         actor: &str,

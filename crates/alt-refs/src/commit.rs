@@ -3,7 +3,7 @@
 //! Once it is appended the transaction is in the log, where every other
 //! process reads it, whatever fails afterwards. What a caller stored for
 //! it must stay from then on, and a failure there is told apart from one
-//! that left the log as it was ([`RefError::Recorded`]).
+//! that left the transaction out of the log ([`RefError::Recorded`]).
 
 use crate::{IdemKey, OpId, RefChange, RefError, RefPolicy, RefStore, tx};
 
@@ -45,7 +45,8 @@ impl RefStore {
     /// A ref transaction with caller-owned recovery context, committed in the
     /// same log frame as the ref changes. Legacy callers omit the context.
     ///
-    /// An error other than [`RefError::Recorded`] left the log as it was.
+    /// An error other than [`RefError::Recorded`] left the transaction
+    /// out of the log.
     pub fn commit_scoped(
         &mut self,
         actor: &str,
@@ -66,8 +67,9 @@ impl RefStore {
     }
 
     /// The first half of [`commit_scoped`](Self::commit_scoped): the
-    /// transaction is appended to the log, or an error left the log as it
-    /// was. [`finish_tx`](Self::finish_tx) is the other half.
+    /// transaction is appended to the log, or an error left it out of the
+    /// log (see [`RefError::Recorded`] for what the log may have become
+    /// by then). [`finish_tx`](Self::finish_tx) is the other half.
     pub fn append_tx(
         &mut self,
         actor: &str,
