@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: have a sink sync nothing once a batch of its handle did not end whole
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/odb.rs
+touched: crates/alt-odb/src/odb/durable.rs
+touched: crates/alt-odb/src/odb/follow.rs
+touched: crates/alt-odb/src/odb/sink.rs
+touched: crates/alt-odb/src/synced.rs
+touched: crates/alt-odb/tests/it/cache_failure.rs
