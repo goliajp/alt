@@ -11,6 +11,7 @@
 //! worst, never a ref pointing at missing objects. Re-running converges:
 //! object puts dedup, an unchanged ref set records no op at all.
 
+mod refs;
 mod report;
 pub use report::ImportReport;
 
@@ -18,11 +19,10 @@ use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
-use alt_bytes::ByteSlice;
 use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, Tag, Tree};
 use alt_git_pack::IndexedPack;
 use alt_odb::{NativeOdb, OdbError};
-use alt_refs::{RefChange, RefError, RefStore, RefTarget};
+use alt_refs::{RefError, RefStore, RefTarget};
 use alt_repo::{RepoError, Repository};
 
 #[derive(Debug)]
@@ -145,7 +145,7 @@ pub fn import_git_with(
     timestamp_ms: u64,
     prepare: impl FnOnce(&mut RefStore),
 ) -> Result<ImportReport, ImportError> {
-    let git_refs = repo.git_refs().ok_or(ImportError::NotAGitSource)?;
+    repo.git_refs().ok_or(ImportError::NotAGitSource)?;
     let mut odb = NativeOdb::open(alt_dir)?;
     let mut refs = RefStore::open(alt_dir)?;
     prepare(&mut refs);
@@ -205,21 +205,7 @@ pub fn import_git_with(
     odb.flush()?;
 
     // --- refs + HEAD: one atomic transaction = the import op ---
-    let mut wanted: Vec<(String, RefTarget)> = Vec::new();
-    if let Some(head) = git_refs.read("HEAD")? {
-        wanted.push(("HEAD".to_owned(), convert_target(head)?));
-    }
-    for r in git_refs.iter_refs()? {
-        let name = r
-            .name
-            .to_str()
-            .map_err(|_| ImportError::NonUtf8Ref(r.name.to_str_lossy().into_owned()))?
-            .to_owned();
-        if name == "HEAD" {
-            continue; // already handled
-        }
-        wanted.push((name, convert_target(r.target)?));
-    }
+    let (wanted, stack_from_log) = refs::wanted(repo)?;
 
     // --- same-path lineage deltas: storage form only, identity untouched ---
     let tips: Vec<ObjectId> = wanted
@@ -234,21 +220,7 @@ pub fn import_git_with(
     odb.flush()?;
 
     let refs_seen = wanted.len();
-    let changes: Vec<RefChange> = wanted
-        .into_iter()
-        .filter_map(|(name, new)| {
-            let old = refs.get(&name).cloned();
-            if old.as_ref() == Some(&new) {
-                None // already converged
-            } else {
-                Some(RefChange {
-                    name,
-                    old,
-                    new: Some(new),
-                })
-            }
-        })
-        .collect();
+    let changes = refs::changes(&refs, wanted, stack_from_log);
 
     let refs_changed = changes.len();
     let op = if changes.is_empty() {
@@ -407,17 +379,6 @@ fn diff_trees(
         }
     }
     Ok(())
-}
-
-fn convert_target(target: alt_git_refs::RefTarget) -> Result<RefTarget, ImportError> {
-    Ok(match target {
-        alt_git_refs::RefTarget::Direct(oid) => RefTarget::Oid(oid),
-        alt_git_refs::RefTarget::Symbolic(name) => RefTarget::Symbolic(
-            name.to_str()
-                .map_err(|_| ImportError::NonUtf8Ref(name.to_str_lossy().into_owned()))?
-                .to_owned(),
-        ),
-    })
 }
 
 #[cfg(test)]

@@ -22,6 +22,8 @@ use alt_git_pack::PackWriter;
 use alt_odb::{NativeOdb, OdbError};
 use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
 
+pub mod stash;
+
 #[derive(Debug)]
 pub enum ExportError {
     Io(std::io::Error),
@@ -259,6 +261,11 @@ fn write_git(
         }
     }
     alt_git_refs::write_loose(git_dir, head.as_ref(), &loose)?;
+    let entry = |(name, target): (&str, &RefTarget)| match target {
+        RefTarget::Oid(oid) if !unstored.contains(oid) => Some((stash::entry_number(name)?, *oid)),
+        _ => None,
+    };
+    stash::write_log(&odb, git_dir, refs.iter().filter_map(entry).collect(), algo)?;
     Ok(ExportReport {
         objects,
         refs: loose.len(),

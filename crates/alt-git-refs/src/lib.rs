@@ -4,6 +4,7 @@
 
 mod packed;
 mod reftable;
+pub mod stash;
 mod write;
 
 pub use write::write_loose;
