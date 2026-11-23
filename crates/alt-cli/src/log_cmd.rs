@@ -1,57 +1,12 @@
-use std::borrow::Cow;
 use std::io::Write;
 
 use alt_bytes::ByteSlice;
 use alt_git_codec::ObjectId;
 use alt_repo::Repository;
 
-/// git's `logmsg_reencode` for the default UTF-8 output encoding: a commit
-/// with an `encoding` header is converted to UTF-8 (whole buffer) and the
-/// header line is dropped; same-encoding commits just lose the header; a
-/// failed conversion leaves the buffer untouched, header included.
-fn reencode<'a>(data: &'a [u8], converted: &mut Vec<u8>) -> Cow<'a, [u8]> {
-    let Some(enc) = encoding_header(data) else {
-        return Cow::Borrowed(data);
-    };
-    if enc.eq_ignore_ascii_case(b"utf-8") || enc.eq_ignore_ascii_case(b"utf8") {
-        return Cow::Owned(strip_encoding_header(data));
-    }
-    // unknown charset or undecodable bytes: keep as-is, like git
-    if crate::charset::decode_into(enc, data, converted) {
-        Cow::Owned(strip_encoding_header(converted))
-    } else {
-        Cow::Borrowed(data)
-    }
-}
-
-/// The value of a top-level `encoding` header, if any.
-fn encoding_header(data: &[u8]) -> Option<&[u8]> {
-    for line in data.lines() {
-        if line.is_empty() {
-            return None; // message reached
-        }
-        if let Some(value) = line.strip_prefix(b"encoding ") {
-            return Some(value);
-        }
-    }
-    None
-}
-
-fn strip_encoding_header(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(data.len());
-    let mut in_headers = true;
-    for line in data.split_inclusive(|&b| b == b'\n') {
-        if in_headers {
-            if line == b"\n" {
-                in_headers = false;
-            } else if line.starts_with(b"encoding ") {
-                continue;
-            }
-        }
-        out.extend_from_slice(line);
-    }
-    out
-}
+use crate::log_encoding::reencode;
+use crate::log_range::Selection;
+use crate::native::pathspec::Place;
 
 #[derive(alt_args::Args, Clone)]
 pub struct LogArgs {
@@ -73,9 +28,16 @@ pub struct LogArgs {
     /// merge itself changed (hunks that differ from every parent)
     #[arg(long = "cc")]
     combined: bool,
-    /// start revision
+    /// each commit as its abbreviated id and its subject
+    #[arg(long)]
+    oneline: bool,
+    /// start revision, or a range: `A..B` for what leads to B and not to
+    /// A, `A...B` for what leads to one of them and not to both
     #[arg(default_value = "HEAD", hint = "rev")]
     rev: String,
+    /// show only the commits that change these paths
+    #[arg(last = true, hint = "path-tracked")]
+    paths: Vec<String>,
 }
 
 impl LogArgs {
@@ -90,53 +52,103 @@ impl LogArgs {
             json,
             patch: !json,
             combined: true,
+            oneline: false,
             rev,
+            paths: Vec::new(),
         }
     }
 }
 
 impl LogArgs {
-    /// The same log, starting from `rev` rewritten by `map` (used to point a
-    /// bare `HEAD` at the current workspace's HEAD).
+    /// The same log, with each revision it names rewritten by `map` (used
+    /// to point a bare `HEAD` at the current workspace's HEAD).
     pub(crate) fn map_rev(mut self, map: impl Fn(&str) -> String) -> Self {
-        self.rev = map(&self.rev);
+        self.rev = match crate::log_range::sides(&self.rev) {
+            Some((left, right, both)) => {
+                let dots = if both { "..." } else { ".." };
+                format!("{}{dots}{}", map(left), map(right))
+            }
+            None => map(&self.rev),
+        };
         self
+    }
+
+    /// The revision as it was given.
+    pub(crate) fn named(&self) -> &str {
+        &self.rev
+    }
+
+    /// The commits this log is of, newest first, each with the bytes of
+    /// its object. `named` is the revision as it was given.
+    fn commits<'r>(
+        &self,
+        repo: &'r Repository,
+        at: &Place,
+        named: &str,
+    ) -> Res<Box<dyn Iterator<Item = Res<(ObjectId, Vec<u8>)>> + 'r>> {
+        let limit = self.max_count.unwrap_or(usize::MAX);
+        if self.paths.is_empty() && crate::log_range::sides(&self.rev).is_none() {
+            let start = repo
+                .rev_parse(&self.rev)?
+                .ok_or_else(|| format!("bad revision '{}'", self.rev))?;
+            let mut walk = repo.rev_walk(start)?;
+            let walked = std::iter::from_fn(move || walk.next_with_data());
+            let commits = walked.map(|item| item.map(|(oid, _, data)| (oid, data)));
+            return Ok(Box::new(commits.map(|item| Ok(item?)).take(limit)));
+        }
+        let paths: Vec<String> = self.paths.iter().map(|p| at.path(p)).collect::<Res<_>>()?;
+        let selected = Selection::of(repo, &self.rev, named)?.commits(repo, &paths, limit)?;
+        Ok(Box::new(selected.into_iter().map(Ok)))
     }
 }
 
-/// `head` is the ref that stands for `HEAD` in this workspace.
+type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+/// `at` is where the command runs: its HEAD stands for `HEAD`, and its
+/// directory is what paths are named from. `named` is the revision as it
+/// was given.
 pub fn run(
     out: &mut impl Write,
     repo: &Repository,
     args: LogArgs,
-    head: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let start = repo
-        .rev_parse(&args.rev)?
-        .ok_or_else(|| format!("bad revision '{}'", args.rev))?;
-    let limit = args.max_count.unwrap_or(usize::MAX);
-
+    at: &Place,
+    named: &str,
+) -> Res<()> {
+    let commits = args.commits(repo, at, named)?;
     if args.json {
-        return run_json(out, repo, start, limit);
+        return run_json(out, repo, commits);
     }
-
     let notes = crate::meta::Notes::of(repo)?;
     let mut first = true;
     let mut converted = Vec::new();
     // one for the whole log, made by the first patch: a log without
     // patches reads neither the config nor the size of the store
     let mut style = None;
-    let mut walk = repo.rev_walk(start)?;
-    for item in std::iter::from_fn(|| walk.next_with_data()).take(limit) {
-        let (oid, _, data) = item?;
+    let pretty = if args.oneline {
+        "oneline"
+    } else {
+        args.pretty.as_str()
+    };
+    for item in commits {
+        let (oid, data) = item?;
         let payload = reencode(&data, &mut converted);
-        match args.pretty.as_str() {
+        match pretty {
             // raw shows the stored object as is
             "raw" => write_raw(out, &oid, &payload, &mut first)?,
-            "oneline" => match crate::meta::Notes::message(&notes, repo, oid)? {
-                Some(m) => write_oneline(out, &oid, format!("\n\n{m}").as_bytes())?,
-                None => write_oneline(out, &oid, &payload)?,
-            },
+            "oneline" => {
+                let shown = match args.oneline {
+                    false => oid.to_string(),
+                    // a plain git repository is not asked how many it holds
+                    true => match repo.abbrev()? {
+                        Some(abbrev) => abbrev.of(&oid)?,
+                        None => oid.to_string()[..7].to_owned(),
+                    },
+                };
+                match crate::meta::Notes::message(&notes, repo, oid)? {
+                    Some(m) => write_oneline(out, &shown, format!("\n\n{m}").as_bytes())?,
+                    None => write_oneline(out, &shown, &payload)?,
+                }
+            }
             other => {
                 return Err(
                     format!("unsupported --pretty={other} (supported: raw, oneline)").into(),
@@ -144,7 +156,7 @@ pub fn run(
             }
         }
         if args.patch {
-            write_patch(out, repo, &args, &oid, head, &mut style)?;
+            write_patch(out, repo, &args, &oid, &at.head, &mut style)?;
         }
     }
     Ok(())
@@ -168,7 +180,8 @@ fn write_patch<'r>(
         None => style.insert(crate::patch::style(repo, head)?),
     };
     let shown = crate::patch::write_commit(&mut patch, repo, oid, args.combined, style)?;
-    if shown == Section::Combined || (shown == Section::Patch && args.pretty != "oneline") {
+    let one_line = args.oneline || args.pretty == "oneline";
+    if shown == Section::Combined || (shown == Section::Patch && !one_line) {
         out.write_all(b"\n")?;
     }
     out.write_all(&patch)?;
@@ -182,14 +195,14 @@ fn write_patch<'r>(
 fn run_json(
     out: &mut impl Write,
     repo: &Repository,
-    start: ObjectId,
-    limit: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+    walked: impl Iterator<Item = Res<(ObjectId, Vec<u8>)>>,
+) -> Res<()> {
     use crate::json::Json;
     let notes = crate::meta::Notes::of(repo)?;
     let mut commits = Vec::new();
-    for item in repo.rev_walk(start)?.take(limit) {
-        let (oid, commit) = item?;
+    for item in walked {
+        let (oid, data) = item?;
+        let commit = alt_git_codec::Commit::parse(&data)?;
         let opt = |v: Option<&alt_bytes::BStr>| match v {
             Some(s) => Json::str(s),
             None => Json::Null,
@@ -267,13 +280,9 @@ fn write_raw(
     Ok(())
 }
 
-/// `--pretty=oneline`: `<oid> <subject>` — the subject folds the title
+/// `--pretty=oneline`: `<oid> <subject>`, the id as `oid` has it — the subject folds the title
 /// lines (up to the first blank line) into one space-separated line.
-fn write_oneline(
-    out: &mut impl Write,
-    oid: &ObjectId,
-    payload: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
+fn write_oneline(out: &mut impl Write, oid: &str, payload: &[u8]) -> Res<()> {
     let message = match payload.find(b"\n\n") {
         Some(at) => &payload[at + 2..],
         None => &[][..],

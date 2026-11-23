@@ -120,15 +120,57 @@ impl Pair {
 
     /// Stages everything and commits it, in both.
     pub fn commit_all(&self, message: &str) {
+        self.commit_all_at(message, 1_700_000_000);
+    }
+
+    /// [`commit_all`](Self::commit_all) at `time`, in seconds: history is
+    /// listed by the dates its commits carry.
+    pub fn commit_all_at(&self, message: &str, time: u64) {
         self.both(&["add", "-A"]);
+        let date = format!("{time} +0000");
+        let dated = [("GIT_AUTHOR_DATE", &date), ("GIT_COMMITTER_DATE", &date)];
         // a commit on a protected flow branch is the test's to make
         let committed = alt_in(&self.alt, &["commit", "-m", message])
             .env("ALT_NO_DAEMON", "1")
             .env("ALT_PROTECTED_OVERRIDE", "1")
+            .envs(dated)
             .output()
             .unwrap();
         ok(committed);
-        ok(git(&self.git, &["commit", "-q", "-m", message]));
+        let committed = Command::new("git")
+            .current_dir(&self.git)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .envs(SIGNING)
+            .envs(dated)
+            .args(["commit", "-q", "-m", message])
+            .output()
+            .unwrap();
+        ok(committed);
+    }
+
+    /// Merges `branch` into the current one with a merge commit made at
+    /// `time`, in both.
+    pub fn merge_at(&self, branch: &str, time: u64) {
+        let date = format!("{time} +0000");
+        let dated = [("GIT_AUTHOR_DATE", &date), ("GIT_COMMITTER_DATE", &date)];
+        let merged = alt_in(&self.alt, &["merge", "--no-ff", branch])
+            .env("ALT_NO_DAEMON", "1")
+            .env("ALT_PROTECTED_OVERRIDE", "1")
+            .envs(dated)
+            .output()
+            .unwrap();
+        ok(merged);
+        let merged = Command::new("git")
+            .current_dir(&self.git)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .envs(SIGNING)
+            .envs(dated)
+            .args(["merge", "-q", "--no-ff", branch])
+            .output()
+            .unwrap();
+        ok(merged);
     }
 
     /// The same command in both ends with the same status and prints the

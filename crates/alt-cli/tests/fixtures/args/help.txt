@@ -1305,10 +1305,11 @@ Options:
 ### alt log
 Show commit logs
 
-Usage: alt log [OPTIONS] [REV]
+Usage: alt log [OPTIONS] [REV] [-- <PATHS>...]
 
 Arguments:
-  [REV]  start revision [default: HEAD]
+  [REV]            start revision, or a range: `A..B` for what leads to B and not to A, `A...B` for what leads to one of them and not to both [default: HEAD]
+  [-- <PATHS>...]  show only the commits that change these paths
 
 Options:
       --pretty <PRETTY>        pretty-print commits: raw | oneline (ignored with --json) [default: oneline]
@@ -1316,6 +1317,7 @@ Options:
       --json                   emit the commit list as a stable JSON object
   -p, --patch                  show a per-commit patch (unified diff for text, compact chunk + perceptual summary for binary so large-file history doesn't blow up the terminal). Ignored with --json
       --cc                     with -p, show for a merge commit the combined diff of what the merge itself changed (hunks that differ from every parent)
+      --oneline                each commit as its abbreviated id and its subject
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help

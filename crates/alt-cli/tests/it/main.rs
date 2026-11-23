@@ -89,6 +89,7 @@ mod lfs;
 mod like_git;
 mod lock_order;
 mod log_patch;
+mod log_range;
 mod log_tails;
 mod machine_results;
 mod merge;

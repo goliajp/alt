@@ -44,6 +44,7 @@ fn canonical_matches(matches: &Matches) -> Value {
                 | "abort_merge"
                 | "no_ff"
                 | "ff_only"
+                | "oneline"
         );
         if later && entry.values.iter().all(|v| v.as_bytes() == b"false") {
             continue;
