@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: end the requests that ran out of time in every repository, whatever happens in one of them
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/gc.rs
+touched: crates/alt-server-store/tests/it/database/expiry.rs
+touched: crates/alt-server/src/http/expiry.rs
