@@ -121,3 +121,43 @@ fn the_lines_of_a_fetch_are_taken_once_each_and_within_a_number() {
         ("400", &b"too many have lines"[..])
     );
 }
+
+/// A commit the sender says it has is left out of what it is sent, with
+/// all that is under it, where a ref reaches it; one that lies in the
+/// store under no ref changes nothing of the answer, like one the store
+/// never had.
+#[test]
+fn a_have_that_no_ref_reaches_is_one_the_server_does_not_know() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    repository(&origin);
+    let server = spawn_server_with_env(&[("ALT_SERVER_REPO", origin.to_str().unwrap())]);
+    let url = format!("http://{}/", server.addr);
+    let src = source(tmp.path(), "src");
+    let gone = commit(&src, "gone.txt");
+    done(push(&src, &url, "gone"));
+    done(git(&src, &["push", &url, ":refs/heads/gone"]));
+    done(git(&src, &["reset", "-q", "--hard", "HEAD~1"]));
+    let under = commit(&src, "under.txt");
+    let tip = commit(&src, "kept.txt");
+    done(push(&src, &url, "kept"));
+
+    let want = format!("0032want {tip}\n");
+    let having = |have: &str| {
+        let lines = format!("{want}0032have {have}\n");
+        fetched(&url, tmp.path(), lines.as_bytes())
+    };
+    let all = fetched(&url, tmp.path(), want.as_bytes());
+    assert_eq!(all.0, "200");
+    let never = "1".repeat(40);
+    assert_eq!(having(&never), all);
+    assert_eq!(having(&gone), all);
+    let less = having(&under);
+    assert_eq!(less.0, "200");
+    assert!(
+        less.1.len() < all.1.len(),
+        "{} {}",
+        less.1.len(),
+        all.1.len()
+    );
+}

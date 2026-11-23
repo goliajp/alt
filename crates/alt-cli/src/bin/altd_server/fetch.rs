@@ -130,6 +130,50 @@ fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
     Ok(req.wants.iter().find(|want| sought.contains(want)).copied())
 }
 
+/// Those of the commits `req` says its sender has that a ref of `repo`
+/// reaches. One that is in the store and under no ref is taken as one
+/// the server does not know: left out of the pack as a commit both
+/// sides have, it would tell its sender that it is there.
+fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
+    let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
+    let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
+    let mut sought: KeyedIdSet<ObjectId> = req.haves.iter().copied().collect();
+    let mut reached: Vec<ObjectId> = Vec::new();
+    reached.extend(req.haves.iter().filter(|have| seen.contains(have)));
+    sought.retain(|have| !seen.contains(have));
+    // one the store lacks is found under no ref: it is not looked for
+    let mut held = KeyedIdSet::default();
+    for have in &sought {
+        if repo.read_object(have)?.is_some() {
+            held.insert(*have);
+        }
+    }
+    let mut sought = held;
+    let mut ahead = tips;
+    while let Some(oid) = ahead.pop() {
+        if sought.is_empty() {
+            break;
+        }
+        let Some(object) = repo.read_object(&oid)? else {
+            continue;
+        };
+        let under: Vec<ObjectId> = match object.kind {
+            ObjectKind::Commit => Commit::parse(&object.data)?.parents().collect(),
+            ObjectKind::Tag => Tag::parse(&object.data)?.object().into_iter().collect(),
+            _ => Vec::new(),
+        };
+        for oid in under {
+            if seen.insert(oid) {
+                if sought.remove(&oid) {
+                    reached.push(oid);
+                }
+                ahead.push(oid);
+            }
+        }
+    }
+    Ok(reached)
+}
+
 /// The response to `req`, in a file that has no name any more: the
 /// want/have closure of the request, less what its filter leaves out, as
 /// a pack in side-band frames. The pack is the wire payload and is not
@@ -159,7 +203,7 @@ fn pack(
     dir: &std::path::Path,
     framed: &mut impl Write,
 ) -> Res<()> {
-    let outgoing = repo.reachable_objects(&req.wants, &req.haves)?;
+    let outgoing = repo.reachable_objects(&req.wants, &reached(repo, req)?)?;
     let filter = parse_filter_spec(req.filter.as_deref());
     // only a limit on the size of blobs has an object read to tell
     // whether it goes
