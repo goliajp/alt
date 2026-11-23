@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: feat
+summary: follow a repository without waiting for a writer in the middle of its objects
+author-type: human
+author: doracawl
+touched: crates/alt-repo/src/alt_backend.rs
