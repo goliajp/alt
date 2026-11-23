@@ -4,6 +4,7 @@ mod bulk_publication;
 mod change_links;
 mod cloud;
 mod delegation;
+mod expiry;
 mod faults;
 mod json;
 mod maintenance;
