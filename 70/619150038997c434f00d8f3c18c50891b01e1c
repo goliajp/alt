@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: say that pg_dump is older than the test server where a backup test finds it so
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator.rs
