@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refuse an edit a directory is in the way of before its refs move
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/tree_edit.rs
+touched: crates/alt-cli/tests/it/edit_order.rs
+touched: crates/alt-cli/tests/it/main.rs
