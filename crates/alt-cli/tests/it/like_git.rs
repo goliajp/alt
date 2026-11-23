@@ -53,6 +53,14 @@ pub fn git(repo: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+/// The version of the git the tests run beside, as major and minor.
+pub fn git_version() -> (u32, u32) {
+    let said = ok(Command::new("git").arg("--version").output().unwrap());
+    let mut parts = said.trim_start_matches("git version ").split('.');
+    let mut next = || parts.next().unwrap().trim().parse().unwrap();
+    (next(), next())
+}
+
 pub fn ok(o: Output) -> String {
     assert!(
         o.status.success(),

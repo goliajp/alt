@@ -150,6 +150,7 @@ mod sink_barrier;
 mod staged_durability;
 mod staged_stored;
 mod stash;
+mod stash_matrix;
 mod status_json;
 mod status_labels;
 mod status_replaced;

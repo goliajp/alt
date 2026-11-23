@@ -37,7 +37,7 @@ fn exported_stack(repo: &Path) -> String {
 }
 
 /// The stacks are the same in both: the same commits, called the same.
-fn assert_same_stack(pair: &Pair) {
+pub fn assert_same_stack(pair: &Pair) {
     assert_eq!(exported_stack(&pair.alt), stack(&pair.git));
 }
 
@@ -181,7 +181,12 @@ fn an_apply_over_a_change_that_would_be_lost_is_refused() {
     assert!(!applied.status.success() && !git_applied.status.success());
     let said = String::from_utf8(applied.stderr).unwrap();
     assert!(said.contains("u already exists, no checkout\n"), "{said}");
-    assert_eq!(std::fs::read_to_string(pair.alt.join("a")).unwrap(), "a\n");
+    // as by git, the rest of the entry is applied all the same
+    assert_eq!(
+        std::fs::read_to_string(pair.alt.join("a")).unwrap(),
+        "stashed\n"
+    );
+    pair.assert_same_state();
     assert_same_stack(&pair);
 }
 

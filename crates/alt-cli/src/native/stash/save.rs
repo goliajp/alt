@@ -1,6 +1,6 @@
 //! `alt stash push`: the changes put away, and the tree as HEAD has it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use super::super::tree_edit::{self, TreeEdit};
 use super::super::*;
@@ -135,11 +135,28 @@ impl NativeRepo<'_> {
             };
             work.insert(entry.path.clone(), entry);
         }
-        for path in &unsaved.deleted {
+        let modes = self.staged_modes()?;
+        let in_head = self.commit_entries(head)?;
+        let in_head: HashSet<&BString> = in_head.iter().map(|entry| &entry.path).collect();
+        // a file that is gone and was never committed is no change from
+        // HEAD to the tree: git leaves it as staged
+        for path in unsaved.deleted.iter().filter(|path| in_head.contains(path)) {
             work.remove(path);
         }
+        // a file the index has lost and the tree still has is put away
+        // as it is in the tree
+        let lost = in_head.iter().filter(|path| !work.contains_key(**path));
+        for path in lost.copied().collect::<Vec<_>>() {
+            let Ok(meta) = std::fs::symlink_metadata(self.abs(path)?) else {
+                continue;
+            };
+            if !meta.is_dir() {
+                let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
+                work.insert(path.clone(), stored(self, path, mode)?);
+            }
+        }
         if !unsaved.loose.is_empty() {
-            let (mut entries, modes) = (Vec::new(), self.staged_modes()?);
+            let mut entries = Vec::new();
             for path in &unsaved.loose {
                 let meta = std::fs::symlink_metadata(self.abs(path)?)?;
                 let mode = modes.of(path, alt_worktree::FileStat::of(&meta).git_mode());
@@ -188,7 +205,8 @@ impl NativeRepo<'_> {
         for path in self.paths_off(index, &target)? {
             edit.write(&path, wanted.get(&path).copied());
         }
-        for path in loose {
+        // an untracked file where HEAD has one is written as HEAD has it
+        for path in loose.iter().filter(|path| !wanted.contains_key(path)) {
             edit.write(path, None);
         }
         self.apply_edit("stash", &refs, edit).map(drop)

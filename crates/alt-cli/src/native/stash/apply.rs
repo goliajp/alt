@@ -75,7 +75,7 @@ impl NativeRepo<'_> {
         let changes =
             |r: &&Resolved| r.conflicted || !same(r.entry.as_ref(), have.get(&r.path).copied());
         let changed: Vec<&Resolved> = resolved.iter().filter(changes).collect();
-        self.ensure_applicable(&changed, &have, &loose)?;
+        let blocked = self.ensure_applicable(&changed, &have, &loose)?;
 
         let conflicts: Vec<BString> = resolved
             .iter()
@@ -108,21 +108,34 @@ impl NativeRepo<'_> {
                 _ => edit.write(&r.path, r.entry.as_ref()),
             }
         }
-        for file in &loose {
+        for file in loose.iter().filter(|file| !blocked.contains(&file.path)) {
             edit.write(&file.path, Some(file));
         }
-        let refs = match pop && conflicts.is_empty() {
+        let kept = !conflicts.is_empty() || !blocked.is_empty();
+        let refs = match pop && !kept {
             true => self.stash_removal(at),
             false => Vec::new(),
         };
         self.apply_edit("stash", &refs, edit)?;
-        self.say_applied(
-            &conflicts,
-            pop.then_some((called.as_str(), entry)),
-            said,
-            out,
-        )?;
-        Ok(!conflicts.is_empty())
+        let popped = pop.then_some((called.as_str(), entry));
+        if blocked.is_empty() {
+            self.say_applied(&conflicts, popped, said, out)?;
+            return Ok(!conflicts.is_empty());
+        }
+        // as by git, the rest of the entry is applied and the entry stays
+        if !said.quiet && !said.json {
+            self.status(None, false, out)?;
+            if pop {
+                writeln!(out, "The stash entry is kept in case you need it again.")?;
+            }
+        }
+        out.flush()?;
+        let mut told = String::new();
+        for path in &blocked {
+            told.push_str(&format!("{path} already exists, no checkout\n"));
+        }
+        told.push_str("error: could not restore untracked files from stash\n");
+        Err(said::refused(&told, 128))
     }
 
     /// The index `ours` with what the entry had staged, `wanted`, merged
@@ -143,14 +156,16 @@ impl NativeRepo<'_> {
     }
 
     /// Refuses, before anything is written, an apply that would write
-    /// over a change that is not staged, over a file that is not tracked,
-    /// or put an untracked file of the entry where a file is.
+    /// over a change that is not staged or over a file that is not
+    /// tracked. Returns the untracked files of the entry that a file is
+    /// in the way of: those are left out, and the apply fails once the
+    /// rest is done.
     fn ensure_applicable(
         &self,
         changed: &[&Resolved],
         have: &BTreeMap<&BString, &WorkEntry>,
         loose: &[WorkEntry],
-    ) -> Res<()> {
+    ) -> Res<Vec<BString>> {
         let state = self.tree_state(alt_worktree::Untracked::No)?;
         let dirty = state.delta.changed.iter().filter(|w| w.mode != 0o160000);
         let dirty: HashSet<&BString> = dirty.map(|w| &w.path).chain(&state.delta.deleted).collect();
@@ -187,19 +202,23 @@ impl NativeRepo<'_> {
                 "Please move or remove them before you merge.",
             ));
         }
-        let mut said = String::new();
+        // an untracked file of the entry does not go where a file is
+        // once the rest is applied
+        let written: BTreeMap<&BString, bool> = changed
+            .iter()
+            .map(|r| (&r.path, r.conflicted || r.entry.is_some()))
+            .collect();
+        let mut blocked = Vec::new();
         for file in loose {
-            if there(&file.path)? {
-                said.push_str(&format!("{} already exists, no checkout\n", file.path));
+            let stays = match written.get(&file.path) {
+                Some(written) => *written,
+                None => there(&file.path)?,
+            };
+            if stays {
+                blocked.push(file.path.clone());
             }
         }
-        match said.is_empty() {
-            true => Ok(()),
-            false => {
-                said.push_str("error: could not restore untracked files from stash\n");
-                Err(said::refused(&said, 1))
-            }
-        }
+        Ok(blocked)
     }
 
     /// What an apply says: the conflicts where there are any, else the
