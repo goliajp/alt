@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: tell the log of a ref from the operations of a store, and read ref@{n} and @{-n} in revisions
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-repo/Cargo.toml
+touched: crates/alt-repo/src/error.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/reflog.rs
+touched: crates/alt-repo/src/reflog/asked.rs
+touched: crates/alt-repo/src/reflog/derived.rs
+touched: crates/alt-repo/src/reflog/said.rs
+touched: crates/alt-repo/src/revspec.rs
