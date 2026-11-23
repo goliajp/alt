@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse to switch branches while a cherry-pick is under way
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/native/switch.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/switch_picking.rs
