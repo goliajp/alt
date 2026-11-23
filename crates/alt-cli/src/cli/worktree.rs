@@ -100,6 +100,7 @@ fn checkout<W: Write>(
             return Err(crate::machine::Failure::usage(usage).into());
         }
         ([rev, paths @ ..], None, true) if !paths.is_empty() && repo.names_commit(rev)? => {
+            repo.ensure_no_file_named(rev)?;
             (Some(rev.as_str()), paths)
         }
         (names, _, true) => (None, names),
@@ -127,7 +128,10 @@ fn reset<W: Write>(repo: &mut NativeRepo, args: &worktree_args::Reset, out: &mut
             let usage = "only one revision may come before `--`";
             return Err(crate::machine::Failure::usage(usage).into());
         }
-        ([rev, paths @ ..], true) if repo.names_commit(rev)? => (Some(rev.as_str()), paths),
+        ([rev, paths @ ..], true) if repo.names_commit(rev)? => {
+            repo.ensure_no_file_named(rev)?;
+            (Some(rev.as_str()), paths)
+        }
         ([first, ..], true) if repo.names_path(first)? => (None, &names[..]),
         // what is neither is said to be no revision
         ([rev, ..], true) => (Some(rev.as_str()), &names[..0]),

@@ -191,6 +191,21 @@ impl NativeRepo<'_> {
         Ok(self.commit_named(rev)?.is_some())
     }
 
+    /// Refuses `word`, which names a revision and stands where a path
+    /// may, where a file of that name is there as well.
+    pub fn ensure_no_file_named(&self, word: &str) -> Res<()> {
+        let spec = pathspec::Spec::parse(&self.root, &self.prefix, word)?;
+        if self.root.join(&spec.path).symlink_metadata().is_err() {
+            return Ok(());
+        }
+        let said = format!(
+            "fatal: ambiguous argument '{word}': both revision and filename\n\
+             Use '--' to separate paths from revisions, like this:\n\
+             'git <command> [<revision>...] -- [<file>...]'\n"
+        );
+        Err(said::refused(&said, 128))
+    }
+
     /// Whether `given` names a file that is there or a path of the index.
     pub fn names_path(&self, given: &str) -> Res<bool> {
         let spec = pathspec::Spec::parse(&self.root, &self.prefix, given)?;
