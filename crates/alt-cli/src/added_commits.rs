@@ -41,6 +41,8 @@
 mod trees;
 mod walk;
 
+pub use trees::COSTLY;
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -152,7 +154,7 @@ pub fn added(
                     None => break,
                 },
                 ObjectKind::Tree if !walk.trees.whole(source, oid, &[])? => {
-                    return Ok(Err(MISSING.to_owned()));
+                    return Ok(Err(walk.trees.lack().to_owned()));
                 }
                 _ => break,
             }

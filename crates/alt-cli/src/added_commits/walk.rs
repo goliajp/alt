@@ -237,7 +237,7 @@ impl<'a> Walk<'a> {
                 };
                 let bases = self.bases(oid);
                 if !self.trees.whole(self.source, tree, &bases)? {
-                    self.suspects.insert(oid, MISSING.to_owned());
+                    self.suspects.insert(oid, self.trees.lack().to_owned());
                 }
             }
             if self.suspects.is_empty() {

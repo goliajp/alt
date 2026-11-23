@@ -14,12 +14,19 @@
 //! for, while those kept fit [`BASES`]. A push names the commits it is
 //! on top of, as many as it likes, and a tree of it stands in the place
 //! of one tree of each: what is read of them is bounded by the
-//! repository, not by the push. Past the limit the trees kept are let go
-//! of and read again when they come up; a tree of the push is held
-//! against one of them at a time, and the trees in the place of a
-//! directory are found when that directory is come to.
+//! repository, not by the push. Past the limit the trees kept longest
+//! without being looked at are let go of, and read again when they come
+//! up; a tree of the push is held against one of them at a time, and the
+//! trees in the place of a directory are found when that directory is
+//! come to.
+//!
+//! A push can be made so that what it stands in the place of never fits
+//! and is read over and over: a merge of many commits whose trees are
+//! large, with many directories of its own. All that is read of the
+//! history served, the first time or again, is counted, and a push that
+//! has [`READ`] times what may be kept read for it is refused.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use alt_git_codec::{ObjectId, ObjectKind, Tree, TreeEntry};
@@ -30,6 +37,10 @@ use super::{Res, Source};
 /// The bytes of trees of the history served that are kept, as they are
 /// counted here: about what they take in memory.
 pub(super) const BASES: usize = 64 << 20;
+/// How many times that may be read of the history served for one push.
+const READ: usize = 64;
+/// What a push is refused with when more would have to be read.
+pub const COSTLY: &str = "the trees under the commits this push is on top of are read too often";
 
 /// What a tree has at each name: whether it is a directory, and its
 /// object.
@@ -42,11 +53,28 @@ pub(super) struct Trees {
     pub(super) added: KeyedIdSet<ObjectId>,
     /// the trees history the refs reach has, as they were read: `None`
     /// for one that does not read
-    bases: KeyedIdMap<ObjectId, Option<Rc<Places>>>,
+    bases: KeyedIdMap<ObjectId, Kept>,
+    /// the trees kept by when they were looked at, the longest ago
+    /// first; one looked at again since has a later entry as well
+    looked: VecDeque<(u64, ObjectId)>,
+    clock: u64,
     /// what `bases` counts for, the most it ever did, and its limit
     kept: usize,
     most: usize,
     limit: usize,
+    /// what was read of the history served so far, as it is counted,
+    /// and the most a push may have read
+    read: usize,
+    budget: usize,
+    /// set once more would have to be read than a push may have read
+    pub(super) costly: bool,
+}
+
+/// A tree kept: when it was last looked at, and what it counts for.
+struct Kept {
+    places: Option<Rc<Places>>,
+    looked: u64,
+    cost: usize,
 }
 
 /// A directory of a tree of the push that waits to be looked at: its
@@ -71,47 +99,104 @@ fn place(entry: &TreeEntry) -> (Vec<u8>, (bool, ObjectId)) {
     (entry.name.to_vec(), (entry.mode.is_tree(), entry.oid))
 }
 
+/// what a tree kept counts for besides its names, and each of its entries
+const EACH: usize = 96;
+
 /// What a tree kept counts for.
 fn cost(places: &Places) -> usize {
-    const EACH: usize = 96;
     EACH + places.keys().map(|name| EACH + name.len()).sum::<usize>()
 }
 
 impl Trees {
-    /// With trees of the history served kept up to `limit` bytes.
+    /// With trees of the history served kept up to `limit` bytes, and
+    /// [`READ`] times that read at most.
     pub(super) fn holding(limit: usize) -> Self {
+        Self::reading(limit, limit.saturating_mul(READ))
+    }
+
+    fn reading(limit: usize, budget: usize) -> Self {
         Trees {
             whole: KeyedIdSet::default(),
             added: KeyedIdSet::default(),
             bases: KeyedIdMap::default(),
+            looked: VecDeque::new(),
+            clock: 0,
             kept: 0,
             most: 0,
             limit,
+            read: 0,
+            budget,
+            costly: false,
         }
     }
 
     /// The tree `base` of the history served; `None` where it does not
     /// read, and it has nothing in its place then. It is kept while the
-    /// trees kept fit their limit: all of them are let go of once one
-    /// more does not, and one that is larger than the limit is not kept.
+    /// trees kept fit their limit: those looked at longest ago are let
+    /// go of for it, and one that is larger than the limit is not kept.
+    /// Nothing is read once the push is found too costly.
     fn base(&mut self, source: &Source<'_>, base: &ObjectId) -> Res<Option<Rc<Places>>> {
-        if let Some(kept) = self.bases.get(base) {
-            return Ok(kept.clone());
+        self.clock += 1;
+        if let Some(kept) = self.bases.get_mut(base) {
+            kept.looked = self.clock;
+            let places = kept.places.clone();
+            self.looked.push_back((self.clock, *base));
+            self.thin();
+            return Ok(places);
+        }
+        if self.costly {
+            return Ok(None);
         }
         let tree = entries(source, base)?;
         let places: Option<Rc<Places>> =
             tree.map(|tree| Rc::new(tree.entries.iter().map(place).collect()));
-        let cost = places.as_deref().map_or(0, cost);
-        if self.kept + cost > self.limit {
-            self.bases.clear();
-            self.kept = 0;
+        let cost = places.as_deref().map_or(EACH, cost);
+        self.read = self.read.saturating_add(cost);
+        self.costly = self.read > self.budget;
+        if cost > self.limit {
+            return Ok(places);
         }
-        if cost <= self.limit {
-            self.bases.insert(*base, places.clone());
-            self.kept += cost;
-            self.most = self.most.max(self.kept);
+        while self.kept + cost > self.limit {
+            let (looked, oldest) = self.looked.pop_front().expect("what is kept was looked at");
+            if self
+                .bases
+                .get(&oldest)
+                .is_some_and(|kept| kept.looked == looked)
+            {
+                self.kept -= self.bases.remove(&oldest).expect("found").cost;
+            }
         }
+        let looked = self.clock;
+        self.looked.push_back((looked, *base));
+        let kept = Kept {
+            places: places.clone(),
+            looked,
+            cost,
+        };
+        self.bases.insert(*base, kept);
+        self.kept += cost;
+        self.most = self.most.max(self.kept);
         Ok(places)
+    }
+
+    /// Drops the entries of `looked` that a later look made stale, once
+    /// they are most of it.
+    fn thin(&mut self) {
+        if self.looked.len() > 2 * self.bases.len() + 64 {
+            let bases = &self.bases;
+            let current = |(looked, oid): &(u64, ObjectId)| {
+                bases.get(oid).is_some_and(|kept| kept.looked == *looked)
+            };
+            self.looked.retain(current);
+        }
+    }
+
+    /// Why a tree was not found whole.
+    pub(super) fn lack(&self) -> &'static str {
+        match self.costly {
+            true => COSTLY,
+            false => super::MISSING,
+        }
     }
 
     /// The trees that `bases` have at the directory `name`.
@@ -192,6 +277,9 @@ impl Trees {
             let Some(tree) = entries(source, &oid)? else {
                 return Ok(false);
             };
+            if self.costly {
+                return Ok(false);
+            }
             // a commit of another repository is none of this one's
             let (dirs, files): (Vec<&TreeEntry>, Vec<&TreeEntry>) = (tree.entries.iter())
                 .filter(|entry| !entry.mode.is_gitlink())
@@ -202,6 +290,10 @@ impl Trees {
             for dir in dirs {
                 stack.push((dir.oid, Rc::clone(&bases), Some(dir.name.to_vec())));
             }
+        }
+        // what was not read of the history served vouches for nothing
+        if self.costly {
+            return Ok(false);
         }
         self.whole.extend(trees.iter().copied());
         self.added.extend(trees);
@@ -229,6 +321,11 @@ mod tests {
         let kind = ObjectKind::Tree;
         held.insert(oid, RawObject { kind, data });
         oid
+    }
+
+    fn trees_of(source: &Source<'_>, oid: &ObjectId) -> Places {
+        let tree = entries(source, oid).unwrap().unwrap();
+        tree.entries.iter().map(place).collect()
     }
 
     /// A tree of the push in the place of a hundred trees of the history
@@ -263,7 +360,7 @@ mod tests {
                 .collect(),
         );
         for (limit, fit) in [(BASES, 100), (10 * one, 10), (one - 1, 0)] {
-            let mut trees = Trees::holding(limit);
+            let mut trees = Trees::reading(limit, usize::MAX);
             reads.set(0);
             assert!(trees.whole(&source, root, &bases).unwrap());
             assert_eq!(reads.get(), 101, "within {limit}");
@@ -276,5 +373,85 @@ mod tests {
             let again = if fit == 100 { 0 } else { 100 };
             assert_eq!(reads.get(), 101 + 1 + again, "within {limit}");
         }
+    }
+
+    /// Ten trees fit. The one let go of for an eleventh is the one not
+    /// looked at for the longest, whichever was read first.
+    #[test]
+    fn the_tree_let_go_of_is_the_one_looked_at_longest_ago() {
+        let mut held = HashMap::new();
+        let bases: Vec<ObjectId> = (0..12).map(|n| tree(&mut held, n, 50)).collect();
+        let reads = std::cell::Cell::new(0);
+        let get = |oid: &ObjectId| -> Res<Option<RawObject>> {
+            reads.set(reads.get() + 1);
+            Ok(held.get(oid).cloned())
+        };
+        let source = Source {
+            get: &get,
+            commit: &|_| Ok(None),
+            holds: &|_| Ok(true),
+            had: &|_| Ok(true),
+            fails: &|_| Ok(None),
+        };
+        let one = cost(&trees_of(&source, &bases[0]));
+        reads.set(0);
+        let mut trees = Trees::reading(10 * one, usize::MAX);
+        for base in &bases[..10] {
+            trees.base(&source, base).unwrap().unwrap();
+        }
+        // the first is looked at again, many times over
+        for _ in 0..1000 {
+            trees.base(&source, &bases[0]).unwrap().unwrap();
+        }
+        assert_eq!(reads.get(), 10);
+        assert!(trees.looked.len() < 100, "{}", trees.looked.len());
+        // the eleventh takes the place of the second, the twelfth of the third
+        for (new, kept, gone) in [(10, 0, 1), (11, 0, 2)] {
+            trees.base(&source, &bases[new]).unwrap().unwrap();
+            let before = reads.get();
+            trees.base(&source, &bases[kept]).unwrap().unwrap();
+            assert_eq!(reads.get(), before, "{new}");
+            assert!(!trees.bases.contains_key(&bases[gone]), "{new}");
+            assert_eq!(trees.kept, 10 * one);
+        }
+    }
+
+    /// A push that has the same trees read again and again is refused
+    /// once what was read for it is more than it may have read, and
+    /// nothing more is read for it then.
+    #[test]
+    fn a_push_that_has_too_much_read_of_the_history_served_is_refused() {
+        let mut held = HashMap::new();
+        let bases: Vec<ObjectId> = (0..100).map(|n| tree(&mut held, n, 50)).collect();
+        let root = tree(&mut held, 1000, 50);
+        let reads = std::cell::Cell::new(0);
+        let get = |oid: &ObjectId| -> Res<Option<RawObject>> {
+            reads.set(reads.get() + 1);
+            Ok(held.get(oid).cloned())
+        };
+        let source = Source {
+            get: &get,
+            commit: &|_| Ok(None),
+            holds: &|_| Ok(true),
+            had: &|_| Ok(true),
+            fails: &|_| Ok(None),
+        };
+        let one = cost(&trees_of(&source, &bases[0]));
+        reads.set(0);
+        // room for ten of the hundred, and for all of them read twice and a half
+        let mut trees = Trees::reading(10 * one, 250 * one);
+        for pass in 0..2 {
+            trees.whole = KeyedIdSet::default();
+            assert!(trees.whole(&source, root, &bases).unwrap(), "{pass}");
+            assert_eq!(trees.lack(), super::super::MISSING);
+        }
+        trees.whole = KeyedIdSet::default();
+        assert!(!trees.whole(&source, root, &bases).unwrap());
+        assert_eq!(trees.lack(), COSTLY);
+        // the root three times, the hundred twice and fifty-one of them once more
+        assert_eq!(reads.get(), 3 + 200 + 51);
+        trees.whole = KeyedIdSet::default();
+        assert!(!trees.whole(&source, root, &bases).unwrap());
+        assert_eq!(reads.get(), 3 + 200 + 51 + 1);
     }
 }
