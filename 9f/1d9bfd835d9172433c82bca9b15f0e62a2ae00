@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: hold a version 2 log to what it does where no boot is told and where a sync fails
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_synced.rs
