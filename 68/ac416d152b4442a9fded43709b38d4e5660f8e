@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: tell a handle that reads the history with no lock held that its frames were cut
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
