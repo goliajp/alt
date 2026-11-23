@@ -222,6 +222,28 @@ impl Layout {
         }
     }
 
+    /// The first `len` bytes of a frame that starts at `at`, fewer than a
+    /// block holds, read out of `data` past the block header they may run
+    /// across. What that header says of the frame is not looked at: it
+    /// tells where the whole frame ends, which these bytes are read to
+    /// learn.
+    pub fn lift_start<'a>(
+        &self,
+        data: &'a [u8],
+        base: u64,
+        at: u64,
+        len: usize,
+    ) -> Option<Cow<'a, [u8]>> {
+        let from = usize::try_from(at.checked_sub(base)?).ok()?;
+        let room = self.room(at).min(len as u64) as usize;
+        let first = data.get(from..from.checked_add(room)?)?;
+        if room == len {
+            return Some(Cow::Borrowed(first));
+        }
+        let rest = data.get(from + room + BLOCK_HEADER_LEN..)?;
+        Some(Cow::Owned([first, rest.get(..len - room)?].concat()))
+    }
+
     /// The `len` bytes of a frame that starts at `at`, read out of `data`
     /// (which begins at byte `base` of the file) with the block headers it
     /// runs across left out, and where it ends in the file. `None` where

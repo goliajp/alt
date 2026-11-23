@@ -20,8 +20,8 @@ impl Log {
         let limit = self.state.end;
         let reach = (HEADER_LEN + BLOCK_HEADER_LEN).min(limit.saturating_sub(at) as usize);
         let start = self.source().at(at, reach)?;
-        let header = self.layout.lift(&start, at, at, HEADER_LEN as u64);
-        let len = header.and_then(|(header, _)| len_of(header.first_chunk()?));
+        let header = self.layout.lift_start(&start, at, at, HEADER_LEN);
+        let len = header.and_then(|header| len_of(header.first_chunk()?));
         let Some(end) = len.map(|len| self.layout.end_of(at, len)) else {
             return Ok(None);
         };

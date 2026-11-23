@@ -40,7 +40,7 @@ fn lift_frame<'a>(
     base: u64,
     at: u64,
 ) -> Option<(Cow<'a, [u8]>, u64)> {
-    let (header, _) = layout.lift(data, base, at, HEADER_LEN as u64)?;
+    let header = layout.lift_start(data, base, at, HEADER_LEN)?;
     layout.lift(data, base, at, len_of(header.first_chunk()?)?)
 }
 
@@ -208,7 +208,7 @@ pub(crate) fn checkpoint_at(
     // a header that runs into the next block has a block header in it
     let reach = (HEADER_LEN + BLOCK_HEADER_LEN).min(len.saturating_sub(at) as usize);
     let start = read(at, reach)?;
-    let Some((header, _)) = layout.lift(&start, at, at, HEADER_LEN as u64) else {
+    let Some(header) = layout.lift_start(&start, at, at, HEADER_LEN) else {
         return Ok(None);
     };
     let header: &[u8; HEADER_LEN] = header.first_chunk().unwrap();
