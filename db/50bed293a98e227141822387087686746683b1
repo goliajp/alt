@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: feat
+summary: read and write the log git keeps of a ref
+author-type: human
+author: doracawl
+touched: crates/alt-git-refs/src/lib.rs
+touched: crates/alt-git-refs/src/reflog.rs
