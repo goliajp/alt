@@ -201,6 +201,7 @@ impl Server {
             receiving_each: 4,
             receiving_bytes: 1 << 30,
             expiry_interval: Duration::from_secs(30),
+            password_places: 2,
             native: NativeOptions {
                 portable: None,
                 task_limits: task_limits(),
