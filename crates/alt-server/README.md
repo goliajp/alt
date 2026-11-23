@@ -86,10 +86,24 @@ resulting `dist` directory. Add a `browser` member to the instance configuration
 
 The origin must be canonical, without a trailing slash. HTTPS is required except
 for literal loopback or localhost development. The edge must preserve this
-browser origin. Forwarded client-address headers are not trusted; login admission
-uses the direct peer and a separate account/global budget. Asset files are frozen
+browser origin. Forwarded client-address headers are read only behind the proxies
+that `http.trusted_proxies` names (addresses or networks; none by default): the
+address of a caller is then the last one in `X-Forwarded-For` that is not such a
+proxy, and the direct peer otherwise. Sign-in attempts are counted for that
+address, for the network around it and for each login at each address; when the
+whole instance is busy with attempts, an address is held to a few a minute and
+nobody is refused for the attempts of others alone. Asset files are frozen
 at startup, bounded and restricted to regular files. Restart after installing a
 new workbench build.
+
+A request keeps no worker while its body is received. One caller may have
+`http.receiving_each` bodies under way at once (an eighth of `connections` by
+default; `429` beyond), and the instance holds `http.receiving_megabytes` of
+bodies no worker has taken yet (four of the largest body by default; `503`
+beyond). A request whose body is whole waits for a worker for as long as a request
+may run, and is answered `503` with `retry: same_request` when none comes free:
+nothing of it was applied. Requests whose time to upload ran out are ended by the
+running server, which gives back what they had reserved.
 
 Enable the configured origin and create a local browser account explicitly:
 
@@ -168,7 +182,9 @@ If login stops or its outcome is unconfirmed, repeat the same command with
 `--resume`. The adjacent `.login` directory contains private recovery state;
 retain it until completion. `--no-wait` saves the request and returns the public
 URL/code immediately; `--resume` later finishes that same authorization. Device
-requests expire after five minutes. A credential already saved in the journal
+requests expire after five minutes. An approved request is exchanged for its
+credential once; a response lost on the way means starting another login. A
+credential already saved in the journal
 can still be finalized after its device request expires. An expired request with
 no saved credential requires checking Settings for an approval before starting
 another login at a new destination.
