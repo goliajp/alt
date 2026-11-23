@@ -11,7 +11,7 @@ use alt_oplog::{Meta, OpLog, OpLogError};
 use super::v2_cuts::{but_gone, told};
 use super::v2_fields::Laid;
 use super::v2_full_check::rewritten;
-use super::v2_image::walked;
+use super::v2_image::{linked, walked};
 use super::v2_log::{boot, frames, grow, new_log};
 use super::v2_named::{collecting, staged_by_another};
 
@@ -227,23 +227,13 @@ fn an_op_before_the_last_cut_is_found_at_a_cost_the_cuts_before_it_do_not_raise(
     assert_eq!(two.1, 3);
 }
 
-#[test]
-fn ops_before_cuts_are_found_under_the_generation_each_was_written_in_however_far_back() {
-    let dir = alt_os::temp::tempdir().unwrap();
-    boot(1);
-    let mut log = new_log(dir.path());
-    grow(&mut log, "a", 1);
-    drop(log);
-    let linked = Meta {
-        linked: true,
-        ..Meta::default()
-    };
-    let unsynced = alt_os::durability::leave_unsynced(true);
+/// Before each of twenty cuts of the log in `dir`, appends an op that
+/// changes the index of a workspace of its own, and before every third a
+/// ref transaction. Returns the payloads of those ops.
+fn staged_before_each_of_twenty_cuts(dir: &Path) -> Vec<Vec<u8>> {
     let mut named = Vec::new();
-    // before each of twenty cuts an op that changes the index of a
-    // workspace of its own, and a ref transaction before every third
     for n in 1..=20u8 {
-        let mut log = OpLog::open(dir.path()).unwrap();
+        let mut log = OpLog::open(dir).unwrap();
         let staged = Meta {
             workspace: Some([n; 8]),
             index_after: Some([n; 20]),
@@ -253,13 +243,25 @@ fn ops_before_cuts_are_found_under_the_generation_each_was_written_in_however_fa
         named.push(vec![n; 100]);
         if n % 3 == 0 {
             let payload = format!("ref transaction {n}").into_bytes();
-            log.append_with("s", 2, &payload, &linked).unwrap();
+            log.append_with("s", 2, &payload, &linked()).unwrap();
             named.push(payload);
         }
         drop(log);
-        tear(dir.path());
-        OpLog::open(dir.path()).unwrap().refresh().unwrap();
+        tear(dir);
+        OpLog::open(dir).unwrap().refresh().unwrap();
     }
+    named
+}
+
+#[test]
+fn ops_before_cuts_are_found_under_the_generation_each_was_written_in_however_far_back() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 1);
+    drop(log);
+    let unsynced = alt_os::durability::leave_unsynced(true);
+    let mut named = staged_before_each_of_twenty_cuts(dir.path());
     let mut log = OpLog::open(dir.path()).unwrap();
     for n in 0..40 {
         log.append("pad", n, &[n as u8; 150]).unwrap();
@@ -269,7 +271,7 @@ fn ops_before_cuts_are_found_under_the_generation_each_was_written_in_however_fa
     let mut log = OpLog::open(dir.path()).unwrap();
     assert_eq!(log.state().unwrap().generation, 20);
     let given = collecting(&mut log);
-    log.append_with("c", 3, b"committed", &linked).unwrap();
+    log.append_with("c", 3, b"committed", &linked()).unwrap();
     named.push(b"committed".to_vec());
     // the ref transactions are looked up from the last one back, the
     // ops of the workspaces from the first one on
