@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: record a merge commit on every flow finish, and take --no-ff and --ff-only in merge
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/sequence.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/flow.rs
+touched: crates/alt-cli/src/native/merge.rs
+touched: crates/alt-cli/src/native/merge/run.rs
+touched: crates/alt-cli/src/sequence_args.rs
+touched: crates/alt-cli/tests/fixtures/cli/flow-workspaces.txt
+touched: crates/alt-cli/tests/fixtures/cli/merge-three-way.txt
+touched: crates/alt-cli/tests/it/like_git.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/merge_ff.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
