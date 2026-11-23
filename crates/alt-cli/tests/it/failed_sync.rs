@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use crate::altd_server::{alt, ok, spawn_server_with_env};
+use crate::altd_server::{Server, alt, ok, spawn_server_with_env};
 use crate::daemon_stop::Stop;
 use crate::scan_daemon::daemon_pid;
 
@@ -95,27 +95,50 @@ fn push(src: &Path, url: &str, branch: &str) -> Output {
     git(src, &["push", url, &format!("HEAD:refs/heads/{branch}")])
 }
 
-#[test]
-fn no_push_is_told_it_landed_after_a_sync_that_failed() {
-    let tmp = alt_os::temp::tempdir().unwrap();
-    let origin = tmp.path().join("origin");
+/// A repository with one commit beneath `root`, and an `altd-server` of
+/// it in which a sync of the file whose path ends with `of` fails once
+/// the file the second path names is there.
+fn served(root: &Path, of: &str) -> (Server, PathBuf) {
+    let origin = root.join("origin");
     fs::create_dir(&origin).unwrap();
     ok(alt(&origin, &["init", "."]));
     fs::write(origin.join("seed.txt"), "seed\n").unwrap();
     ok(alt(&origin, &["add", "."]));
     ok(alt(&origin, &["commit", "-m", "seed"]));
-
-    let library = failing_once(tmp.path());
-    let armed = tmp.path().join("armed");
+    let library = failing_once(root);
+    let armed = root.join("armed");
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("LD_PRELOAD", library.to_str().unwrap()),
-        ("ALT_TEST_FAIL_SYNC_OF", "/oplog/log"),
+        ("ALT_TEST_FAIL_SYNC_OF", of),
         ("ALT_TEST_FAIL_SYNC_ARMED", armed.to_str().unwrap()),
     ]);
-    let url = format!("http://{}/", server.addr);
-    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
+    (server, armed)
+}
 
+fn said(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// The push after one that failed is refused, nothing of it is taken in,
+/// and the server reads on.
+fn writes_are_stopped(root: &Path, url: &str) {
+    let after = push(&source(root, "after"), url, "after");
+    assert!(!after.status.success(), "{}", said(&after));
+    let stopped = said(&after).contains("writes are stopped");
+    assert!(stopped, "{}", said(&after));
+    let listed = git(root, &["ls-remote", url]);
+    assert!(listed.status.success(), "{}", said(&listed));
+    let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
+    assert!(listed.contains("refs/heads/before"), "{listed}");
+    assert!(!listed.contains("refs/heads/after"), "{listed}");
+}
+
+#[test]
+fn no_push_is_told_it_landed_after_a_sync_that_failed() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (server, armed) = served(tmp.path(), "/oplog/log");
+    let url = format!("http://{}/", server.addr);
     let before = push(&source(tmp.path(), "before"), &url, "before");
     assert!(before.status.success(), "{}", said(&before));
 
@@ -124,21 +147,44 @@ fn no_push_is_told_it_landed_after_a_sync_that_failed() {
     assert!(!armed.exists(), "no sync of the log was made");
     assert!(!failed.status.success(), "{}", said(&failed));
     assert!(said(&failed).contains("durability"), "{}", said(&failed));
-
     // its ref transaction lies behind the one that was not synced
-    let after = push(&source(tmp.path(), "after"), &url, "after");
-    assert!(!after.status.success(), "{}", said(&after));
-    assert!(
-        said(&after).contains("writes are stopped"),
-        "{}",
-        said(&after)
-    );
-    // and nothing of it was taken in: the server reads on
-    let listed = git(tmp.path(), &["ls-remote", &url]);
-    assert!(listed.status.success(), "{}", said(&listed));
-    let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
-    assert!(listed.contains("refs/heads/before"), "{listed}");
-    assert!(!listed.contains("refs/heads/after"), "{listed}");
+    writes_are_stopped(tmp.path(), &url);
+}
+
+/// The batch of a push that brings enough objects for an index run ends
+/// with a sync of its own, before the run is built, whoever syncs the
+/// rest. That sync fails: the sync of the group after it would be the
+/// second one of the same files.
+#[test]
+fn no_push_is_told_it_landed_after_the_sync_within_a_batch_failed() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (mut server, armed) = served(tmp.path(), "/map.alt");
+    let url = format!("http://{}/", server.addr);
+    let before = push(&source(tmp.path(), "before"), &url, "before");
+    assert!(before.status.success(), "{}", said(&before));
+
+    let many = source(tmp.path(), "failed");
+    for n in 0..300 {
+        fs::write(many.join(format!("{n}.txt")), format!("{n}\n")).unwrap();
+    }
+    assert!(git(&many, &["add", "."]).status.success());
+    assert!(git(&many, &["commit", "-q", "-m", "many"]).status.success());
+    fs::write(&armed, "").unwrap();
+    let failed = push(&many, &url, "failed");
+    assert!(!armed.exists(), "no sync of the map was made");
+    assert!(!failed.status.success(), "{}", said(&failed));
+    assert!(said(&failed).contains("durability"), "{}", said(&failed));
+    writes_are_stopped(tmp.path(), &url);
+
+    // the push that failed never came to the sync of the group
+    let log = server.drain_stderr();
+    let pushes = log
+        .lines()
+        .filter(|line| line.starts_with('{') && line.contains("\"path\":\"/git-receive-pack\""));
+    let synced: Vec<bool> = pushes
+        .map(|line| !line.contains("\"fsync_seq\":null"))
+        .collect();
+    assert_eq!(synced, [true, false, false], "{log}");
 }
 
 /// Runs `alt` in `repo` through its daemon, which is started with the
@@ -168,7 +214,6 @@ fn a_daemon_refuses_to_write_after_a_sync_that_failed() {
     let library = failing_once(tmp.path());
     let armed = tmp.path().join("armed");
     let run = |args: &[&str]| through_daemon(&dir, &library, &armed, args);
-    let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
 
     let before = run(&["branch", "before"]);
     assert!(before.status.success(), "{}", said(&before));

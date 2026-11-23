@@ -72,8 +72,7 @@ fn a_push_whose_objects_did_not_sync_is_not_recorded_as_synced_in_the_log() {
     let breaks = || in_the_way(&alt_dir, "odb.durable", true);
     let landed = lands(&store, &updates, &pack_of(&[new]), &breaks);
     in_the_way(&alt_dir, "odb.durable", false);
-    let refused = matches!(&landed, Landed::Refused(why) if why.starts_with("durability: "));
-    assert!(refused, "{landed:?}");
+    assert!(matches!(&landed, Landed::Unsynced(_)), "{landed:?}");
     assert!(log_synced(&alt_dir) < log_len(&alt_dir));
     drop(store);
     // the next command that syncs finds the objects and takes the

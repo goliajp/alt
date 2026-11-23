@@ -112,10 +112,7 @@ fn a_transaction_in_the_log_that_fails_to_sync_leaves_the_objects() {
         };
         receive::land_observed(store, push, &blocked).unwrap()
     });
-    assert!(
-        matches!(&landed, Landed::Refused(reason) if reason.starts_with("durability")),
-        "{landed:?}"
-    );
+    assert!(matches!(&landed, Landed::Unsynced(_)), "{landed:?}");
     std::fs::remove_dir(&lock).unwrap();
     assert_eq!(pointed(&alt_dir), Some(oid));
     assert!(holds(&alt_dir, &oid));

@@ -39,6 +39,9 @@
 mod batch;
 mod ref_tx;
 pub mod signed;
+mod taken;
+
+pub use taken::{Recorded, Report, take_in};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
@@ -49,7 +52,6 @@ use alt_refs::{RefChange, RefTarget};
 use alt_wire::push::RefUpdate;
 
 use crate::added_commits::{self, Source};
-use crate::held::Held;
 use crate::native::{Principal, Store};
 use batch::Batch;
 use signed::Checked;
@@ -123,6 +125,9 @@ pub enum Landed {
     Unpack(String),
     /// every command is refused with this; nothing of the push is left
     Refused(String),
+    /// the ref transaction is in the log, where whoever reads the refs
+    /// sees them moved, and the push could not be made durable for this
+    Unsynced(String),
 }
 
 /// Where a push is on its way in.
@@ -224,7 +229,7 @@ fn attempt(
     let finished = stored.and_then(|()| tx.finish(refs, op).map_err(|e| e.to_string()));
     Ok(Some(match finished {
         Ok(()) => Landed::Moved,
-        Err(e) => Landed::Refused(format!("durability: {e}")),
+        Err(e) => Landed::Unsynced(e),
     }))
 }
 
@@ -248,53 +253,4 @@ pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step))
     Ok(Landed::Refused(
         "the refs moved while the push was looked at: push again".into(),
     ))
-}
-
-/// How the unpack went and, when the refs moved, what `moved` gave (none
-/// for a push of no commands); otherwise the reason every command is
-/// refused with.
-pub type Report<T> = (Result<(), String>, Result<Option<T>, String>);
-
-/// Takes in the push of `updates` by `principal` (and how its signature
-/// went) with the pack at `pack`, when it sent one. The pack is indexed
-/// and the signatures of its commits are checked before the store is
-/// taken in hand; `moved` is called with it still in hand.
-pub fn take_in<T>(
-    store: &Held<Store>,
-    pack: Option<&std::path::Path>,
-    updates: &[RefUpdate],
-    (principal, sig_label): &(Principal, &str),
-    moved: impl FnOnce() -> T,
-) -> Res<Report<T>> {
-    // a pack that fails to index is reported as the unpack error
-    let prepared = match pack.map(prepare_pack) {
-        Some(Err(_)) => {
-            let unpack = Err("index-pack: failed to prepare pack".into());
-            return Ok((unpack, Err("pack unpack failed".into())));
-        }
-        Some(Ok(prepared)) => Some(prepared),
-        None => None,
-    };
-    // nothing would name the objects
-    if updates.is_empty() {
-        return Ok((Ok(()), Ok(None)));
-    }
-    let trust = signed::trust_for(&store.take(), principal)?;
-    let checked = match trust {
-        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
-        None => None,
-    };
-    let push = Push {
-        pack: prepared.as_ref(),
-        checked: checked.as_ref(),
-        updates,
-        principal,
-        sig_label,
-    };
-    let mut store = store.take();
-    Ok(match land(&mut store, &push)? {
-        Landed::Moved => (Ok(()), Ok(Some(moved()))),
-        Landed::Unpack(e) => (Err(e), Err("pack unpack failed".into())),
-        Landed::Refused(reason) => (Ok(()), Err(reason)),
-    })
 }

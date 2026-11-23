@@ -43,8 +43,7 @@ impl Server {
     /// the bind line. Reading must happen *after* kill since the child's
     /// stderr fd stays open until the process exits, and a blocking
     /// `read_to_string` would otherwise deadlock waiting for EOF.
-    #[allow(dead_code)]
-    fn drain_stderr(&mut self) -> String {
+    pub(crate) fn drain_stderr(&mut self) -> String {
         // tiny_http writes the response back from a worker thread; the
         // access-log JSON line is emitted right after, but the OS may
         // schedule the parent's drain in between the response and the

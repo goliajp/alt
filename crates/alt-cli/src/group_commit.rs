@@ -109,6 +109,15 @@ impl GroupCommit {
         g.failed.clone()
     }
 
+    /// Has every commit that is not durable yet answered with `error`, as
+    /// a sync that failed has: for a write that failed to sync outside
+    /// the group, in files the group syncs.
+    pub fn fail(&self, error: String) {
+        let mut g = self.inner.lock().expect("group mutex poisoned");
+        g.failed.get_or_insert(error);
+        self.cv.notify_all();
+    }
+
     /// Block until `ticket` is durable. The first caller into the
     /// uncovered region becomes the leader and performs the fsync;
     /// later callers wait on the condvar. Once a flush has failed,
@@ -153,6 +162,16 @@ impl GroupCommit {
             }
             self.cv.notify_all();
         }
+    }
+}
+
+impl crate::receive::Recorded<u64> for &GroupCommit {
+    fn moved(self) -> u64 {
+        self.assign()
+    }
+
+    fn unsynced(self, why: &str) {
+        self.fail(why.to_owned());
     }
 }
 

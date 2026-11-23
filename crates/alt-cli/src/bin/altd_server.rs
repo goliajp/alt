@@ -1220,12 +1220,11 @@ fn handle_receive_pack(
     // the ticket is handed out with the store still in hand, once the
     // batch of objects has ended: a sink syncs the odb under the shared
     // `odb.lock`, and so never between a push's objects and its refs
-    let assign = || writer.group.assign();
     // nothing is appended behind what a failed sync left in doubt
     let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
     let (unpack_result, moved) = match sig_block.or(stopped) {
         Some(reason) => (Ok(()), Err(reason)),
-        None => receive::take_in(store, pack, &head.updates, &principal, assign)?,
+        None => receive::take_in(store, pack, &head.updates, &principal, &writer.group)?,
     };
     // wait for the group-commit leader's fsync to cover us, outside the
     // store lock: this is the only place we touch disk durability on the
