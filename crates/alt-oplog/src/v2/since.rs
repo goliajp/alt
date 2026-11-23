@@ -144,7 +144,9 @@ impl Log {
     }
 
     /// Reads the log from its first frame to the last one held, as a full
-    /// check does when `strict`, and gives its ops.
+    /// check does when `strict`, and gives its ops. No lock is held: where
+    /// the frames do not lead to the last one held because the log was cut
+    /// meanwhile, that is what is told.
     fn read_through(&self, strict: bool) -> Result<Vec<Op>, OpLogError> {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
@@ -157,20 +159,25 @@ impl Log {
             Ok(())
         };
         let limit = self.state.end;
-        let stop = walk_file(
+        let walked = walk_file(
             &mut read,
             &self.layout,
             &mut state,
             limit,
             strict,
             &mut each,
-        )?;
-        if stop != Stop::End || state != self.state {
-            return Err(OpLogError::Format(
-                "the oplog does not lead to where it ends",
-            ));
+        );
+        let led = matches!(walked, Ok(Stop::End)) && state == self.state;
+        if !led && !self.holds_head(self.file.metadata()?.len())? {
+            return Err(OpLogError::CutBack);
         }
-        Ok(ops)
+        walked?;
+        match led {
+            true => Ok(ops),
+            false => Err(OpLogError::Format(
+                "the oplog does not lead to where it ends",
+            )),
+        }
     }
 
     pub fn ops(&self) -> Result<&[Op], OpLogError> {

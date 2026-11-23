@@ -208,9 +208,12 @@ impl Log {
     }
 
     /// The frames that read past the ones held, with the length of the
-    /// file.
+    /// file, where the ones held are still in it.
     fn past(&self) -> Result<(Salvaged, u64), OpLogError> {
         let len = self.file.metadata()?.len();
+        if !self.holds_head(len)? {
+            return Err(OpLogError::CutBack);
+        }
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
         let (end, generation) = (self.state.end, self.state.generation);

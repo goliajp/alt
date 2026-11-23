@@ -237,6 +237,53 @@ fn a_handle_whose_op_was_cut_is_refused_until_it_reads_the_log_again() {
 }
 
 #[test]
+fn a_handle_that_reads_the_history_after_its_ops_were_cut_is_told_they_were_cut() {
+    for appended_after in [true, false] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        let mut log = new_log(dir.path());
+        let synced = grow(&mut log, "synced", 3);
+        let _unsynced = alt_os::durability::leave_unsynced(true);
+        for n in 0..60u8 {
+            let payload = if n == 20 {
+                vec![b'g', b'o', b'n', b'e']
+            } else {
+                vec![n; 150]
+            };
+            log.append("actor", 9, &payload).unwrap();
+        }
+        drop(log);
+        // it holds the ops of the last block, and reads the others when asked
+        let held_open = OpLog::open(dir.path()).unwrap();
+        assert!(held_open.recent().len() < 30 && file_len(dir.path()) > 2 * 4096);
+        let head = held_open.head().unwrap();
+        boot(2);
+        let mut writer = OpLog::open(dir.path()).unwrap();
+        assert_eq!(writer.settle(held).unwrap().unwrap().ops, 40);
+        if appended_after {
+            // the file is as long again as the handle knew it
+            for n in 0..60u8 {
+                writer.append("writer", 2, &[n; 150]).unwrap();
+            }
+        }
+        let cut_back = |read: Result<(), OpLogError>| {
+            assert!(matches!(read, Err(OpLogError::CutBack)), "{read:?}");
+        };
+        cut_back(held_open.ops().map(|_| ()));
+        cut_back(held_open.get(&head).map(|_| ()));
+        cut_back(held_open.since(&synced[0]).map(|_| ()));
+        cut_back(held_open.verify());
+        cut_back(held_open.passed().map(|_| ()));
+        cut_back(held_open.passed_ops().map(|_| ()));
+        let mut held_open = held_open;
+        held_open.reopen().unwrap();
+        let expected = if appended_after { 83 } else { 23 };
+        assert_eq!(held_open.ops().unwrap().len(), expected);
+        held_open.verify().unwrap();
+    }
+}
+
+#[test]
 fn a_handle_whose_op_stayed_goes_on_after_a_cut_behind_it() {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
