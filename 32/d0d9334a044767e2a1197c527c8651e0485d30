@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: keep what a frame carries beside its body in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/ext.rs
+touched: crates/alt-oplog/src/v2/frame.rs
