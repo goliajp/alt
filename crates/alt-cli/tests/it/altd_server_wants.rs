@@ -86,7 +86,15 @@ fn fetched(url: &str, dir: &Path, lines: &[u8]) -> (String, Vec<u8>) {
     fs::write(dir.join("request"), body).unwrap();
     let out = std::process::Command::new("curl")
         .current_dir(dir)
-        .args(["-sS", "-w", "%{http_code}", "-o", "answer"])
+        .args([
+            "-sS",
+            "--max-time",
+            "120",
+            "-w",
+            "%{http_code}",
+            "-o",
+            "answer",
+        ])
         .args(["-H", "Git-Protocol: version=2", "--data-binary", "@request"])
         .arg(format!("{url}git-upload-pack"))
         .output()
