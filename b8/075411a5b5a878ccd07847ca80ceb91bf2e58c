@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: work out the tree a stash records and the untracked files in an apply's way in functions of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/stash/apply.rs
+touched: crates/alt-cli/src/native/stash/save.rs
