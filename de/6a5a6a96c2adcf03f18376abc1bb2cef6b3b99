@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: tell where a file holds data and where it has holes
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/holes.rs
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/src/sys.rs
+touched: crates/alt-os/src/sys/linux.rs
+touched: crates/alt-os/src/sys/macos.rs
+touched: crates/alt-os/tests/it/holes.rs
+touched: crates/alt-os/tests/it/main.rs
