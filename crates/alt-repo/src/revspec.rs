@@ -10,6 +10,10 @@
 //!   `^{}` to whatever a tag names
 //! - `<rev>@{u}`, `<rev>@{upstream}`: the remote-tracking branch the
 //!   branch follows, the current branch where none is named
+//! - `<ref>@{N}`: what the ref named N moves ago, as its log tells;
+//!   `@{N}` alone is of the current branch
+//! - `@{-N}`: the branch that was left the N-th last time one was
+//!   switched from
 //!
 //! and last `<rev>:<path>`, the file or directory the tree of the
 //! revision has at the path, the tree itself for an empty path.
@@ -200,12 +204,20 @@ impl Repository {
     /// The non-suffix portion of `rev_parse`: full hex, or a ref name
     /// through git's DWIM lookup order, `@` for `HEAD`, or the upstream
     /// of a branch.
-    fn resolve_base(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
+    pub(crate) fn resolve_base(&self, spec: &str) -> Result<Option<ObjectId>, RepoError> {
         if spec.is_empty() {
             return Ok(None);
         }
         if spec == "@" {
             return self.resolve_ref("HEAD");
+        }
+        let braced = spec
+            .strip_suffix('}')
+            .and_then(|open| open.rsplit_once("@{"));
+        if let Some((named, asked)) =
+            braced.filter(|(_, asked)| !matches!(*asked, "u" | "upstream"))
+        {
+            return self.logged(spec, named, asked);
         }
         if let Some(named) = UPSTREAM.iter().find_map(|at| spec.strip_suffix(at)) {
             let named = if named.is_empty() || named == "@" {

@@ -7,9 +7,11 @@
 //! backend: a `.git` directory or a native `.alt` store.
 
 mod alt_backend;
+mod error;
 pub mod kept_config;
 mod object_format;
 mod odb;
+pub mod reflog;
 mod revspec;
 mod revwalk;
 mod ssh_url;
@@ -24,6 +26,7 @@ use alt_git_codec::{Commit, HashAlgo, LooseStore, ObjectId, ObjectKind, RawObjec
 use alt_git_config::{Config, IncludeContext};
 use alt_git_pack::IndexedPack;
 use alt_git_refs::{RefStore, RefTarget};
+pub use error::RepoError;
 pub use object_format::native_object_format;
 use object_format::object_format;
 use ssh_url::builtin_ssh_to_https;
@@ -541,123 +544,4 @@ fn object_children(
     }
     let _ = oid; // reserved for diagnostics if a future variant needs it
     Ok(out)
-}
-
-#[derive(Debug)]
-pub enum RepoError {
-    NotARepository(PathBuf),
-    MissingObject(ObjectId),
-    Unsupported(&'static str),
-    Format(&'static str),
-    /// A short oid prefix matched more than one object — the caller has
-    /// to commit to a longer prefix to disambiguate. Carries up to four
-    /// example matches so the error message can list them.
-    AmbiguousShortOid {
-        prefix: String,
-        matches: Vec<ObjectId>,
-    },
-    Io(std::io::Error),
-    Loose(alt_git_codec::LooseError),
-    Object(alt_git_codec::ObjectParseError),
-    Pack(alt_git_pack::PackError),
-    Refs(alt_git_refs::RefError),
-    Config(alt_git_config::ConfigError),
-    Odb(alt_odb::OdbError),
-    NativeRefs(alt_refs::RefError),
-}
-
-impl std::fmt::Display for RepoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotARepository(path) => write!(
-                f,
-                "not a git repository (or any parent): {}",
-                path.display()
-            ),
-            Self::MissingObject(oid) => write!(f, "object {oid} is referenced but missing"),
-            Self::Unsupported(what) => write!(f, "{what} are not supported yet"),
-            Self::Format(what) => write!(f, "repository format: {what}"),
-            Self::AmbiguousShortOid { prefix, matches } => write!(
-                f,
-                "short oid '{prefix}' is ambiguous: matches {} objects",
-                matches.len()
-            ),
-            Self::Io(_) => f.write_str("io"),
-            Self::Loose(e) => std::fmt::Display::fmt(e, f),
-            Self::Object(e) => std::fmt::Display::fmt(e, f),
-            Self::Pack(e) => std::fmt::Display::fmt(e, f),
-            Self::Refs(e) => std::fmt::Display::fmt(e, f),
-            Self::Config(e) => std::fmt::Display::fmt(e, f),
-            Self::Odb(e) => std::fmt::Display::fmt(e, f),
-            Self::NativeRefs(e) => std::fmt::Display::fmt(e, f),
-        }
-    }
-}
-
-impl std::error::Error for RepoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Loose(e) => e.source(),
-            Self::Object(e) => e.source(),
-            Self::Pack(e) => e.source(),
-            Self::Refs(e) => e.source(),
-            Self::Config(e) => e.source(),
-            Self::Odb(e) => e.source(),
-            Self::NativeRefs(e) => e.source(),
-            Self::NotARepository(_)
-            | Self::MissingObject(_)
-            | Self::Unsupported(_)
-            | Self::Format(_)
-            | Self::AmbiguousShortOid { .. } => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for RepoError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<alt_git_codec::LooseError> for RepoError {
-    fn from(e: alt_git_codec::LooseError) -> Self {
-        Self::Loose(e)
-    }
-}
-
-impl From<alt_git_codec::ObjectParseError> for RepoError {
-    fn from(e: alt_git_codec::ObjectParseError) -> Self {
-        Self::Object(e)
-    }
-}
-
-impl From<alt_git_pack::PackError> for RepoError {
-    fn from(e: alt_git_pack::PackError) -> Self {
-        Self::Pack(e)
-    }
-}
-
-impl From<alt_git_refs::RefError> for RepoError {
-    fn from(e: alt_git_refs::RefError) -> Self {
-        Self::Refs(e)
-    }
-}
-
-impl From<alt_git_config::ConfigError> for RepoError {
-    fn from(e: alt_git_config::ConfigError) -> Self {
-        Self::Config(e)
-    }
-}
-
-impl From<alt_odb::OdbError> for RepoError {
-    fn from(e: alt_odb::OdbError) -> Self {
-        Self::Odb(e)
-    }
-}
-
-impl From<alt_refs::RefError> for RepoError {
-    fn from(e: alt_refs::RefError) -> Self {
-        Self::NativeRefs(e)
-    }
 }

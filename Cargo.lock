@@ -532,6 +532,7 @@ dependencies = [
  "alt-hash",
  "alt-import",
  "alt-odb",
+ "alt-oplog",
  "alt-os",
  "alt-refs",
  "alt-testutil",
