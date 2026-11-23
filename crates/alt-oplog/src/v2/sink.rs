@@ -34,6 +34,11 @@ impl Log {
         let Some((target, closes)) = self.sync_target()? else {
             return Ok(());
         };
+        // without a frame there is nothing whose place a sink could
+        // find changed
+        if self.state.last == 0 {
+            return Ok(());
+        }
         let synced = self.tail().map_or(0, |tail| tail.synced);
         let pending = self.named_from(synced.max(self.synced_here()).max(self.synced))?;
         let mut reached = self.deferred.lock().unwrap();
