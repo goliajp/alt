@@ -36,6 +36,9 @@ pub enum PackError {
     Io(std::io::Error),
     Limit(&'static str),
     Format(&'static str),
+    /// what the pack needs is taken by others, and was not given back in
+    /// the time the pack had to wait
+    Busy(&'static str),
 }
 
 impl std::fmt::Display for PackError {
@@ -44,6 +47,7 @@ impl std::fmt::Display for PackError {
             Self::Io(_) => f.write_str("io"),
             Self::Limit(v) => write!(f, "pack resource limit: {v}"),
             Self::Format(v) => write!(f, "pack format: {v}"),
+            Self::Busy(v) => write!(f, "busy: {v}"),
         }
     }
 }

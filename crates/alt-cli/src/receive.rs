@@ -42,7 +42,7 @@ mod ref_tx;
 pub mod signed;
 mod taken;
 
-pub use taken::{Recorded, Report, take_in};
+pub use taken::{Recorded, Report, busy, take_in};
 
 use std::cell::Cell;
 use std::collections::BTreeMap;

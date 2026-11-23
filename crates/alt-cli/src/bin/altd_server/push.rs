@@ -135,7 +135,15 @@ pub(super) fn handle_receive_pack(
     let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
     let (unpack_result, moved) = match sig_block.or(stopped) {
         Some(reason) => (Ok(()), Err(reason)),
-        None => receive::take_in(store, pack, &head.updates, &principal, &writer.group)?,
+        None => match receive::take_in(store, pack, &head.updates, &principal, &writer.group) {
+            Ok(report) => report,
+            Err(e) if receive::busy(&*e) => {
+                let busy = "the packs of other pushes are being indexed; send the push again";
+                let r = Response::from_string(busy).with_status_code(StatusCode(503));
+                return Ok(respond_logged(req, r, log)?);
+            }
+            Err(e) => return Err(e),
+        },
     };
     // wait for the group-commit leader's fsync to cover us, outside the
     // store lock: this is the only place we touch disk durability on the

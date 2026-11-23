@@ -3,7 +3,7 @@
 //! packs indexed at once share.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alt_git_codec::HashAlgo;
 use alt_git_pack::{IndexLimits, Memory, PackError, index_pack_within};
@@ -60,8 +60,16 @@ fn a_pack_takes_its_largest_object_three_times_over_and_gives_it_back() {
         drop(one);
     });
     assert!(told.recv_timeout(Duration::from_millis(300)).is_err());
+    // and one that waits for it until a time is told that it is taken
+    let soon = Some(Instant::now() + Duration::from_millis(50));
+    let busy = memory.take_by(1, soon);
+    assert!(
+        matches!(busy, Err(PackError::Busy("index memory"))),
+        "{busy:?}"
+    );
     drop(taken);
-    told.recv().unwrap();
+    told.recv_timeout(Duration::from_secs(60)).unwrap();
     waiting.join().unwrap();
-    drop(memory.take(3000).unwrap());
+    let late = Some(Instant::now() + Duration::from_secs(60));
+    drop(memory.take_by(3000, late).unwrap());
 }

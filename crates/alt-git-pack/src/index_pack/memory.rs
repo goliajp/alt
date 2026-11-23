@@ -9,6 +9,7 @@
 //! have it.
 
 use std::sync::{Condvar, Mutex};
+use std::time::Instant;
 
 use crate::PackError;
 
@@ -38,12 +39,28 @@ impl Memory {
     /// Takes `bytes`, once the packs that have them are done. A pack that
     /// needs more than there is at all is refused.
     pub fn take(&self, bytes: u64) -> Result<Taken<'_>, PackError> {
+        self.take_by(bytes, None)
+    }
+
+    /// [`Self::take`], waiting no longer than until `by`: a pack the
+    /// others leave no room for by then is told that they are busy.
+    pub fn take_by(&self, bytes: u64, by: Option<Instant>) -> Result<Taken<'_>, PackError> {
         if bytes > self.all {
             return Err(PackError::Limit("index memory"));
         }
         let mut free = self.free.lock().expect("index memory");
         while *free < bytes {
-            free = self.given_back.wait(free).expect("index memory");
+            free = match by {
+                None => self.given_back.wait(free).expect("index memory"),
+                Some(by) => {
+                    let left = by.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(PackError::Busy("index memory"));
+                    }
+                    let waited = self.given_back.wait_timeout(free, left);
+                    waited.expect("index memory").0
+                }
+            };
         }
         *free -= bytes;
         Ok(Taken { of: self, bytes })

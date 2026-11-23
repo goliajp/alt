@@ -79,6 +79,9 @@ pub struct IndexLimits {
     pub kept: bool,
     /// what the pack takes its memory out of, and waits for
     pub memory: Option<&'static Memory>,
+    /// until when it waits for its memory, where it does not wait for
+    /// as long as it takes
+    pub memory_by: Option<std::time::Instant>,
 }
 
 impl Default for IndexLimits {
@@ -91,6 +94,7 @@ impl Default for IndexLimits {
             base_bytes: crate::cache::DEFAULT_BUDGET,
             kept: true,
             memory: None,
+            memory_by: None,
         }
     }
 }
@@ -175,10 +179,8 @@ pub fn index_pack_thin(
     // an entry is inflated whole to be scanned: no larger than an object
     // may be, nor than what its stream can inflate to
     let body = (map.len() as u64).saturating_mul(1032);
-    let scanning = (limits
-        .memory
-        .map(|memory| memory.take(body.min(limits.object_bytes))))
-    .transpose()?;
+    let take = |bytes| (limits.memory.map(|of| of.take_by(bytes, limits.memory_by))).transpose();
+    let scanning = take(body.min(limits.object_bytes))?;
     let mut scanned = scan::scan(&pack, count, limits, &mut work)?;
     drop(scanning);
     // resolved, the largest object is there as a base, as the instructions
@@ -188,7 +190,7 @@ pub fn index_pack_thin(
         scanned.largest.saturating_mul(3).saturating_add(held)
     };
     let before = needed(&scanned);
-    let mut memory = (limits.memory.map(|memory| memory.take(before))).transpose()?;
+    let mut memory = take(before)?;
     let mut oids = scanned.oids.clone();
     resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, &mut work)?;
     drop(pack);
@@ -202,7 +204,7 @@ pub fn index_pack_thin(
         // a base that was appended may be larger than all the pack came with
         if needed(&scanned) > before {
             drop(memory.take());
-            memory = (limits.memory.map(|memory| memory.take(needed(&scanned)))).transpose()?;
+            memory = take(needed(&scanned))?;
         }
         let pack = Pack::open(pack_path, algo)?;
         resolve::resolve(&pack, &mut scanned, &mut oids, came, limits, &mut work)?;

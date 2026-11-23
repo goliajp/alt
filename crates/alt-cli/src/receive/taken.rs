@@ -21,6 +21,13 @@ pub trait Recorded<T> {
     fn unsynced(self, why: &str);
 }
 
+/// Whether `error` is that of a pack which waited for memory other packs
+/// kept: its push may be sent again as it is.
+pub fn busy(error: &(dyn std::error::Error + 'static)) -> bool {
+    let pack = error.downcast_ref::<alt_git_pack::PackError>();
+    matches!(pack, Some(alt_git_pack::PackError::Busy(_)))
+}
+
 /// Takes in the push of `updates` by `principal` (and how its signature
 /// went) with the pack at `pack`, when it sent one, what that pack may
 /// hold and where the bases it leaves out are read. The pack is indexed
@@ -37,8 +44,10 @@ pub fn take_in<T>(
     (principal, sig_label): &(Principal, &str),
     recorded: impl Recorded<T>,
 ) -> Res<Report<T>> {
-    // a pack that fails to index is reported as the unpack error
+    // a pack that fails to index is reported as the unpack error; one
+    // that was not looked at for want of memory is no failed push
     let prepared = match pack.map(|(path, limits, bases)| prepare_pack(path, &limits, bases)) {
+        Some(Err(e)) if busy(&*e) => return Err(e),
         Some(Err(e)) => {
             let unpack = Err(format!("index-pack: {e}"));
             return Ok((unpack, Err("pack unpack failed".into())));

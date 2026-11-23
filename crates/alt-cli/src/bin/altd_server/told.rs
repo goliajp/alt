@@ -31,6 +31,10 @@ pub(super) struct Told {
     /// `ALT_SERVER_MAX_INDEX_BYTES`: the memory the packs of pushes take
     /// between them while they are indexed; a push waits for it
     pub(super) index_bytes: u64,
+    /// `ALT_SERVER_MAX_INDEX_WAIT_MS`: how long a push waits for that
+    /// memory before it is told to come again. It has a worker while it
+    /// waits, and its body is sent anew when it comes again
+    pub(super) index_wait: Duration,
     /// `ALT_SERVER_WORKERS`
     pub(super) workers: usize,
     /// `ALT_SERVER_MAX_CONNECTIONS`
@@ -71,10 +75,12 @@ impl Told {
         let grace = Duration::from_millis(grace);
         let per_mib = number(lookup, "ALT_SERVER_IO_MS_PER_MIB", 8_000u64)?;
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
+        let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
         Ok(Told {
             push_bytes,
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
             index_bytes: number(lookup, "ALT_SERVER_MAX_INDEX_BYTES", index)?,
+            index_wait: Duration::from_millis(index_wait),
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections: number(lookup, "ALT_SERVER_MAX_CONNECTIONS", 256usize)?,
             repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
@@ -112,6 +118,7 @@ mod tests {
     fn a_number_that_does_not_read_ends_the_start_and_is_not_taken_for_the_default() {
         let unset = with(&[]).unwrap();
         assert_eq!(unset.index_bytes, 4 << 30);
+        assert_eq!(unset.index_wait, Duration::from_secs(600));
         assert_eq!(
             (unset.push_bytes, unset.inflated_bytes),
             (1 << 30, 128 << 30)
@@ -126,6 +133,7 @@ mod tests {
             "ALT_SERVER_MAX_PUSH_BYTES",
             "ALT_SERVER_MAX_INFLATED_BYTES",
             "ALT_SERVER_MAX_INDEX_BYTES",
+            "ALT_SERVER_MAX_INDEX_WAIT_MS",
             "ALT_SERVER_WORKERS",
             "ALT_SERVER_MAX_CONNECTIONS",
             "ALT_SERVER_MAX_OPEN_REPOS",
