@@ -60,7 +60,7 @@ pub fn parse_ls_refs_request<R: std::io::Read>(
                     _ => {
                         if let Some(p) = s.strip_prefix("ref-prefix ") {
                             prefixes += 1;
-                            if prefixes <= MAX_PREFIXES {
+                            if prefixes < MAX_PREFIXES {
                                 req.ref_prefixes.push(p.to_owned());
                             }
                         }
@@ -72,14 +72,16 @@ pub fn parse_ls_refs_request<R: std::io::Read>(
     }
     // as Git has it: a request with too many prefixes is given every ref,
     // which holds all it asked for
-    if prefixes > MAX_PREFIXES {
+    if prefixes >= MAX_PREFIXES {
         req.ref_prefixes.clear();
     }
     Ok((req, object_format))
 }
 
-/// The most `ref-prefix` lines a request is held to; one with more is
-/// answered with every ref.
+/// The number of `ref-prefix` lines from which on a request is answered
+/// with every ref: `TOO_MANY_PREFIXES` of Git's `ls-refs.c`, where a
+/// request of that many has its prefixes dropped. Git sends a handful for
+/// each refspec of a fetch.
 pub const MAX_PREFIXES: usize = 65536;
 
 impl LsRefsRequest {
@@ -208,10 +210,10 @@ mod tests {
     #[test]
     fn a_request_of_too_many_prefixes_is_one_for_every_ref() {
         let prefixes = |count: usize| (0..count).map(|n| format!("refs/heads/{n}"));
-        let most = request(prefixes(MAX_PREFIXES));
-        assert_eq!(most.ref_prefixes.len(), MAX_PREFIXES);
+        let most = request(prefixes(MAX_PREFIXES - 1));
+        assert_eq!(most.ref_prefixes.len(), MAX_PREFIXES - 1);
         assert!(!LsRefsRequest::listed(&most.prefixes(), "refs/tags/v1"));
-        let over = request(prefixes(MAX_PREFIXES + 1));
+        let over = request(prefixes(MAX_PREFIXES));
         assert!(over.ref_prefixes.is_empty());
         assert!(LsRefsRequest::listed(&over.prefixes(), "refs/tags/v1"));
     }

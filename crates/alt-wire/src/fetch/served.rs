@@ -9,12 +9,18 @@ use crate::pkt::{self, Frame};
 
 /// The most `want` lines of a request. Git sends one for each ref it
 /// asks for, and a partial clone one for each object it left out that a
-/// checkout needs, all in one request: hundreds of thousands in a large
-/// tree.
+/// checkout needs, all in one request: as many as the tree has files, a
+/// million and more in the largest there are. A line is fifty bytes, so
+/// this many are some fifty MiB of request: more of them fit no body a
+/// server that holds the lines in memory can take.
 pub const MAX_WANTS: usize = 1 << 20;
-/// The most `have` lines of a request. Git sends them in rounds that
-/// grow to some sixteen thousand, and gives up a negotiation that finds
-/// nothing in common long before this.
+/// The most `have` lines of a request. Git sends them in rounds, of 16
+/// commits, then twice as many each time up to 16384, then a tenth more
+/// each time (`next_flush` of its `fetch-pack.c`), and ends the rounds
+/// 256 commits after the first that the server knew. A round has this
+/// many only once some two and a half million commits were sent and none
+/// of them was known: a clone of the largest histories there are,
+/// fetching from a server it shares nothing with.
 pub const MAX_HAVES: usize = 1 << 18;
 
 /// Server-side parse of a `fetch` request body. Mirror image
