@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: give a sync the ops other writers appended before the checkpoint its handle began at
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle/settled.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/named.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_named.rs
