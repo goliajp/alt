@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a name that is no user is told what a user with another token is
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_untrusted.rs
