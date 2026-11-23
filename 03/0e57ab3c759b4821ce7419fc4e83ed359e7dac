@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: feat
+summary: a hasher for digests a peer chooses, placed by a product with a key of the process
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/ident.rs
+touched: crates/alt-hash/src/lib.rs
