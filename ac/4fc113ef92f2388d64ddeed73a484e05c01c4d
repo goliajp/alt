@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: feat
+summary: give a shallow fetch the history it asks for and tell a fetch which of its commits the server has
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/shallow.rs
+touched: crates/alt-cli/tests/it/altd_server_shallow.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/reach.rs
+touched: crates/alt-wire/src/fetch.rs
+touched: crates/alt-wire/src/fetch/depth.rs
+touched: crates/alt-wire/src/fetch/served.rs
