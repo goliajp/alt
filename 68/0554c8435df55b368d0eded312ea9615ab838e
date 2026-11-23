@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: hold a frame to the length it closes with before reading it at the length it claims, also where a block header parts the two
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/locate.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/src/v2/stream.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_claims.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
