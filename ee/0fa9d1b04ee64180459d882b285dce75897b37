@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: count sign-in attempts for the address the proxy on the machine names
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/routes.rs
+touched: crates/alt-server/tests/it/database/connections/unknown_callers.rs
