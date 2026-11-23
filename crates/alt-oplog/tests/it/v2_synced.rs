@@ -280,7 +280,7 @@ fn a_tail_of_another_boot_or_one_that_does_not_read_says_nothing() {
         // every op is still read, and those past the boundary are looked at
         let log = OpLog::open(dir.path()).unwrap();
         assert_eq!(log.len(), 4, "byte {at}");
-        assert!(log.unsettled() || (4..8).contains(&at), "byte {at}");
+        assert!(log.unsettled(), "byte {at}");
     }
     fs::remove_file(&path).unwrap();
     assert!(!fresh(dir.path()));

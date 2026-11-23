@@ -233,16 +233,21 @@ fn a_log_with_a_feature_this_build_does_not_know_is_read_or_refused_as_the_featu
         .append("a", 1, b"x")
         .unwrap();
 
-    let written = fs::read(&path).unwrap();
+    // with what an append that was never finished left at its end, which
+    // a build that may write the log cuts off before it appends
+    let mut torn = fs::read(&path).unwrap();
+    torn.extend_from_slice(&[7; 40]);
+    fs::write(&path, torn).unwrap();
     with(FileHeader {
         read_compatible: 1,
         ..header
     });
+    let written = fs::read(&path).unwrap();
     let mut log = OpLog::open(dir.path()).unwrap();
-    assert_eq!(log.len(), 3);
+    assert!(log.len() == 3 && log.passed_over());
     let said = "the oplog uses a feature this alt does not know to write";
     assert!(matches!(log.append("a", 1, b"x"), Err(OpLogError::Format(s)) if s == said));
-    assert_eq!(fs::read(&path).unwrap()[64..], written[64..]);
+    assert_eq!(fs::read(&path).unwrap(), written);
 
     with(FileHeader {
         incompatible: 1 | 4,

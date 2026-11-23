@@ -136,6 +136,10 @@ fn child() {
             let mut log = OpLog::open(&dir).unwrap();
             assert_eq!(log.settle(but_gone).unwrap().unwrap().ops, 2);
         }
+        "sync" => sync_fails(&dir),
+        "sink" => sink_sync_fails(&dir),
+        "bound" => boundary_sync_fails(&dir),
+        "cut-fails" => cut_sync_fails(&dir),
         other => panic!("no scenario {other}"),
     }
 }
@@ -169,4 +173,117 @@ fn a_cut_says_what_it_cuts_in_the_log_and_syncs_that_before_the_file_is_made_sho
     ];
     assert_eq!(calls, expected);
     assert_eq!(file_len(dir.path()), said.1);
+}
+
+/// Makes the fsyncs of the log fail from now on, or work again.
+fn fail_syncs(dir: &Path, fail: bool) {
+    match fail {
+        true => fs::write(dir.join("fail"), b"").unwrap(),
+        false => fs::remove_file(dir.join("fail")).unwrap(),
+    }
+}
+
+fn io_error<T: std::fmt::Debug>(did: Result<T, OpLogError>) {
+    assert!(matches!(did, Err(OpLogError::Io(_))), "{did:?}");
+}
+
+/// A sync that fails moves no boundary: not what is noted, not what the
+/// handle takes for synced, not what the next frame says.
+fn sync_fails(dir: &Path) {
+    let mut log = new_log(dir);
+    grow(&mut log, "a", 2);
+    let synced = log.appended_len();
+    let noted = fs::read(dir.join("tail")).unwrap();
+    log.append("a", 3, b"not synced").unwrap();
+    fail_syncs(dir, true);
+    io_error(log.sync());
+    io_error(log.bound_now());
+    assert_eq!(fs::read(dir.join("tail")).unwrap(), noted);
+    assert_eq!(
+        (log.synced_here(), log.bounded_to()),
+        (synced, Some(synced))
+    );
+    assert!(!log.confirmed());
+    log.append("a", 4, b"after it").unwrap();
+    assert_eq!(frames(dir).1.synced, synced);
+    fail_syncs(dir, false);
+    log.sync().unwrap();
+    assert_eq!(alt_oplog::bounded_in(dir), Some(log.appended_len()));
+}
+
+/// The same of a sync left to a sink.
+fn sink_sync_fails(dir: &Path) {
+    let mut log = new_log(dir);
+    grow(&mut log, "a", 2);
+    let synced = log.appended_len();
+    let noted = fs::read(dir.join("tail")).unwrap();
+    log.set_defer_durability(true);
+    let sink = log.sync_handle().unwrap();
+    log.append("a", 3, b"not synced").unwrap();
+    log.sync().unwrap();
+    fail_syncs(dir, true);
+    io_error(sink.fsync());
+    io_error(sink.fsync());
+    assert_eq!(fs::read(dir.join("tail")).unwrap(), noted);
+    assert_eq!(
+        (log.synced_here(), log.bounded_to()),
+        (synced, Some(synced))
+    );
+    fail_syncs(dir, false);
+    sink.fsync().unwrap();
+    assert_eq!(log.synced_here(), log.appended_len());
+}
+
+/// A writer whose sync of what another boot left fails appends nothing
+/// after it and sets no boundary over it.
+fn boundary_sync_fails(dir: &Path) {
+    boot(1);
+    let mut log = new_log(dir);
+    grow(&mut log, "a", 2);
+    let synced = log.appended_len();
+    log.append("a", 3, b"left by boot 1").unwrap();
+    let len = log.appended_len();
+    drop(log);
+    boot(2);
+    let mut log = OpLog::open(dir).unwrap();
+    fail_syncs(dir, true);
+    io_error(log.append("b", 4, b"after it"));
+    assert_eq!((file_len(dir), log.len()), (len, 3));
+    assert_eq!(alt_oplog::bounded_in(dir), None);
+    assert_eq!(log.bounded_to(), Some(synced));
+    assert!(OpLog::open(dir).unwrap().unsettled());
+    fail_syncs(dir, false);
+    log.append("b", 4, b"after it").unwrap();
+    assert_eq!(alt_oplog::bounded_in(dir), Some(len));
+}
+
+/// A cut whose first sync fails has said what it cuts and cut nothing:
+/// the file is as long as it was, and the next writer finishes it.
+fn cut_sync_fails(dir: &Path) {
+    let at = two_to_cut(dir);
+    let len = file_len(dir);
+    boot(2);
+    let mut log = OpLog::open(dir).unwrap();
+    fail_syncs(dir, true);
+    io_error(log.settle(but_gone));
+    assert!(file_len(dir) >= len, "nothing was cut off the file");
+    fail_syncs(dir, false);
+    let mut next = OpLog::open(dir).unwrap();
+    assert_eq!((next.len(), next.state().unwrap().generation), (3, 1));
+    next.append("b", 9, b"next").unwrap();
+    next.sync().unwrap();
+    let (all, state) = frames(dir);
+    let said = all.iter().find(|frame| frame.0 == at).unwrap();
+    assert_eq!(said.3.unwrap().ops, 2, "what was cut is told once");
+    assert_eq!((state.seq, file_len(dir)), (4, next.appended_len()));
+}
+
+#[test]
+fn a_sync_that_fails_moves_no_boundary() {
+    for scenario in ["sync", "sink", "bound", "cut-fails"] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let calls = in_child(dir.path(), scenario);
+        let failed = calls.iter().filter(|call| call.0 == "fsync-failed");
+        assert!(failed.count() >= 1, "{scenario}: no sync of the log failed");
+    }
 }

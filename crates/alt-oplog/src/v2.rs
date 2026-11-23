@@ -113,8 +113,16 @@ pub fn create_with(dir: &Path, block_exp: u8) -> std::io::Result<()> {
     created
 }
 
+/// What a thread takes for the boot it runs in.
+#[derive(Clone, Copy)]
+enum Told {
+    ByTheKernel,
+    This([u8; 16]),
+    Nothing,
+}
+
 thread_local! {
-    static BOOT: Cell<Option<[u8; 16]>> = const { Cell::new(None) };
+    static BOOT: Cell<Told> = const { Cell::new(Told::ByTheKernel) };
 }
 
 /// Makes the handles this thread opens from now on take `boot` for the
@@ -122,14 +130,25 @@ thread_local! {
 /// of what a log is taken for after the machine went down.
 #[doc(hidden)]
 pub fn in_boot(boot: Option<[u8; 16]>) {
-    BOOT.set(boot);
+    BOOT.set(boot.map_or(Told::ByTheKernel, Told::This));
+}
+
+/// Makes the handles this thread opens from now on run as on a system
+/// whose kernel tells no boot: for a test of that.
+#[doc(hidden)]
+pub fn in_no_boot() {
+    BOOT.set(Told::Nothing);
 }
 
 /// The boot a handle opened now on this thread runs in; `None` where the
 /// kernel tells none, and nothing a boot left in its cache is then taken
 /// on trust.
 pub fn running_boot() -> Option<[u8; 16]> {
-    BOOT.get().or_else(alt_os::boot::id)
+    match BOOT.get() {
+        Told::ByTheKernel => alt_os::boot::id(),
+        Told::This(boot) => Some(boot),
+        Told::Nothing => None,
+    }
 }
 
 /// Up to where the log in `dir` is known synced in the running boot.

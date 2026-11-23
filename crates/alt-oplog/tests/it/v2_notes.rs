@@ -226,3 +226,52 @@ fn a_writer_that_syncs_nothing_notes_nothing_where_the_ops_were_vouched_for_sinc
     assert!(!staging.unsettled());
     assert!(!OpLog::open(dir.path()).unwrap().unsettled());
 }
+
+#[test]
+fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    alt_oplog::v2::in_no_boot();
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    let synced = log.appended_len();
+    stage(&mut log, 60);
+    drop(log);
+    let len = file_len(dir.path());
+    assert!(len > synced + 3 * 4096);
+    assert!(!dir.path().join("tail").exists());
+    assert_eq!(alt_oplog::bounded_in(dir.path()), None);
+
+    // every open reads all that is not synced, as far as frames say, and
+    // has it to look at: what one handle looked at the next does not know
+    for _ in 0..2 {
+        let log = OpLog::open_read_only(dir.path(), None).unwrap();
+        assert!(log.bytes_read() >= len - synced, "{}", log.bytes_read());
+        assert_eq!((log.len(), log.bounded_to()), (62, Some(synced)));
+        assert!(log.unsettled());
+        assert_eq!(log.unconfirmed(vouched).unwrap(), None);
+        assert!(!log.unsettled());
+    }
+
+    // a writer that syncs has them seen to, and its boundary is in the
+    // log once the next frame says it
+    let mut log = OpLog::open(dir.path()).unwrap();
+    let given = Arc::new(Mutex::new(0));
+    let seen = given.clone();
+    log.sync_named_with(Arc::new(move |ops| {
+        *seen.lock().unwrap() += ops.len();
+        Ok(())
+    }));
+    log.append("w", 1, b"committed").unwrap();
+    assert_eq!(*given.lock().unwrap(), 60);
+    log.sync().unwrap();
+    let committed = log.appended_len();
+    assert!(log.confirmed() && log.synced_here() == committed);
+    assert!(!dir.path().join("tail").exists());
+    assert_eq!(OpLog::open(dir.path()).unwrap().bounded_to(), Some(len));
+    log.append("w", 2, b"next").unwrap();
+    let reader = OpLog::open(dir.path()).unwrap();
+    assert_eq!((reader.len(), reader.bounded_to()), (64, Some(committed)));
+    assert!(reader.unsettled() && reader.bytes_read() < 2 * 4096);
+    reader.verify().unwrap();
+    alt_oplog::v2::in_boot(None);
+}
