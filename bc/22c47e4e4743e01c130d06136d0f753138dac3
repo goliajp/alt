@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: fold a key of several ids with the key of the process
+author-type: human
+author: doracawl
+touched: crates/alt-hash/src/ident.rs
