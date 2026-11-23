@@ -3,12 +3,13 @@
 use crate::{
     Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
     carried::Carried,
+    descend::{Frame, Shared, descend},
     format::{self, CommitRow, Delta, NO_BASE},
     object::{self, Parsed},
     object_id,
-    scan::{self, Form, Raw},
+    scan::{self, Form},
 };
-use std::{collections::HashMap, io::Write};
+use std::{collections::HashMap, io::Write, sync::atomic::AtomicU64};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -26,16 +27,16 @@ const KEEP: usize = 1 << 20;
 /// takes does not grow with its size.
 const HELD: u64 = 256 << 20;
 
-struct Meta {
-    oid: Oid,
-    blake3: [u8; 32],
-    kind: Kind,
-    size: u64,
-    depth: u16,
+pub(crate) struct Meta {
+    pub oid: Oid,
+    pub blake3: [u8; 32],
+    pub kind: Kind,
+    pub size: u64,
+    pub depth: u16,
     /// scan index of the base inside this pack
-    base: Option<usize>,
-    outside: bool,
-    parsed: Parsed,
+    pub base: Option<usize>,
+    pub outside: bool,
+    pub parsed: Parsed,
 }
 
 pub struct Ingested {
@@ -87,93 +88,11 @@ impl Ingested {
     }
 }
 
-fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
+pub(crate) fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
     (
         object_id(kind, data),
         *alt_hash::blake3::hash(data).as_bytes(),
     )
-}
-
-struct Shared<'a> {
-    pack: &'a [u8],
-    entries: &'a [Raw],
-    by_base: &'a HashMap<Oid, Vec<usize>>,
-    limits: &'a Limits,
-}
-
-struct Frame {
-    data: Vec<u8>,
-    kind: Kind,
-    depth: u16,
-    index: Option<usize>,
-    children: Vec<usize>,
-    next: usize,
-}
-
-/// resolves every delta below one base; returns the metadata of each resolved entry
-fn descend(
-    shared: &Shared<'_>,
-    offset_children: &HashMap<usize, Vec<usize>>,
-    root: Frame,
-) -> Result<Vec<(usize, Meta)>, Error> {
-    let mut done = Vec::new();
-    let mut stack = vec![root];
-    while let Some(frame) = stack.last_mut() {
-        let Some(child) = frame.children.get(frame.next).copied() else {
-            stack.pop();
-            continue;
-        };
-        frame.next += 1;
-        let depth = frame.depth + 1;
-        if depth > shared.limits.delta_depth {
-            return Err(Error::Limit("delta depth"));
-        }
-        let raw = &shared.entries[child];
-        let delta = match &raw.data {
-            Some(delta) => std::borrow::Cow::Borrowed(delta.as_slice()),
-            // not kept by the scan
-            None => {
-                let start = raw.offset as usize + raw.header as usize;
-                std::borrow::Cow::Owned(scan::inflate(&shared.pack[start..], raw.size as usize)?.0)
-            }
-        };
-        let data =
-            alt_git_pack::delta::apply_bounded(&frame.data, &delta, shared.limits.object_bytes)
-                .map_err(|_| Error::Format("delta instructions"))?;
-        let kind = frame.kind;
-        let (oid, blake3) = digest(kind, &data);
-        let meta = Meta {
-            oid,
-            blake3,
-            kind,
-            size: data.len() as u64,
-            depth,
-            base: frame.index,
-            outside: frame.index.is_none(),
-            parsed: object::parse(kind, &data)?,
-        };
-        let mut children = shared.by_base.get(&oid).cloned().unwrap_or_default();
-        if let Some(more) = offset_children.get(&child) {
-            children.extend_from_slice(more);
-        }
-        done.push((child, meta));
-        // a base is dropped before its last child is descended into, so a chain holds
-        // one object and not one per link
-        if frame.next == frame.children.len() {
-            stack.pop();
-        }
-        if !children.is_empty() {
-            stack.push(Frame {
-                data,
-                kind,
-                depth,
-                index: Some(child),
-                children,
-                next: 0,
-            });
-        }
-    }
-    Ok(done)
 }
 
 /// `pack` is the complete received pack including its trailer
@@ -225,11 +144,13 @@ pub fn ingest_holding(
             Form::Reference(base) => by_base.entry(base).or_default().push(index),
         }
     }
+    let waiting = AtomicU64::new(0);
     let shared = Shared {
         pack,
         entries: &entries,
         by_base: &by_base,
         limits,
+        waiting: &waiting,
     };
 
     // Plain entries: object ids for a batch of objects are computed together, several
@@ -354,14 +275,7 @@ pub fn ingest_holding(
                     scan::inflate(&pack[start..], raw.size as usize)?.0
                 }
             };
-            Ok(Frame {
-                data,
-                kind,
-                depth: 0,
-                index: Some(index),
-                children,
-                next: 0,
-            })
+            Ok(Frame::base(data, kind, 0, Some(index), children))
         })
         .collect::<Result<Vec<_>, Error>>()?;
     for (index, meta) in resolve(inside)? {
@@ -379,14 +293,7 @@ pub fn ingest_holding(
             .record(base)?
             .ok_or(Error::MissingBase(*base))?
             .depth;
-        outside.push(Frame {
-            data,
-            kind,
-            depth,
-            index: None,
-            children: children.clone(),
-            next: 0,
-        });
+        outside.push(Frame::base(data, kind, depth, None, children.clone()));
     }
     for (index, meta) in resolve(outside)? {
         metas[index].get_or_insert(meta);

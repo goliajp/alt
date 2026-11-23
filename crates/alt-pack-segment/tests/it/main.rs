@@ -2,6 +2,7 @@ mod budget;
 mod build;
 mod fetch;
 mod merge;
+mod waiting;
 
 use alt_pack_segment::{Limits, Segment, SegmentSet, ingest};
 use std::{fs, io::Write, path::Path, process::Command, sync::Arc};
