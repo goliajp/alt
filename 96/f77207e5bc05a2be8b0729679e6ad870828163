@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: give back what requests reserved and never used, as the server runs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/expiry.rs
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/tests/it/database/connections/bodies.rs
+touched: crates/alt-server/tests/it/database/running.rs
