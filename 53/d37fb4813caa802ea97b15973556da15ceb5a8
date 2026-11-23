@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: let the objects of a push inflate to many times what its pack may weigh
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/tests/it/database/git/raw_push.rs
