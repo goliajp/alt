@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: export the stash as git keeps it alone, and read the stack git has on every import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/stash_roundtrip.rs
+touched: crates/alt-export/src/config.rs
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-import/src/refs.rs
