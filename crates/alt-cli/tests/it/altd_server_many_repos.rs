@@ -8,8 +8,24 @@ use crate::altd_server::{alt, ok, spawn_server_with_env};
 use crate::altd_server_pack_limits::git;
 use crate::altd_server_untrusted::repository;
 
+/// A server started by hand, ended when the test lets go of it.
+#[cfg(target_os = "linux")]
+struct Ended(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Drop for Ended {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 fn listed(url: &str) -> String {
-    let out = git(Path::new("."), &["ls-remote", url]);
+    let patient = ["-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=120"];
+    let out = git(
+        Path::new("."),
+        &[&patient[..], &["ls-remote", url]].concat(),
+    );
     assert!(out.status.success(), "{out:?}");
     String::from_utf8(out.stdout).unwrap()
 }
@@ -50,11 +66,27 @@ fn no_more_repositories_of_a_root_stay_open_than_the_server_is_told() {
 /// served from then on is the one that is there.
 #[test]
 fn a_repository_put_in_the_place_of_another_is_the_one_served() {
+    put_in_place("ALT_SERVER_ROOT", "served/");
+}
+
+/// And so where the server serves the one repository it was started on.
+#[test]
+fn the_one_repository_of_a_server_put_in_the_place_of_another_is_the_one_served() {
+    put_in_place("ALT_SERVER_REPO", "");
+}
+
+/// A server told of `root/served` through `told`, as a root or as its
+/// repository, which it serves at `at`.
+fn put_in_place(told: &str, at: &str) {
     let tmp = alt_os::temp::tempdir().unwrap();
     let root = tmp.path().join("root");
     repository(&root.join("served"));
-    let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
-    let url = format!("http://{}/served/", server.addr);
+    let serves = match at.is_empty() {
+        true => root.join("served"),
+        false => root.clone(),
+    };
+    let server = spawn_server_with_env(&[(told, serves.to_str().unwrap())]);
+    let url = format!("http://{}/{at}", server.addr);
     let before = listed(&url);
 
     fs::remove_dir_all(root.join("served")).unwrap();
@@ -108,27 +140,83 @@ fn a_server_that_can_take_no_more_connections_waits_for_one_to_end() {
         .spawn()
         .unwrap();
     let mut said = BufReader::new(child.stderr.take().unwrap());
-    let address = loop {
+    // ended with the test, however the test ends
+    let child = Ended(child);
+    let (tell, told) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut line = String::new();
-        assert_ne!(said.read_line(&mut line).unwrap(), 0, "the server ended");
-        if let Some(at) = line.find("listening on ") {
-            let address = line[at + "listening on ".len()..].split_whitespace().next();
-            break address.unwrap().to_owned();
+        while said.read_line(&mut line).is_ok_and(|read| read > 0) {
+            if let Some(at) = line.find("listening on ") {
+                let address = line[at + "listening on ".len()..].split_whitespace().next();
+                let _ = tell.send(address.unwrap().to_owned());
+            }
+            line.clear();
         }
-    };
+    });
+    let address = told.recv_timeout(Duration::from_secs(60));
+    let address = address.expect("the server did not say where it listens");
     let held: Vec<_> = (0..120)
         .map(|_| std::net::TcpStream::connect(&address).unwrap())
         .collect();
     // every file it may have is open by now
     std::thread::sleep(Duration::from_secs(1));
-    let before = ticks(child.id());
+    let before = ticks(child.0.id());
     std::thread::sleep(Duration::from_secs(2));
-    let spent = ticks(child.id()) - before;
+    let spent = ticks(child.0.id()) - before;
     drop(held);
     let answered = listed(&format!("http://{address}/"));
-    child.kill().unwrap();
-    child.wait().unwrap();
+    drop(child);
     // two seconds are two hundred ticks of one thread that does not wait
     assert!(spent < 40, "{spent} ticks in two seconds");
     assert!(answered.contains("refs/heads/main"), "{answered}");
+}
+
+/// A signed push is signed over a nonce the server gave it with the refs,
+/// and comes with it a request later. The repository is closed between
+/// the two, for another that is asked for all the while and the one
+/// repository the server keeps open: the nonce is good all the same.
+#[test]
+fn the_nonce_of_a_signed_push_is_good_though_its_repository_was_closed_meanwhile() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    repository(&root.join("pushed"));
+    repository(&root.join("other"));
+    let server = spawn_server_with_env(&[
+        ("ALT_SERVER_ROOT", root.to_str().unwrap()),
+        ("ALT_SERVER_MAX_OPEN_REPOS", "1"),
+    ]);
+    let url = format!("http://{}/pushed/", server.addr);
+    let other = format!("http://{}/other/", server.addr);
+    let client = tmp.path().join("client");
+    ok(alt(tmp.path(), &["clone", &url, client.to_str().unwrap()]));
+    crate::altd_server::enable_signed_push(&client, &root.join("pushed"), "alice");
+    // a push whose signature does not hold is one of nobody, and refused
+    let policy = root.join("pushed/.alt/policy");
+    fs::write(policy, "human:anonymous -> require-signed\n").unwrap();
+    let over = AtomicBool::new(false);
+    let pushes = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !over.load(Ordering::Acquire) {
+                listed(&other);
+            }
+        });
+        let pushes: Vec<_> = (0..8)
+            .map(|n| {
+                fs::write(client.join("file"), n.to_string()).unwrap();
+                ok(alt(&client, &["add", "."]));
+                ok(alt(&client, &["commit", "-m", "more"]));
+                alt(
+                    &client,
+                    &["push", "origin", "refs/heads/main:refs/heads/main"],
+                )
+            })
+            .collect();
+        over.store(true, Ordering::Release);
+        pushes
+    });
+    for push in pushes {
+        let told = String::from_utf8_lossy(&push.stderr).into_owned();
+        assert!(push.status.success(), "{told}");
+    }
 }

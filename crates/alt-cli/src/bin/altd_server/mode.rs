@@ -10,8 +10,9 @@ use super::*;
 pub(super) enum ServeMode {
     Single {
         repo_path: PathBuf,
-        writer: Option<Arc<WriteCoordinator>>,
-        readers: readers::Readers,
+        /// the one repository, as a root keeps each of its own: another
+        /// put in its place is told from it by its directory
+        cache: Held<Opened>,
     },
     Multi {
         root: PathBuf,
@@ -25,6 +26,10 @@ pub(super) enum ServeMode {
 /// ago, of those no request has in hand, closed for it.
 pub(super) struct Opened {
     repos: HashMap<String, Open>,
+    /// the nonces issued for each repository, by its name and directory:
+    /// kept while one of them is good, whether the repository is open
+    /// or not
+    nonces: HashMap<(String, (u64, u64)), Arc<NonceTable>>,
     clock: u64,
     most: usize,
 }
@@ -53,6 +58,14 @@ impl Opened {
             }
             None => None,
         }
+    }
+
+    /// The nonces of the repository `name` in `dir`.
+    fn nonces(&mut self, name: &str, dir: (u64, u64)) -> Arc<NonceTable> {
+        let held = |table: &Arc<NonceTable>| Arc::strong_count(table) > 1 || !table.spent();
+        self.nonces.retain(|_, table| held(table));
+        let table = self.nonces.entry((name.to_owned(), dir)).or_default();
+        Arc::clone(table)
     }
 
     /// Keeps `opened` under `name` unless another request did so first,
@@ -87,10 +100,17 @@ impl Opened {
 }
 
 /// What tells the directory of a repository from another under its name.
+/// Only a repository that has no `.alt` is told by its `.git`: one whose
+/// `.alt` could not be looked at this once is not taken for another, to
+/// be opened a second time beside itself.
 fn directory(repo_path: &std::path::Path) -> std::io::Result<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
-    let alt = repo_path.join(".alt");
-    let about = std::fs::metadata(&alt).or_else(|_| std::fs::metadata(repo_path.join(".git")))?;
+    let about = match std::fs::metadata(repo_path.join(".alt")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::metadata(repo_path.join(".git"))?
+        }
+        about => about?,
+    };
     Ok((about.dev(), about.ino()))
 }
 
@@ -114,7 +134,7 @@ pub(super) struct WriteCoordinator {
     /// LRU table". A captured signed push payload can only be replayed
     /// against this server if its nonce hasn't yet been consumed and
     /// hasn't aged out of the table.
-    pub(super) nonces: NonceTable,
+    pub(super) nonces: Arc<NonceTable>,
 }
 
 /// Open the write store and build the write coordinator: turn on deferred
@@ -123,6 +143,7 @@ pub(super) struct WriteCoordinator {
 /// `GroupCommit` that coalesces concurrent flushes.
 pub(super) fn open_write_coordinator(
     alt_dir: std::path::PathBuf,
+    nonces: Arc<NonceTable>,
 ) -> Result<Arc<WriteCoordinator>, Box<dyn std::error::Error>> {
     let mut store = Store::open(alt_dir)?;
     store.set_defer_durability(true);
@@ -131,35 +152,63 @@ pub(super) fn open_write_coordinator(
         store: Held::new(store),
         sink,
         group: alt_cli::group_commit::GroupCommit::new(),
-        nonces: NonceTable::new(),
+        nonces,
     }))
+}
+
+impl Opened {
+    fn of(most: usize) -> Held<Opened> {
+        Held::new(Opened {
+            repos: HashMap::new(),
+            nonces: HashMap::new(),
+            clock: 0,
+            most,
+        })
+    }
+}
+
+/// The repository at `repo_path` as `cache` has it open under `name`,
+/// opened where it is not or is no longer the one that is there.
+fn opened(
+    cache: &Held<Opened>,
+    name: &str,
+    repo_path: PathBuf,
+) -> Result<RepoHandle, Box<dyn std::error::Error>> {
+    let dir = directory(&repo_path)?;
+    if let Some(handle) = cache.take().known(name, dir) {
+        return Ok(handle);
+    }
+    // opened with the cache let go of: an open that waits for a lock of
+    // this repository keeps no request for another waiting. The probe
+    // tells what is no repository here, and not on every request
+    Repository::discover(&repo_path)?;
+    let alt_dir = repo_path.join(".alt");
+    let writer = match alt_dir.is_dir() {
+        true => {
+            let nonces = cache.take().nonces(name, dir);
+            Some(open_write_coordinator(alt_dir, nonces)?)
+        }
+        false => None,
+    };
+    // the first to have opened it is the one every request uses
+    let opened = RepoHandle::new(repo_path, writer, &readers::none());
+    Ok(cache.take().keep(name, dir, opened))
 }
 
 impl ServeMode {
     pub(super) fn single(repo_path: PathBuf) -> Self {
-        // Fail-fast: probe the repo once at boot so a misconfigured
-        // ALT_SERVER_REPO surfaces immediately rather than on the first
-        // request. We drop the handle; per-request opens are cheap.
-        Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}")));
-        let alt_dir = repo_path.join(".alt");
-        let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
-            Some(
-                open_write_coordinator(alt_dir)
-                    .unwrap_or_else(|e| die(&format!("opening write coordinator: {e}"))),
-            )
-        } else {
+        // Fail-fast: a misconfigured ALT_SERVER_REPO surfaces at boot
+        // rather than on the first request.
+        let cache = Opened::of(1);
+        let handle = opened(&cache, "*", repo_path.clone());
+        let handle = handle.unwrap_or_else(|e| die(&format!("opening repo: {e}")));
+        if handle.writer.is_none() {
             eprintln!(
                 "altd-server: no .alt under {p}; receive-pack will be refused (read-only mode)",
                 p = repo_path.display()
             );
-            None
-        };
-        let readers = readers::none();
-        ServeMode::Single {
-            repo_path,
-            writer,
-            readers,
         }
+        ServeMode::Single { repo_path, cache }
     }
 
     pub(super) fn multi(root: PathBuf) -> Self {
@@ -185,14 +234,8 @@ impl ServeMode {
                 ));
             }
         }
-        ServeMode::Multi {
-            root,
-            cache: Held::new(Opened {
-                repos: HashMap::new(),
-                clock: 0,
-                most: told::told().repos,
-            }),
-        }
+        let cache = Opened::of(told::told().repos);
+        ServeMode::Multi { root, cache }
     }
 
     pub(super) fn describe(&self) -> String {
@@ -214,39 +257,17 @@ pub(super) fn resolve_repo(
     path: &str,
 ) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
-        ServeMode::Single {
-            repo_path,
-            writer,
-            readers,
-        } => Ok((
-            RepoHandle::new(repo_path.clone(), writer.clone(), readers),
-            path.to_owned(),
-            "*".to_owned(),
-        )),
+        ServeMode::Single { repo_path, cache } => {
+            let handle = opened(cache, "*", repo_path.clone())?;
+            Ok((handle, path.to_owned(), "*".to_owned()))
+        }
         ServeMode::Multi { root, cache } => {
             let trimmed = path.trim_start_matches('/');
             let (name, rest) = match trimmed.find('/') {
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
                 None => (trimmed, ""),
             };
-            let repo_path = readers::named(root, name)?;
-            let dir = directory(&repo_path)?;
-            if let Some(handle) = cache.take().known(name, dir) {
-                return Ok((handle, rest.to_owned(), name.to_owned()));
-            }
-            // opened with the cache let go of: an open that waits for a
-            // lock of this repository keeps no request for another waiting
-            // Probe once: surfaces "not a repo" errors right at cache
-            // insertion rather than on every request.
-            Repository::discover(&repo_path)?;
-            let alt_dir = repo_path.join(".alt");
-            let writer = match alt_dir.is_dir() {
-                true => Some(open_write_coordinator(alt_dir)?),
-                false => None,
-            };
-            // the first to have opened it is the one every request uses
-            let opened = RepoHandle::new(repo_path, writer, &readers::none());
-            let handle = cache.take().keep(name, dir, opened);
+            let handle = opened(cache, name, readers::named(root, name)?)?;
             Ok((handle, rest.to_owned(), name.to_owned()))
         }
     }
