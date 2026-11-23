@@ -28,6 +28,8 @@
 mod auth;
 #[path = "altd_server/limits.rs"]
 mod limits;
+#[path = "altd_server/readers.rs"]
+mod readers;
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -44,6 +46,7 @@ use alt_wire::ls_refs::RefRecord;
 use alt_wire::push::CommandStatus;
 use auth::{AclRule, AuthOutcome, acl_allows, action_from_request, check_auth};
 use limits::{max_body_bytes, pack_limits, read_body_capped};
+use readers::RepoHandle;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
@@ -338,6 +341,7 @@ enum ServeMode {
     Single {
         repo_path: PathBuf,
         writer: Option<Arc<WriteCoordinator>>,
+        readers: readers::Readers,
     },
     Multi {
         root: PathBuf,
@@ -447,22 +451,6 @@ impl NonceTable {
     }
 }
 
-/// A resolved repo binding for one request. `repo_path` is reopened on
-/// every read so the Repository's RefStore + odb always reflect any
-/// receive-pack write that just completed (no stale-cache window between
-/// push → fetch on the same connection). The `WriteCoordinator` is
-/// shared across requests for write serialisation + group fsync.
-struct RepoHandle {
-    repo_path: PathBuf,
-    writer: Option<Arc<WriteCoordinator>>,
-}
-
-impl RepoHandle {
-    fn open_repo(&self) -> Result<Repository, Box<dyn std::error::Error>> {
-        Ok(Repository::discover(&self.repo_path)?)
-    }
-}
-
 /// Open the write store and build the write coordinator: turn on deferred
 /// durability so each commit appends-without-fsync, create the off-write
 /// `sink` so the fsync uses independent fds, instantiate the
@@ -500,7 +488,12 @@ impl ServeMode {
             );
             None
         };
-        ServeMode::Single { repo_path, writer }
+        let readers = readers::none();
+        ServeMode::Single {
+            repo_path,
+            writer,
+            readers,
+        }
     }
 
     fn multi(root: PathBuf) -> Self {
@@ -551,11 +544,12 @@ fn resolve_repo(
     path: &str,
 ) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
-        ServeMode::Single { repo_path, writer } => Ok((
-            RepoHandle {
-                repo_path: repo_path.clone(),
-                writer: writer.clone(),
-            },
+        ServeMode::Single {
+            repo_path,
+            writer,
+            readers,
+        } => Ok((
+            RepoHandle::new(repo_path.clone(), writer.clone(), readers),
             path.to_owned(),
             "*".to_owned(),
         )),
@@ -570,14 +564,7 @@ fn resolve_repo(
             }
             let mut cache_g = cache.take();
             if let Some(h) = cache_g.get(name) {
-                return Ok((
-                    RepoHandle {
-                        repo_path: h.repo_path.clone(),
-                        writer: h.writer.clone(),
-                    },
-                    rest.to_owned(),
-                    name.to_owned(),
-                ));
+                return Ok((h.clone(), rest.to_owned(), name.to_owned()));
             }
             let repo_path = root.join(name);
             if !repo_path.is_dir() {
@@ -592,16 +579,9 @@ fn resolve_repo(
             } else {
                 None
             };
-            let handle = RepoHandle {
-                repo_path: repo_path.clone(),
-                writer: writer.clone(),
-            };
-            cache_g.insert(name.to_owned(), handle);
-            Ok((
-                RepoHandle { repo_path, writer },
-                rest.to_owned(),
-                name.to_owned(),
-            ))
+            let handle = RepoHandle::new(repo_path, writer, &readers::none());
+            cache_g.insert(name.to_owned(), handle.clone());
+            Ok((handle, rest.to_owned(), name.to_owned()))
         }
     }
 }
