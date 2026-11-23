@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: split the functions of the version 2 log that ran over fifty lines
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/source.rs
+touched: crates/alt-oplog/src/v2/verify.rs
