@@ -1,8 +1,6 @@
 //! The handle on a log of either format.
 
 use std::borrow::Cow;
-use std::fs::File;
-use std::io::Read;
 use std::path::Path;
 
 use crate::v2::block::VERSION as V2;
@@ -34,29 +32,13 @@ macro_rules! on {
     };
 }
 
+mod format;
 mod settled;
 mod sink;
 
+pub(crate) use format::format_of;
+use format::{creates_v2, format_to_open};
 pub use sink::{OpLogSink, Reached};
-
-/// The version the header of the log in `dir` gives: `None` for a log
-/// that is not there yet or holds no whole header of either format.
-pub(crate) fn format_of(dir: &Path) -> std::io::Result<Option<u8>> {
-    let mut header = [0u8; 5];
-    let read = File::open(dir.join("log")).and_then(|mut file| file.read_exact(&mut header));
-    match read {
-        Ok(()) => Ok(Some(header[4])),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
-        Err(e) => Err(e),
-    }
-}
-
-/// Whether a log this process creates is one of version 2: by
-/// `ALT_OPLOG_FORMAT=2` in its environment.
-fn creates_v2() -> bool {
-    std::env::var_os("ALT_OPLOG_FORMAT").is_some_and(|format| format == "2")
-}
 
 impl OpLog {
     /// Opens (or creates) the log in `dir`. An unfinished append at its
@@ -71,10 +53,10 @@ impl OpLog {
     /// it needs of the ops after the anchor, when the log still holds the
     /// anchor's op where the anchor says, and every op otherwise.
     pub fn open_at(dir: &Path, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
-        let mut format = format_of(dir)?;
+        let mut format = format_to_open(dir)?;
         if format.is_none() && creates_v2() {
             v2::create(dir)?;
-            format = format_of(dir)?;
+            format = format_to_open(dir)?;
         }
         Ok(OpLog(match format {
             Some(V2) => Inner::V2(Box::new(v2::Log::open_at(dir, anchor)?)),
@@ -86,7 +68,7 @@ impl OpLog {
     /// created or repaired, and an unfinished append at the end of the log
     /// is passed over.
     pub fn open_read_only(dir: &Path, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
-        Ok(OpLog(match format_of(dir)? {
+        Ok(OpLog(match format_to_open(dir)? {
             Some(V2) => Inner::V2(Box::new(v2::Log::open_read_only(dir, anchor)?)),
             _ => Inner::V1(Box::new(v1::OpLog::open_read_only(dir, anchor)?)),
         }))
