@@ -1,7 +1,7 @@
 //! `alt reset --soft` is refused while the index holds a conflict, as by
 //! git, whatever left the conflict there.
 
-use crate::like_git::{Pair, alt, git, heads};
+use crate::like_git::{Pair, alt, files, git, heads, index, ok};
 
 /// `main` and `side` both rewrite `f`.
 fn diverged() -> Pair {
@@ -48,4 +48,30 @@ fn a_soft_reset_is_refused_where_a_stash_came_back_in_conflict() {
     assert!(!alt(&pair.alt, &["stash", "pop"]).status.success());
     assert!(!git(&pair.git, &["stash", "pop"]).status.success());
     assert_soft_reset_refused(&pair);
+}
+
+#[test]
+fn a_hard_reset_is_undone_with_the_pick_it_gave_up() {
+    let pair = diverged();
+    let (ours, theirs) = pair.run(&["cherry-pick", "side"]);
+    assert_eq!(
+        (ours.status.code(), theirs.status.code()),
+        (Some(1), Some(1))
+    );
+    let picking = || ok(alt(&pair.alt, &["status", "--json"])).contains("\"kind\":\"cherr");
+    let state = || (files(&pair.alt), index(&pair.alt), heads(&pair.alt));
+    let before = state();
+    assert!(picking());
+
+    pair.both(&["reset", "-q", "--hard"]);
+    pair.assert_same_state();
+    assert!(!picking());
+    ok(alt(&pair.alt, &["undo"]));
+    assert_eq!(state(), before);
+    assert!(picking());
+    // the pick goes on from where the reset found it
+    std::fs::write(pair.alt.join("f"), "both\n").unwrap();
+    ok(alt(&pair.alt, &["add", "f"]));
+    ok(alt(&pair.alt, &["cherry-pick", "--continue"]));
+    assert!(!picking());
 }

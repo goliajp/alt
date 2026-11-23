@@ -197,3 +197,48 @@ fn a_parallel_workspace_means_its_own_head() {
         ))
     );
 }
+
+/// `a` and `b` each merged the other's first commit, so that the two
+/// have two merge bases, and each went on by one commit:
+///
+/// ```text
+/// c0 - a1 - A+B - a2      a
+///    X    X
+///    \ b1 - B+A - b2      b
+/// ```
+fn crossed() -> Pair {
+    let pair = Pair::new();
+    let mut time = 1_700_000_000;
+    let mut tick = || {
+        time += 1;
+        time
+    };
+    pair.write("base", "base\n");
+    pair.commit_all_at("c0", tick());
+    pair.both(&["branch", "a"]);
+    pair.both(&["branch", "b"]);
+    for (branch, old) in [("a", "a-old"), ("b", "b-old")] {
+        pair.both(&["switch", branch]);
+        pair.write(branch, "one\n");
+        pair.commit_all_at(&format!("{branch}1"), tick());
+        pair.both(&["branch", old]);
+    }
+    for (branch, other) in [("a", "b-old"), ("b", "a-old")] {
+        pair.both(&["switch", branch]);
+        pair.merge_at(other, tick());
+        pair.write(branch, "two\n");
+        pair.commit_all_at(&format!("{branch}2"), tick());
+    }
+    pair
+}
+
+#[test]
+fn a_range_over_a_history_with_two_merge_bases_is_git_s() {
+    let pair = crossed();
+    let three = pair.same(&["log", "--oneline", "a...b"]);
+    assert_eq!(three.lines().count(), 4, "{three}");
+    let two = pair.same(&["log", "--oneline", "a..b"]);
+    assert_eq!(two.lines().count(), 2, "{two}");
+    assert_eq!(pair.same(&["log", "--oneline", "b..a"]).lines().count(), 2);
+    pair.same(&["log", "--oneline", "a-old...b", "--", "a"]);
+}
