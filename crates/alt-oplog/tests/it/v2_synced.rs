@@ -78,10 +78,7 @@ fn a_frame_appended_while_what_the_ops_name_is_synced_lies_past_the_boundary() {
             .unwrap();
         Ok(())
     }));
-    let linked = Meta {
-        linked: true,
-        ..Meta::default()
-    };
+    let linked = super::v2_image::linked();
     log.append_with("a", 3, b"committed", &linked).unwrap();
     let sampled = log.appended_len();
     log.sync().unwrap();
@@ -110,10 +107,7 @@ fn a_writer_that_appends_after_what_another_boot_left_has_what_it_names_synced_f
     boot(1);
     let mut log = new_log(dir.path());
     grow(&mut log, "a", 2);
-    let linked = Meta {
-        linked: true,
-        ..Meta::default()
-    };
+    let linked = super::v2_image::linked();
     log.append_with("a", 3, b"left by boot 1", &linked).unwrap();
     let left = log.appended_len();
     drop(log);

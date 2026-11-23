@@ -2,11 +2,11 @@
 
 use alt_oplog::v2::block::{FileHeader, Layout};
 use alt_oplog::v2::compose::{Composer, New};
-use alt_oplog::v2::frame::{Ext, KIND_OP, KIND_RECEIPT, View};
+use alt_oplog::v2::frame::{Cut, Ext, KIND_OP, KIND_RECEIPT, View};
 use alt_oplog::v2::receipt::{Outcome, Receipt};
 use alt_oplog::v2::scan::{Stop, Walk};
 use alt_oplog::v2::state::State;
-use alt_oplog::{OpId, OpLogError};
+use alt_oplog::{Meta, OpId, OpLogError};
 
 pub struct Image {
     pub composer: Composer,
@@ -147,4 +147,22 @@ pub fn walked(layout: Layout, data: &[u8], strict: bool) -> Result<Walked, OpLog
         Ok(())
     })?;
     Ok((frames, state, stop))
+}
+
+/// What the checkpoint of the first cut of a log says: no cut before it.
+pub fn first_cut(bytes: u64, ops: u32) -> Cut {
+    Cut {
+        bytes,
+        ops,
+        after: 0,
+        generation: 0,
+    }
+}
+
+/// What the frame of a ref transaction says of it.
+pub fn linked() -> Meta {
+    Meta {
+        linked: true,
+        ..Meta::default()
+    }
 }

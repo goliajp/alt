@@ -6,13 +6,13 @@
 use alt_oplog::v2::block::{BLOCK_HEADER_LEN, BlockHeader, FILE_HEADER_LEN};
 use alt_oplog::v2::checkpoint::Checkpoint;
 use alt_oplog::v2::frame::{
-    Cut, Ext, Head, KIND_CHECKPOINT, KIND_OP, SKIPPABLE, Seed, Step, encode, parse,
+    Ext, Head, KIND_CHECKPOINT, KIND_OP, SKIPPABLE, Seed, Step, encode, parse,
 };
 use alt_oplog::v2::scan::{Stop, locate};
 use alt_oplog::v2::state::State;
 use alt_oplog::{OpId, OpLogError};
 
-use super::v2_image::{Image, walked};
+use super::v2_image::{Image, first_cut, walked};
 
 /// A log of 1 KiB blocks that holds ops of two workspaces, ref
 /// transactions and receipts across several blocks.
@@ -200,12 +200,7 @@ fn frames_written_before_a_cut_do_not_read_where_others_were_appended_after_it()
     image.bytes.truncate(kept.1);
     image.frames.truncate(1);
     image.state.generation += 1;
-    let cut = Cut {
-        bytes: cut_off.len() as u64,
-        ops: 2,
-        after: 0,
-        generation: 0,
-    };
+    let cut = first_cut(cut_off.len() as u64, 2);
     let from = image.state.clone();
     let added = image
         .composer

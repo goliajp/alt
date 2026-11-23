@@ -15,6 +15,7 @@ use std::sync::atomic::Ordering;
 use alt_oplog::{Op, OpLog, OpLogError};
 
 use super::v2_driver::{Run, holds, name};
+use super::v2_log::boot;
 use super::v2_model::Laid;
 
 /// Vouches for every op but the one of the payload `refused`, and notes
@@ -193,6 +194,37 @@ impl Run {
         ));
         let mut file = fs::OpenOptions::new().append(true).open(&path).unwrap();
         file.write_all(&torn).unwrap();
+    }
+
+    /// The machine goes down: the handles are gone, and of what lies past
+    /// where the log is synced a part may be.
+    fn reboot(&mut self) {
+        self.handles.clear();
+        let path = self.path().join("log");
+        let len = fs::metadata(&path).unwrap().len();
+        let from = self.model.fsynced.max(64);
+        let lost = match self.rng.below(4) {
+            0 if len > from => {
+                let kept = from + self.rng.below(len - from + 1);
+                let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+                file.set_len(kept).unwrap();
+                format!("the file ends at {kept}")
+            }
+            1 if len > from => {
+                let start = from + self.rng.below(len - from);
+                let end = start + 1 + self.rng.below(len - start);
+                let mut bytes = fs::read(&path).unwrap();
+                bytes[start as usize..end as usize].fill(0);
+                fs::write(&path, bytes).unwrap();
+                format!("{start}..{end} is zeros")
+            }
+            _ => "nothing is lost".to_owned(),
+        };
+        let log = self.log();
+        self.model.rebooted(&log);
+        boot(self.model.boot);
+        self.trace
+            .push(format!("boot {} of {len} bytes: {lost}", self.model.boot));
     }
 
     fn step(&mut self) {

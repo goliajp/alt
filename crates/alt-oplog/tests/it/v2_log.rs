@@ -10,6 +10,8 @@ use alt_oplog::v2::scan::{Stop, Walk};
 use alt_oplog::v2::state::State;
 use alt_oplog::{Anchor, Meta, OpLog, OpLogError, ROOT};
 
+use super::v2_image::first_cut;
+
 /// A new version 2 log with blocks of 4 KiB.
 pub fn new_log(dir: &Path) -> OpLog {
     alt_oplog::v2::create_with(dir, 12).unwrap();
@@ -183,13 +185,8 @@ fn a_torn_tail_is_passed_over_and_cut_off_by_the_next_append_which_says_so() {
         let (all, state) = frames(dir.path());
         let said = all.iter().find(|frame| frame.0 == whole).unwrap();
         let bytes = torn - whole;
-        let cut = Cut {
-            bytes,
-            ops: 0,
-            after: 0,
-            generation: 0,
-        };
-        assert_eq!((said.2, said.3), (KIND_CHECKPOINT, Some(cut)));
+        let cut = Some(first_cut(bytes, 0));
+        assert_eq!((said.2, said.3), (KIND_CHECKPOINT, cut));
         assert_eq!((state.generation, state.seq), (1, 3));
         OpLog::open(dir.path()).unwrap().verify().unwrap();
     }

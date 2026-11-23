@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::Path;
 
-use alt_oplog::v2::frame::{Cut, KIND_CHECKPOINT};
+use alt_oplog::v2::frame::KIND_CHECKPOINT;
 use alt_oplog::{Anchor, Op, OpLog, OpLogError, Unconfirmed};
 
 use super::v2_log::{boot, file_len, frames, grow, new_log};
@@ -65,13 +65,7 @@ fn a_writer_cuts_from_the_first_op_another_boot_left_that_names_what_is_not_stor
     let last = all.last().unwrap();
     let bytes = len - found.at;
     assert_eq!((last.0, last.2), (found.at, KIND_CHECKPOINT));
-    let first = Cut {
-        bytes,
-        ops: 2,
-        after: 0,
-        generation: 0,
-    };
-    assert_eq!(last.3, Some(first));
+    assert_eq!(last.3, Some(super::v2_image::first_cut(bytes, 2)));
     assert_eq!((state.generation, state.seq), (1, 4));
 
     // nothing more to look at, by this handle or the next of this boot

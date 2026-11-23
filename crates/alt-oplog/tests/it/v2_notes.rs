@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use alt_oplog::{Meta, Op, OpLog, OpLogError};
 
 use super::v2_bounds::stage;
-use super::v2_fields::tail;
 use super::v2_log::{boot, file_len, grow, new_log};
+use super::v2_note_fields::tail;
 
 fn noted(dir: &Path) -> Vec<u8> {
     fs::read(dir.join("tail")).unwrap()

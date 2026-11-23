@@ -1,7 +1,6 @@
 //! Handles on one version 2 log, driven step by step and held after each
 //! step to what the file and the driver know (`v2_model`).
 
-use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,7 +17,6 @@ type Calls = Arc<Mutex<Vec<(Vec<Vec<u8>>, bool)>>>;
 pub struct Handle {
     pub log: OpLog,
     pub read_only: bool,
-    /// of a handle that leaves its fsyncs to a sink
     pub sink: Option<OpLogSink>,
 }
 
@@ -31,7 +29,6 @@ pub struct Run {
     /// whoever syncs what ops name fails while this is set
     pub refuses: Arc<AtomicBool>,
     appended: u64,
-    /// the last cut the log told of after the step before
     cut: (u32, u64),
     /// the cut of this step died before its checkpoint was synced
     pub unsynced_cut: bool,
@@ -152,8 +149,7 @@ impl Run {
     }
 
     /// What a call on handle `index` came to: nothing where it was told
-    /// its ops were cut, after which it reads the log anew, and where it
-    /// failed for a reason the step gave it (`may_fail`).
+    /// its ops were cut (it then reads anew) or failed as `may_fail` allows.
     pub fn took<T>(
         &mut self,
         index: usize,
@@ -300,36 +296,5 @@ impl Run {
             assert!(ops.len() == log.ops.len() || fresh.passed_over());
             fresh.verify().expect("the log holds to the full check");
         }
-    }
-
-    /// The machine goes down: the handles are gone, and of what lies past
-    /// where the log is synced a part may be.
-    pub fn reboot(&mut self) {
-        self.handles.clear();
-        let path = self.path().join("log");
-        let len = fs::metadata(&path).unwrap().len();
-        let from = self.model.fsynced.max(64);
-        let lost = match self.rng.below(4) {
-            0 if len > from => {
-                let kept = from + self.rng.below(len - from + 1);
-                let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
-                file.set_len(kept).unwrap();
-                format!("the file ends at {kept}")
-            }
-            1 if len > from => {
-                let start = from + self.rng.below(len - from);
-                let end = start + 1 + self.rng.below(len - start);
-                let mut bytes = fs::read(&path).unwrap();
-                bytes[start as usize..end as usize].fill(0);
-                fs::write(&path, bytes).unwrap();
-                format!("{start}..{end} is zeros")
-            }
-            _ => "nothing is lost".to_owned(),
-        };
-        let log = self.log();
-        self.model.rebooted(&log);
-        boot(self.model.boot);
-        self.trace
-            .push(format!("boot {} of {len} bytes: {lost}", self.model.boot));
     }
 }
