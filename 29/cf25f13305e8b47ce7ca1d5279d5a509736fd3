@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say how the server takes the address of a caller, receives bodies and ends requests that ran out of time
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
