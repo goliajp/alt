@@ -170,7 +170,8 @@ impl Log {
             ops: discarded.ops.len() as u32,
         };
         let mut state = self.state.clone();
-        state.generation += 1;
+        let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
+        state.generation = state.generation.checked_add(1).ok_or(cut_before)?;
         let bytes = self.composer().checkpoint(&mut state, Some(cut))?;
         self.put(&bytes, state)?;
         self.file.sync_all()?;

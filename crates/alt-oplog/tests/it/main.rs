@@ -1,5 +1,6 @@
 //! Single integration-test binary for alt-oplog.
 
+mod counted;
 mod left_unsynced;
 mod lost;
 mod marker;
@@ -14,6 +15,7 @@ mod synced_writers;
 mod unconfirmed;
 mod v2_bounds;
 mod v2_features;
+mod v2_fields;
 mod v2_format;
 mod v2_image;
 mod v2_log;

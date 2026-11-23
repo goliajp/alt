@@ -21,6 +21,7 @@ pub mod scan;
 mod since;
 mod sink;
 pub mod state;
+mod stream;
 mod sync;
 mod tail;
 

@@ -188,15 +188,16 @@ impl Layout {
     }
 
     /// Where a frame of `len` bytes that starts at `at` ends in the file,
-    /// the block headers it runs across counted.
-    pub fn end_of(&self, at: u64, len: u64) -> u64 {
+    /// the block headers it runs across counted; `None` for a place no
+    /// file reaches.
+    pub fn end_of(&self, at: u64, len: u64) -> Option<u64> {
         let room = self.room(at);
         if len <= room {
-            return at + len;
+            return at.checked_add(len);
         }
         let each = self.block - BLOCK_HEADER_LEN as u64;
-        let rest = len - room;
-        at + len + rest.div_ceil(each) * BLOCK_HEADER_LEN as u64
+        let headers = (len - room).div_ceil(each) * BLOCK_HEADER_LEN as u64;
+        at.checked_add(len)?.checked_add(headers)
     }
 
     /// Appends to `out` the bytes of `frame` as they lie in the file from
@@ -256,8 +257,9 @@ impl Layout {
         at: u64,
         len: u64,
     ) -> Option<(Cow<'a, [u8]>, u64)> {
-        let end = self.end_of(at, len);
-        let held = data.get(at.checked_sub(base)? as usize..(end - base) as usize)?;
+        let end = self.end_of(at, len)?;
+        let from = usize::try_from(at.checked_sub(base)?).ok()?;
+        let held = data.get(from..usize::try_from(end - base).ok()?)?;
         let room = self.room(at);
         if len <= room {
             return Some((Cow::Borrowed(held), end));

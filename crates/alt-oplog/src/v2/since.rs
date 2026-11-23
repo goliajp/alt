@@ -4,41 +4,93 @@
 
 use std::borrow::Cow;
 
-use crate::v2::block::{BLOCK_HEADER_LEN, FILE_HEADER_LEN};
-use crate::v2::frame::{HEADER_LEN, KIND_OP, len_of};
+use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, FILE_HEADER_LEN};
+use crate::v2::frame::{HEADER_LEN, KIND_OP, View, len_of};
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
-use crate::v2::scan::{Stop, Walk, read_frame};
+use crate::v2::scan::{Stop, checkpoint_at, read_frame};
 use crate::v2::state::State;
+use crate::v2::stream::walk_file;
 use crate::{Anchor, Op, OpLogError};
 
 impl Log {
+    /// The generation the frame at `at` was written under, in a log that
+    /// was cut. The headers of its block and of the next one tell when
+    /// the log was not cut in between; otherwise the frames of the block
+    /// do, read from its first one on. `None` where they do not read.
+    fn generation_at(&self, at: u64) -> Result<Option<u32>, OpLogError> {
+        let source = self.source();
+        let mut read = |at: u64, len: usize| source.at(at, len);
+        let (block, limit) = (self.layout.block, self.state.end);
+        let start = at / block * block;
+        let header = |at: u64| -> std::io::Result<Option<BlockHeader>> {
+            let bytes = source.at(at, BLOCK_HEADER_LEN)?;
+            Ok(self.layout.decode_header(&bytes, at))
+        };
+        let (low, mut state) = match start {
+            0 => (0, State::empty()),
+            _ => {
+                let Some(opened) = header(start)? else {
+                    return Ok(None);
+                };
+                let first = start + opened.first as u64;
+                let Some(first) = checkpoint_at(&self.layout, limit, first, &mut read)? else {
+                    return Ok(None);
+                };
+                (opened.generation, first.state)
+            }
+        };
+        let next = start + block;
+        let high = match next + BLOCK_HEADER_LEN as u64 <= limit {
+            true => header(next)?.map(|header| header.generation),
+            false => Some(self.state.generation),
+        };
+        if high == Some(low) || state.last == at {
+            return Ok(Some(state.generation.max(low)));
+        }
+        if state.end > at {
+            return Ok(None);
+        }
+        let each = &mut |_: u64, _: u64, _: &View| Ok(());
+        walk_file(&mut read, &self.layout, &mut state, at, false, each)?;
+        Ok((state.end == at).then_some(state.generation))
+    }
+
     /// The op whose frame starts at `at`, with the frame it names as the
     /// ref transaction before it: `None` where no op frame reads there. A
     /// frame from before a cut reads under an earlier generation.
     fn op_at(&self, at: u64) -> Result<Option<(Op, Option<u64>)>, OpLogError> {
         let limit = self.state.end;
-        let reach = (HEADER_LEN + BLOCK_HEADER_LEN).min(limit.saturating_sub(at) as usize);
+        let left = limit
+            .checked_sub(at)
+            .filter(|left| *left >= HEADER_LEN as u64);
+        let Some(left) = left else {
+            return Ok(None);
+        };
+        let reach = left.min((HEADER_LEN + BLOCK_HEADER_LEN) as u64) as usize;
         let start = self.source().at(at, reach)?;
         let header = self.layout.lift_start(&start, at, at, HEADER_LEN);
         let len = header.and_then(|header| len_of(header.first_chunk()?));
-        let Some(end) = len.map(|len| self.layout.end_of(at, len)) else {
+        let end = len.and_then(|len| self.layout.end_of(at, len));
+        let Some((len, end)) = len.zip(end).filter(|(_, end)| *end <= limit) else {
             return Ok(None);
         };
-        if end > limit {
-            return Ok(None);
-        }
         let data = self.source().at(at, (end - at) as usize)?;
-        let Some((bytes, _)) = self.layout.lift(&data, at, at, len.unwrap()) else {
+        let Some((bytes, _)) = self.layout.lift(&data, at, at, len) else {
             return Ok(None);
         };
-        for generation in (0..=self.state.generation).rev() {
-            if let Some(view) = read_frame(&self.layout, &bytes, generation) {
-                let op = (view.head.kind == KIND_OP).then(|| op_of(at, end, &view));
-                return Ok(op.transpose()?.map(|op| (op, view.ext.linked)));
-            }
+        let latest = self.state.generation;
+        let mut view = read_frame(&self.layout, &bytes, latest);
+        if view.is_none()
+            && latest != 0
+            && let Some(earlier) = self.generation_at(at)?
+        {
+            view = read_frame(&self.layout, &bytes, earlier);
         }
-        Ok(None)
+        let Some(view) = view.filter(|view| view.head.kind == KIND_OP) else {
+            return Ok(None);
+        };
+        Ok(Some((op_of(at, end, &view)?, view.ext.linked)))
     }
 
     /// Begins after `anchor` when the log holds the anchor's op where the
@@ -94,21 +146,25 @@ impl Log {
     /// Reads the log from its first frame to the last one held, as a full
     /// check does when `strict`, and gives its ops.
     fn read_through(&self, strict: bool) -> Result<Vec<Op>, OpLogError> {
-        let data = self.source().at(0, self.state.end as usize)?;
-        let walk = Walk {
-            layout: self.layout,
-            data: &data,
-            base: 0,
-            strict,
-        };
+        let source = self.source();
+        let mut read = |at: u64, len: usize| source.at(at, len);
         let mut state = State::empty();
         let mut ops = Vec::new();
-        let stop = walk.run(&mut state, &mut |at, end, view| {
+        let mut each = |at: u64, end: u64, view: &View| {
             if view.head.kind == KIND_OP {
                 ops.push(op_of(at, end, view)?);
             }
             Ok(())
-        })?;
+        };
+        let limit = self.state.end;
+        let stop = walk_file(
+            &mut read,
+            &self.layout,
+            &mut state,
+            limit,
+            strict,
+            &mut each,
+        )?;
         if stop != Stop::End || state != self.state {
             return Err(OpLogError::Format(
                 "the oplog does not lead to where it ends",

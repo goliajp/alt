@@ -21,6 +21,7 @@ use crate::v2::frame::{KIND_OP, View};
 use crate::v2::salvage::salvage;
 use crate::v2::scan::{Located, Stop, Walk, locate};
 use crate::v2::state::State;
+use crate::v2::stream::{ReadAt, walk_file};
 use crate::v2::tail::Tail;
 use crate::{Framed, Op, OpLogError};
 
@@ -93,35 +94,77 @@ fn held(source: &Source, window: &(u64, Vec<u8>), at: u64, len: usize) -> std::i
     }
 }
 
-/// Reads on from `located` to byte `size` of the file.
+/// Reads on from `located` to byte `size` of the file: out of `window`
+/// where that holds the bytes from there on, and a stretch of the file
+/// at a time otherwise.
 fn pass(
     source: &Source,
     layout: &Layout,
     located: &Located,
     size: u64,
-    window: &mut (u64, Vec<u8>),
+    window: &(u64, Vec<u8>),
 ) -> Result<(State, Vec<Op>, Stop), OpLogError> {
     let mut state = located.state.clone();
-    if state.end < window.0 {
-        *window = (
-            state.end,
-            source.at(state.end, (size - state.end) as usize)?,
-        );
-    }
-    let walk = Walk {
-        layout: *layout,
-        data: &window.1,
-        base: window.0,
-        strict: false,
-    };
     let mut ops = Vec::new();
-    let stop = walk.run(&mut state, &mut |at, end, view| {
+    let mut each = |at: u64, end: u64, view: &View| {
         if view.head.kind == KIND_OP {
             ops.push(op_of(at, end, view)?);
         }
         Ok(())
-    })?;
+    };
+    let stop = match state.end >= window.0 {
+        true => {
+            let walk = Walk {
+                layout: *layout,
+                data: &window.1,
+                base: window.0,
+                strict: false,
+            };
+            walk.run(&mut state, &mut each)?
+        }
+        false => {
+            let mut read = |at: u64, len: usize| source.at(at, len);
+            walk_file(&mut read, layout, &mut state, size, false, &mut each)?
+        }
+    };
     Ok((state, ops, stop))
+}
+
+/// Whether what `tail` says is said of the log as this read found it.
+fn told_of(tail: &Tail, state: &State, size: u64, window: &(u64, Vec<u8>)) -> bool {
+    // the bytes before its boundary, where this read holds them
+    let closes = tail
+        .synced
+        .checked_sub(4)
+        .and_then(|at| at.checked_sub(window.0));
+    let held = closes.and_then(|at| window.1.get(at as usize..)?.first_chunk::<4>());
+    tail.generation == state.generation
+        && tail.judged <= size
+        && held.is_none_or(|held| *held == tail.closes || tail.closes == [0; 4])
+}
+
+impl Loaded {
+    /// Takes what follows the last frame, which is no frame, for what an
+    /// append left unfinished or for damage: by whether the log is
+    /// synced beyond where it starts. Whether damage was read past.
+    fn stopped(
+        &mut self,
+        read: &mut ReadAt,
+        layout: &Layout,
+        size: u64,
+    ) -> Result<bool, OpLogError> {
+        let (end, generation) = (self.state.end, self.state.generation);
+        let found = salvage(read, layout, end, size, generation)?;
+        if end >= self.synced.max(found.claim) {
+            self.passed = true;
+            return Ok(false);
+        }
+        if !crate::settle::reading_past_damage() {
+            return Err(OpLogError::Format("oplog record corrupt"));
+        }
+        self.clamped = true;
+        Ok(true)
+    }
 }
 
 /// Reads the log `file` of `dir` as an open does; from its first frame
@@ -138,44 +181,34 @@ pub(crate) fn load(
     let clamped = size < meta.len();
     let tail = Tail::read(dir, boot);
     // what a reader of this boot found to be no part of the log
-    let mut hidden = None;
-    if let Some(tail) = &tail
-        && tail.hidden == meta.len()
-        && tail.judged < size
-    {
-        (size, hidden) = (tail.judged, Some(meta.len()));
-    }
+    let hidden = tail.filter(|tail| tail.hidden == meta.len() && tail.judged < size);
+    let hidden = hidden.map(|tail| {
+        size = tail.judged;
+        meta.len()
+    });
     let size = size.max(FILE_HEADER_LEN as u64);
     // one read of the last block serves the search for its checkpoint and
     // the frames after it
     let from = match all {
-        true => 0,
+        true => size,
         false => (size - 1) / layout.block * layout.block,
     };
-    let mut window = (from, source.at(from, (size - from) as usize)?);
+    let window = (from, source.at(from, (size - from) as usize)?);
+    let mut read = |at: u64, len: usize| held(source, &window, at, len);
     let mut located = Located::empty();
     if !all {
-        let mut read = |at: u64, len: usize| held(source, &window, at, len);
         located = locate(layout, size, &mut read)?;
     }
-    let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &mut window)?;
-    let tail = tail.filter(|tail| {
-        // the bytes before its boundary, where this read holds them
-        let closes = tail.synced.checked_sub(4 + window.0).map(|at| at as usize);
-        let held = closes.and_then(|at| window.1.get(at..at + 4));
-        tail.generation == state.generation
-            && tail.judged <= size
-            && held.is_none_or(|held| held == tail.closes || tail.closes == [0; 4])
-    });
+    let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &window)?;
+    let tail = tail.filter(|tail| told_of(tail, &state, size, &window));
     let by_boot = located.state.checkpoint != 0 && boot == Some(located.boot);
     let by_tail = tail.is_some_and(|tail| located.state.end <= tail.judged);
     let fresh = by_boot || by_tail;
     if !fresh && located.state.checkpoint != 0 && located.state.end > state.synced {
         // the machine went down since it was written: begin within what
         // is synced and read through all that follows
-        let mut read = |at: u64, len: usize| source.at(at, len);
         located = locate(layout, state.synced.max(FILE_HEADER_LEN as u64), &mut read)?;
-        (state, ops, stop) = pass(source, layout, &located, size, &mut window)?;
+        (state, ops, stop) = pass(source, layout, &located, size, &window)?;
     }
     let mut loaded = Loaded {
         closes: [0; 4],
@@ -196,21 +229,11 @@ pub(crate) fn load(
     };
     if loaded.state.last != 0 {
         // the window may begin where that frame ends, when none after it reads
-        let closes = held(source, &window, loaded.state.end - 4, 4)?;
+        let closes = read(loaded.state.end - 4, 4)?;
         loaded.closes.copy_from_slice(&closes);
     }
-    if stop == Stop::Unread {
-        let rest = &window.1[(loaded.state.end - window.0) as usize..];
-        let found = salvage(layout, rest, loaded.state.end, loaded.state.generation);
-        if loaded.state.end < loaded.synced.max(found.claim) {
-            if !crate::settle::reading_past_damage() {
-                return Err(OpLogError::Format("oplog record corrupt"));
-            }
-            crate::settle::note_damage(&dir.join("durable"), loaded.state.end, size);
-            loaded.clamped = true;
-        } else {
-            loaded.passed = true;
-        }
+    if stop == Stop::Unread && loaded.stopped(&mut read, layout, size)? {
+        crate::settle::note_damage(&dir.join("durable"), loaded.state.end, size);
     }
     Ok(loaded)
 }

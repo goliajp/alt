@@ -83,6 +83,25 @@ impl Checkpoint {
         OpId(self.head)
     }
 
+    /// Whether every place it names lies before `at` as the places of a
+    /// log do that a checkpoint at `at` stands for.
+    pub fn precedes(&self, at: u64) -> bool {
+        let rows = self.workspaces.iter().all(|row| {
+            row.last <= self.head_at
+                && row.undoable <= row.last
+                && row.index_at <= row.last
+                && row.step <= row.last
+        });
+        let sorted = self.workspaces.windows(2).all(|two| two[0].id < two[1].id);
+        rows && sorted
+            && self.head_at <= self.head_end
+            && self.head_end <= at
+            && self.synced <= at
+            && self.migrated <= at
+            && self.linked_at <= self.head_at
+            && self.linked <= self.seq
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(FIXED_LEN + self.workspaces.len() * WORKSPACE_LEN);
         out.push(VERSION);

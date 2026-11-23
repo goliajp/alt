@@ -21,6 +21,8 @@ pub struct New<'a> {
     pub linked: bool,
 }
 
+const TOO_MANY: OpLogError = OpLogError::Format("the oplog holds as many ops as it can count");
+
 pub struct Composer {
     pub layout: Layout,
     /// the boot the checkpoints are written in
@@ -138,12 +140,13 @@ impl Composer {
             prev_in_workspace: if op { before } else { 0 },
             synced: state.synced.max(self.synced),
             workspace: new.workspace,
-            seq: state.seq + op as u64,
+            seq: state.seq.checked_add(op as u64).ok_or(TOO_MANY)?,
         };
         let ext = self.ext(state, new);
         let seed = Seed::new(&self.layout.id, state.generation);
         let bytes = encode(&seed, &head, &ext, new.body, new.op.as_ref())?;
         let end = self.layout.end_of(at, bytes.len() as u64);
+        let end = end.ok_or(OpLogError::TooLarge(bytes.len()))?;
         self.layout
             .lay(at, &bytes, state.checkpoint, state.generation, out);
         let view = View {

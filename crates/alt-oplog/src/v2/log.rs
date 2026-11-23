@@ -211,9 +211,10 @@ impl Log {
     /// file.
     fn past(&self) -> Result<(Salvaged, u64), OpLogError> {
         let len = self.file.metadata()?.len();
-        let rest = len.saturating_sub(self.state.end) as usize;
-        let rest = self.source().at(self.state.end, rest)?;
-        let found = salvage(&self.layout, &rest, self.state.end, self.state.generation);
+        let source = self.source();
+        let mut read = |at: u64, len: usize| source.at(at, len);
+        let (end, generation) = (self.state.end, self.state.generation);
+        let found = salvage(&mut read, &self.layout, end, len, generation)?;
         Ok((found, len))
     }
 

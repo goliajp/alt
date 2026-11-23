@@ -101,7 +101,7 @@ impl State {
         let op = head.kind == KIND_OP;
         let before = self.workspace(&head.workspace).map_or(0, |row| row.last);
         head.prev == self.last
-            && head.seq == self.seq + op as u64
+            && Some(head.seq) == self.seq.checked_add(op as u64)
             && head.synced <= at
             && head.prev_in_workspace == if op { before } else { 0 }
             && view
@@ -149,7 +149,7 @@ impl State {
 
     fn take_op(&mut self, at: u64, view: &View) {
         if view.ext.linked.is_some() {
-            (self.linked_at, self.linked) = (at, self.linked + 1);
+            (self.linked_at, self.linked) = (at, self.linked.saturating_add(1));
         }
         let id = view.head.workspace;
         if id == [0; 8] {

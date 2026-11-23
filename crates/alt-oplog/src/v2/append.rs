@@ -5,12 +5,14 @@ use std::os::unix::fs::FileExt;
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::scan::encode_body;
 use crate::v2::compose::{Composer, New};
-use crate::v2::frame::{Ext, KIND_OP, KIND_RECEIPT, REQUIRED, UNDOABLE, UNSYNCED};
+use crate::v2::frame::{Ext, KIND_OP, KIND_RECEIPT, REQUIRED, UNDOABLE, UNSYNCED, View};
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
 use crate::v2::receipt::Receipt;
-use crate::v2::salvage::salvage;
-use crate::v2::scan::{Stop, Walk};
+use crate::v2::salvage::{Salvaged, salvage};
+use crate::v2::scan::Stop;
+use crate::v2::state::State;
+use crate::v2::stream::walk_file;
 use crate::v2::tail::Tail;
 use crate::{Discarded, Framed, Meta, Op, OpId, OpLogError, relaxed_durability};
 
@@ -152,11 +154,7 @@ impl Log {
     }
 
     /// Writes `bytes` where the log ends; `state` is the log after them.
-    pub(super) fn put(
-        &mut self,
-        bytes: &[u8],
-        state: crate::v2::state::State,
-    ) -> Result<(), OpLogError> {
+    pub(super) fn put(&mut self, bytes: &[u8], state: State) -> Result<(), OpLogError> {
         self.file.write_all_at(bytes, self.state.end)?;
         self.closes.copy_from_slice(&bytes[bytes.len() - 4..]);
         self.state = state;
@@ -194,6 +192,31 @@ impl Log {
         Ok(self.source().at(self.state.end - 4, 4)? == self.closes)
     }
 
+    /// The log through the frames that follow the ones held in a file of
+    /// `size` bytes, their ops, and, where what follows them is no frame,
+    /// what still reads after it.
+    fn read_past(&self, size: u64) -> Result<(State, Vec<Op>, Option<Salvaged>), OpLogError> {
+        let source = self.source();
+        let mut read = |at: u64, len: usize| source.at(at, len);
+        let mut state = self.state.clone();
+        let mut added = Vec::new();
+        let mut each = |at: u64, end: u64, view: &View| {
+            if view.head.kind == KIND_OP {
+                added.push(op_of(at, end, view)?);
+            }
+            Ok(())
+        };
+        let stop = walk_file(&mut read, &self.layout, &mut state, size, false, &mut each)?;
+        let found = match stop {
+            Stop::Unread => {
+                let (end, generation) = (state.end, state.generation);
+                Some(salvage(&mut read, &self.layout, end, size, generation)?)
+            }
+            Stop::End => None,
+        };
+        Ok((state, added, found))
+    }
+
     /// Takes in the frames past the ones held, under a lock on the log.
     /// What follows the last of them that is no frame is cut off the file
     /// when `cut`, under the exclusive lock, and stays in it otherwise.
@@ -205,46 +228,27 @@ impl Log {
         if size <= self.state.end || (!cut && self.hidden == Some(size)) {
             return Ok(());
         }
-        let base = self.state.end;
-        let data = self.source().at(base, (size - base) as usize)?;
-        let walk = Walk {
-            layout: self.layout,
-            data: &data,
-            base,
-            strict: false,
-        };
-        let mut state = self.state.clone();
-        let mut added = Vec::new();
-        let stop = walk.run(&mut state, &mut |at, end, view| {
-            if view.head.kind == KIND_OP {
-                added.push(op_of(at, end, view)?);
-            }
-            Ok(())
-        })?;
-        let rest = &data[(state.end - base) as usize..];
-        let found = (stop == Stop::Unread)
-            .then(|| salvage(&self.layout, rest, state.end, state.generation));
+        let (state, added, found) = self.read_past(size)?;
         let synced = self.tail().map_or(0, |tail| tail.synced);
         let claim = found.as_ref().map_or(0, |found| found.claim);
-        if stop == Stop::Unread && state.end < synced.max(self.synced).max(state.synced).max(claim)
-        {
+        if found.is_some() && state.end < synced.max(self.synced).max(state.synced).max(claim) {
             return Err(OpLogError::Format("oplog record corrupt"));
         }
-        if state.end > base {
-            let at = (state.end - 4 - base) as usize;
-            self.closes.copy_from_slice(&data[at..at + 4]);
+        if state.end > self.state.end {
+            let closes = self.source().at(state.end - 4, 4)?;
+            self.closes.copy_from_slice(&closes);
         }
         self.state = state;
         if let Some(full) = self.full.get_mut() {
             full.extend_from_slice(&added);
         }
         self.ops.extend(added);
-        self.passed = !cut && stop == Stop::Unread;
+        self.passed = !cut && found.is_some();
         if let Some(found) = found.filter(|_| cut) {
             let discarded = Discarded {
                 from: self.state.end,
                 to: size,
-                unread: rest.len() as u64 - found.covered,
+                unread: (size - self.state.end).saturating_sub(found.covered),
                 ops: found.ops,
             };
             self.cut_end(discarded)?;
