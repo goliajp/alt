@@ -12,6 +12,10 @@ use crate::v2::stream::walk_file;
 use crate::v2::tail::Tail;
 use crate::{Discarded, Op, OpLogError};
 
+/// The log through frames read past the ones a handle holds, their ops,
+/// and what still reads after them where what follows is no frame.
+type Past = (State, Vec<Op>, Option<Salvaged>);
+
 impl Log {
     pub fn refresh(&mut self) -> Result<(), OpLogError> {
         self.locked(|log| log.catch_up())?
@@ -47,7 +51,7 @@ impl Log {
     /// The log through the frames that follow the ones held in a file of
     /// `size` bytes, their ops, and, where what follows them is no frame,
     /// what still reads after it.
-    fn read_past(&self, size: u64) -> Result<(State, Vec<Op>, Option<Salvaged>), OpLogError> {
+    fn read_past(&self, size: u64) -> Result<Past, OpLogError> {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
         let mut state = self.state.clone();
@@ -71,15 +75,11 @@ impl Log {
         Ok((state, added, found))
     }
 
-    /// Takes in the frames that follow the ones held in a file of `size`
-    /// bytes, and gives what still reads past them where what follows is
-    /// no frame; `noted` is what `tail` says.
-    fn take_past(
-        &mut self,
-        size: u64,
-        noted: Option<Tail>,
-    ) -> Result<Option<Salvaged>, OpLogError> {
-        let (state, added, found) = self.read_past(size)?;
+    /// Takes in the frames `past` holds, which follow the ones held, and
+    /// gives what still reads after them where what follows is no frame;
+    /// `noted` is what `tail` says.
+    fn take_in(&mut self, past: Past, noted: Option<Tail>) -> Result<Option<Salvaged>, OpLogError> {
+        let (state, added, found) = past;
         let synced = noted.map_or(0, |tail| tail.synced);
         let claim = found.as_ref().map_or(0, |found| found.claim);
         if found.is_some() && state.end < synced.max(self.synced).max(state.synced).max(claim) {
@@ -95,6 +95,34 @@ impl Log {
         }
         self.ops.extend(added);
         Ok(found)
+    }
+
+    /// Where the log ends for a reader in a file of `size` bytes whose
+    /// end `tail` hides from it, and otherwise what it read to find that
+    /// the note holds no longer. A reader's note is of the log of the
+    /// generation this handle holds. A cut that was begun is noted of
+    /// the log before it, which is what this handle holds whether or not
+    /// the cut was made since: when it was, its checkpoint is among the
+    /// frames that follow, and with it the log is of the generation
+    /// noted, in a file of any length, also one grown back to the length
+    /// the cut found.
+    fn hidden_from(
+        &self,
+        noted: Option<Tail>,
+        size: u64,
+    ) -> Result<(Option<u64>, Option<Past>), OpLogError> {
+        let (generation, end) = (self.state.generation, self.state.end);
+        let hides = |tail: &Tail| tail.hides(size, generation) && tail.ends >= end;
+        let Some(tail) = noted.filter(hides) else {
+            return Ok((None, None));
+        };
+        if tail.cutting {
+            let past = self.read_past(size)?;
+            if past.0.generation >= tail.generation {
+                return Ok((None, Some(past)));
+            }
+        }
+        Ok((Some(tail.ends), None))
     }
 
     /// Forgets in `tail` a cut it notes as begun: for a writer that holds
@@ -128,15 +156,18 @@ impl Log {
             return Err(OpLogError::CutBack);
         }
         // to a reader the log ends where `tail` says it does in a file of
-        // this length, while that is said of the log this handle holds
-        let (generation, end) = (self.state.generation, self.state.end);
-        let hides = |tail: &Tail| !cut && tail.hides(size, generation) && tail.ends >= end;
-        let ends = noted.filter(hides).map(|tail| tail.ends);
+        // this length, while that is said of the log as it is
+        let end = self.state.end;
+        let (ends, ahead) = match cut {
+            true => (None, None),
+            false => self.hidden_from(noted, size)?,
+        };
         self.hidden = ends.map(|_| size);
         size = ends.unwrap_or(size);
-        let found = match size > end {
-            true => self.take_past(size, noted)?,
-            false => None,
+        let found = match ahead {
+            Some(past) => self.take_in(past, noted)?,
+            None if size > end => self.take_in(self.read_past(size)?, noted)?,
+            None => None,
         };
         // a cut is said in a frame appended where the log is cut
         let cuts = cut && self.knows_all()?;

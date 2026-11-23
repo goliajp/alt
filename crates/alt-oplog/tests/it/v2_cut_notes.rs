@@ -205,3 +205,39 @@ fn a_handle_told_where_the_log_ends_reads_on_once_the_log_is_cut_and_grown_back(
         assert_eq!(held.ops().unwrap().len(), 4);
     }
 }
+
+#[test]
+fn a_handle_from_before_a_cut_reads_on_in_a_file_grown_back_whatever_is_noted_of_the_cut() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    drop(log);
+    let path = dir.path().join("log");
+    let mut torn = fs::read(&path).unwrap();
+    torn.extend_from_slice(&[0xa5; 700]);
+    fs::write(&path, &torn).unwrap();
+    // a handle that holds the log as it is before the cut
+    let mut held = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert_eq!((held.len(), held.passed_over()), (2, true));
+    let mut writer = OpLog::open(dir.path()).unwrap();
+    alt_oplog::v2::cut_dies_after(Some(4));
+    assert!(writer.refresh().is_err());
+    alt_oplog::v2::cut_dies_after(None);
+    drop(writer);
+    let begun = fs::read(dir.path().join("tail")).unwrap();
+    assert_eq!(noted(dir.path()), (true, torn.len() as u64));
+
+    let mut next = OpLog::open(dir.path()).unwrap();
+    fill_to(&mut next, dir.path(), torn.len() as u64);
+    next.sync().unwrap();
+    // the note as the cut left it, had no writer forgotten it: the file
+    // is as long as it says, and the handle holds the log it speaks of
+    fs::write(dir.path().join("tail"), begun).unwrap();
+    assert_eq!(noted(dir.path()), (true, torn.len() as u64));
+    // the checkpoint of the cut lies where the note says the log ends
+    held.follow().unwrap();
+    assert_eq!((held.len(), held.passed_over()), (4, false));
+    let opened = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert_eq!((opened.len(), opened.passed_over()), (4, false));
+}
