@@ -22,6 +22,23 @@ use alt_remote_protocol::{DeploymentMode, ObjectFormat, Scope};
 use alt_repository_service::RepositorySnapshot;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Whether `error` is that of a read whose view could not be kept: a row it takes
+/// a share in, of its caller's credential or of the instance, was changed by another
+/// transaction after the read began.
+fn overtaken(error: &Error) -> bool {
+    matches!(error, Error::Database(error) if error.code() == Some("40001"))
+}
+
+/// Runs `read`, and once more where it was overtaken: begun again, it sees the
+/// change that overtook it. This is how a transaction under one view is meant to
+/// be used; a read that is overtaken a second time fails with that.
+pub(crate) fn twice<T>(mut read: impl FnMut() -> Result<T>) -> Result<T> {
+    match read() {
+        Err(error) if overtaken(&error) => read(),
+        other => other,
+    }
+}
+
 /// Begins a read, before the first statement of its transaction.
 pub(crate) fn begin(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
     if spec.deployment_mode == DeploymentMode::SelfHosted {
@@ -95,4 +112,34 @@ pub(crate) fn unread(
         approved_publications: BTreeSet::new(),
         writes_enabled: row.get(5),
     }))
+}
+
+/// The reads that are begun again where they were overtaken.
+impl crate::Store {
+    pub fn published_records(
+        &mut self,
+        credential: &crate::Credential,
+        scope: &Scope,
+        kind: alt_remote_protocol::RecordKind,
+        after: Option<&str>,
+        count: usize,
+    ) -> Result<Vec<alt_remote_protocol::RecordRoot>> {
+        twice(|| self.published_records_once(credential, scope, kind, after, count))
+    }
+
+    pub fn repository_info(
+        &mut self,
+        credential: &crate::Credential,
+        repository: &str,
+    ) -> Result<alt_remote_protocol::RepositoryInfo> {
+        twice(|| self.repository_info_once(credential, repository))
+    }
+
+    pub fn query(
+        &mut self,
+        credential: &crate::Credential,
+        key: &alt_remote_protocol::RequestKey,
+    ) -> Result<alt_remote_protocol::RequestObservation> {
+        twice(|| self.query_once(credential, key))
+    }
 }

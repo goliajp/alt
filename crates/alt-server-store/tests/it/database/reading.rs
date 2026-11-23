@@ -85,3 +85,47 @@ fn the_time_of_the_reads_of_a_repository() {
         println!("round {round}: 1000 reads in {:?}", began.elapsed());
     }
 }
+
+/// The credential a read is made with is changed by another transaction while the
+/// read is under way: the read waits for the change, is begun again, and is
+/// answered with what the change left. It does not fail for having been overtaken.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn a_read_overtaken_by_a_change_to_its_credential_is_begun_again() {
+    let mut f = Fixture::new();
+    let first = Payload::new("first", None);
+    first.publish_new(&mut f.store, &f.credential);
+    let mut holder = f.client();
+    let mut held = holder.transaction().unwrap();
+    let touched = held
+        .execute("UPDATE alt_credentials SET expires_at=expires_at", &[])
+        .unwrap();
+    assert!(touched >= 1);
+
+    let mut reader = f.reopen();
+    let (credential, key) = (f.credential.clone(), first.publication.key.clone());
+    let reading = std::thread::spawn(move || {
+        let info = reader
+            .repository_info(&credential, "repository")
+            .map(|info| info.refs.len());
+        let recorded = reader.query(&credential, &key);
+        let recorded = recorded.map(|seen| matches!(seen, RequestObservation::Recorded { .. }));
+        (
+            info.map_err(|e| format!("{e:?}")),
+            recorded.map_err(|e| format!("{e:?}")),
+        )
+    });
+    // the read has begun and waits for the row of its credential
+    let mut watcher = f.client();
+    let waiting = "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%alt_credentials%'";
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while watcher.query_one(waiting, &[]).unwrap().get::<_, i64>(0) == 0 {
+        assert!(
+            std::time::Instant::now() < until,
+            "the read never came to wait"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    held.commit().unwrap();
+    assert_eq!(reading.join().unwrap(), (Ok(1), Ok(true)));
+}

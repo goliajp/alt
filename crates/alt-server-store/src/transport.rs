@@ -6,7 +6,7 @@ use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
 impl Store {
-    pub fn published_records(
+    pub(crate) fn published_records_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -146,7 +146,7 @@ impl Store {
         tx.commit()?;
         Ok(value)
     }
-    pub fn repository_info(
+    pub(crate) fn repository_info_once(
         &mut self,
         credential: &Credential,
         repository: &str,

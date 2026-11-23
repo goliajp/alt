@@ -116,7 +116,7 @@ impl Store {
             return Ok(view);
         }
         // every reference: a complete view answers any filter
-        self.pack_view_locked(credential, repository)
+        crate::reading::twice(|| self.pack_view_locked(credential, repository))
     }
 
     /// The same decision as `pack_view_locked` from one statement and therefore one

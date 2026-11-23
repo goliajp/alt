@@ -123,7 +123,7 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(state)
     }
-    pub fn query(
+    pub(crate) fn query_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,

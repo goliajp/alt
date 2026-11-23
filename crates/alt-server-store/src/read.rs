@@ -145,6 +145,16 @@ impl Store {
         ttl_ms: u64,
         selection: Selection<'_>,
     ) -> Result<ReadSnapshot> {
+        let read = || self.read_snapshot_once(credential, repository, ttl_ms, selection);
+        crate::reading::twice(read)
+    }
+    fn read_snapshot_once(
+        &mut self,
+        credential: &Credential,
+        repository: &str,
+        ttl_ms: u64,
+        selection: Selection<'_>,
+    ) -> Result<ReadSnapshot> {
         if ttl_ms == 0 || ttl_ms > 3_600_000 {
             return Err(Error::Limit("read snapshot lifetime or object bound"));
         }
