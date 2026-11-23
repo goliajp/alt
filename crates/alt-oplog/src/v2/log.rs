@@ -8,7 +8,8 @@ use std::sync::OnceLock;
 use crate::lock::{lock_shared, unlock};
 use crate::read::read_at;
 use crate::v2::block::{FILE_HEADER_LEN, FileHeader, Layout};
-use crate::v2::open::{Loaded, Source, load, salvage};
+use crate::v2::open::{Loaded, Source, load};
+use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::sink::Deferred;
 use crate::v2::state::State;
 use crate::v2::tail::Tail;
@@ -208,7 +209,7 @@ impl Log {
 
     /// The frames that read past the ones held, with the length of the
     /// file.
-    fn past(&self) -> Result<(crate::v2::open::Salvaged, u64), OpLogError> {
+    fn past(&self) -> Result<(Salvaged, u64), OpLogError> {
         let len = self.file.metadata()?.len();
         let rest = len.saturating_sub(self.state.end) as usize;
         let rest = self.source().at(self.state.end, rest)?;

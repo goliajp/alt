@@ -16,6 +16,7 @@ pub mod frame;
 mod log;
 mod open;
 pub mod receipt;
+mod salvage;
 pub mod scan;
 mod since;
 mod sink;
