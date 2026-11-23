@@ -1,6 +1,6 @@
 mod references;
 
-use crate::store::{authorize, instance, now, repository_authority, snapshot, unsigned};
+use crate::store::{authorize, instance, now, repository_authority, unsigned};
 use crate::{Credential, Error, Result, Store};
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 use alt_pack_segment::SegmentSet;
@@ -149,8 +149,8 @@ impl Store {
             return Err(Error::Limit("read snapshot lifetime or object bound"));
         }
         let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let (spec, signing) = (&self.spec, &self.signing_key);
+        let current = crate::reading::open(&mut tx, spec, signing, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         let expires = now(&mut tx)?
             .checked_add(ttl_ms)

@@ -11,6 +11,7 @@ mod maintenance;
 mod pack_sweep;
 mod pack_view;
 mod provenance;
+mod reading;
 mod registration;
 mod schema_20;
 mod schema_21;

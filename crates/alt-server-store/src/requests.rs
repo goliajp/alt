@@ -2,7 +2,7 @@ use crate::Jsonb;
 pub(crate) use crate::committed::request_row;
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, DurableBytes, Error, Result, Store};
+use crate::{Credential, DurableBytes, Error, Result, Store, reading};
 use alt_remote_protocol::{
     ContentEntry, ContentKind, Manifest, Publication, RequestKey, RequestObservation, RequestState,
 };
@@ -130,8 +130,8 @@ impl Store {
     ) -> Result<RequestObservation> {
         key.validate()?;
         let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let (spec, signing) = (&self.spec, &self.signing_key);
+        let current = reading::open(&mut tx, spec, signing, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if key.scope.installation_id != self.spec.installation_id || auth.actor_id != key.actor_id {
             return Err(Error::Unauthorized);

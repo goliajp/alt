@@ -184,6 +184,7 @@ pub use cloud_login::CloudLoginClaim;
 
 mod client_credentials;
 mod device_login;
+mod reading;
 pub use client_credentials::*;
 pub use device_login::*;
 

@@ -1,7 +1,7 @@
 use crate::Jsonb;
 use crate::requests::{active, check_key, request_row, upload_request_row, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
+use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store, reading};
 use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
@@ -25,8 +25,8 @@ impl Store {
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
         let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let (spec, signing) = (&self.spec, &self.signing_key);
+        let current = reading::open(&mut tx, spec, signing, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
@@ -154,8 +154,7 @@ impl Store {
         let mut tx = self.client.transaction()?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let current = reading::open(&mut tx, &self.spec, &self.signing_key, repository)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         let result = RepositoryInfo {
             scope: current.scope,
