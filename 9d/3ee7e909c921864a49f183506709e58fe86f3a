@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: tell what became of a request without a lock on its row, which a change to it made fail under the view of a read
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/committed.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/tests/it/database/reading.rs
