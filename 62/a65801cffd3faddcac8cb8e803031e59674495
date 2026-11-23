@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: open the object store of a repository when it is first taken for reads
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
