@@ -222,9 +222,11 @@ impl Run {
         payload
     }
 
-    /// Takes in an op a handle appended and holds as its last, at `head`.
-    pub fn appended(&mut self, payload: Vec<u8>, meta: &Meta, head: Anchor) {
-        self.ledger.appended(&payload, meta, head);
+    /// Takes in an op `actor` had a handle append, which that handle
+    /// holds as its last, at `head`.
+    pub fn appended(&mut self, actor: &str, payload: Vec<u8>, meta: &Meta, head: Anchor) {
+        let log = (self.dir.path(), self.block);
+        self.ledger.appended(log, (actor, &payload), meta, head);
         self.model.written.insert(payload, self.model.boot);
         // it read the log to its end under the lock: a cut that was
         // begun and never came to the log is forgotten

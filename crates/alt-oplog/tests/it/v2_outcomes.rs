@@ -44,10 +44,15 @@ impl Run {
                 let handle = &mut self.handles[index];
                 let end = handle.log.appended_len();
                 let begun = self.ledger.begun.is_some_and(|at| at < end);
+                let held = self.ledger.holds(handle.log.anchor());
                 assert!(
-                    begun || !self.ledger.holds(handle.log.anchor()),
+                    begun || !held,
                     "handle {index} is told its ops were cut: the log holds them"
                 );
+                if held {
+                    let begun = &self.counts.cut_back_begun;
+                    begun.fetch_add(1, Ordering::Relaxed);
+                }
                 handle.log.reopen().expect("the log reads anew");
                 handle.seen.push(len);
                 assert!(self.ledger.holds(handle.log.anchor()));
@@ -87,25 +92,32 @@ impl Run {
         }
     }
 
-    /// Takes in what a writer's look came to: the ops it cut are the one
-    /// `refused` and all after it, and what the handle tells as cut is
-    /// those.
+    /// Takes in what a writer's look came to. It cut the log when it was
+    /// told of an op that it is not held, and then only: the ops cut are
+    /// that one, `refused`, and all after it, what the look gives back
+    /// says so, and what the handle tells as cut is those. Whether it
+    /// cut.
     pub fn settled(
         &mut self,
         unsettled: &[Laid],
         refused: &Option<Vec<u8>>,
         asked: &[(Vec<u8>, bool)],
         (cut, told): (Option<Unconfirmed>, Vec<Discarded>),
-    ) {
-        let gone = cut.map(|cut| {
+    ) -> bool {
+        let gone = asked.iter().any(|(_, held)| !held).then(|| {
             let refused = refused.as_ref().expect("an op was refused");
-            let gone = self.ledger.cut_from(refused, self.model.synced);
-            assert_eq!((cut.at, cut.ops), (gone[0].at, gone.len()));
-            gone
+            self.ledger.cut_from(refused, self.model.synced)
         });
+        let cut_at = gone.as_ref().map(|gone| (gone[0].at, gone.len()));
+        assert_eq!(
+            cut.map(|cut| (cut.at, cut.ops)),
+            cut_at,
+            "a look says it cut the log otherwise than at the op it was told is not held"
+        );
         self.cuts_told(&told, gone.as_deref());
-        self.looked(unsettled, asked, cut.map(|cut| cut.at));
+        self.looked(unsettled, asked, cut_at.map(|(at, _)| at));
         self.ledger.begun = None;
+        gone.is_some()
     }
 
     /// Takes in what another handle did while a writer had given up the
@@ -113,7 +125,10 @@ impl Run {
     pub fn meanwhile_done(&mut self, unsettled: &[Laid]) {
         self.meanwhile.plan(None);
         for outcome in self.meanwhile.done() {
-            self.counts.meanwhile.fetch_add(1, Ordering::Relaxed);
+            let done = !matches!(outcome, Outcome::Failed(_));
+            self.counts
+                .meanwhile
+                .fetch_add(done as u64, Ordering::Relaxed);
             match outcome {
                 Outcome::Appended {
                     meta,
@@ -124,7 +139,7 @@ impl Run {
                     self.trace
                         .push(format!("  meanwhile {} is appended", name(&payload)));
                     self.cuts_told(&told, None);
-                    self.appended(payload, &meta, head);
+                    self.appended("meanwhile", payload, &meta, head);
                 }
                 Outcome::Looked {
                     refused,
@@ -136,7 +151,9 @@ impl Run {
                     self.trace.push(format!(
                         "  meanwhile a writer settles, refusing {refuses:?}"
                     ));
-                    self.settled(unsettled, &refused, &asked, (cut, told));
+                    let cut = self.settled(unsettled, &refused, &asked, (cut, told));
+                    let cuts = &self.counts.meanwhile_cuts;
+                    cuts.fetch_add(cut as u64, Ordering::Relaxed);
                 }
                 Outcome::Failed(why) => {
                     assert!(why.starts_with("Io("), "{why}");

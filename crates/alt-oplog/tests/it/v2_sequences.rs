@@ -25,9 +25,13 @@ pub struct Counts {
     pub cuts: AtomicU64,
     pub cuts_died: AtomicU64,
     pub cut_back: AtomicU64,
+    /// of them, those whose ops the log held: a cut of them was begun
+    pub cut_back_begun: AtomicU64,
     pub meanwhile: AtomicU64,
+    pub meanwhile_cuts: AtomicU64,
     pub receipts: AtomicU64,
     pub anchored: AtomicU64,
+    pub anchored_gone: AtomicU64,
     pub grown_back: AtomicU64,
     pub grown_back_after_death: AtomicU64,
     pub hidden: AtomicU64,
@@ -40,9 +44,12 @@ impl Counts {
             cuts: AtomicU64::new(0),
             cuts_died: AtomicU64::new(0),
             cut_back: AtomicU64::new(0),
+            cut_back_begun: AtomicU64::new(0),
             meanwhile: AtomicU64::new(0),
+            meanwhile_cuts: AtomicU64::new(0),
             receipts: AtomicU64::new(0),
             anchored: AtomicU64::new(0),
+            anchored_gone: AtomicU64::new(0),
             grown_back: AtomicU64::new(0),
             grown_back_after_death: AtomicU64::new(0),
             hidden: AtomicU64::new(0),
@@ -143,10 +150,18 @@ impl Run {
             .log
             .unconfirmed(says(&refused, &mut asked));
         if let Some(found) = self.took(index, found, false) {
-            self.looked(&unsettled, &asked, found.map(|found| found.at));
+            // it ends at the op it was told is not held, and nowhere else
+            let unheld = asked.iter().find(|(_, held)| !held);
+            let ends = unheld.map(|(payload, _)| self.ledger.place_of(payload));
+            assert_eq!(
+                found.map(|found| found.at),
+                ends,
+                "a reader's look ends elsewhere than at the op it was told is not held"
+            );
+            self.looked(&unsettled, &asked, ends);
             // it may note that the log ends there in the file it read
             let seen = self.handles[index].seen.iter();
-            let hides = seen.filter_map(|len| Some((*len, found?.at)));
+            let hides = seen.filter_map(|len| Some((*len, ends?)));
             self.ledger.hides.extend(hides);
         }
     }
@@ -202,7 +217,8 @@ impl Run {
                 self.trace.push(format!("handle {gone} is closed"));
                 self.handles.remove(gone);
             }
-            10..42 => self.append(),
+            10..41 => self.append(),
+            41..42 => self.cut_begun(),
             42..51 => {
                 let (index, how) = (self.writer(), self.rng.below(2));
                 self.sync(index, how);

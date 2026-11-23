@@ -1,12 +1,16 @@
 //! What whoever drives handles on a version 2 log knows of its ops
-//! without reading it: the ops it appended and where each handle said it
-//! put them, the ones it had cut, and the ones a power cut took, by the
-//! bytes that were damaged. The log is held to it: it holds these ops,
-//! in this order, at these places, and no other.
+//! without a handle telling it: the ops it had appended, each with the
+//! id its body hashes to and at the place the bytes of the file hold that
+//! body, the ones it had cut, and the ones a power cut took, by the bytes
+//! that were damaged. The log is held to it: it holds these ops, in this
+//! order, at these places, and no other.
 
 use std::collections::HashSet;
+use std::fs::File;
+use std::os::unix::fs::FileExt;
+use std::path::Path;
 
-use alt_oplog::{Anchor, Discarded, Meta, OpId};
+use alt_oplog::{Anchor, Discarded, Meta, OpId, ROOT};
 
 use super::v2_model::Reference;
 
@@ -32,6 +36,47 @@ pub fn number(payload: &[u8]) -> u64 {
     text.parse().expect("an op the driver appended")
 }
 
+/// Where in the log file of `dir`, at or after byte `after`, the op frame
+/// lies that holds `body`, closes with `id` and counts itself op number
+/// `seq`: found by those bytes, with the headers of the blocks of `block`
+/// bytes taken out from between the bytes of frames.
+fn lies(
+    dir: &Path,
+    block: u64,
+    after: u64,
+    (body, id, seq): (&[u8], OpId, u64),
+) -> Option<(u64, u64)> {
+    let file = File::open(dir.join("log")).unwrap();
+    let len = file.metadata().unwrap().len().checked_sub(after)?;
+    let mut read = vec![0u8; len as usize];
+    file.read_exact_at(&mut read, after).unwrap();
+    let places = (after..after + len).zip(read);
+    let of_frames = |(place, _): &(u64, u8)| *place < block || place % block >= 32;
+    let (places, bytes): (Vec<u64>, Vec<u8>) = places.filter(of_frames).unzip();
+    let closed = [body, &id.0[..]].concat();
+    let found = bytes
+        .windows(closed.len())
+        .position(|held| held == closed)?;
+    // its length and its checksum follow the id
+    let end = places.get(found + closed.len() + 7)? + 1;
+    // 48 bytes of header and what the frame carries beside its body come
+    // before the body; the header says how long that is, how long the
+    // body, and which op of the log this is
+    let word = |at: usize, len: usize| {
+        let mut word = [0u8; 8];
+        word[..len].copy_from_slice(&bytes[at..at + len]);
+        u64::from_le_bytes(word)
+    };
+    let starts = |start: &usize| {
+        bytes[*start] == 1
+            && word(start + 2, 2) == (found - start - 48) as u64
+            && word(start + 4, 4) == body.len() as u64
+            && word(start + 40, 8) == seq
+    };
+    let start = (0..=found.checked_sub(48)?).rev().find(starts)?;
+    Some((places[start], end))
+}
+
 #[derive(Default)]
 pub struct Ledger {
     pub ops: Vec<Entry>,
@@ -50,25 +95,55 @@ pub struct Ledger {
 }
 
 impl Ledger {
-    /// Takes in an op a handle appended and holds as its last, at `head`.
-    pub fn appended(&mut self, payload: &[u8], meta: &Meta, head: Anchor) {
-        let after = self.ops.last().map_or(0, |last| last.end);
-        assert!(head.start >= after, "an op was appended over another");
+    /// Takes in an op of `payload` that `actor` had a handle append after
+    /// the ops known here, to the log in `dir` with blocks of `block`
+    /// bytes. Its id is the hash of the body it has after the last of
+    /// them, it is the next op of the log, and it lies where the file
+    /// holds that body. The handle that appended it has it at `told`.
+    pub fn appended(
+        &mut self,
+        (dir, block): (&Path, u64),
+        (actor, payload): (&str, &[u8]),
+        meta: &Meta,
+        told: Anchor,
+    ) {
+        let (parent, after) = self
+            .ops
+            .last()
+            .map_or((ROOT, 64), |last| (last.id, last.end));
+        let body = alt_oplog::v2::op_body(&parent, 1, actor, payload);
+        let id = OpId(*alt_hash::blake3::hash(&body).as_bytes());
+        let seq = self.ops.len() as u64 + 1;
+        let n = number(payload);
+        let Some((at, end)) = lies(dir, block, after, (&body, id, seq)) else {
+            panic!("op {n} is not in the file after byte {after} as op {seq} of the log");
+        };
+        let found = Anchor {
+            op: id,
+            start: at,
+            end,
+            count: seq,
+        };
         assert_eq!(
-            head.count as usize,
-            self.ops.len() + 1,
-            "the op appended is not counted as the next of the log"
+            told, found,
+            "the handle that appended op {n} has it elsewhere than the file"
         );
         self.ops.push(Entry {
-            n: number(payload),
-            seq: head.count,
+            n,
+            seq,
             payload: payload.to_vec(),
-            id: head.op,
-            at: head.start,
-            end: head.end,
+            id,
+            at,
+            end,
             linked: meta.linked,
             request: meta.request,
         });
+    }
+
+    /// Where the op of `payload` starts, which the log holds.
+    pub fn place_of(&self, payload: &[u8]) -> u64 {
+        let op = self.ops.iter().find(|op| op.payload == payload);
+        op.expect("the op is in the log").at
     }
 
     /// Whether the log holds the op at `head` where the anchor says.

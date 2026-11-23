@@ -67,12 +67,47 @@ impl Run {
         let Some(cut) = self.took(index, cut, false) else {
             return false;
         };
-        if cut.is_some() {
-            self.counts.cuts.fetch_add(1, Ordering::Relaxed);
-        }
-        self.settled(&unsettled, &refused, &asked, (cut, told));
+        let cut = self.settled(&unsettled, &refused, &asked, (cut, told));
+        self.counts.cuts.fetch_add(cut as u64, Ordering::Relaxed);
         let len = self.file_len();
         self.handles[index].seen.push(len);
         true
+    }
+
+    /// A cut is begun and comes to no more than the note of it, and a
+    /// handle that holds ops past where it would have cut does what reads
+    /// that note: it is told its ops were cut, while the log holds them.
+    pub fn cut_begun(&mut self) {
+        // what is not synced is another boot's to look at
+        for _ in 0..2 {
+            let (index, op) = (self.writer(), self.op());
+            self.put(index, op, true, false);
+        }
+        self.reboot(true);
+        let held = self.open(false);
+        let cutter = self.open(false);
+        self.settle(cutter, Some(1), true);
+        if self.ledger.begun.is_none() {
+            return;
+        }
+        let way = self.rng.below(4);
+        self.trace.push(format!(
+            "handle {held} comes upon the note of the cut (way {way})"
+        ));
+        let handle = &mut self.handles[held];
+        let mut did = match way {
+            0 => handle.log.follow(),
+            1 => handle.log.refresh(),
+            2 => handle.log.sync(),
+            _ => handle.log.bound_now(),
+        };
+        if let (2, Ok(()), Some(sink)) = (way, &did, &handle.sink) {
+            did = sink.fsync();
+        }
+        assert!(
+            matches!(did, Err(OpLogError::CutBack)),
+            "a handle that holds ops past where a cut was begun is told {did:?}"
+        );
+        self.took(held, did, false);
     }
 }

@@ -16,11 +16,20 @@ fn all_of(block_exp: u8, sequences: u64) {
         ("cuts of ops nobody vouched for", &counts.cuts),
         ("handles told their ops were cut", &counts.cut_back),
         (
+            "of them told so of ops the log held, a cut of them begun",
+            &counts.cut_back_begun,
+        ),
+        (
             "things done while a writer had given up the lock",
             &counts.meanwhile,
         ),
+        ("of them looks that cut the log", &counts.meanwhile_cuts),
         ("receipts", &counts.receipts),
         ("opens at an anchor that holds", &counts.anchored),
+        (
+            "opens at the anchor of an op that is gone",
+            &counts.anchored_gone,
+        ),
         ("cuts that died", &counts.cuts_died),
         ("logs grown back to the length they had", &counts.grown_back),
         (

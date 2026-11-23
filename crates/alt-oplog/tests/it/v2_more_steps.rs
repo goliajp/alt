@@ -40,7 +40,7 @@ impl Run {
             return false;
         }
         let head = self.handles[index].log.anchor().unwrap();
-        self.appended(payload, &meta, head);
+        self.appended("driver", payload, &meta, head);
         // a writer that syncs appends after nothing that is not seen to
         if let Some(op) = unsettled.first().filter(|_| !unsynced && !seen_to) {
             panic!(
@@ -120,6 +120,7 @@ impl Run {
         );
         if stale {
             assert!(!log.anchored(), "a handle begins after an op that is gone");
+            self.counts.anchored_gone.fetch_add(1, Ordering::Relaxed);
         } else if held == self.ledger.ops.len() {
             assert!(log.anchored(), "the anchor of an op of the log is not held");
             // of the ops after it, in their order: every ref transaction,
