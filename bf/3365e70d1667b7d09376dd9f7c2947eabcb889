@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: feat
+summary: open the ref store over a version 2 oplog from a checkpoint, with a snapshot that may be anchored past the synced boundary
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-refs/src/anchored.rs
+touched: crates/alt-refs/src/check.rs
+touched: crates/alt-refs/src/commit.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/record.rs
+touched: crates/alt-refs/src/settle.rs
+touched: crates/alt-refs/src/snapshot.rs
+touched: crates/alt-refs/tests/it/crash_injection.rs
+touched: crates/alt-refs/tests/it/main.rs
+touched: crates/alt-refs/tests/it/v2.rs
