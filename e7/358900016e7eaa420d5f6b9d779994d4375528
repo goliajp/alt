@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: leave the index of a pack that is not kept unsynced
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
