@@ -82,6 +82,17 @@ pub(crate) struct Loaded {
     pub passed: bool,
 }
 
+/// The `len` bytes of the file at `at`, out of `window` where it holds
+/// them: bytes of the file from byte `window.0` on.
+fn held(source: &Source, window: &(u64, Vec<u8>), at: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    let skip = at.checked_sub(window.0).map(|skip| skip as usize);
+    let within = skip.and_then(|skip| window.1.get(skip..skip.checked_add(len)?));
+    match within {
+        Some(bytes) => Ok(bytes.to_vec()),
+        None => source.at(at, len),
+    }
+}
+
 /// Reads on from `located` to byte `size` of the file.
 fn pass(
     source: &Source,
@@ -144,12 +155,7 @@ pub(crate) fn load(
     let mut window = (from, source.at(from, (size - from) as usize)?);
     let mut located = Located::empty();
     if !all {
-        let mut read = |at: u64, len: usize| match at.checked_sub(window.0) {
-            Some(skip) if skip as usize + len <= window.1.len() => {
-                Ok(window.1[skip as usize..skip as usize + len].to_vec())
-            }
-            _ => source.at(at, len),
-        };
+        let mut read = |at: u64, len: usize| held(source, &window, at, len);
         located = locate(layout, size, &mut read)?;
     }
     let (mut state, mut ops, mut stop) = pass(source, layout, &located, size, &mut window)?;
@@ -189,8 +195,9 @@ pub(crate) fn load(
         ops,
     };
     if loaded.state.last != 0 {
-        let at = (loaded.state.end - 4 - window.0) as usize;
-        loaded.closes.copy_from_slice(&window.1[at..at + 4]);
+        // the window may begin where that frame ends, when none after it reads
+        let closes = held(source, &window, loaded.state.end - 4, 4)?;
+        loaded.closes.copy_from_slice(&closes);
     }
     if stop == Stop::Unread {
         let rest = &window.1[(loaded.state.end - window.0) as usize..];

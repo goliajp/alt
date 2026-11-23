@@ -12,7 +12,7 @@ use alt_oplog::{Meta, Op, OpLog, OpLogError};
 use super::v2_log::{boot, file_len, frames, grow, new_log};
 
 /// Appends `count` ops of some 300 bytes and syncs none of them.
-fn stage(log: &mut OpLog, count: u64) {
+pub fn stage(log: &mut OpLog, count: u64) {
     let _unsynced = alt_os::durability::leave_unsynced(true);
     for n in 0..count {
         let meta = Meta {
@@ -103,7 +103,7 @@ fn many_blocks(dir: &Path) -> u64 {
     (file_len(dir) - 1) / 4096 * 4096
 }
 
-fn zero(dir: &Path, from: u64, to: u64) {
+pub fn zero(dir: &Path, from: u64, to: u64) {
     let path = dir.join("log");
     let mut bytes = fs::read(&path).unwrap();
     bytes[from as usize..to as usize].fill(0);
