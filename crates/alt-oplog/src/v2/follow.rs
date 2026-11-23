@@ -24,9 +24,10 @@ impl Log {
     }
 
     /// Reads the frames other writers appended and cuts off what a
-    /// crashed one left at the end; the caller holds the exclusive lock.
+    /// crashed one left at the end, which stays in a log this build may
+    /// not write; the caller holds the exclusive lock.
     pub(super) fn catch_up(&mut self) -> Result<(), OpLogError> {
-        self.read_on(true)
+        self.read_on(self.writable)
     }
 
     /// Whether the last frame this handle holds is still where the handle

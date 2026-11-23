@@ -71,6 +71,9 @@ impl Log {
     /// this boot, and that what follows them in a file as long as it is
     /// now is no part of the log.
     fn note_judged(&self, judged: u64) -> std::io::Result<()> {
+        if !self.writable {
+            return Ok(());
+        }
         let len = self.file.metadata()?.len();
         let (generation, synced) = (self.state.generation, self.synced);
         Tail::update(&self.dir, self.boot, |tail| {
@@ -156,6 +159,7 @@ impl Log {
     /// is cut, then says so in a checkpoint under the next generation,
     /// and is synced. Nothing is cut that was recorded as synced.
     fn cut_at(&mut self, at: u64, discarded: Discarded) -> Result<(), OpLogError> {
+        self.may_write()?;
         let held = Held::take(&self.dir)?;
         let synced = self.tail().map_or(0, |tail| tail.synced).max(self.synced);
         if at < synced {

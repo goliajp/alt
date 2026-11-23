@@ -38,6 +38,7 @@ impl Log {
         F: FnOnce(&[Op]) -> Result<Vec<u8>, E>,
         E: From<OpLogError>,
     {
+        self.may_write().map_err(E::from)?;
         if actor.len() > u16::MAX as usize {
             return Err(OpLogError::TooLarge(actor.len()).into());
         }
@@ -54,6 +55,7 @@ impl Log {
     }
 
     pub fn append_receipt(&mut self, receipt: &Receipt) -> Result<(), OpLogError> {
+        self.may_write()?;
         let body = receipt.encode();
         let flags = if relaxed_durability() { UNSYNCED } else { 0 };
         self.locked(|log| {
@@ -130,11 +132,7 @@ impl Log {
 
     /// Writes the bytes that append `new` where the log ends, all at once.
     pub(super) fn write(&mut self, new: &New) -> Result<(), OpLogError> {
-        if !self.writable {
-            return Err(OpLogError::Format(
-                "the oplog uses a feature this alt does not know to write",
-            ));
-        }
+        self.may_write()?;
         let composer = self.composer();
         let mut state = self.state.clone();
         let bytes = composer.frame(&mut state, new)?;
@@ -170,6 +168,7 @@ impl Log {
         if relaxed_durability() || self.judged.get() >= self.state.end {
             return Ok(());
         }
+        self.may_write()?;
         let upto = self.state.end;
         if let Some(sync) = self.named.clone() {
             let left = self.ops_from(self.judged.get());

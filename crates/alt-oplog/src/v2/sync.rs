@@ -17,7 +17,8 @@ use crate::{OpLogError, SyncNamed, relaxed_durability};
 
 impl Log {
     pub fn sync(&mut self) -> Result<(), OpLogError> {
-        if relaxed_durability() {
+        // a handle that may not write the log appended nothing to it
+        if relaxed_durability() || !self.writable {
             return Ok(());
         }
         if self.defer {
@@ -75,6 +76,7 @@ impl Log {
             self.note_synced(target);
             return Ok(());
         }
+        self.may_write()?;
         if let Some(sync) = &self.named {
             sync(&self.ops_from(self.synced))?;
         }

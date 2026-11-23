@@ -261,6 +261,17 @@ impl Log {
         }
     }
 
+    /// Refuses for a log this build may read and not write: nothing of
+    /// it is changed then, nor what is noted beside it.
+    pub(super) fn may_write(&self) -> Result<(), OpLogError> {
+        match self.writable {
+            true => Ok(()),
+            false => Err(OpLogError::Format(
+                "the oplog uses a feature this alt does not know to write",
+            )),
+        }
+    }
+
     pub fn take_discarded(&mut self) -> Vec<Discarded> {
         std::mem::take(&mut self.discarded)
     }
