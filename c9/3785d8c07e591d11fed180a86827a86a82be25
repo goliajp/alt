@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: measure what the table of workspaces costs a version 2 log
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/examples/oplog_blocks.rs
