@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: tell a handle its ops were cut when what it reads without a lock does not read because a cut of the log was begun
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/named.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
