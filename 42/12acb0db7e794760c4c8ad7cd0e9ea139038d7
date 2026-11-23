@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: feat
+summary: encode and scan the frames, blocks, checkpoints and receipts of a version 2 oplog
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/block.rs
+touched: crates/alt-oplog/src/v2/checkpoint.rs
+touched: crates/alt-oplog/src/v2/compose.rs
+touched: crates/alt-oplog/src/v2/frame.rs
+touched: crates/alt-oplog/src/v2/receipt.rs
+touched: crates/alt-oplog/src/v2/scan.rs
+touched: crates/alt-oplog/src/v2/state.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_image.rs
+touched: fuzz/Cargo.lock
+touched: fuzz/Cargo.toml
+touched: fuzz/README.md
+touched: fuzz/fuzz_targets/oplog_frames.rs
