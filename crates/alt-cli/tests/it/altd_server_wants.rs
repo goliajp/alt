@@ -55,4 +55,25 @@ fn a_fetch_is_given_what_the_refs_reach_and_nothing_else_of_the_store() {
     assert!(told.contains(&why), "{told}");
     // reached by a ref, though none points at it
     done(fetch(&under));
+
+    // a partial clone asks for the files it left out by their ids
+    let clone = [
+        "clone",
+        "-q",
+        "--filter=blob:none",
+        "-b",
+        "kept",
+        &url,
+        "partial",
+    ];
+    done(git(tmp.path(), &clone));
+    let partial = tmp.path().join("partial");
+    assert_eq!(
+        fs::read_to_string(partial.join("kept.txt")).unwrap(),
+        "kept.txt\n"
+    );
+    assert_eq!(
+        fs::read_to_string(partial.join("under.txt")).unwrap(),
+        "under.txt\n"
+    );
 }

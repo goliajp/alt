@@ -1374,19 +1374,19 @@ fn altd_server_honors_git_clone_filter_blob_none() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    // The known blob oid must NOT be present on the partial clone — if
-    // the server ignored the filter and sent a full pack, this check
-    // would falsely pass `git cat-file -e`.
-    let exists = std::process::Command::new("git")
+    // the known blob did not come with the clone: a walk that fetches
+    // nothing lists it as missing (asked for by its id, it would be fetched)
+    let missing = std::process::Command::new("git")
         .arg("-C")
         .arg(&target)
-        .args(["cat-file", "-e", &blob_oid])
+        .args(["rev-list", "--objects", "--missing=print", "HEAD"])
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .unwrap();
+    assert!(missing.status.success());
     assert!(
-        !exists.status.success(),
+        String::from_utf8_lossy(&missing.stdout).contains(&format!("?{blob_oid}")),
         "blob {blob_oid} must be absent from the partial clone (server ignored --filter=blob:none?)"
     );
 

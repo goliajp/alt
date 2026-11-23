@@ -170,7 +170,9 @@ fn pack(
             true => read(repo, oid)?.data.len(),
             false => 0,
         };
-        if !filter.excludes(*kind, bytes) {
+        // what is asked for by its id goes whatever the filter: it is how
+        // a partial clone gets what it left out
+        if req.wants.contains(oid) || !filter.excludes(*kind, bytes) {
             going.push((*oid, *kind));
         }
     }
