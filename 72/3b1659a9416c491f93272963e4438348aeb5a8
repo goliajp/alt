@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: read the body of a push and write its report in functions of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
