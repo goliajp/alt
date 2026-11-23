@@ -28,7 +28,7 @@ pub(crate) fn pusher(id: &str) -> Principal {
 }
 
 /// The store of the served repository, as the server holds it.
-fn served(origin: &Path) -> RefCell<Store> {
+pub(crate) fn served(origin: &Path) -> RefCell<Store> {
     let mut store = Store::open(origin.join(".alt")).unwrap();
     store.set_defer_durability(true);
     RefCell::new(store)
@@ -44,7 +44,7 @@ pub(crate) fn prepared(pack: &[u8]) -> (alt_os::temp::TempDir, PreparedPack) {
 
 /// Takes in the push of `updates` by `anonymous`, `written` being called
 /// between its objects and its ref transaction.
-fn land(
+pub(crate) fn land(
     store: &RefCell<Store>,
     updates: &[alt_wire::RefUpdate],
     pack: Option<&[u8]>,
@@ -259,75 +259,4 @@ fn a_push_whose_ref_transaction_fails_has_its_objects_taken_out_again() {
     drop(store);
     assert_eq!(tip(origin.path(), "refs/heads/new"), name);
     ok(alt(origin.path(), &["fsck"]));
-}
-
-/// Not a check of anything but that the pushes are let in: prints how
-/// long a push takes to land in a repository of ten thousand refs, on
-/// top of one of them and beside them (run with `--nocapture`).
-#[test]
-#[ignore = "a measurement of a push among ten thousand refs, for --nocapture"]
-fn the_time_of_a_push_among_ten_thousand_refs() {
-    use alt_git_codec::ObjectKind;
-    let (origin, seed) = seeded();
-    let alt_dir = origin.path().join(".alt");
-    let mut odb = NativeOdb::open(&alt_dir).unwrap();
-    let tree = ObjectId::hash_object(alt_git_codec::HashAlgo::Sha1, ObjectKind::Tree, b"");
-    odb.put(tree, ObjectKind::Tree, b"").unwrap();
-    let mut changes = Vec::new();
-    for n in 0..10_000 {
-        let (oid, commit) = commit_object(&seed, 1_700_000_000, "", &format!("branch {n}"));
-        odb.put(oid, ObjectKind::Commit, &commit).unwrap();
-        changes.push(RefChange {
-            name: format!("refs/heads/branch-{n}"),
-            old: None,
-            new: Some(RefTarget::Oid(oid)),
-        });
-    }
-    odb.flush().unwrap();
-    drop(odb);
-    let top = changes[5000].new.clone();
-    let Some(RefTarget::Oid(top)) = top else {
-        unreachable!()
-    };
-    // `main` moves on: the seed is under the refs and none points at it
-    changes.push(RefChange {
-        name: "refs/heads/main".into(),
-        old: Some(RefTarget::Oid(seed.parse().unwrap())),
-        new: Some(RefTarget::Oid(top)),
-    });
-    let mut refs = RefStore::open(&alt_dir).unwrap();
-    refs.commit("by hand", 0, &changes).unwrap();
-    drop(refs);
-    let store = served(origin.path());
-    store.borrow_mut().refresh().unwrap();
-    let sink = store.borrow().sink().unwrap();
-
-    // `ALT_PUSH_ROUNDS=<on top|beside>:<n>` for that many pushes of one
-    // kind, each synced as a server syncs it: the work of one is what a
-    // run takes more than a run of none
-    let asked = std::env::var("ALT_PUSH_ROUNDS").ok();
-    let asked = asked.as_deref().and_then(|asked| asked.split_once(':'));
-    let rounds = |what: &str| match asked {
-        Some((kind, rounds)) if what.starts_with(kind) => rounds.parse().unwrap(),
-        Some(_) => 0,
-        None => 3,
-    };
-    for (what, parent) in [
-        ("on top of a ref", top.to_string()),
-        ("beside the refs", seed),
-    ] {
-        for round in 0..rounds(what) {
-            let new = commit_object(&parent, 1_700_000_001, "", &format!("{what} {round}"));
-            let name = format!("refs/heads/{}-{round}", what.replace(' ', "-"));
-            let updates = [creation(&name, &new.0.to_string())];
-            let pack = pack_of(&[new]);
-            let started = std::time::Instant::now();
-            let landed = land(&store, &updates, Some(&pack), &|| ());
-            sink.fsync_all().unwrap();
-            if asked.is_none() {
-                eprintln!("a push {what}: {:?}", started.elapsed());
-            }
-            assert_eq!(landed, Landed::Moved);
-        }
-    }
 }
