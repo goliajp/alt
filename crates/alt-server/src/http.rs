@@ -1,4 +1,5 @@
 mod body;
+mod caller;
 mod connection;
 mod device;
 mod encoding;
@@ -29,6 +30,7 @@ use axum::{
 };
 use body::{BodyError, spool};
 use bytes::Bytes;
+pub use caller::Network;
 use http_body_util::{BodyExt, Full};
 use respond::{ResponseBody, failure, full, render_output, response, store_failure, unknown};
 use std::{
@@ -121,6 +123,9 @@ pub struct HttpOptions {
     pub body_timeout: Duration,
     pub work_timeout: Duration,
     pub connection_timeout: Duration,
+    /// the reverse proxies whose `X-Forwarded-For` is read for the address a
+    /// request came from; with none the address is the peer's
+    pub trusted_proxies: Vec<Network>,
     pub native: NativeOptions,
 }
 struct App {

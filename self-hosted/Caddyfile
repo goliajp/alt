@@ -5,5 +5,9 @@
 }
 https://:8443 {
     tls /run/tls/certificate.pem /run/tls/private-key.pem
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:8080 {
+        # the one address the server takes for the caller's: whom this
+        # proxy accepted the connection from, whatever the request says
+        header_up X-Forwarded-For {remote_host}
+    }
 }

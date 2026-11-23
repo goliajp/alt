@@ -60,6 +60,10 @@
     "database_statement_timeout_ms": 15000,
     "upload_ttl_ms": 3600000,
     "worker_lease_ms": 60000,
-    "approval_ttl_ms": 300000
+    "approval_ttl_ms": 300000,
+    "trusted_proxies": [
+      "127.0.0.1",
+      "::1"
+    ]
   }
 }

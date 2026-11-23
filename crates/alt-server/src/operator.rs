@@ -75,6 +75,11 @@ pub struct HttpBounds {
     pub upload_ttl_ms: u64,
     pub worker_lease_ms: u64,
     pub approval_ttl_ms: u64,
+    /// The addresses or networks (`10.0.0.0/8`) of the reverse proxies in front
+    /// of the listener. Only what these append to `X-Forwarded-For` is taken for
+    /// the address of a caller; with none named the header is not read.
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_proxies: Vec<String>,
 }
 impl Config {
     /// Accept either an explicitly issued raw operator secret or the private,
@@ -260,6 +265,8 @@ impl Config {
             || h.database_statement_timeout_ms > 300_000
             || h.database_connect_timeout_ms > 300_000
             || h.worker_lease_ms < h.work_timeout_ms
+            || h.trusted_proxies.len() > 64
+            || (h.trusted_proxies.iter()).any(|proxy| proxy.parse::<crate::Network>().is_err())
         {
             return Err(Error::Config("HTTP/worker bounds"));
         }
@@ -544,6 +551,9 @@ impl Config {
             body_timeout: Duration::from_millis(h.body_timeout_ms),
             work_timeout: Duration::from_millis(h.work_timeout_ms),
             connection_timeout: Duration::from_millis(h.connection_timeout_ms),
+            trusted_proxies: (h.trusted_proxies.iter())
+                .filter_map(|proxy| proxy.parse().ok())
+                .collect(),
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,
