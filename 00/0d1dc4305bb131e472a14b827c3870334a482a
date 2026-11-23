@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: tell a handle its ops were cut when a sync finds an op it has to see to gone, not that the log is damaged
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/named.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
