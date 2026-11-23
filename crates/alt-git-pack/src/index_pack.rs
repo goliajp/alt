@@ -41,15 +41,21 @@
 //! [`IndexLimits::inflated_bytes`], and a chain is refused past
 //! [`MAX_DELTA_DEPTH`].
 
+mod budget;
+mod deltas;
 mod held;
 mod idx;
 mod memory;
 mod resolve;
 mod scan;
 mod thin;
+mod walk;
 
+pub use budget::Budget;
+pub use deltas::{Deltas, Of};
 pub use memory::{Memory, Taken};
 pub use thin::Bases;
+pub use walk::{Objects, Walk};
 
 use std::fs::File;
 use std::io::Write;
