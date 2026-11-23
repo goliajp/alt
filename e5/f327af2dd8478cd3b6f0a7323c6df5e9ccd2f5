@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: leave a log this build may read and not write as it is, whatever a handle is asked to do
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_features.rs
