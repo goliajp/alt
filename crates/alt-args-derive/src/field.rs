@@ -59,6 +59,8 @@ pub(crate) struct ArgField {
     pub(crate) required_unless: Vec<String>,
     pub(crate) group: Option<String>,
     pub(crate) trailing: bool,
+    /// takes the words after `--` and no other
+    pub(crate) last: bool,
     pub(crate) hyphen_values: bool,
     pub(crate) hint: Hint,
 }
@@ -156,6 +158,7 @@ impl ArgField {
             required_unless: Vec::new(),
             group: None,
             trailing: false,
+            last: false,
             hyphen_values: false,
             hint: Hint::Unset,
         };
@@ -191,6 +194,7 @@ impl ArgField {
                 }
                 "group" => arg.group = Some(entry.string()?),
                 "trailing_var_arg" => arg.trailing = entry.enabled()?,
+                "last" => arg.last = entry.enabled()?,
                 "allow_hyphen_values" => arg.hyphen_values = entry.enabled()?,
                 "hint" => arg.hint = hint(&entry)?,
                 other => {

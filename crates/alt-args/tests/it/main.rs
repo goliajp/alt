@@ -5,6 +5,7 @@ mod counted;
 mod description;
 mod hidden;
 mod hints;
+mod last;
 mod optional_value;
 mod portable;
 mod reference;

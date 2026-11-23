@@ -12,6 +12,9 @@ const CHECKED: usize = 16;
 const TYPED: usize = 32;
 const LISTED: usize = 64;
 
+/// added to the kind of a positional that takes the words after `--`
+const LAST: usize = 8;
+
 const ALIAS: usize = 1;
 const PRESET: usize = 2;
 const MISSING: usize = 4;
@@ -49,6 +52,8 @@ pub struct Arg {
     pub global: bool,
     /// once this positional starts, every later word belongs to it
     pub trailing: bool,
+    /// this positional takes the words after `--` and no other
+    pub last: bool,
     /// words starting with `-` are values of this positional
     pub hyphen_values: bool,
     /// the type of the argument checks its values
@@ -94,6 +99,7 @@ impl Arg {
         required: false,
         global: false,
         trailing: false,
+        last: false,
         hyphen_values: false,
         checked: false,
         typed: false,
@@ -106,7 +112,8 @@ impl Arg {
 
     /// Reads the argument `reader` stands at and leaves it behind it.
     pub(crate) fn read(node: Node, reader: &mut Reader) -> Arg {
-        let kind = Kind::numbered(reader.one());
+        let kind = reader.one();
+        let (kind, last) = (Kind::numbered(kind % LAST), kind >= LAST);
         let flags = reader.one();
         let rare = reader.one() as u8;
         let number = reader.two() as u16;
@@ -118,6 +125,7 @@ impl Arg {
             required: flags & REQUIRED != 0,
             global: flags & GLOBAL != 0,
             trailing: flags & TRAILING != 0,
+            last,
             hyphen_values: flags & HYPHEN_VALUES != 0,
             checked: flags & CHECKED != 0,
             typed: flags & TYPED != 0,

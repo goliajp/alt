@@ -27,6 +27,8 @@ pub(crate) struct Level<'a> {
     pub(crate) filled: usize,
     /// every further word is a positional value
     pub(crate) trailing: bool,
+    /// `--` was read
+    pub(crate) dashed: bool,
 }
 
 /// What reading one word led to.
@@ -48,6 +50,7 @@ impl<'a> Level<'a> {
             state: State::Idle,
             filled: 0,
             trailing: false,
+            dashed: false,
         }
     }
 
@@ -65,6 +68,11 @@ impl<'a> Level<'a> {
             }
             if word == "--" {
                 self.trailing = true;
+                self.dashed = true;
+                // what follows goes to the positional kept for it
+                if self.last_positional().is_some() {
+                    self.settle()?;
+                }
                 return Ok(Step::Taken);
             }
             let is_option = if word.starts_with("--") {
@@ -145,9 +153,21 @@ impl<'a> Level<'a> {
         validate::given(self.scope, &self.entries)
     }
 
+    /// The positional that takes the words after `--` and no other.
+    fn last_positional(&self) -> Option<usize> {
+        let mut positionals = self.scope.positionals();
+        positionals
+            .find(|(_, slot)| slot.arg.last)
+            .map(|(at, _)| at)
+    }
+
     /// The positional the next plain word goes to.
     pub(crate) fn next_positional(&self) -> Option<usize> {
-        self.scope.positionals().nth(self.filled).map(|(at, _)| at)
+        if let (true, Some(last)) = (self.dashed, self.last_positional()) {
+            return Some(last);
+        }
+        let before = self.scope.positionals().filter(|(_, slot)| !slot.arg.last);
+        before.map(|(at, _)| at).nth(self.filled)
     }
 
     pub(crate) fn takes_hyphen_values(&self) -> bool {

@@ -64,7 +64,7 @@ pub(crate) fn narrowed(scope: &Scope, needed: &[&str], used: &[&str]) -> String 
 }
 
 impl Arg {
-    /// `--long <NAME>`, `-s`, `<NAME>` or `[NAME]...`; `required` picks the
+    /// `--long <NAME>`, `-s`, `<NAME>`, `[NAME]...` or `[-- <NAME>...]`; `required` picks the
     /// brackets of a positional and defaults to the argument's own setting.
     pub(crate) fn display(&self, required: Option<bool>) -> String {
         let mut text = if !self.long.is_empty() {
@@ -82,6 +82,9 @@ impl Arg {
         }
         if !self.is_positional() {
             text.push(' ');
+        }
+        if self.last {
+            return format!("[-- <{}>...]", self.value_name());
         }
         if self.is_positional() && !required.unwrap_or(self.required) {
             text += &format!("[{}]", self.value_name());

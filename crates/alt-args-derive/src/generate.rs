@@ -20,7 +20,7 @@ fn arg_item(arg: &ArgField, named: &mut Named) -> Result<String, Error> {
         Shape::Attached => 2,
         Shape::Required | Shape::Optional => 3,
         Shape::Repeated => 4,
-    };
+    } + 8 * usize::from(arg.last);
     let mut flags = usize::from(arg.required)
         + 2 * usize::from(arg.global)
         + 4 * usize::from(arg.trailing)
