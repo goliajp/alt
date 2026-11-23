@@ -1,5 +1,5 @@
 //! Requests of callers nobody has been told who they are: what they keep of the
-//! workers.
+//! workers, and which address their sign-in attempts are counted for.
 use super::*;
 use crate::database::sign_in_deadline::start;
 use std::io::Write;
@@ -38,4 +38,36 @@ fn a_body_that_does_not_come_keeps_no_worker_from_a_caller_not_yet_known() {
         std::thread::sleep(Duration::from_millis(25));
     }
     drop(waiting);
+}
+
+fn device_code(server: &Running, forwarded: &str) -> u16 {
+    let request = ureq::post(&format!("{}/oauth/device/code", server.url))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .set("X-Forwarded-For", forwarded);
+    match request.send_string("client_id=alt-cli&scope=account") {
+        Ok(response) => response.status(),
+        Err(ureq::Error::Status(status, _)) => status,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
+fn sign_in_attempts_are_counted_for_the_address_the_proxy_names() {
+    let mut f = Fixture::new();
+    let server = start(&mut f, |_, _| ());
+    assert_eq!(device_code(&server, "203.0.113.7"), 200);
+    let key = |address: &str| format!("network:{}", alt_browser_auth::digest(address));
+    let spent = f
+        .client()
+        .execute(
+            "UPDATE alt_login_budgets SET attempts=100 WHERE key=$1",
+            &[&key("203.0.113.7")],
+        )
+        .unwrap();
+    assert_eq!(spent, 1, "no attempt was counted for the address named");
+    assert_eq!(device_code(&server, "203.0.113.7"), 503);
+    // what the sender wrote comes first; the proxy names whom it heard from last
+    assert_eq!(device_code(&server, "203.0.113.7, 203.0.113.8"), 200);
+    assert_eq!(device_code(&server, "203.0.113.8,203.0.113.7"), 503);
 }

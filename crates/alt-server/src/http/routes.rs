@@ -35,6 +35,20 @@ pub(super) fn router(state: Arc<App>) -> Router {
     router.with_state(state)
 }
 
+/// The address a request was sent from. A proxy on this machine names whom it
+/// accepted the request from last in `X-Forwarded-For`; what the sender wrote there
+/// itself comes before that.
+fn caller(peer: SocketAddr, headers: &HeaderMap) -> std::net::IpAddr {
+    let forwarded = || {
+        let last = headers.get_all("x-forwarded-for").iter().next_back()?;
+        last.to_str().ok()?.rsplit(',').next()?.trim().parse().ok()
+    };
+    match peer.ip().is_loopback() {
+        true => forwarded().unwrap_or(peer.ip()),
+        false => peer.ip(),
+    }
+}
+
 async fn livez(State(state): State<Arc<App>>, request: Request) -> Reply {
     let trace = start(&state, request.method(), MetricRoute::Health);
     let alive = request.method() == Method::GET && request.uri().query().is_none();
@@ -53,7 +67,8 @@ async fn device(
     request: Request,
 ) -> Reply {
     let trace = start(&state, request.method(), MetricRoute::Device);
-    respond(trace, device::handle(request, state, peer.ip())).await
+    let caller = caller(peer, request.headers());
+    respond(trace, device::handle(request, state, caller)).await
 }
 async fn provision(State(state): State<Arc<App>>, request: Request) -> Reply {
     let trace = start(&state, request.method(), MetricRoute::Provision);
@@ -65,7 +80,8 @@ async fn browser(
     request: Request,
 ) -> Reply {
     let trace = start(&state, request.method(), MetricRoute::Browser);
-    respond(trace, web::handle(request, state, peer.ip())).await
+    let caller = caller(peer, request.headers());
+    respond(trace, web::handle(request, state, caller)).await
 }
 /// a file of the frozen browser bundle is served under its path whatever else that path matches
 fn is_asset(state: &App, request: &Request) -> bool {
