@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: feat
+summary: read @, ^{kind}, @{upstream} and <rev>:<path> in revisions
+author-type: human
+author: doracawl
+touched: crates/alt-odb/src/abbrev.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/revspec.rs
