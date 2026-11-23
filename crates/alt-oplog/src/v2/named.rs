@@ -72,11 +72,11 @@ impl Log {
 
     /// [`Self::named_from`] for a handle that holds no lock on the log.
     /// An op that does not read where the frames held say it is, because
-    /// the log was cut since the handle read it, is no damage: the handle
-    /// is told that its ops were cut.
+    /// the log was cut since the handle read it or is being cut, is no
+    /// damage: the handle is told that its ops were cut.
     pub(super) fn named_unlocked(&self, from: u64) -> Result<Vec<Op>, OpLogError> {
         let named = self.named_from(from);
-        if named.is_err() && !self.holds_head(self.file.metadata()?.len())? {
+        if named.is_err() && self.cut_away()? {
             return Err(OpLogError::CutBack);
         }
         named

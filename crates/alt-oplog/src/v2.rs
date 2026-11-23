@@ -36,10 +36,11 @@ mod sync;
 mod tail;
 mod verify;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
+use std::sync::mpsc::{Receiver, Sender};
 
 pub(crate) use log::Log;
 pub use sink::Reached;
@@ -158,12 +159,35 @@ pub fn cut_dies_after(step: Option<u8>) {
     CUT_DIES.set(step.unwrap_or(0));
 }
 
-/// Fails where a test has the cut die after step `step`.
+/// The step of a cut a test has it wait after, whom it tells that it is
+/// there, and who tells it to go on.
+type Waits = (u8, Sender<()>, Receiver<()>);
+
+thread_local! {
+    static CUT_WAITS: RefCell<Option<Waits>> = const { RefCell::new(None) };
+}
+
+/// Makes the next cut of a log on this thread stop after step `step` of
+/// it, with its locks held: it says so on `reached` and goes on when
+/// `go` is sent to or closed. For a test of what others find while a log
+/// is being cut.
+#[doc(hidden)]
+pub fn cut_waits_after(step: u8, reached: Sender<()>, go: Receiver<()>) {
+    CUT_WAITS.set(Some((step, reached, go)));
+}
+
+/// Fails where a test has the cut die after step `step`, and waits where
+/// a test has it wait there.
 pub(crate) fn cut_reached(step: u8) -> std::io::Result<()> {
-    match CUT_DIES.get() == step {
-        true => Err(std::io::Error::other("the cut was made to die here")),
-        false => Ok(()),
+    if CUT_DIES.get() == step {
+        return Err(std::io::Error::other("the cut was made to die here"));
     }
+    let waits = CUT_WAITS.with_borrow(|waits| waits.as_ref().is_some_and(|(at, ..)| *at == step));
+    if waits && let Some((_, reached, go)) = CUT_WAITS.take() {
+        let _ = reached.send(());
+        let _ = go.recv();
+    }
+    Ok(())
 }
 
 /// The boot a handle opened now on this thread runs in; `None` where the

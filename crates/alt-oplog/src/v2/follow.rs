@@ -48,6 +48,20 @@ impl Log {
         Ok(self.source().at(self.state.end - 4, 4)? == self.closes)
     }
 
+    /// Whether frames this handle holds are cut off the log, or noted in
+    /// `tail` as being cut off it. What a handle that holds no lock on
+    /// the log does not find where those frames say it is, is then no
+    /// damage: from the note on a cut writes over them before it makes
+    /// the file shorter.
+    pub(super) fn cut_away(&self) -> Result<bool, OpLogError> {
+        if !self.holds_head(self.file.metadata()?.len())? {
+            return Ok(true);
+        }
+        let (generation, end) = (self.state.generation, self.state.end);
+        let noted = Tail::read(&self.dir, self.boot);
+        Ok(noted.is_some_and(|tail| tail.cuts(generation, end)))
+    }
+
     /// The log through the frames that follow the ones held in a file of
     /// `size` bytes, their ops, and, where what follows them is no frame,
     /// what still reads after it.

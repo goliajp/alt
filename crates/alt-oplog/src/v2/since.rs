@@ -107,7 +107,7 @@ impl Log {
     /// check does when `strict`, and gives its ops with how many frames
     /// of kinds this build does not know lie among them. No lock is held:
     /// where the frames do not lead to the last one held because the log
-    /// was cut meanwhile, that is what is told.
+    /// was cut meanwhile or is being cut, that is what is told.
     fn read_through(&self, strict: bool) -> Result<(Vec<Op>, u64), OpLogError> {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
@@ -131,7 +131,7 @@ impl Log {
             &mut each,
         );
         let led = matches!(walked, Ok(Stop::End)) && state == self.state;
-        if !led && !self.holds_head(self.file.metadata()?.len())? {
+        if !led && self.cut_away()? {
             return Err(OpLogError::CutBack);
         }
         walked?;
