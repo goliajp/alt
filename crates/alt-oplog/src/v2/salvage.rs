@@ -123,7 +123,9 @@ pub(crate) fn salvage(
         let mut block = next;
         let mut opened = None;
         while opened.is_none() && block + (BLOCK_HEADER_LEN as u64) < limit {
-            opened = opening(read, layout, block, limit)?;
+            // one from before the log was cut is no part of it any more
+            let reads = opening(read, layout, block, limit)?;
+            opened = reads.filter(|located| located.state.generation >= generation);
             block += layout.block;
         }
         let Some(Located { mut state, .. }) = opened else {
