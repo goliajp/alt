@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: count sign-in attempts by address and by the network around it, and refuse nobody for the attempts of others alone
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser.rs
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
