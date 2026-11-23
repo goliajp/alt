@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: read the note beside the log again under its lock when it does not read, and take one that stays unreadable for saying ops are left to look at
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
