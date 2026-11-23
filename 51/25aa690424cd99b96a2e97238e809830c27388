@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: a worker waits for a peer while its body comes and no longer than a body of that size is given
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/head.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
