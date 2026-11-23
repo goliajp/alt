@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: refactor
+summary: take the arguments of blame and tag out of the command list
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/blame.rs
+touched: crates/alt-cli/src/cli/classify.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/sequence_args.rs
