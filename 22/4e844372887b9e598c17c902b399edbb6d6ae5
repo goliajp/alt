@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: feat
+summary: give a request body a time to move in and none as a whole, and a connection its time from the last piece of a body
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: crates/alt-server/example-config.json
+touched: crates/alt-server/src/http/body.rs
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/tests/fixtures/json/example-config.txt
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/bodies.rs
+touched: crates/alt-server/tests/it/database/connections/slow_bodies.rs
+touched: self-hosted/README.md
