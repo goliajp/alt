@@ -23,7 +23,8 @@ use cache::DeltaBaseCache;
 pub use delta_window::DeltaOptions;
 pub use idx::PackIndex;
 pub use index_pack::{
-    IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH, index_pack, index_pack_within,
+    Bases, IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH, index_pack, index_pack_thin,
+    index_pack_within,
 };
 pub use ingress::*;
 pub use pack::{EntryInfo, EntryKind, Pack};

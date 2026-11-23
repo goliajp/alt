@@ -11,9 +11,9 @@
 //!
 //! ## Scope
 //!
-//! Non-thin packs only: every delta's base must be present in this same
-//! pack. That matches our fetch policy (we don't claim `thin-pack`
-//! capability, so the server sends self-contained packs).
+//! A pack that was fetched holds the base of every delta it has: we don't
+//! claim the `thin-pack` capability. A pack that was pushed is thin, and
+//! is made whole from the store it was pushed to ([`index_pack_thin`]).
 //!
 //! ## Algorithm
 //!
@@ -40,8 +40,12 @@
 //! theirs comes up, which costs no more delta applications than the
 //! chain is deep, and a chain is refused past [`MAX_DELTA_DEPTH`].
 
+mod idx;
 mod resolve;
 mod scan;
+mod thin;
+
+pub use thin::Bases;
 
 use std::fs::File;
 use std::io::Write;
@@ -134,20 +138,48 @@ pub fn index_pack_within(
     rename: bool,
     limits: &IndexLimits,
 ) -> Result<IndexedPackOnDisk, PackError> {
-    // the file is not modified for the lifetime of the map: we hold the
+    index_pack_thin(pack_path, algo, rename, limits, None)
+}
+
+/// [`index_pack_within`] of a pack that may be thin: the bases it leaves
+/// out are read from `bases` and appended to it. Its trailer and its
+/// count of objects are those of the pack made whole then.
+pub fn index_pack_thin(
+    pack_path: &Path,
+    algo: HashAlgo,
+    rename: bool,
+    limits: &IndexLimits,
+    bases: Option<Bases<'_>>,
+) -> Result<IndexedPackOnDisk, PackError> {
+    // the file is not modified for the lifetime of a map: we hold the
     // only handle
     let pack = Pack::open(pack_path, algo)?;
     let map = pack.bytes();
     let trailer_len = algo.raw_len();
     let count = pack.object_count();
-    let trailer = map[map.len() - trailer_len..].to_vec();
+    let mut trailer = map[map.len() - trailer_len..].to_vec();
     // verify the pack trailer matches a fresh hash of the body — protects
     // against truncated / corrupt downloads
     verify_trailer(map, algo, &trailer)?;
 
     let mut work = IndexWork::default();
-    let scanned = scan::scan(&pack, count, limits, &mut work)?;
-    let oids = resolve::resolve(&pack, &scanned, limits, &mut work)?;
+    let mut scanned = scan::scan(&pack, count, limits, &mut work)?;
+    let mut oids = scanned.oids.clone();
+    resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, &mut work)?;
+    drop(pack);
+    let came = oids.len();
+    if let Some(bases) = bases
+        && oids.contains(&None)
+        && let Some(whole) =
+            thin::complete(pack_path, algo, &mut scanned, &mut oids, bases, limits)?
+    {
+        trailer = whole;
+        let pack = Pack::open(pack_path, algo)?;
+        resolve::resolve(&pack, &mut scanned, &mut oids, came, limits, &mut work)?;
+    }
+    let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
+    let oids: Vec<ObjectId> = oids.into_iter().collect::<Option<_>>().ok_or(stuck)?;
+    let count = oids.len() as u32;
     let mut oid_entries: Vec<(ObjectId, u64, u32)> = scanned
         .entries
         .iter()
@@ -156,7 +188,7 @@ pub fn index_pack_within(
         .collect();
     drop(scanned);
 
-    let idx_bytes = build_idx(algo, &mut oid_entries, &trailer);
+    let idx_bytes = idx::build_idx(algo, &mut oid_entries, &trailer);
     let idx_path = pack_path.with_extension("idx");
     let tmp_idx = pack_path.with_extension("idx.tmp");
     {
@@ -212,62 +244,6 @@ fn verify_trailer(map: &[u8], algo: HashAlgo, trailer: &[u8]) -> Result<(), Pack
         return Err(PackError::Format("pack trailer mismatch"));
     }
     Ok(())
-}
-
-/// V2 idx layout — same shape as [`crate::write::build_idx`], duplicated
-/// here so we don't have to expose the writer's internals across modules
-/// (and so this stays a self-contained read-and-index path).
-fn build_idx(algo: HashAlgo, entries: &mut [(ObjectId, u64, u32)], trailer: &[u8]) -> Vec<u8> {
-    use alt_hash::{Sha1, Sha256};
-    entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-
-    let mut out = Vec::with_capacity(8 + 256 * 4 + entries.len() * (algo.raw_len() + 8) + 64);
-    out.extend_from_slice(&[0xff, b't', b'O', b'c']);
-    out.extend_from_slice(&2u32.to_be_bytes());
-
-    let mut fanout = [0u32; 256];
-    for (oid, _, _) in entries.iter() {
-        fanout[oid.as_bytes()[0] as usize] += 1;
-    }
-    let mut cumulative = 0u32;
-    for count in fanout {
-        cumulative += count;
-        out.extend_from_slice(&cumulative.to_be_bytes());
-    }
-    for (oid, _, _) in entries.iter() {
-        out.extend_from_slice(oid.as_bytes());
-    }
-    for (_, _, crc) in entries.iter() {
-        out.extend_from_slice(&crc.to_be_bytes());
-    }
-    let mut large: Vec<u64> = Vec::new();
-    for (_, offset, _) in entries.iter() {
-        if *offset < (1 << 31) {
-            out.extend_from_slice(&(*offset as u32).to_be_bytes());
-        } else {
-            out.extend_from_slice(&((1u32 << 31) | large.len() as u32).to_be_bytes());
-            large.push(*offset);
-        }
-    }
-    for offset in large {
-        out.extend_from_slice(&offset.to_be_bytes());
-    }
-    out.extend_from_slice(trailer);
-
-    let checksum: Vec<u8> = match algo {
-        HashAlgo::Sha1 => {
-            let mut h = Sha1::new();
-            h.update(&out);
-            h.finalize().to_vec()
-        }
-        HashAlgo::Sha256 => {
-            let mut h = Sha256::new();
-            h.update(&out);
-            h.finalize().to_vec()
-        }
-    };
-    out.extend_from_slice(&checksum);
-    out
 }
 
 #[cfg(test)]

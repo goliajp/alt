@@ -40,13 +40,17 @@ struct Resolver<'a> {
     scratch: Vec<u8>,
 }
 
-/// The id of every entry of the pack, in the order of its entries.
+/// Gives every delta under the plain entries from `roots` on its id in
+/// `oids`, which are in the order of the entries. A delta whose base is
+/// no object of the pack is left without one.
 pub(super) fn resolve(
     pack: &Pack,
-    scanned: &Scanned,
+    scanned: &mut Scanned,
+    oids: &mut Vec<Option<ObjectId>>,
+    roots: usize,
     limits: &IndexLimits,
     work: &mut IndexWork,
-) -> Result<Vec<ObjectId>, PackError> {
+) -> Result<(), PackError> {
     let entries = &scanned.entries;
     let mut by_offset = Vec::new();
     let mut by_id = Vec::new();
@@ -67,24 +71,21 @@ pub(super) fn resolve(
         work,
         by_offset,
         by_id,
-        oids: scanned.oids.clone(),
+        oids: std::mem::take(oids),
         inflated: scanned.inflated,
         stack: Vec::new(),
         held: 0,
         lowest: 0,
         scratch: Vec::new(),
     };
-    for (index, entry) in entries.iter().enumerate() {
+    for (index, entry) in entries.iter().enumerate().skip(roots) {
         if let Form::Plain(kind) = entry.form {
             resolver.below(index as u32, kind)?;
         }
     }
-    let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
-    resolver
-        .oids
-        .into_iter()
-        .collect::<Option<_>>()
-        .ok_or(stuck)
+    *oids = resolver.oids;
+    scanned.inflated = resolver.inflated;
+    Ok(())
 }
 
 impl Resolver<'_> {

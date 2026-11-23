@@ -7,7 +7,7 @@ use alt_os::temp::TempDir;
 
 use crate::ingress::{entry_header, finish, ofs, pack_header, zlib};
 
-fn blob(data: &[u8]) -> ObjectId {
+pub(crate) fn blob(data: &[u8]) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data)
 }
 
@@ -21,7 +21,7 @@ fn size(out: &mut Vec<u8>, mut value: usize) {
 
 /// A delta that makes `target` of a base of `base` bytes: the first
 /// `keep` bytes of the base, then the rest of the target as it is.
-fn delta(base: usize, keep: usize, target: &[u8]) -> Vec<u8> {
+pub(crate) fn delta(base: usize, keep: usize, target: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     size(&mut out, base);
     size(&mut out, target.len());
@@ -35,13 +35,13 @@ fn delta(base: usize, keep: usize, target: &[u8]) -> Vec<u8> {
     out
 }
 
-fn plain_entry(data: &[u8]) -> Vec<u8> {
+pub(crate) fn plain_entry(data: &[u8]) -> Vec<u8> {
     let mut entry = entry_header(3, data.len() as u64);
     entry.extend(zlib(data));
     entry
 }
 
-fn ref_entry(base: &ObjectId, delta: &[u8]) -> Vec<u8> {
+pub(crate) fn ref_entry(base: &ObjectId, delta: &[u8]) -> Vec<u8> {
     let mut entry = entry_header(7, delta.len() as u64);
     entry.extend_from_slice(base.as_bytes());
     entry.extend(zlib(delta));
@@ -49,14 +49,14 @@ fn ref_entry(base: &ObjectId, delta: &[u8]) -> Vec<u8> {
 }
 
 /// A delta of the entry `distance` bytes before the one this becomes.
-fn ofs_entry(distance: usize, delta: &[u8]) -> Vec<u8> {
+pub(crate) fn ofs_entry(distance: usize, delta: &[u8]) -> Vec<u8> {
     let mut entry = entry_header(6, delta.len() as u64);
     entry.extend(ofs(distance));
     entry.extend(zlib(delta));
     entry
 }
 
-fn written(dir: &TempDir, entries: &[Vec<u8>]) -> std::path::PathBuf {
+pub(crate) fn written(dir: &TempDir, entries: &[Vec<u8>]) -> std::path::PathBuf {
     let mut pack = pack_header(entries.len() as u32);
     for entry in entries {
         pack.extend_from_slice(entry);
@@ -73,7 +73,7 @@ fn limits(base_bytes: usize) -> IndexLimits {
     }
 }
 
-fn object(n: usize) -> Vec<u8> {
+pub(crate) fn object(n: usize) -> Vec<u8> {
     format!("the object number {n} of a chain\n").into_bytes()
 }
 
@@ -127,7 +127,7 @@ fn a_delta_whose_base_the_pack_lacks_is_refused() {
 }
 
 /// The index `git index-pack` writes for the pack at `pack`.
-fn by_git(pack: &std::path::Path) -> Vec<u8> {
+pub(crate) fn by_git(pack: &std::path::Path) -> Vec<u8> {
     let dir = TempDir::new().unwrap();
     let copy = dir.path().join("copy.pack");
     std::fs::copy(pack, &copy).unwrap();
