@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: split the server binary into the log, what is served, the fetch requests and the push
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/log.rs
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
