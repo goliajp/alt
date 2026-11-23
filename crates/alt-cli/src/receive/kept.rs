@@ -47,3 +47,62 @@ pub(super) fn keep(oid: &ObjectId, data: &[u8]) {
         kept.bytes += data.len();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
+    use alt_odb::NativeOdb;
+
+    use super::super::Objects;
+
+    fn commit(message: &str) -> (ObjectId, Vec<u8>) {
+        let tree = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Tree, b"");
+        let who = "t <t@e> 1700000000 +0000";
+        let data = format!("tree {tree}\nauthor {who}\ncommitter {who}\n\n{message}\n");
+        let oid = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Commit, data.as_bytes());
+        (oid, data.into_bytes())
+    }
+
+    /// The messages are of this test alone: the commits kept are those of
+    /// the whole process, and another test keeps none of these.
+    #[test]
+    fn a_commit_kept_is_read_as_it_is_in_the_store_and_is_none_where_the_store_lacks_it() {
+        let (here, elsewhere) = (commit("kept: here"), commit("kept: elsewhere"));
+        let dirs = [(); 2].map(|()| alt_os::temp::tempdir().unwrap());
+        let mut odbs = dirs
+            .each_ref()
+            .map(|dir| NativeOdb::open(dir.path()).unwrap());
+        odbs[0].put(here.0, ObjectKind::Commit, &here.1).unwrap();
+        odbs[1]
+            .put(elsewhere.0, ObjectKind::Commit, &elsewhere.1)
+            .unwrap();
+        for odb in &mut odbs {
+            odb.flush().unwrap();
+        }
+        let [first, second] = odbs.each_ref().map(|odb| Objects { odb, pack: None });
+
+        // read out of the store, and then as it was kept: the same object
+        assert!(super::commit(&here.0).is_none());
+        let read = first.get(&here.0).unwrap().unwrap();
+        assert_eq!((read.kind, &read.data), (ObjectKind::Commit, &here.1));
+        assert_eq!(*super::commit(&here.0).unwrap(), here.1);
+        let again = first.get(&here.0).unwrap().unwrap();
+        assert_eq!((again.kind, again.data), (read.kind, read.data));
+
+        // kept from one store, it is no object of a store that lacks it
+        assert!(second.get(&here.0).unwrap().is_none());
+        second.get(&elsewhere.0).unwrap().unwrap();
+        assert!(super::commit(&elsewhere.0).is_some());
+        assert!(first.get(&elsewhere.0).unwrap().is_none());
+
+        // and once that store has it, it is read there as anywhere
+        drop([first, second]);
+        odbs[1].put(here.0, ObjectKind::Commit, &here.1).unwrap();
+        odbs[1].flush().unwrap();
+        let second = Objects {
+            odb: &odbs[1],
+            pack: None,
+        };
+        assert_eq!(second.get(&here.0).unwrap().unwrap().data, here.1);
+    }
+}
