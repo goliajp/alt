@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: tell a handle its ops were cut when the frame it has to know or its last frame lies past the end of a file that was cut
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
