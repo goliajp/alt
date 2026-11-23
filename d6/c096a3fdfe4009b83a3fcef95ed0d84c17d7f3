@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: take no parent reached twice for a cycle when the generations of pushed commits are numbered
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/generation.rs
