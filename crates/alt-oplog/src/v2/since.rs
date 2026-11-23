@@ -6,9 +6,10 @@ use std::borrow::Cow;
 
 use crate::v2::block::{BLOCK_HEADER_LEN, BlockHeader, FILE_HEADER_LEN};
 use crate::v2::frame::{HEADER_LEN, KIND_OP, View, len_of};
+use crate::v2::locate::checkpoint_at;
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
-use crate::v2::scan::{Stop, checkpoint_at, read_frame};
+use crate::v2::scan::{Stop, read_frame};
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
 use crate::{Anchor, Op, OpLogError};

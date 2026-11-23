@@ -4,8 +4,9 @@
 
 use crate::v2::block::{BLOCK_HEADER_LEN, Layout};
 use crate::v2::frame::{CLOSE_LEN, KIND_OP, View};
+use crate::v2::locate::{Located, checkpoint_at};
 use crate::v2::open::op_of;
-use crate::v2::scan::{Located, checkpoint_at, read_frame};
+use crate::v2::scan::read_frame;
 use crate::v2::stream::{ReadAt, walk_file};
 use crate::{Op, OpLogError};
 

@@ -1,5 +1,4 @@
-//! Reading frames out of bytes of a log: forward from a state, and the
-//! checkpoint to begin at.
+//! Reading frames out of bytes of a log, forward from a state.
 
 use std::borrow::Cow;
 
@@ -10,8 +9,8 @@ use crate::v2::frame::{
     HEADER_LEN, KIND_CHECKPOINT, KIND_OP, KIND_RECEIPT, SKIPPABLE, Seed, View, body_at, len_of,
     parse,
 };
+pub use crate::v2::locate::{Located, locate};
 use crate::v2::state::State;
-use crate::v2::stream::ReadAt;
 
 /// Why a walk stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +34,7 @@ pub struct Walk<'a> {
 /// The bytes of the frame that starts at `at`, without the block headers
 /// among them, and where it ends: `None` where `data` does not hold as
 /// many bytes as its header says, laid out as a frame's are.
-fn lift_frame<'a>(
+pub(crate) fn lift_frame<'a>(
     layout: &Layout,
     data: &'a [u8],
     base: u64,
@@ -178,97 +177,4 @@ impl Walk<'_> {
         }
         Ok(Stop::End)
     }
-}
-
-/// Where a read begins: the log as a checkpoint says it stands, or the
-/// empty log.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Located {
-    pub state: State,
-    /// the boot the checkpoint was written in, zeros for the empty log
-    pub boot: [u8; 16],
-}
-
-impl Located {
-    pub(crate) fn empty() -> Self {
-        Located {
-            state: State::empty(),
-            boot: [0; 16],
-        }
-    }
-}
-
-/// The state the checkpoint frame at `at` gives, when one reads there
-/// and ends within `len`.
-pub(crate) fn checkpoint_at(
-    layout: &Layout,
-    len: u64,
-    at: u64,
-    read: &mut ReadAt,
-) -> std::io::Result<Option<Located>> {
-    let Some(left) = len
-        .checked_sub(at)
-        .filter(|left| *left >= HEADER_LEN as u64)
-    else {
-        return Ok(None);
-    };
-    // a header that runs into the next block has a block header in it
-    let reach = left.min((HEADER_LEN + BLOCK_HEADER_LEN) as u64);
-    let start = read(at, reach as usize)?;
-    let Some(header) = layout.lift_start(&start, at, at, HEADER_LEN) else {
-        return Ok(None);
-    };
-    let header: &[u8; HEADER_LEN] = header.first_chunk().unwrap();
-    let end = match len_of(header) {
-        Some(frame) if header[0] == KIND_CHECKPOINT => layout.end_of(at, frame),
-        _ => None,
-    };
-    let Some(end) = end.filter(|end| *end <= len) else {
-        return Ok(None);
-    };
-    let data = read(at, (end - at) as usize)?;
-    let read = lift_frame(layout, &data, at, at);
-    let Some((bytes, _)) = read.filter(|(bytes, _)| read_frame(layout, bytes, 0).is_some()) else {
-        return Ok(None);
-    };
-    let body = &bytes[body_at(header)..bytes.len() - 8];
-    let said = Checkpoint::decode(body).filter(|said| said.precedes(at));
-    Ok(said.map(|said| Located {
-        boot: said.boot,
-        state: State::of(said, at, end),
-    }))
-}
-
-/// Where a read of a log `len` bytes long begins: the state of the
-/// last checkpoint a block header leads to which reads and ends within
-/// `len`, or of the empty log where there is none. `read` gives bytes of
-/// the file.
-pub fn locate(layout: &Layout, len: u64, read: &mut ReadAt) -> std::io::Result<Located> {
-    let mut block = len.saturating_sub(1) / layout.block;
-    while block > 0 {
-        let start = block * layout.block;
-        let header = match len - start >= BLOCK_HEADER_LEN as u64 {
-            true => layout.decode_header(&read(start, BLOCK_HEADER_LEN)?, start),
-            false => None,
-        };
-        if let Some(header) = header {
-            if header.first != 0
-                && let Some(state) = checkpoint_at(layout, len, start + header.first as u64, read)?
-            {
-                return Ok(state);
-            }
-            match header.checkpoint {
-                0 => return Ok(Located::empty()),
-                // the one it names lies before it
-                at if at < start => {
-                    if let Some(state) = checkpoint_at(layout, len, at, read)? {
-                        return Ok(state);
-                    }
-                }
-                _ => {}
-            }
-        }
-        block -= 1;
-    }
-    Ok(Located::empty())
 }

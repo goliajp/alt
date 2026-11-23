@@ -14,6 +14,7 @@ pub mod compose;
 mod cut;
 mod follow;
 pub mod frame;
+mod locate;
 mod log;
 mod named;
 mod notes;
