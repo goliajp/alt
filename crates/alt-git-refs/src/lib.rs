@@ -3,6 +3,7 @@
 //! Pure-logic crate, business-agnostic.
 
 mod packed;
+pub mod reflog;
 mod reftable;
 pub mod stash;
 mod write;
