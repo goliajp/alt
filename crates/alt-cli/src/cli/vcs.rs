@@ -32,11 +32,7 @@ pub enum MetaOp {
     },
 }
 
-pub(super) fn parse_key_value(s: &str) -> Result<(String, String), String> {
-    s.split_once('=')
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .ok_or_else(|| format!("expected key=value, got '{s}'"))
-}
+pub(super) use crate::commit_args::parse_key_value;
 
 /// `alt lfs` operations.
 #[derive(Subcommand)]

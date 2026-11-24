@@ -2,7 +2,6 @@
 
 use alt_args::Subcommand;
 
-use super::vcs::parse_key_value;
 use super::*;
 use crate::{branch_args, log_cmd, sequence_args, worktree_args};
 
@@ -101,38 +100,7 @@ pub enum Command {
         args: worktree_args::Add,
     },
     /// Record staged changes as a new commit
-    Commit {
-        /// Commit message (with --amend, defaults to the amended commit's)
-        #[arg(short = 'm', required_unless_present_any = ["amend", "validate"], hint = none)]
-        message: Option<String>,
-        /// Replace the current branch tip with a new commit made from the
-        /// index, keeping its parents and author
-        #[arg(long)]
-        amend: bool,
-        /// Keep the amended commit's message (alt never opens an editor, so
-        /// this is already the default without -m; accepted as in git)
-        #[arg(long, requires = "amend")]
-        no_edit: bool,
-        /// Record the commit even when it changes nothing
-        #[arg(long)]
-        allow_empty: bool,
-        /// Skip the pre-commit checks (secret scan, large-file warning)
-        #[arg(short = 'n', long)]
-        no_verify: bool,
-        /// Only run the pre-commit checks on what is staged; commit nothing
-        #[arg(long, conflicts_with_all = ["amend", "message", "no_verify"])]
-        validate: bool,
-        /// Record a one-line decision in the commit's metadata (up to 3)
-        #[arg(long = "decision", value_name = "TEXT", hint = none)]
-        decisions: Vec<String>,
-        /// Record an extra metadata field (`key=value`, e.g. `model=…`)
-        #[arg(long = "meta", value_name = "KEY=VALUE", value_parser = parse_key_value, hint = none)]
-        extra: Vec<(String, String)>,
-        /// Emit the new commit/tree oids (or, with --validate, the findings)
-        /// as a JSON object
-        #[arg(long)]
-        json: bool,
-    },
+    Commit(crate::commit_args::Commit),
     /// Show the working tree status
     Status {
         #[command(flatten)]
@@ -182,27 +150,7 @@ pub enum Command {
         op: BisectOp,
     },
     /// Replay the current branch's own commits onto another base
-    Rebase {
-        /// The base to replay onto
-        #[arg(required_unless_present_any = ["cont", "skip", "abort"], hint = "rev")]
-        upstream: Option<String>,
-        /// Edit the list of commits first (pick, reword, squash, fixup,
-        /// drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
-        #[arg(short = 'i', long)]
-        interactive: bool,
-        /// Commit the resolved step and go on
-        #[arg(long = "continue", id = "cont", conflicts_with_all = ["upstream", "skip", "abort"])]
-        cont: bool,
-        /// Drop the stopped step and go on
-        #[arg(long, conflicts_with_all = ["upstream", "abort"])]
-        skip: bool,
-        /// Put the branch back as it was before the rebase
-        #[arg(long, conflicts_with = "upstream")]
-        abort: bool,
-        /// Emit a structured JSON result instead of human lines.
-        #[arg(long)]
-        json: bool,
-    },
+    Rebase(crate::commit_args::Rebase),
     /// Record new commits that undo earlier ones
     Revert {
         /// Commits to revert, in order

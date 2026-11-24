@@ -12,13 +12,13 @@ pub fn is_native(cmd: &Command) -> bool {
             | Command::Evidence { .. }
             | Command::Request { .. }
             | Command::Add { .. }
-            | Command::Commit { .. }
+            | Command::Commit(_)
             | Command::Status { .. }
             | Command::Branch { .. }
             | Command::Tag { .. }
             | Command::CherryPick { .. }
             | Command::Revert { .. }
-            | Command::Rebase { .. }
+            | Command::Rebase(_)
             | Command::Bisect { .. }
             | Command::Lfs { .. }
             | Command::Meta { .. }
@@ -54,7 +54,7 @@ pub fn may_conflict(cmd: &Command) -> bool {
         cmd,
         Command::Merge { .. }
             | Command::CherryPick { .. }
-            | Command::Rebase { .. }
+            | Command::Rebase(_)
             | Command::Revert { .. }
             | Command::Stash(_)
     )
@@ -141,7 +141,7 @@ fn native_mutates(cmd: &Command) -> bool {
             | Command::Fsck(crate::fsck::FsckArgs { yes: false, .. })
             | Command::Complete(_)
             | Command::Prompt(_)
-            | Command::Commit { validate: true, .. }
+            | Command::Commit(crate::commit_args::Commit { validate: true, .. })
             | Command::Branch(crate::branch_args::Branch {
                 name: None,
                 delete: None,

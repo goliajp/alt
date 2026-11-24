@@ -4,6 +4,14 @@
 use super::super::sequence_editor::Action;
 use super::super::*;
 
+/// One step of a rebase still to run.
+pub(in crate::native) enum Step {
+    /// a commit to replay
+    Replay(Action, ObjectId),
+    /// a shell command to run
+    Run(String),
+}
+
 /// What a stopped or running rebase remembers.
 pub(in crate::native) struct RebaseState {
     pub(super) recovery: Option<String>,
@@ -16,7 +24,11 @@ pub(in crate::native) struct RebaseState {
     /// The step that stopped on a conflict, not yet committed.
     pub(in crate::native) current: Option<(Action, ObjectId)>,
     /// Steps still to run, in order.
-    pub(in crate::native) todo: Vec<(Action, ObjectId)>,
+    pub(in crate::native) todo: Vec<Step>,
+    /// Each commit replayed is authored at the moment it is replayed.
+    pub(super) fresh_dates: bool,
+    /// It stopped for a shell command to be run, and has not gone on.
+    pub(super) ran: bool,
 }
 
 impl RebaseState {
@@ -32,10 +44,25 @@ impl RebaseState {
         if let Some((a, c)) = self.current {
             text.push_str(&format!("current {} {c}\n", a.word()));
         }
-        for (a, c) in &self.todo {
-            text.push_str(&format!("todo {} {c}\n", a.word()));
+        if self.fresh_dates {
+            text.push_str("dates fresh\n");
+        }
+        if self.ran {
+            text.push_str("ran exec\n");
+        }
+        for step in &self.todo {
+            match step {
+                Step::Replay(a, c) => text.push_str(&format!("todo {} {c}\n", a.word())),
+                Step::Run(command) => text.push_str(&format!("todo exec {command}\n")),
+            }
         }
         text
+    }
+
+    /// How many commits are still to replay.
+    pub(in crate::native) fn replays_left(&self) -> usize {
+        let replays = self.todo.iter();
+        replays.filter(|s| matches!(s, Step::Replay(..))).count()
     }
 }
 
@@ -78,7 +105,7 @@ impl NativeRepo<'_> {
         let oid = |v: &str| v.parse::<ObjectId>().map_err(|_| corrupt());
         let (mut branch, mut orig, mut onto, mut current) = (None, None, None, None);
         let mut todo = Vec::new();
-        let mut recovery = None;
+        let (mut recovery, mut fresh_dates, mut ran) = (None, false, false);
         for line in text.lines() {
             let (key, value) = line.split_once(' ').ok_or_else(corrupt)?;
             match key {
@@ -87,7 +114,15 @@ impl NativeRepo<'_> {
                 "orig" => orig = Some(oid(value)?),
                 "onto" => onto = Some(oid(value)?),
                 "current" => current = Some(parse_step_line(value, &oid)?),
-                "todo" => todo.push(parse_step_line(value, &oid)?),
+                "dates" => fresh_dates = true,
+                "ran" => ran = true,
+                "todo" => todo.push(match value.strip_prefix("exec ") {
+                    Some(command) => Step::Run(command.to_owned()),
+                    None => {
+                        let (action, commit) = parse_step_line(value, &oid)?;
+                        Step::Replay(action, commit)
+                    }
+                }),
                 _ => return Err(corrupt().into()),
             }
         }
@@ -98,6 +133,8 @@ impl NativeRepo<'_> {
             onto: onto.ok_or_else(corrupt)?,
             current,
             todo,
+            fresh_dates,
+            ran,
         }))
     }
 

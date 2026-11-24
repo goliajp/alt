@@ -4,6 +4,10 @@ use super::notes::MetaInput;
 use super::*;
 use crate::precommit::{self, Change, Severity};
 
+mod amend;
+mod authored;
+pub use authored::Authored;
+
 /// How `alt commit` was asked to behave.
 #[derive(Debug, Default, Clone)]
 pub struct CommitOptions {
@@ -15,9 +19,25 @@ pub struct CommitOptions {
     pub decisions: Vec<String>,
     /// Extra `key=value` metadata fields.
     pub extra: Vec<(String, String)>,
+    /// What the command line says of the author.
+    pub by: Authored,
 }
 
 impl CommitOptions {
+    pub fn of(args: &crate::commit_args::Commit) -> Self {
+        CommitOptions {
+            allow_empty: args.allow_empty,
+            no_verify: args.no_verify,
+            decisions: args.decisions.clone(),
+            extra: args.extra.clone(),
+            by: Authored {
+                author: args.author_given.clone(),
+                date: args.author_date.clone(),
+                reset: args.reset_author,
+            },
+        }
+    }
+
     fn meta(&self, carry_from: Option<ObjectId>) -> MetaInput {
         MetaInput {
             decisions: self.decisions.clone(),
@@ -42,11 +62,15 @@ impl NativeRepo<'_> {
         if self.bisect_in_progress() {
             return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
         }
+        if opts.by.reset {
+            let said = "--reset-author can be used only with -C, -c or --amend.";
+            return Err(settings::fatal(said.to_owned()));
+        }
         let committer = self.committer()?;
-        let author = match self.picked_author()? {
-            Some(_) => None,
-            None => Some(self.author()?),
-        };
+        // nobody to name as the author ends the command before it stores
+        if self.picked_author()?.is_none() {
+            self.authored(&opts.by, None)?;
+        }
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
         let head_tree = parent.map(|p| self.commit_tree(p)).transpose()?;
@@ -68,15 +92,15 @@ impl NativeRepo<'_> {
         let parents: Vec<ObjectId> = parent.into_iter().chain(merging).collect();
 
         let me = committer.sig();
-        let mine = author.as_ref().map(|by| by.sig());
         let msg = with_newline(message);
         let picked = self.concluding()?;
+        let by = self.authored(&opts.by, picked.as_ref())?;
         let commit = self.record_commit(
             NewCommit {
                 effects: recovery::RefEffects::RefsOnly,
                 tree,
                 parents: &parents,
-                author: picked.as_ref().or(mine.as_ref()).unwrap_or(&me),
+                author: &by.sig(),
                 committer: &me,
                 message: &msg,
             },
@@ -86,71 +110,6 @@ impl NativeRepo<'_> {
             &opts.meta(None),
         )?;
         self.settle_state()?;
-        report_commit(&branch, commit, tree, json, out)
-    }
-
-    /// `alt commit --amend [-m <msg>]`: replace the branch tip with a new
-    /// commit built from the index, as git does — same parents and author,
-    /// the new (or, without `-m`, the old) message, a fresh committer. The
-    /// old commit is left untouched and stays reachable through the op log.
-    pub fn amend(
-        &mut self,
-        message: Option<&str>,
-        opts: CommitOptions,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
-        self.ensure_writable("commit --amend")?;
-        self.ensure_topic_branch_or_unborn("commit --amend")?;
-        self.ensure_no_merge_in_progress("commit --amend")?;
-        let committer = self.committer()?;
-        let branch = self.head_branch()?;
-        let old = self
-            .store
-            .refs
-            .resolve(&branch)?
-            .ok_or("commit --amend: there is no commit to amend yet")?;
-        let obj = self
-            .store
-            .odb
-            .get(&old)?
-            .ok_or("commit missing from store")?;
-        let prev = alt_git_codec::Commit::parse(&obj.data)?;
-        let parents: Vec<ObjectId> = prev.parents().collect();
-        let author_line = prev
-            .author()
-            .ok_or("commit --amend: the commit has no author")?
-            .to_str()
-            .map_err(|_| "commit --amend: the author is not UTF-8")?
-            .to_owned();
-        let author = parse_sig(&author_line)?;
-        let msg = match message {
-            Some(m) => with_newline(m),
-            None => prev
-                .message()
-                .to_str()
-                .map_err(|_| "commit --amend: the message is not UTF-8; pass -m")?
-                .to_owned(),
-        };
-
-        let tree = self.staged_tree(prev.tree())?;
-        if !opts.no_verify {
-            self.run_precommit()?;
-        }
-        let commit = self.record_commit(
-            NewCommit {
-                effects: recovery::RefEffects::RefsOnly,
-                tree,
-                parents: &parents,
-                author: &author,
-                committer: &committer.sig(),
-                message: &msg,
-            },
-            &branch,
-            Some(old),
-            "amend",
-            &opts.meta(Some(old)),
-        )?;
         report_commit(&branch, commit, tree, json, out)
     }
 
@@ -302,7 +261,7 @@ pub(super) struct NewCommit<'a> {
     pub(super) message: &'a str,
 }
 
-fn with_newline(message: &str) -> String {
+pub(super) fn with_newline(message: &str) -> String {
     if message.ends_with('\n') {
         message.to_owned()
     } else {
@@ -327,7 +286,7 @@ pub(super) fn parse_sig(line: &str) -> Res<Sig<'_>> {
     })
 }
 
-fn report_commit(
+pub(super) fn report_commit(
     branch: &str,
     commit: ObjectId,
     tree: ObjectId,

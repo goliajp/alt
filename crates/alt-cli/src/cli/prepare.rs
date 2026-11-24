@@ -10,7 +10,7 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 fn several_records(cmd: &Command) -> bool {
     match cmd {
         Command::Revert { revs, .. } => revs.len() > 1,
-        Command::Rebase { upstream, .. } => upstream.is_some(),
+        Command::Rebase(args) => args.upstream.is_some(),
         _ => false,
     }
 }
@@ -19,11 +19,11 @@ fn several_records(cmd: &Command) -> bool {
 /// it does is then kept track of as a step.
 fn is_step(cmd: &Command) -> bool {
     match cmd {
-        Command::Commit { validate, .. } => !validate,
+        Command::Commit(args) => !args.validate,
         Command::Merge { .. }
         | Command::CherryPick { .. }
         | Command::Revert { .. }
-        | Command::Rebase { .. }
+        | Command::Rebase(_)
         | Command::Reset(_) => true,
         _ => false,
     }
@@ -38,7 +38,7 @@ fn gives_up(cmd: &Command) -> Option<(&'static str, &'static str)> {
             Some(("CHERRY_PICK_HEAD", "Cherry-pick aborted."))
         }
         Command::Revert { abort: true, .. } => Some(("REVERT_STATE", "Revert aborted.")),
-        Command::Rebase { abort: true, .. } => Some(("REBASE_STATE", "Rebase aborted.")),
+        Command::Rebase(args) if args.abort => Some(("REBASE_STATE", "Rebase aborted.")),
         _ => None,
     }
 }
@@ -54,11 +54,11 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
     };
     let excludes = match cmd {
         Add { args } => !args.renormalize,
-        Commit { validate, .. } => !validate,
+        Commit(args) => !args.validate,
         Diff(args) => args.cached,
         Switch(args) => !args.create || args.start.is_some(),
         // a sequence under way is ended or gone on with all the same
-        Rebase { upstream, .. } => upstream.is_some(),
+        Rebase(args) => args.upstream.is_some(),
         Revert { revs, .. } => !revs.is_empty(),
         _ => matches!(cmd, Status { .. }),
     };

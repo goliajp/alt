@@ -39,3 +39,23 @@ pub(super) fn cherry_pick<W: Write>(
     let rev = args.rev.as_deref().unwrap_or_default();
     Ok(u8::from(repo.cherry_pick(rev, args.noted, args.json, out)?))
 }
+
+/// git exits 1 when a rebase stops
+pub(super) fn rebase<W: Write>(
+    repo: &mut NativeRepo,
+    args: &crate::commit_args::Rebase,
+    out: &mut W,
+) -> Res<u8> {
+    if args.abort {
+        repo.rebase_abort(out)?;
+        return Ok(0);
+    }
+    let stopped = if args.cont {
+        repo.rebase_continue(args.json, out)?
+    } else if args.skip {
+        repo.rebase_skip(args.json, out)?
+    } else {
+        repo.rebase(args, out)?
+    };
+    Ok(u8::from(stopped))
+}

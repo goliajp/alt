@@ -144,6 +144,7 @@ mod reset_unborn;
 mod restore;
 mod rev_parse;
 mod revert;
+mod rewrite_authors;
 mod rm;
 mod scan_cache;
 mod scan_daemon;

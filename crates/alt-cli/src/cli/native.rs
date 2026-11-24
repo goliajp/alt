@@ -24,11 +24,11 @@ pub fn run_native<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
 fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     if matches!(
         cmd,
-        Command::Rebase {
+        Command::Rebase(crate::commit_args::Rebase {
             interactive: true,
             json: true,
             ..
-        }
+        })
     ) {
         return Err(crate::machine::Failure::refusal(
             "interactive_input_required",
@@ -42,34 +42,17 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
         Command::Evidence { op, json } => repo.evidence_command(op, *json, out)?,
         Command::Request { op, json } => repo.request_query(op, *json, out)?,
         Command::Add { args } => repo.add_paths(args, out)?,
-        Command::Commit {
-            validate: true,
-            json,
-            ..
-        } => {
+        Command::Commit(args) if args.validate => {
             // exit 1 when a check fails, like a refused commit
-            return Ok(if repo.validate(*json, out)? { 1 } else { 0 });
+            return Ok(if repo.validate(args.json, out)? { 1 } else { 0 });
         }
-        Command::Commit {
-            message,
-            amend,
-            allow_empty,
-            no_verify,
-            decisions,
-            extra,
-            json,
-            ..
-        } => {
-            let opts = crate::native::commit::CommitOptions {
-                allow_empty: *allow_empty,
-                no_verify: *no_verify,
-                decisions: decisions.clone(),
-                extra: extra.clone(),
-            };
-            if *amend {
-                repo.amend(message.as_deref(), opts, *json, out)?
+        Command::Commit(args) => {
+            let opts = crate::native::commit::CommitOptions::of(args);
+            if args.amend {
+                repo.amend(args.message.as_deref(), opts, args.json, out)?
             } else {
-                repo.commit(message.as_deref().unwrap_or_default(), opts, *json, out)?
+                let message = args.message.as_deref().unwrap_or_default();
+                repo.commit(message, opts, args.json, out)?
             }
         }
         Command::Complete(args) => repo.complete(args, out)?,
@@ -101,7 +84,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             LfsOp::Ls => repo.lfs_ls(out)?,
         },
         Command::Bisect { .. }
-        | Command::Rebase { .. }
+        | Command::Rebase(_)
         | Command::Revert { .. }
         | Command::CherryPick { .. }
         | Command::Merge { .. } => return run_sequence(repo, cmd, out),
@@ -198,29 +181,7 @@ fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> 
             }
             Ok(0)
         }
-        Command::Rebase {
-            upstream,
-            interactive,
-            cont,
-            skip,
-            abort,
-            json,
-        } => {
-            if *abort {
-                repo.rebase_abort(out)?;
-                return Ok(0);
-            }
-            let stopped = if *cont {
-                repo.rebase_continue(*json, out)?
-            } else if *skip {
-                repo.rebase_skip(*json, out)?
-            } else {
-                let upstream = upstream.as_deref().unwrap_or_default();
-                repo.rebase(upstream, *interactive, *json, out)?
-            };
-            // git exits 1 when a rebase stops in conflict
-            Ok(if stopped { 1 } else { 0 })
-        }
+        Command::Rebase(args) => sequence::rebase(repo, args, out),
         Command::Revert {
             revs,
             mainline,

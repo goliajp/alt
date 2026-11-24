@@ -84,7 +84,7 @@ impl NativeRepo<'_> {
                 let state = self.rebase_state()?.ok_or("corrupt REBASE_STATE")?;
                 let done = self.commits_since(self.rebase_head()?, state.onto)?;
                 let stopped = usize::from(state.current.is_some());
-                operation.step = Some((done + stopped, done + stopped + state.todo.len()));
+                operation.step = Some((done + stopped, done + stopped + state.replays_left()));
                 operation.branch = Some(state.branch);
             }
             OperationKind::Revert => {

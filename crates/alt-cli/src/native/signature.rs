@@ -167,6 +167,13 @@ fn in_zone(said: &Said, instant: i64) -> (i64, String) {
     (instant, date::zone(i64::from(east) / 60))
 }
 
+/// The moment `date` names, in the caller's zone where it names none.
+fn read_date(said: &Said, date: &str, now: i64) -> Res<(i64, String)> {
+    let local = |wall| alt_os::zone::Zone::of(said.get("TZ")).offset_of_local(wall);
+    date::parse(date, now, &local)
+        .ok_or_else(|| crate::git_settings::fatal(format!("invalid date format: {date}")))
+}
+
 fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signature> {
     let (word, variables, own) = role.names();
     let told = |what: &str| said.get(&format!("{variables}_{what}"));
@@ -186,11 +193,7 @@ fn resolve(said: &Said, role: Role, settings: &Config, now: i64) -> Res<Signatur
         (name, email) => return Err(unknown(word, name.is_none(), email.is_none())),
     };
     let (when, tz) = match told("DATE").filter(|date| !date.is_empty()) {
-        Some(date) => {
-            let local = |wall| alt_os::zone::Zone::of(said.get("TZ")).offset_of_local(wall);
-            date::parse(date, now, &local)
-                .ok_or_else(|| crate::git_settings::fatal(format!("invalid date format: {date}")))?
-        }
+        Some(date) => read_date(said, date, now)?,
         None => in_zone(said, now),
     };
     Ok(Signature {
@@ -223,6 +226,21 @@ impl NativeRepo<'_> {
     pub(super) fn moment(&self) -> String {
         let (seconds, zone) = in_zone(&self.id.said, (now_ms() / 1000) as i64);
         format!("{seconds} {zone}")
+    }
+
+    /// The moment `date`, given on the command line, names.
+    pub(super) fn date_said(&self, date: &str) -> Res<(i64, String)> {
+        read_date(&self.id.said, date, (now_ms() / 1000) as i64)
+    }
+
+    /// When a commit made now is authored: the date the caller's
+    /// environment gives, or this moment.
+    pub(super) fn author_moment(&self) -> Res<(i64, String)> {
+        let now = (now_ms() / 1000) as i64;
+        match self.id.said.get("GIT_AUTHOR_DATE") {
+            Some(date) if !date.is_empty() => read_date(&self.id.said, date, now),
+            _ => Ok(in_zone(&self.id.said, now)),
+        }
     }
 
     fn signature(&self, role: Role) -> Res<Signature> {

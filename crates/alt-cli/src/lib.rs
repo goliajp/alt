@@ -21,6 +21,7 @@ pub mod ci_cmd;
 pub mod cli;
 pub mod client;
 mod combined;
+pub mod commit_args;
 pub mod commit_sign;
 pub mod complete;
 pub mod config_cmd;
@@ -64,6 +65,7 @@ mod tree_changes;
 pub mod workers;
 pub mod worktree_args;
 
+pub mod exec_step;
 pub mod execution;
 mod file_header;
 pub mod funcname;

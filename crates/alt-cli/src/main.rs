@@ -72,11 +72,31 @@ fn run() -> Response {
     let response = match machine::parse(args.clone()) {
         Ok(parsed) => match alt_cli::execution::for_shell(&parsed.cli.command) {
             Some(respond) => return respond(Box::new(|| attempt(args, parsed))),
-            None => attempt(args, parsed),
+            None => {
+                let (json, on) = (parsed.json, go_on(&parsed));
+                let first = attempt(args, parsed);
+                alt_cli::exec_step::run(first, json, &mut || match machine::parse(on.clone()) {
+                    Ok(parsed) => attempt(on.clone(), parsed),
+                    Err(response) => response,
+                })
+            }
         },
         Err(response) => response,
     };
     alt_cli::past_damage::report(native::tell_left_out(response))
+}
+
+/// The command line that goes on with the rebase `parsed` asks for.
+fn go_on(parsed: &machine::Parsed) -> Vec<OsString> {
+    let mut words = vec!["alt"];
+    if let Some(workspace) = &parsed.cli.workspace {
+        words.extend(["--workspace", workspace]);
+    }
+    words.extend(["rebase", "--continue"]);
+    if parsed.json {
+        words.push("--json");
+    }
+    words.into_iter().map(OsString::from).collect()
 }
 
 fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {

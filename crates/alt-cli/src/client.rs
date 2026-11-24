@@ -76,7 +76,7 @@ mod imp {
                 | Cmd::Log(_)
                 | Cmd::OpLog { .. }
                 | Cmd::Add { .. }
-                | Cmd::Commit { .. }
+                | Cmd::Commit(_)
                 | Cmd::Switch { .. }
                 | Cmd::Restore(_)
                 | Cmd::Checkout(_)

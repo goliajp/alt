@@ -1428,6 +1428,9 @@ Options:
       --validate               Only run the pre-commit checks on what is staged; commit nothing
       --decision <TEXT>        Record a one-line decision in the commit's metadata (up to 3)
       --meta <KEY=VALUE>       Record an extra metadata field (`key=value`, e.g. `model=…`)
+      --author <AUTHOR>        Whom the commit is by: `Name <email>`, or a text that the author of an earlier commit holds
+      --date <DATE>            When the commit was authored
+      --reset-author           With --amend, the commit is by whoever amends it, as of now
       --json                   Emit the new commit/tree oids (or, with --validate, the findings) as a JSON object
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
@@ -1455,6 +1458,9 @@ Arguments:
 Options:
   -d <DELETE>                  Delete the named branch
   -r, --remotes                With -d, the branch is a remote-tracking one (`<remote>/<branch>`)
+  -f, --force                  Put the branch at the start named, or at HEAD, though there is one of the name already
+  -m, --move                   Rename a branch: `-m [<old>] <new>`, the current one where one name is given
+  -M                           Rename as -m does, though there is a branch of the new name
       --json                   Emit the branch list as a stable JSON object
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
@@ -1470,6 +1476,7 @@ Arguments:
 
 Options:
   -c                           Create the branch before switching
+  -C                           Create the branch before switching, or put the one of that name at the start named
       --json                   Emit a structured JSON result instead of the human line
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
@@ -1503,6 +1510,7 @@ Arguments:
 
 Options:
   -b                           Create the branch named before switching to it
+  -B                           Create the branch named before switching to it, or put the one of that name at the start named
       --ours                   For a path in conflict, check out the file of the current branch
       --theirs                 For a path in conflict, check out the file of the branch merged in
       --json                   Emit a structured JSON result instead of the human line
@@ -1799,6 +1807,8 @@ Options:
       --continue               Commit the resolved step and go on
       --skip                   Drop the stopped step and go on
       --abort                  Put the branch back as it was before the rebase
+  -x, --exec <COMMAND>         Run a shell command after each commit replayed; the rebase stops where one fails
+      --reset-author-date      Give each commit replayed the moment of the rebase as its author's date
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository

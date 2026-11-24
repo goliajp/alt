@@ -9,12 +9,15 @@
 
 use super::commit::{NewCommit, parse_sig};
 use super::notes::MetaInput;
-use super::sequence_editor::{self as ed, Action};
+use super::sequence_editor::Action;
 use super::*;
 
 mod leave;
+mod plan;
+mod run;
 mod state;
 pub(super) use state::RebaseState;
+use state::Step;
 
 enum Picked {
     Clean(ObjectId),
@@ -22,14 +25,14 @@ enum Picked {
 }
 
 impl NativeRepo<'_> {
-    /// `alt rebase [-i] <upstream>`. Returns whether it stopped on a conflict.
-    pub fn rebase(
-        &mut self,
-        upstream: &str,
-        interactive: bool,
-        json: bool,
-        out: &mut impl Write,
-    ) -> Res<bool> {
+    /// `alt rebase [-i] [-x <command>] <upstream>`. Returns whether it
+    /// stopped on a conflict.
+    pub fn rebase(&mut self, args: &crate::commit_args::Rebase, out: &mut impl Write) -> Res<bool> {
+        let upstream = args.upstream.as_deref().unwrap_or_default();
+        let (interactive, json) = (args.interactive, args.json);
+        run::ensure_commands(&args.exec)?;
+        // each commit is replayed anew where a command follows it or its date changes
+        let anew = !args.exec.is_empty() || args.reset_author_date;
         self.ensure_topic_branch_or_unborn("rebase")?;
         self.ensure_no_merge_in_progress("rebase")?;
         self.ensure_clean("rebase")?;
@@ -50,7 +53,7 @@ impl NativeRepo<'_> {
 
         let commits = self.commits_to_replay(orig, onto)?;
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
-        if !interactive && self.merge_bases(&[orig], &[onto])? == [onto] {
+        if !interactive && !anew && self.merge_bases(&[orig], &[onto])? == [onto] {
             writeln!(out, "Current branch {short} is up to date.")?;
             return Ok(false);
         }
@@ -90,7 +93,9 @@ impl NativeRepo<'_> {
             orig,
             onto,
             current: None,
-            todo,
+            todo: run::steps(&todo, &args.exec),
+            fresh_dates: args.reset_author_date,
+            ran: false,
         };
         self.save_rebase_state(&state)?;
         self.commit_refs_checkout("rebase", &moved, &old, &target)?;
@@ -120,8 +125,11 @@ impl NativeRepo<'_> {
             }
             state.current = None;
             self.save_rebase_state(&state)?;
-            self.apply_step(action, commit, tree)?;
+            self.apply_step(action, commit, tree, state.fresh_dates)?;
+        } else if state.ran {
+            self.ensure_left_clean()?;
         }
+        state.ran = false;
         self.run_rebase(state, json, out)
     }
 
@@ -132,11 +140,27 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<bool> {
         while !state.todo.is_empty() {
-            let (action, commit) = state.todo.remove(0);
+            let (action, commit) = match state.todo.remove(0) {
+                Step::Replay(action, commit) => (action, commit),
+                Step::Run(command) => {
+                    // whoever gave this command runs that one, once what
+                    // was done so far holds and nothing is held
+                    state.ran = true;
+                    self.save_rebase_state(&state)?;
+                    self.settle_state()?;
+                    crate::exec_step::ask(command, self.root.clone());
+                    return Ok(false);
+                }
+            };
             if action == Action::Drop {
                 continue;
             }
             let head = self.rebase_head()?;
+            if action == Action::Pick && !state.fresh_dates && self.stands_on(commit, head)? {
+                self.save_rebase_state(&state)?;
+                self.step_onto(head, commit)?;
+                continue;
+            }
             // that it stopped at this step holds with the conflict it writes
             state.current = Some((action, commit));
             let stopped = state.text();
@@ -152,7 +176,7 @@ impl NativeRepo<'_> {
                 Picked::Clean(tree) => {
                     // that the step is done holds with its commit
                     self.save_rebase_state(&state)?;
-                    self.apply_step(action, commit, tree)?;
+                    self.apply_step(action, commit, tree, state.fresh_dates)?;
                 }
             }
         }
@@ -214,7 +238,13 @@ impl NativeRepo<'_> {
 
     /// Records one replayed step whose tree is ready: a new commit for pick
     /// and reword, a replacement of the previous one for squash and fixup.
-    fn apply_step(&mut self, action: Action, commit: ObjectId, tree: ObjectId) -> Res<()> {
+    fn apply_step(
+        &mut self,
+        action: Action,
+        commit: ObjectId,
+        tree: ObjectId,
+        fresh_date: bool,
+    ) -> Res<()> {
         let head = self.rebase_head()?;
         let theirs = self.read_commit_parts(commit)?;
         let (parents, author_line, message) = if action.melds() {
@@ -231,7 +261,11 @@ impl NativeRepo<'_> {
             };
             (vec![head], theirs.author, message)
         };
-        let author = parse_sig(&author_line)?;
+        let moment = self.moment();
+        let mut author = parse_sig(&author_line)?;
+        if fresh_date && let Some((when, tz)) = moment.split_once(' ') {
+            (author.when, author.tz) = (when.parse()?, tz);
+        }
         let me = self.committer()?;
         let scratch = self.scratch_ref();
         self.record_commit(
@@ -254,96 +288,6 @@ impl NativeRepo<'_> {
             },
         )?;
         Ok(())
-    }
-
-    /// Lists the commits the rebase will replay, oldest first: those reachable
-    /// from `orig` but not from `onto`, without merges (git drops them too),
-    /// parents before children, older committer time first among peers.
-    fn commits_to_replay(&self, orig: ObjectId, onto: ObjectId) -> Res<Vec<ObjectId>> {
-        let from_orig = self.ancestry(&[orig])?;
-        let from_onto = self.ancestry(&[onto])?;
-        let mine: std::collections::HashMap<ObjectId, Vec<ObjectId>> = from_orig
-            .into_iter()
-            .filter(|(c, _)| !from_onto.contains_key(c))
-            .collect();
-        let mut done = std::collections::HashSet::new();
-        let mut order = Vec::new();
-        while done.len() < mine.len() {
-            let mut ready: Vec<(i64, ObjectId)> = Vec::new();
-            for (c, parents) in &mine {
-                if !done.contains(c)
-                    && parents
-                        .iter()
-                        .all(|p| !mine.contains_key(p) || done.contains(p))
-                {
-                    ready.push((self.committer_time(*c)?, *c));
-                }
-            }
-            ready.sort();
-            let (_, next) = ready[0];
-            done.insert(next);
-            if mine[&next].len() < 2 {
-                order.push(next);
-            }
-        }
-        Ok(order)
-    }
-
-    fn edit_todo(
-        &mut self,
-        todo: &[(Action, ObjectId)],
-        onto: ObjectId,
-        orig: ObjectId,
-    ) -> Res<Vec<(Action, ObjectId)>> {
-        let mut text = String::new();
-        for (action, c) in todo {
-            let subject = self.read_commit_parts(*c)?.subject();
-            text.push_str(&format!(
-                "{} {} {subject}\n",
-                action.word(),
-                &c.to_string()[..7]
-            ));
-        }
-        let (o, h) = (&onto.to_string()[..7], &orig.to_string()[..7]);
-        text.push_str(&format!(
-            "\n# Rebase {o}..{h} onto {o} ({} command{})\n",
-            todo.len(),
-            if todo.len() == 1 { "" } else { "s" }
-        ));
-        text.push_str(ed::TODO_HELP);
-        ed::check_machine_mode()?;
-        let path = self.index_path.with_file_name("REBASE_TODO");
-        crate::durable::write(&path, text)?;
-        ed::edit(&path, true)?;
-        let edited = std::fs::read_to_string(&path)?;
-        crate::durable::remove_file(&path)?;
-        let repo = self.store.git_view()?;
-        ed::parse_todo(&edited, |rev| {
-            repo.rev_parse(rev)?
-                .ok_or_else(|| format!("rebase: unknown commit '{rev}' in the todo list").into())
-        })
-    }
-
-    fn squash_message(&self, first: &str, next: &str) -> Res<String> {
-        let text = format!(
-            "# This is a combination of 2 commits.\n# This is the 1st commit message:\n\n{first}\n\
-             # This is the commit message #2:\n\n{next}"
-        );
-        self.edited_message(&text)
-    }
-
-    /// Runs the editor on a commit message and applies git's cleanup.
-    fn edited_message(&self, message: &str) -> Res<String> {
-        ed::check_machine_mode()?;
-        let path = self.index_path.with_file_name("REBASE_MSG");
-        crate::durable::write(&path, message)?;
-        ed::edit(&path, false)?;
-        let edited = ed::cleanup(&std::fs::read_to_string(&path)?);
-        crate::durable::remove_file(&path)?;
-        if edited.is_empty() {
-            return Err("rebase: aborting because the commit message is empty".into());
-        }
-        Ok(edited)
     }
 
     fn report_rebase_stop(
@@ -409,7 +353,7 @@ impl NativeRepo<'_> {
         Ok(changes)
     }
 
-    fn committer_time(&self, commit: ObjectId) -> Res<i64> {
+    pub(super) fn committer_time(&self, commit: ObjectId) -> Res<i64> {
         let obj = self
             .store
             .odb
@@ -420,7 +364,7 @@ impl NativeRepo<'_> {
             .unwrap_or(0))
     }
 
-    fn read_commit_parts(&self, commit: ObjectId) -> Res<CommitParts> {
+    pub(super) fn read_commit_parts(&self, commit: ObjectId) -> Res<CommitParts> {
         let obj = self
             .store
             .odb
@@ -444,14 +388,14 @@ impl NativeRepo<'_> {
     }
 }
 
-struct CommitParts {
-    parents: Vec<ObjectId>,
-    author: String,
-    message: String,
+pub(super) struct CommitParts {
+    pub(super) parents: Vec<ObjectId>,
+    pub(super) author: String,
+    pub(super) message: String,
 }
 
 impl CommitParts {
-    fn subject(&self) -> String {
+    pub(super) fn subject(&self) -> String {
         self.message.lines().next().unwrap_or("").to_owned()
     }
 }
