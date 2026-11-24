@@ -8,6 +8,7 @@ use alt_oplog::v2::frame::frame_len;
 use alt_oplog::v2::receipt::{Outcome, Receipt};
 use alt_oplog::{Anchor, Meta, OpLog, OpLogError, ROOT};
 
+use super::v2_beside::Beside;
 use super::v2_driver::{Run, name};
 use super::v2_owed::Wrote;
 
@@ -150,6 +151,17 @@ impl Run {
         }
     }
 
+    /// A handle opened at `anchor`, and whether the note beside the log
+    /// was changed while it opened: an open that reads the log twice
+    /// may then find the note another the second time, hold every op
+    /// and begin after none.
+    fn opened_at(&self, anchor: Anchor) -> (OpLog, bool) {
+        let noted = || std::fs::read(self.path().join("tail")).ok();
+        let before = noted();
+        let opened = OpLog::open_at(self.path(), Some(anchor)).expect("the log opens");
+        (opened, self.beside == Beside::Meddled && noted() != before)
+    }
+
     /// Opens a handle at the anchor of an op of the log, or of one that
     /// was cut or lost: it begins after the op while the log holds it.
     pub fn open_anchored(&mut self) {
@@ -172,7 +184,7 @@ impl Run {
             "open at the anchor of {} (gone: {stale})",
             name(&op.payload)
         ));
-        let opened = OpLog::open_at(self.path(), Some(anchor)).expect("the log opens");
+        let (opened, renoted) = self.opened_at(anchor);
         let index = self.adopt(opened, false);
         let log = &self.handles[index].log;
         let (held, end) = (log.len(), log.appended_len());
@@ -183,7 +195,7 @@ impl Run {
         if stale {
             assert!(!log.anchored(), "a handle begins after an op that is gone");
             self.counts.anchored_gone.fetch_add(1, Ordering::Relaxed);
-        } else if held == self.ledger.ops.len() {
+        } else if held == self.ledger.ops.len() && (log.anchored() || !renoted) {
             assert!(log.anchored(), "the anchor of an op of the log is not held");
             // of the ops after it, in their order: every ref transaction,
             // and the last op of the log
