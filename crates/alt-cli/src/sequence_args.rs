@@ -77,6 +77,9 @@ pub struct Merge {
     /// Fast-forward or change nothing: refuse a merge that needs a commit
     #[arg(long = "ff-only", conflicts_with = "abort_merge")]
     pub ff_only: bool,
+    /// Fast-forward where the branch is behind, whatever `merge.ff` says
+    #[arg(long = "ff", conflicts_with_all = ["no_ff", "ff_only", "abort_merge"])]
+    pub ff: bool,
     /// Take the message of the merge commit as it is (alt never opens an
     /// editor, so this is already the default; accepted as in git)
     #[arg(long = "no-edit")]
@@ -87,11 +90,14 @@ pub struct Merge {
 }
 
 impl Merge {
-    pub fn fast_forward(&self) -> FastForward {
-        match (self.no_ff, self.ff_only) {
-            (true, _) => FastForward::Never,
-            (false, true) => FastForward::Only,
-            (false, false) => FastForward::Allowed,
+    /// What the command line says of a fast-forward; `None` where it
+    /// says nothing, and `merge.ff` decides.
+    pub fn fast_forward(&self) -> Option<FastForward> {
+        match (self.no_ff, self.ff_only, self.ff) {
+            (true, ..) => Some(FastForward::Never),
+            (_, true, _) => Some(FastForward::Only),
+            (.., true) => Some(FastForward::Allowed),
+            _ => None,
         }
     }
 }

@@ -14,11 +14,15 @@ impl NativeRepo<'_> {
     pub fn merge(
         &mut self,
         branch_name: &str,
-        ff: FastForward,
+        ff: Option<FastForward>,
         json: bool,
         out: &mut impl Write,
     ) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("merge")?;
+        let ff = match ff {
+            Some(ff) => ff,
+            None => self.configured_ff()?,
+        };
         let brought = self.brought(branch_name)?;
         let theirs = brought.commit;
         let cur = self.head_branch()?;
@@ -63,7 +67,7 @@ impl NativeRepo<'_> {
                 Ok(false)
             }
             MergeOutcome::Conflicted(resolved) => {
-                self.keep_merge_message(theirs, &brought.message(&into))?;
+                self.keep_merge_message(theirs, &self.merge_message(&brought, ours, &into)?)?;
                 self.start_merge(theirs)?;
                 self.write_conflicted(&resolved)?;
                 self.say_stopped(&resolved, json, out)?;
@@ -152,7 +156,8 @@ impl NativeRepo<'_> {
             self.ensure_signing()?;
             // the tree of a merge that could have been a fast-forward is theirs
             let entries = self.commit_entries(theirs)?;
-            let commit = self.write_merge_commit(ours, theirs, &entries, &brought.message(into))?;
+            let message = self.merge_message(brought, ours, into)?;
+            let commit = self.write_merge_commit(ours, theirs, &entries, &message)?;
             return Ok(MergeOutcome::Merged { commit, entries });
         }
         if ff == FastForward::Only {
@@ -173,7 +178,8 @@ impl NativeRepo<'_> {
         }
 
         let entries: Vec<WorkEntry> = resolved.iter().filter_map(|r| r.entry.clone()).collect();
-        let commit = self.write_merge_commit(ours, theirs, &entries, &brought.message(into))?;
+        let message = self.merge_message(brought, ours, into)?;
+        let commit = self.write_merge_commit(ours, theirs, &entries, &message)?;
         Ok(MergeOutcome::Merged { commit, entries })
     }
 

@@ -248,7 +248,7 @@ fn the_index_of_a_stopped_merge_is_written_after_its_blobs_are_synced() {
     let stopped = merging
         .merge(
             "theirs",
-            alt_cli::native::FastForward::Allowed,
+            Some(alt_cli::native::FastForward::Allowed),
             false,
             &mut Vec::new(),
         )

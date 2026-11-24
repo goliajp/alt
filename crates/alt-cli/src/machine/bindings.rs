@@ -55,6 +55,7 @@ const LATER: &[&str] = &[
     "quit_pick",
     "continue_merge",
     "quit_merge",
+    "ff",
     "quit_rebase",
     "skip_revert",
     "quit_revert",

@@ -13,6 +13,9 @@ pub(in crate::native) struct Brought {
     /// the message of the annotated tag that was named, which the
     /// message of the merge commit carries
     pub note: Option<String>,
+    /// what git lists the commits it brings under, where `merge.log`
+    /// has them listed
+    pub listed: String,
 }
 
 impl Brought {
@@ -23,15 +26,16 @@ impl Brought {
             label: name.to_owned(),
             title: format!("Merge branch '{name}'"),
             note: None,
+            listed: name.to_owned(),
         }
     }
 
     /// The message of the commit that merges this into the branch `into`,
-    /// which is named unless it is `main` or `master`.
-    pub(in crate::native) fn message(&self, into: &str) -> String {
-        let mut message = match into {
-            "main" | "master" => format!("{}\n", self.title),
-            _ => format!("{} into {into}\n", self.title),
+    /// which is named unless `unnamed`.
+    fn message(&self, into: &str, unnamed: bool) -> String {
+        let mut message = match unnamed {
+            true => format!("{}\n", self.title),
+            false => format!("{} into {into}\n", self.title),
         };
         if let Some(note) = &self.note {
             message.push('\n');
@@ -109,12 +113,134 @@ impl NativeRepo<'_> {
                 _ => format!("Merge commit '{word}'"),
             },
         };
+        // a branch is listed by its name, anything else as the title has it
+        let listed = match title.strip_prefix("Merge ") {
+            Some(named)
+                if title.starts_with("Merge tag ") || title.starts_with("Merge commit ") =>
+            {
+                named.to_owned()
+            }
+            Some(named) => named.split('\'').nth(1).unwrap_or(named).to_owned(),
+            None => word.to_owned(),
+        };
         Ok(Brought {
             commit,
             label,
             title,
             note,
+            listed,
         })
+    }
+}
+
+impl NativeRepo<'_> {
+    /// How a merge treats a branch that is behind what it brings where
+    /// the command line does not say: `merge.ff`, as git reads it.
+    pub(in crate::native) fn configured_ff(&self) -> Res<FastForward> {
+        let settings = self.settings()?;
+        if settings
+            .get_str("merge", None, "ff")
+            .is_some_and(|v| v.as_bytes() == b"only")
+        {
+            return Ok(FastForward::Only);
+        }
+        // a value that is neither is as none
+        Ok(match settings.get_bool("merge", None, "ff") {
+            Some(Ok(false)) => FastForward::Never,
+            _ => FastForward::Allowed,
+        })
+    }
+
+    /// The message of the commit that merges `brought` into the branch
+    /// `into`, whose commit is `ours`: the branch is named unless a
+    /// pattern of `merge.suppressDest` matches it, `main` and `master`
+    /// where none is set, and with `merge.log` the commits brought are
+    /// listed after it, as git lists them.
+    pub(in crate::native) fn merge_message(
+        &self,
+        brought: &Brought,
+        ours: ObjectId,
+        into: &str,
+    ) -> Res<String> {
+        let settings = self.settings()?;
+        let mut patterns: Vec<&[u8]> = vec![b"main", b"master"];
+        let set = settings.get_all("merge", None, "suppressdest");
+        for (at, pattern) in set.iter().enumerate() {
+            // the first that is set takes the place of what git has without one
+            if at == 0 {
+                patterns.clear();
+            }
+            match pattern.filter(|pattern| !pattern.is_empty()) {
+                Some(pattern) => patterns.push(pattern),
+                None => patterns.clear(),
+            }
+        }
+        let matches = |p: &&[u8]| alt_git_config::wildmatch(p, into.as_bytes(), false);
+        let mut message = brought.message(into, patterns.iter().any(matches));
+        // a number is how many are listed, and a word says whether
+        // git's twenty are
+        let limit = match settings.get_int("merge", None, "log") {
+            Some(Ok(limit)) => usize::try_from(limit).unwrap_or(0),
+            _ => match settings.get_bool("merge", None, "log") {
+                Some(Ok(true)) => 20,
+                _ => 0,
+            },
+        };
+        if limit > 0 {
+            message.push_str(&self.brought_listed(brought, ours, limit)?);
+        }
+        Ok(message)
+    }
+
+    /// The commits `brought` has and `ours` lacks, the newest first and
+    /// no merge among them, each by its subject: at most `limit`, with
+    /// how many there are where there are more.
+    fn brought_listed(&self, brought: &Brought, ours: ObjectId, limit: usize) -> Res<String> {
+        let repo = self.store.git_view()?;
+        let mut had = std::collections::HashSet::new();
+        for walked in repo.rev_walk(ours)? {
+            had.insert(walked?.0);
+        }
+        let (mut count, mut subjects) = (0, Vec::new());
+        for walked in repo.rev_walk(brought.commit)? {
+            let commit = walked?.0;
+            if had.contains(&commit) {
+                continue;
+            }
+            let parsed = repo.read_commit(&commit)?;
+            if parsed.parents().count() > 1 {
+                continue;
+            }
+            count += 1;
+            if subjects.len() > limit {
+                continue;
+            }
+            // the first paragraph on one line, as `%s` has it
+            let message = String::from_utf8_lossy(parsed.message()).into_owned();
+            let first = message.trim_start_matches('\n').split("\n\n").next();
+            let subject = first
+                .unwrap_or_default()
+                .lines()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let subject = subject.trim_start();
+            subjects.push(match subject.is_empty() {
+                true => commit.to_string(),
+                false => subject.to_owned(),
+            });
+        }
+        let name = &brought.listed;
+        let mut listed = match count > limit {
+            true => format!("\n* {name}: ({count} commits)\n"),
+            false => format!("\n* {name}:\n"),
+        };
+        for (at, subject) in subjects.iter().enumerate() {
+            listed.push_str(&match at >= limit {
+                true => "  ...\n".to_owned(),
+                false => format!("  {subject}\n"),
+            });
+        }
+        Ok(listed)
     }
 }
 

@@ -1920,6 +1920,7 @@ Options:
       --quit                   Forget the stopped merge; the index and the files stay as they are
       --no-ff                  Record a merge commit even where the branch could be fast-forwarded
       --ff-only                Fast-forward or change nothing: refuse a merge that needs a commit
+      --ff                     Fast-forward where the branch is behind, whatever `merge.ff` says
       --no-edit                Take the message of the merge commit as it is (alt never opens an editor, so this is already the default; accepted as in git)
       --json                   Emit a structured JSON result instead of the human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
