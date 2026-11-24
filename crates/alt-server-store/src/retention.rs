@@ -30,8 +30,10 @@ pub const SESSION_RETENTION_MS: u64 = 30 * DAY_MS;
 /// how long a credential is kept after it ended
 pub const CREDENTIAL_RETENTION_MS: u64 = 90 * DAY_MS;
 
-/// The last request that was looked at. The ones that stay for good are passed
-/// once, not found again by every round.
+/// The last request that was looked at. The ones that stay are passed and not
+/// found again by the next round; once every request that is over was looked at,
+/// the rounds begin again with the first, so that one which stays no longer (the
+/// segment that named it was compacted away) goes with the next pass.
 #[derive(Clone, Debug, Default)]
 pub struct RequestsSeen {
     settled_at: i64,
@@ -250,16 +252,21 @@ impl Store {
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         let Some(row) = row else {
+            *seen = RequestsSeen::default();
             return Ok((0, false));
         };
-        *seen = RequestsSeen {
-            settled_at: row.get(0),
-            repository: row.get(1),
-            epoch: row.get(2),
-            actor: row.get(3),
-            request: row.get(4),
+        let more = row.get::<_, i64>(6) >= limit;
+        *seen = match more {
+            true => RequestsSeen {
+                settled_at: row.get(0),
+                repository: row.get(1),
+                epoch: row.get(2),
+                actor: row.get(3),
+                request: row.get(4),
+            },
+            false => RequestsSeen::default(),
         };
-        Ok((unsigned(row.get(5))?, row.get::<_, i64>(6) >= limit))
+        Ok((unsigned(row.get(5))?, more))
     }
 
     fn credentials_over(&mut self, limit: i64) -> Result<(u64, bool)> {

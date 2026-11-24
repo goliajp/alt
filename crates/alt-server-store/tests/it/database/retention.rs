@@ -91,14 +91,12 @@ fn a_request_that_is_over_is_kept_thirty_days_and_one_with_records_for_good() {
         .unwrap();
     assert_eq!(after, event);
 
-    // the one that stays was passed: without its records it is not found again
-    // by the rounds of this process, and is by one that starts over
+    // every request that is over was looked at, so the next round begins again:
+    // the one that stayed goes once its records are gone
     f.client()
         .batch_execute("DELETE FROM alt_task_bundles")
         .unwrap();
-    assert_eq!(round(&mut f, &mut seen), Removed::default());
-    let removed = round(&mut f, &mut RequestsSeen::default());
-    assert_eq!(removed, expected_one());
+    assert_eq!(round(&mut f, &mut seen), expected_one());
     assert_eq!(requests(&f), ["d-open"]);
 
     // a recovery leaves the open request to an epoch that is over
@@ -152,6 +150,40 @@ fn a_round_removes_so_many_and_tells_of_the_rest() {
     let third = f.store.remove_what_is_over(3, &mut seen, &mut none);
     assert_eq!((third.requests, third.more), (1, false));
     assert_eq!(requests(&f), Vec::<String>::new());
+}
+
+/// Seven requests stay for the records they carried. Three at a time they are
+/// passed, each round going on behind the one before; with all of them looked at
+/// the rounds begin again, and remove them once their records are gone.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_requests_that_stay_are_passed_and_looked_at_again_in_the_next_pass() {
+    let mut f = Fixture::new();
+    Payload::new("a", None).publish_new(&mut f.store, &f.credential);
+    f.client()
+        .batch_execute(&format!(
+            "INSERT INTO alt_requests SELECT (jsonb_populate_record(q, jsonb_build_object('request_id','n'||n))).* FROM alt_requests q, generate_series(1,6) n;
+             UPDATE alt_requests SET settled_at=settled_at-{};
+             INSERT INTO alt_task_bundles(repository,bundle_blake3,epoch,actor_id,request_id) SELECT repository,(SELECT blake3 FROM alt_blobs LIMIT 1),epoch,actor_id,request_id FROM alt_requests",
+            31 * DAY
+        ))
+        .unwrap();
+    let mut seen = RequestsSeen::default();
+    let mut none = |_: &str, _| panic!("a rule failed");
+    let mut pass = |f: &mut Fixture| -> Vec<(u64, bool)> {
+        (0..3)
+            .map(|_| {
+                let round = f.store.remove_what_is_over(3, &mut seen, &mut none);
+                (round.requests, round.more)
+            })
+            .collect()
+    };
+    assert_eq!(pass(&mut f), [(0, true), (0, true), (0, false)]);
+    assert_eq!(pass(&mut f), [(0, true), (0, true), (0, false)]);
+    f.client()
+        .batch_execute("DELETE FROM alt_task_bundles")
+        .unwrap();
+    assert_eq!(pass(&mut f), [(3, true), (3, true), (1, false)]);
 }
 
 /// Credentials by what became of them and what still names them. `e` is how long
