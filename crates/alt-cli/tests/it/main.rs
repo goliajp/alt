@@ -152,6 +152,7 @@ mod rebase_merges;
 mod rebase_merges_base;
 mod recovery_checked;
 mod reflog;
+mod reflog_kept;
 mod remote;
 mod replay_refused;
 mod request_operations;

@@ -113,6 +113,19 @@ pub(super) fn derived(
         if head {
             let now = at(&state, want);
             if let (true, Some(new)) = (before != now, now.1) {
+                // a branch that takes another name takes the head along:
+                // nothing was left, and git says what was renamed
+                if let ("branch", Some(from), Some(to)) = (verb, &before.0, &now.0) {
+                    let said = format!("Branch: renamed {from} to {to}");
+                    found.moves.push(Move {
+                        old: before.1,
+                        new: Some(new),
+                        by: None,
+                        at_ms: Some(op.timestamp_ms),
+                        said: Said::Kept(Some(said.into_bytes())),
+                    });
+                    continue;
+                }
                 let on = (before.0 != now.0).then_some((before.0, now.0));
                 let (from, to) = on.unwrap_or_default();
                 found.moves.push(told(before.1, new, from, to));
