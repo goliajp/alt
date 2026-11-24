@@ -99,6 +99,23 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
     }
 }
 
+/// The status a push is refused with where its commands could not be read:
+/// that of what kept its body from coming where something did, and
+/// otherwise that of a request that is none.
+pub(super) fn unread_commands(error: &(dyn std::error::Error + 'static)) -> u16 {
+    use std::io::ErrorKind;
+    let mut cause = Some(error);
+    while let Some(error) = cause {
+        match error.downcast_ref::<std::io::Error>().map(|io| io.kind()) {
+            Some(ErrorKind::TimedOut) => return 408,
+            Some(ErrorKind::StorageFull) => return 503,
+            Some(ErrorKind::FileTooLarge) => return 413,
+            _ => cause = error.source(),
+        }
+    }
+    400
+}
+
 /// The status a request is refused with where its body could not be read
 /// within its cap: the peer stopped sending, ended early, sent what is
 /// no body, or sent too much, or the server has no room for it now.

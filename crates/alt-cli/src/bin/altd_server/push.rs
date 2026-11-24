@@ -30,7 +30,7 @@ pub(super) fn read_push(
     // the commands are held in memory: they get a cap of their own
     let mut commands = (&mut reader).take(max_command_bytes());
     let head = alt_wire::push::parse_push_request_head(&mut commands, HashAlgo::Sha1)
-        .map_err(|e| (400, format!("{e}")))?;
+        .map_err(|e| (limits::unread_commands(&e), format!("{e}")))?;
     let mut tmp = std::fs::File::create(pack).map_err(|e| (500, format!("tempfile: {e}")))?;
     // the cap is on what the body inflates to as well: a gzip body is
     // counted as it is written out. Not synced: the file is gone when

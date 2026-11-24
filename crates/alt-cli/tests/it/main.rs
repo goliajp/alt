@@ -20,6 +20,7 @@ mod altd_server_many_repos;
 mod altd_server_no_new_objects;
 mod altd_server_pack_limits;
 mod altd_server_push_cost;
+mod altd_server_push_refused;
 mod altd_server_reads;
 mod altd_server_recorded;
 mod altd_server_refused_objects;
