@@ -7,7 +7,7 @@ use alt_oplog::{OpLog, OpLogError};
 
 use super::v2_cut_notes::{cut_once, opened_holds};
 use super::v2_cut_told::{cut_told, tell_cut};
-use super::v2_log::file_len;
+use super::v2_log::{boot, file_len, grow, new_log};
 
 #[test]
 fn a_cut_the_log_tells_of_ends_it_there_for_a_reader_while_the_log_is_of_a_generation_before() {
@@ -61,4 +61,32 @@ fn a_cut_the_log_tells_of_ends_it_there_for_a_reader_while_the_log_is_of_a_gener
     assert_eq!(writer.len(), 5);
     writer.refresh().unwrap();
     assert_eq!((writer.len(), cut_told(dir.path())), (6, (0, 0)));
+}
+
+#[test]
+fn a_cut_told_at_a_place_the_note_says_is_synced_ends_the_log_for_nobody_who_opens_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    let ops = grow(&mut log, "a", 5);
+    // the frames say the log is synced up to its last op, the note
+    // beside it that it is to its end
+    let said = log.state().unwrap().synced;
+    drop(log);
+    assert_eq!(
+        (said, alt_oplog::bounded_in(dir.path())),
+        (ops[4].start, Some(ops[4].end))
+    );
+    for at in [ops[4].start, ops[4].start + 10, ops[4].end - 1] {
+        let case = format!("a cut told at {at}");
+        tell_cut(dir.path(), (1, at));
+        opened_holds(dir.path(), (5, false), &case);
+        let mut log = OpLog::open_read_only(dir.path(), None).unwrap();
+        log.follow().unwrap();
+        assert_eq!(log.len(), 5, "{case}");
+        // a writer that reads the log to its end takes it back
+        let mut log = OpLog::open(dir.path()).unwrap();
+        log.refresh().unwrap();
+        assert_eq!(cut_told(dir.path()), (0, 0), "{case}");
+    }
 }

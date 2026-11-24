@@ -270,7 +270,10 @@ pub(crate) fn load(
     let generation = found.state.generation;
     let ends = |tail: &Tail| tail.hides(meta.len(), generation);
     let noted_end = tail.filter(ends).map(|tail| tail.ends);
-    let begun = told.begun_at(generation, found.state.synced);
+    // the boundary is the one a handle reads on with: what the frames
+    // say and what the note says of this log
+    let synced = found.tail.map_or(0, |tail| tail.synced);
+    let begun = told.begun_at(generation, found.state.synced.max(synced));
     let hidden = [noted_end, begun].into_iter().flatten().min();
     let hidden = hidden.filter(|ends| *ends < size);
     let size = hidden.map_or(size, |ends| ends.max(FILE_HEADER_LEN as u64));
