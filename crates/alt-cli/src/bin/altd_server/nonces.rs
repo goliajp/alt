@@ -1,5 +1,6 @@
 //! The nonces of signed pushes: issued with the advertisement, good once.
 
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use super::*;
@@ -9,11 +10,18 @@ use super::*;
 /// coming.
 const LIFE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// In-memory single-use nonce table. Cap at 1024 active entries; on
-/// overflow the oldest is dropped (LRU FIFO). This is a tradeoff:
-/// under burst load an honest client whose info/refs nonce ages out
-/// before they POST receive-pack gets refused, but the bound makes
-/// the table O(1) memory regardless of traffic.
+/// the nonces a table holds, and those of them one asker has
+const MOST: usize = 1024;
+const EACH: usize = 64;
+
+/// In-memory single-use nonce table, of [`MOST`] nonces. One asker, an
+/// address as connections are counted for it, has [`EACH`] of them: a
+/// nonce more replaces the oldest of its own, so that whoever asks for
+/// many drops none that another asked for. Past the cap of the table the
+/// oldest of all is dropped, which takes more askers than a quarter of
+/// the cap divided among them: an honest client whose nonce went that
+/// way is refused and asks again. The bound makes the table O(1) memory
+/// regardless of traffic.
 ///
 /// The table of a repository is kept apart from what is open of the
 /// repository: a nonce is good after the repository was closed and
@@ -29,7 +37,7 @@ impl Default for NonceTable {
 }
 
 pub(super) struct NonceInner {
-    pub(super) queue: std::collections::VecDeque<(String, Instant)>,
+    pub(super) queue: std::collections::VecDeque<(String, Instant, Option<IpAddr>)>,
     pub(super) set: std::collections::HashSet<String>,
 }
 
@@ -44,38 +52,22 @@ impl NonceTable {
     }
 
     /// Issue a fresh 32-char-hex nonce (128 bits — collision negligible
-    /// against any realistic traffic + 1024-entry table). Inserts it
-    /// into the table; on overflow the oldest entry is evicted.
-    pub(super) fn issue(&self) -> String {
-        let nonce = {
-            // 16 bytes from the OS entropy pool via /dev/urandom; we
-            // avoid a `rand` dep by reading directly. Failure to read
-            // is essentially "running on Mars" — fall back to a
-            // timestamp-derived value so the path doesn't crash.
-            let mut buf = [0u8; 16];
-            match std::fs::File::open("/dev/urandom") {
-                Ok(mut f) => {
-                    use std::io::Read;
-                    let _ = f.read_exact(&mut buf);
-                }
-                Err(_) => {
-                    let ms = unix_ms_now().to_le_bytes();
-                    buf[..ms.len()].copy_from_slice(&ms);
-                }
-            }
-            let mut hex = String::with_capacity(32);
-            for b in buf {
-                hex.push_str(&format!("{b:02x}"));
-            }
-            hex
-        };
+    /// against any realistic traffic + 1024-entry table) to the asker
+    /// counted under `from`, and insert it into the table.
+    pub(super) fn issue(&self, from: Option<IpAddr>) -> String {
+        let mut buf = [0u8; 16];
+        alt_os::random::fill(&mut buf);
+        let nonce: String = buf.iter().map(|b| format!("{b:02x}")).collect();
         let mut g = self.inner.take();
-        if g.queue.len() >= 1024
-            && let Some((old, _)) = g.queue.pop_front()
-        {
+        let theirs = |held: &(String, Instant, Option<IpAddr>)| held.2 == from;
+        let dropped = match g.queue.iter().filter(|held| theirs(held)).count() >= EACH {
+            true => g.queue.iter().position(theirs),
+            false => (g.queue.len() >= MOST).then_some(0),
+        };
+        if let Some((old, ..)) = dropped.and_then(|at| g.queue.remove(at)) {
             g.set.remove(&old);
         }
-        g.queue.push_back((nonce.clone(), Instant::now()));
+        g.queue.push_back((nonce.clone(), Instant::now(), from));
         g.set.insert(nonce.clone());
         nonce
     }
@@ -95,9 +87,9 @@ impl NonceTable {
         // also drop it from the queue so the LRU bookkeeping stays
         // accurate; we accept the O(N) here because consumes are
         // rare relative to issues.
-        let at = g.queue.iter().position(|(held, _)| held == nonce);
+        let at = g.queue.iter().position(|(held, ..)| held == nonce);
         let issued = at.and_then(|at| g.queue.remove(at));
-        issued.is_some_and(|(_, issued)| now.saturating_duration_since(issued) <= LIFE)
+        issued.is_some_and(|(_, issued, _)| now.saturating_duration_since(issued) <= LIFE)
     }
 
     /// Whether no nonce of the table is good any more: the table may be
@@ -107,7 +99,7 @@ impl NonceTable {
     }
 
     fn spent_at(&self, now: Instant) -> bool {
-        let newest = self.inner.take().queue.back().map(|(_, issued)| *issued);
+        let newest = self.inner.take().queue.back().map(|(_, issued, _)| *issued);
         newest.is_none_or(|issued| now.saturating_duration_since(issued) > LIFE)
     }
 }
@@ -122,7 +114,7 @@ mod tests {
     #[test]
     fn nonce_table_consume_is_single_use() {
         let t = NonceTable::new();
-        let n = t.issue();
+        let n = t.issue(None);
         assert_eq!(n.len(), 32, "issued nonce should be 32 hex chars");
         assert!(t.consume(&n), "first consume must succeed");
         assert!(!t.consume(&n), "second consume on the same nonce must fail");
@@ -140,24 +132,31 @@ mod tests {
         );
     }
 
-    /// At cap (1024 entries), issuing one more evicts the oldest;
-    /// after eviction the evicted value can't be consumed. This
-    /// bounds memory regardless of traffic at the cost of refusing
-    /// an honest client whose info/refs nonce aged out before they
-    /// posted receive-pack.
+    /// An asker has so many nonces in the table: one more drops the oldest
+    /// of its own and none of another's, however many it asks for. With
+    /// the table full of the nonces of many askers the oldest of all goes.
     #[test]
-    fn nonce_table_evicts_oldest_when_full() {
+    fn an_asker_drops_its_own_nonces_and_a_full_table_the_oldest() {
         let t = NonceTable::new();
-        let first = t.issue();
-        for _ in 1..1024 {
-            let _ = t.issue();
+        let asker = |n: u8| Some(IpAddr::from([198, 51, 100, n]));
+        let (theirs, here) = (t.issue(asker(1)), t.issue(None));
+        let first = t.issue(asker(2));
+        let kept: Vec<String> = (1..EACH).map(|_| t.issue(asker(2))).collect();
+        for _ in 0..4 * MOST {
+            let _ = t.issue(asker(2));
         }
-        // table is full now; one more issue must evict `first`.
-        let _last = t.issue();
-        assert!(
-            !t.consume(&first),
-            "the evicted (oldest) nonce must no longer be consumable"
-        );
+        assert!(!t.consume(&first));
+        assert!(kept.iter().all(|nonce| !t.consume(nonce)));
+        assert!(t.consume(&theirs) && t.consume(&here));
+        assert_eq!(t.inner.take().queue.len(), EACH);
+
+        let t = NonceTable::new();
+        let first = t.issue(asker(0));
+        for n in 0..MOST {
+            let _ = t.issue(asker((n / (EACH - 1)) as u8 + 1));
+        }
+        assert_eq!(t.inner.take().queue.len(), MOST);
+        assert!(!t.consume(&first));
     }
 
     /// A nonce is good for a day, and a table whose nonces are all older
@@ -166,7 +165,7 @@ mod tests {
     fn a_nonce_is_good_for_a_day_and_a_table_of_none_that_are_is_spent() {
         let t = NonceTable::new();
         assert!(t.spent());
-        let (old, new) = (t.issue(), t.issue());
+        let (old, new) = (t.issue(None), t.issue(None));
         let now = Instant::now();
         assert!(!t.spent_at(now + LIFE - Duration::from_secs(60)));
         assert!(t.spent_at(now + LIFE + Duration::from_secs(60)));

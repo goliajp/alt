@@ -190,7 +190,7 @@ pub(super) fn handle_info_refs(
             // is not written to gives none: a push to it is refused before
             // its signature is looked at.
             let nonce_cap: Option<String> = writer.map(|w| {
-                let n = w.nonces.issue();
+                let n = w.nonces.issue(req.from());
                 format!("{}={n}", alt_wire::CAP_ALT_NONCE)
             });
             let mut caps_list: Vec<&str> = vec![
