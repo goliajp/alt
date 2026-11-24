@@ -27,16 +27,18 @@ fn all_read(path: &std::path::Path, entries: usize) {
     assert_eq!(idx.len() as usize, entries);
     for i in 0..idx.len() {
         let (oid, offset) = (idx.oid_at(i), idx.offset_at(i).unwrap());
+        // a read that came to hold this much is one that goes round
+        let _held = crate::held::no_more_than(64 << 20);
         let is = |read: alt_git_pack::PackedObject| {
             assert_eq!(
                 ObjectId::hash_object(HashAlgo::Sha1, read.kind, &read.data),
                 oid
             );
         };
-        let mut steps = 0;
+        let mut work = alt_git_pack::ReadWork::default();
         let cold = IndexedPack::open(path, HashAlgo::Sha1).unwrap();
-        is(cold.read_at_counting(offset, &mut steps).unwrap());
-        assert!(steps <= entries, "{steps} steps over {entries} entries");
+        is(cold.read_at_counting(offset, &mut work).unwrap());
+        assert!(work.looked <= entries, "{work:?} over {entries} entries");
         let cold = IndexedPack::open(path, HashAlgo::Sha1).unwrap();
         is(cold.read(&oid).unwrap().unwrap());
         is(listed.read_at(offset).unwrap());
@@ -48,6 +50,7 @@ fn all_read(path: &std::path::Path, entries: usize) {
 /// first again as a delta of the second, named by its id or by where it is.
 #[test]
 fn an_object_that_is_there_again_as_a_delta_of_itself_or_of_what_is_made_of_it_is_read() {
+    let _ended = crate::held::ended_within(600);
     let (x, y) = (object(0), object(1));
     let own = vec![plain_entry(&x), ref_entry(&blob(&x), &of(0, 0))];
     let second = ref_entry(&blob(&x), &of(0, 1));
@@ -74,6 +77,7 @@ fn an_object_that_is_there_again_as_a_delta_of_itself_or_of_what_is_made_of_it_i
 /// of an entry before it. Those `index_pack` takes are read through.
 #[test]
 fn every_entry_of_a_pack_that_is_taken_is_read_whatever_it_is_a_delta_of() {
+    let _ended = crate::held::ended_within(900);
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
     let mut next = |below: usize| {
         state ^= state << 13;
