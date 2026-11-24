@@ -60,6 +60,7 @@ alt-oplog = { path = "crates/alt-oplog" }
 alt-os = { path = "crates/alt-os" }
 alt-pg = { path = "crates/alt-pg" }
 alt-pack-segment = { path = "crates/alt-pack-segment" }
+alt-precompose = { path = "crates/alt-precompose" }
 alt-prism = { path = "crates/alt-prism" }
 alt-prism-deflate = { path = "crates/alt-prism-deflate" }
 alt-prism-png = { path = "crates/alt-prism-png" }

@@ -13,8 +13,8 @@ alt-odb.workspace = true
 alt-bytes.workspace = true
 alt-hash.workspace = true
 alt-os.workspace = true
+alt-precompose.workspace = true
 alt-threads.workspace = true
-alt-url.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true

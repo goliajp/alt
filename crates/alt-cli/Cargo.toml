@@ -69,6 +69,7 @@ alt-json.workspace = true
 alt-json-serde.workspace = true
 
 [dev-dependencies]
+alt-precompose.workspace = true
 alt-json-testkit.workspace = true
 alt-browser-auth.workspace = true
 alt-deflate.workspace = true

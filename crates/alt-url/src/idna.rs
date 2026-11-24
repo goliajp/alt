@@ -102,11 +102,6 @@ fn map(domain: &str) -> Result<Vec<char>, ParseError> {
     Ok(mapped)
 }
 
-/// `text` in Normalization Form C.
-pub fn nfc(text: &str) -> String {
-    nfc::normalize(text.chars().collect()).into_iter().collect()
-}
-
 /// Appends the ASCII form of `domain` to `out`.
 pub(crate) fn to_ascii(domain: &str, out: &mut String) -> Result<(), ParseError> {
     let normalized = nfc::normalize(map(domain)?);

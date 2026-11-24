@@ -1,0 +1,8 @@
+[package]
+name = "alt-precompose"
+description = "File names as git takes them on macOS under core.precomposeUnicode, with no dependencies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -94,6 +94,7 @@ dependencies = [
  "alt-os",
  "alt-pg",
  "alt-portable",
+ "alt-precompose",
  "alt-provenance",
  "alt-refs",
  "alt-regex",
@@ -438,6 +439,10 @@ dependencies = [
  "ed25519-dalek",
  "golia-change-link",
 ]
+
+[[package]]
+name = "alt-precompose"
+version = "0.1.0"
 
 [[package]]
 name = "alt-prism"
@@ -823,10 +828,10 @@ dependencies = [
  "alt-import",
  "alt-odb",
  "alt-os",
+ "alt-precompose",
  "alt-repo",
  "alt-testutil",
  "alt-threads",
- "alt-url",
 ]
 
 [[package]]

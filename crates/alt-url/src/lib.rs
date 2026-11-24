@@ -18,7 +18,7 @@ pub mod percent;
 
 pub use error::ParseError;
 pub use host::Host;
-pub use idna::{UNICODE_VERSION, nfc};
+pub use idna::UNICODE_VERSION;
 pub use origin::Origin;
 
 use host::HostKind;
