@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a list of references too long for memory is a file of the room responses have
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_read.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/listed_refs.rs
