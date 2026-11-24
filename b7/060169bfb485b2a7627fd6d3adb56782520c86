@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a fetch goes once through what the client has, reads no more trees than a walk may take steps, and ends when nobody waits
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/select.rs
+touched: crates/alt-pack-segment/src/trees.rs
+touched: crates/alt-pack-segment/tests/it/fetch.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_read.rs
