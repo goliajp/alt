@@ -475,7 +475,7 @@ pub fn clone(
         if !matches!(&current_head, Some(RefTarget::Symbolic(s)) if s == &head_target) {
             repo.point_head_at(&head_target)?;
         }
-        repo.materialise_head()?;
+        repo.materialise_told(json, out)?;
         if json {
             use crate::json::Json;
             crate::json::emit(

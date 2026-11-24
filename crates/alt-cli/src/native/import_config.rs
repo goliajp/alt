@@ -92,6 +92,16 @@ impl NativeRepo<'_> {
         self.say_collided(out, met)
     }
 
+    /// Checks out the head of a fresh clone and says, as an import does,
+    /// which of its paths met: beside the JSON where that is asked for.
+    pub(super) fn materialise_told(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        let met = self.materialise_head()?;
+        match json {
+            true => self.say_collided(&mut std::io::stderr(), met),
+            false => self.say_collided(out, met),
+        }
+    }
+
     /// Checks out the tree of HEAD into a working directory that holds
     /// none of it, the index with every path of the tree. Where a file
     /// and a directory of the tree have one name to the file system, the
