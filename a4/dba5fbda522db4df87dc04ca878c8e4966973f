@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: an image is not built of what the kept target directory has of other sources
+author-type: human
+author: doracawl
+touched: self-hosted/Dockerfile
