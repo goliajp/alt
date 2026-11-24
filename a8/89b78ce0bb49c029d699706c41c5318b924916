@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a network of this host written as an IPv6 one is read as the IPv4 network it is
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/peers.rs
