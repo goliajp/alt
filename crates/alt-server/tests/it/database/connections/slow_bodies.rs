@@ -11,7 +11,7 @@ const WINDOW: Duration = Duration::from_millis(200);
 const LEAST: usize = 1024 * 200 / 1000;
 
 /// bytes no compression makes fewer
-fn noise(count: usize) -> Vec<u8> {
+pub(super) fn noise(count: usize) -> Vec<u8> {
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
     let mut next = || {
         state ^= state << 13;
@@ -22,7 +22,7 @@ fn noise(count: usize) -> Vec<u8> {
     (0..count).map(|_| next()).collect()
 }
 
-fn push_head(f: &Fixture, length: usize) -> String {
+pub(super) fn push_head(f: &Fixture, length: usize) -> String {
     format!(
         "POST /git/repository/git-receive-pack HTTP/1.1\r\nHost: alt\r\nAuthorization: Bearer {}\r\nContent-Type: application/x-git-receive-pack-request\r\nExpect: 100-continue\r\nContent-Length: {length}\r\n\r\n",
         f.token
