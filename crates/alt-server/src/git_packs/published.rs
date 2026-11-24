@@ -32,6 +32,8 @@ pub(super) fn spool(
         .create_new(true)
         .mode(0o600)
         .open(&path)?;
+    // kept from the sweep from before the first byte is written
+    let mut writing = Some(alt_server_store::writing(&path));
     let mut written = || -> Result<Spooled> {
         file.write_all(first)?;
         let rest = limit.saturating_add(1).saturating_sub(first.len() as u64);
@@ -43,7 +45,7 @@ pub(super) fn spool(
         // later lies behind what is mapped here
         let pack = unsafe { alt_os::map::Mmap::map(&file) }?;
         Ok(Spooled {
-            _writing: alt_server_store::writing(&path),
+            _writing: writing.take().expect("written once"),
             id: id.clone(),
             path: path.clone(),
             file: file.try_clone()?,
