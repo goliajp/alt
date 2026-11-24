@@ -3,8 +3,10 @@
 //! file, where the kernel tells no boot and nothing is noted beside the
 //! log, and whatever became of the note where one is.
 
-use std::fs;
+use std::fs::{self, TryLockError};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 
 use alt_oplog::{OpLog, OpLogError};
@@ -267,27 +269,21 @@ fn a_cut_told_in_the_header_is_taken_back_under_the_lock_beside_the_log() {
     drop(log);
     boot(2);
     cut_that_dies(dir.path(), 1);
-    let told = cut_told(dir.path());
-    assert_eq!(told.0, 1);
+    assert_eq!(cut_told(dir.path()).0, 1);
     // whoever reads what the header tells under this lock alone, a sync
-    // or a sink, holds it now
-    let lock = fs::OpenOptions::new()
-        .write(true)
-        .open(dir.path().join("lock"));
-    let lock = lock.unwrap();
-    alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX).unwrap();
-    let path = dir.path().to_owned();
-    let (done, is_done) = channel();
-    let writer = std::thread::spawn(move || {
-        boot(2);
-        let mut log = OpLog::open(&path).unwrap();
-        log.refresh().unwrap();
-        done.send(()).unwrap();
-    });
-    let waited = is_done.recv_timeout(std::time::Duration::from_millis(500));
-    assert!(waited.is_err(), "the writer went on without the lock");
-    assert_eq!(cut_told(dir.path()), told);
-    drop(lock);
-    writer.join().unwrap();
+    // or a sink, is kept out while the writer takes the cut back
+    let taken_back = Arc::new(AtomicUsize::new(0));
+    let (told, counted) = (cut_told(dir.path()), taken_back.clone());
+    alt_oplog::v2::before_cut_taken_back(Some(Box::new(move |dir| {
+        let lock = fs::File::open(dir.join("lock")).unwrap();
+        let held = matches!(lock.try_lock(), Err(TryLockError::WouldBlock));
+        assert!(held, "the writer takes the cut back without the lock");
+        assert_eq!(cut_told(dir), told);
+        counted.fetch_add(1, Ordering::Relaxed);
+    })));
+    let mut log = OpLog::open(dir.path()).unwrap();
+    log.refresh().unwrap();
+    alt_oplog::v2::before_cut_taken_back(None);
+    assert_eq!(taken_back.load(Ordering::Relaxed), 1);
     assert_eq!(cut_told(dir.path()), (0, 0));
 }

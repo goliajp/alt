@@ -38,6 +38,7 @@ mod told {
         static CUT_WAITS: RefCell<Option<Waits>> = const { RefCell::new(None) };
         static ASKED_WAITS: RefCell<Option<(Sender<()>, Receiver<()>)>> =
             const { RefCell::new(None) };
+        static TAKEN_BACK: RefCell<Option<BeforeRead>> = const { RefCell::new(None) };
     }
 
     /// Makes the handles this thread opens from now on take `boot` for
@@ -87,6 +88,22 @@ mod told {
         NOTE_READ.set(first);
     }
 
+    /// Has `first` done in the directory of a log before a handle of
+    /// this thread takes back a cut the header of the log tells of,
+    /// with the locks it holds for that held, and nothing with `None`:
+    /// for a test of what it holds then.
+    pub fn before_cut_taken_back(first: Option<BeforeRead>) {
+        TAKEN_BACK.set(first);
+    }
+
+    pub(crate) fn cut_taken_back(dir: &Path) {
+        TAKEN_BACK.with_borrow_mut(|first| {
+            if let Some(first) = first {
+                first(dir);
+            }
+        });
+    }
+
     pub(crate) fn note_read(dir: &Path) {
         NOTE_READ.with_borrow_mut(|first| {
             if let Some(first) = first {
@@ -126,10 +143,11 @@ mod told {
 
 #[cfg(feature = "hooks")]
 pub use told::{
-    before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot,
+    before_cut_taken_back, before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after,
+    in_boot, in_no_boot,
 };
 #[cfg(feature = "hooks")]
-pub(crate) use told::{cut_asked, cut_reached, note_read, running_boot};
+pub(crate) use told::{cut_asked, cut_reached, cut_taken_back, note_read, running_boot};
 
 /// The boot a handle opened now runs in, as the kernel tells it.
 #[cfg(not(feature = "hooks"))]
@@ -149,6 +167,12 @@ pub(crate) fn cut_reached(_step: u8) -> std::io::Result<()> {
 #[cfg(not(feature = "hooks"))]
 #[inline(always)]
 pub(crate) fn cut_asked() {}
+
+/// A cut the header of the log in `dir` tells of is about to be taken
+/// back.
+#[cfg(not(feature = "hooks"))]
+#[inline(always)]
+pub(crate) fn cut_taken_back(_dir: &std::path::Path) {}
 
 /// `tail` in `dir` is about to be read.
 #[cfg(not(feature = "hooks"))]

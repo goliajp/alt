@@ -199,6 +199,7 @@ impl Log {
             // whoever reads what the header tells under `lock` alone
             // does not meet this write halfway
             let _held = Held::take(&self.dir)?;
+            crate::v2::cut_taken_back(&self.dir);
             Mark::default().write(&self.file)?;
         }
         // a frame of this handle past where the log ended for it is

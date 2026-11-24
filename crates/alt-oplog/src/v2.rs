@@ -51,9 +51,10 @@ use std::path::Path;
 #[cfg(feature = "hooks")]
 #[doc(hidden)]
 pub use hooks::{
-    before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot,
+    before_cut_taken_back, before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after,
+    in_boot, in_no_boot,
 };
-pub(crate) use hooks::{cut_asked, cut_reached, note_read};
+pub(crate) use hooks::{cut_asked, cut_reached, cut_taken_back, note_read};
 pub(crate) use log::Log;
 pub use owed::{Answer, Ticket};
 pub use sink::Reached;
