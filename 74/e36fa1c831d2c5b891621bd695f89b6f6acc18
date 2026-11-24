@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: an old server that started with a users file lets nobody in while the file is gone
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/tests/it/altd_server_users.rs
