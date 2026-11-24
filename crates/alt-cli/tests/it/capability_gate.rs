@@ -122,7 +122,6 @@ fn branch_allow_denies_out_of_namespace() {
         alt_as(repo, &["branch", "main-rewrite"], "bot"),
         "capability denied",
     );
-    ok(alt_as(repo, &["branch", "feature/agent-bot/wip"], "bot"));
     // a name that only begins as the namespace does is outside it
     for beside in ["feature/agent-botX/wip", "feature/agent-bot"] {
         fails_with(
@@ -130,6 +129,7 @@ fn branch_allow_denies_out_of_namespace() {
             "capability denied",
         );
     }
+    ok(alt_as(repo, &["branch", "feature/agent-bot/wip"], "bot"));
 
     // …and the unrestricted operator (no rule matches `human:operator`)
     // still moves freely

@@ -109,8 +109,21 @@ impl NativeRepo<'_> {
 
     /// Refuses, in git's words, a new branch by a `name` one has.
     pub(super) fn ensure_no_branch(&self, name: &str) -> Res<()> {
-        if self.store.refs.get(&format!("refs/heads/{name}")).is_none() {
-            return Ok(());
+        let full = format!("refs/heads/{name}");
+        if self.store.refs.get(&full).is_none() {
+            // git keeps a ref in a file of its name: none lies beneath
+            // another, and an export has no place for two that do
+            let above = full.match_indices('/').map(|(at, _)| &full[..at]);
+            let above = above.filter(|above| self.store.refs.get(above).is_some());
+            let within = format!("{full}/");
+            let beneath = self.store.refs.iter().map(|(other, _)| other);
+            let beneath = beneath.filter(|other| other.starts_with(&within));
+            return match above.chain(beneath).next() {
+                None => Ok(()),
+                Some(other) => Err(settings::fatal(format!(
+                    "cannot lock ref '{full}': '{other}' exists; cannot create '{full}'"
+                ))),
+            };
         }
         let said = format!("a branch named '{name}' already exists");
         let refusal = crate::machine::Failure::refusal("precondition_failed", said);

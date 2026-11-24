@@ -40,6 +40,11 @@ pub enum ExportError {
     TargetNotEmpty(std::path::PathBuf),
     /// A ref names an object the store does not hold.
     RefUnstored(String, ObjectId),
+    /// A ref lies beneath another: git keeps each in a file of its name.
+    RefBeneath {
+        name: String,
+        above: String,
+    },
 }
 
 impl std::fmt::Display for ExportError {
@@ -59,6 +64,13 @@ impl std::fmt::Display for ExportError {
             Self::RefUnstored(name, oid) => write!(
                 f,
                 "ref {name} points at {oid}, which is not stored; nothing was exported"
+            ),
+            // the first line is what git says of the second of the two
+            Self::RefBeneath { name, above } => write!(
+                f,
+                "cannot lock ref '{name}': '{above}' exists; cannot create '{name}'\n\
+                 git has no place for both names; rename or delete one of the two and export \
+                 again; nothing was exported"
             ),
         }
     }
@@ -209,6 +221,21 @@ fn named_objects(refs: &RefStore) -> HashSet<ObjectId> {
     refs.iter().filter_map(named).collect()
 }
 
+/// The first of the refs written that lies beneath another of them,
+/// with that one.
+fn beneath_another(refs: &RefStore) -> Option<(String, String)> {
+    let written =
+        |name: &&str| *name != "HEAD" && stash::entry_number(name).is_none() && !stands_apart(name);
+    let mut names: Vec<&str> = refs.iter().map(|(name, _)| name).filter(written).collect();
+    names.sort_unstable();
+    let held: HashSet<&str> = names.iter().copied().collect();
+    names.iter().find_map(|name| {
+        let above = name.match_indices('/').map(|(at, _)| &name[..at]);
+        let above = above.filter(|above| held.contains(above)).next()?;
+        Some(((*name).to_owned(), above.to_owned()))
+    })
+}
+
 /// Whether `name` is the ref a rebase or a bisect of a workspace keeps
 /// the commit it stands on under, while HEAD is off its branch.
 fn stands_apart(name: &str) -> bool {
@@ -226,6 +253,9 @@ fn write_git(
     let stored = odb.stored_past_cuts();
     let refs = RefStore::open_confirmed(alt_dir, also, |oid| stored(oid).unwrap_or(true))?;
     drop(stored);
+    if let Some((name, above)) = beneath_another(&refs) {
+        return Err(ExportError::RefBeneath { name, above });
+    }
     let mut unstored = named_objects(&refs);
     let objects = write_objects(&odb, git_dir, algo, &mut unstored)?;
 
