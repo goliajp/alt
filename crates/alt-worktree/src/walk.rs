@@ -71,7 +71,7 @@ pub(crate) fn walk(
     let dir = DirFd::open(root)?;
     match untracked {
         Untracked::No => walk.unlisted(&dir, 0, reach, &mut found)?,
-        _ => walk.listed(dir, 0, ignore, false, reach, &mut found)?,
+        _ => walk.listed(dir, 0, &[], ignore, false, reach, &mut found)?,
     }
     Ok(found)
 }
