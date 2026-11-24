@@ -1,17 +1,29 @@
 //! Times the two halves of a fetch that is not the whole repository: choosing the
 //! objects, and writing them as a pack.
 //!
-//! `fetch build <pack> <segment>` verifies a pack and writes it as a segment file.
+//! `fetch build <pack> <segment>` verifies a pack and writes it as a segment file,
+//! and tells the most memory the verifying was counted for beside the most the
+//! process had resident beyond the pack itself.
 //! `fetch run <segment> [thin] [select] <want>... [^<have>...]` selects and writes, and
 //! prints the time of each half, the objects chosen and the bytes written; with
 //! `select` nothing is written.
+//! `fetch reach <segment> <tip> <said>...` tells which of the commits said the tip
+//! leads to, and the time that took.
 
-use alt_pack_segment::{Limits, Oid, Segment, SegmentSet, ingest};
+use alt_pack_segment::{Limits, Memory, Oid, Segment, SegmentSet, ingest};
 use std::{
     io::Write,
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+
+/// the bytes of this process that are in memory now, as Linux tells them
+fn resident() -> u64 {
+    let told = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+    let pages = told.split(' ').nth(1).and_then(|pages| pages.parse().ok());
+    pages.unwrap_or(0u64) * 4096
+}
 
 fn oid(hex: &str) -> Oid {
     let mut out = [0; 20];
@@ -43,11 +55,33 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("build") => {
             let pack = std::fs::read(&args[1]).unwrap();
+            let memory: &'static Memory = Box::leak(Box::new(Memory::new(1 << 40)));
             let limits = Limits {
                 delta_depth: 4096,
+                memory: Some(memory),
                 ..Limits::of(1 << 28, 1 << 32, 1 << 40)
             };
-            let ingested = ingest(&pack, &SegmentSet::default(), &limits).unwrap();
+            let (before, done) = (resident(), AtomicBool::new(false));
+            let (ingested, most) = std::thread::scope(|scope| {
+                let watching = scope.spawn(|| {
+                    let (mut counted, mut held) = (0, 0);
+                    while !done.load(Ordering::Relaxed) {
+                        let taken = memory.taken();
+                        counted = counted.max(taken.0 + taken.1);
+                        held = held.max(resident());
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    (counted, held)
+                });
+                let ingested = ingest(&pack, &SegmentSet::default(), &limits).unwrap();
+                done.store(true, Ordering::Relaxed);
+                (ingested, watching.join().unwrap())
+            });
+            println!(
+                "counted {} resident_beyond_the_pack {}",
+                most.0,
+                most.1.saturating_sub(before)
+            );
             let mut file = std::fs::File::create(&args[2]).unwrap();
             file.write_all(&pack).unwrap();
             ingested.write_index(&mut file).unwrap();
@@ -81,6 +115,18 @@ fn main() {
                 ms(selected),
                 ms(start.elapsed()),
                 out.0
+            );
+        }
+        Some("reach") => {
+            let set = SegmentSet::new(vec![Arc::new(Segment::open(args[1].as_ref()).unwrap())]);
+            let said: Vec<Oid> = args[3..].iter().map(|id| oid(id)).collect();
+            let start = Instant::now();
+            let found = set.reached(&[oid(&args[2])], &said, usize::MAX).unwrap();
+            println!(
+                "reached {} of {} reach_ms {:.1}",
+                found.len(),
+                said.len(),
+                ms(start.elapsed())
             );
         }
         _ => panic!("fetch build <pack> <segment> | fetch run <segment> [thin] [select] <want>..."),
