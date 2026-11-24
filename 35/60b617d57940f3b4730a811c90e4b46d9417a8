@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: the attempts whose minute is over are removed without waiting for a row another transaction counts in
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/tests/it/database/browser/budgets.rs
+touched: crates/alt-server/src/http/device.rs
