@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a delta beneath the deepest object that makes one had by a shorter way
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/tests/it/many_of_one.rs
