@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a read or a write of the old server that a signal breaks into is gone on with
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced/tests.rs
