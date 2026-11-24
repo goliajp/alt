@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: the tests of the old server's connections wait for what the server has done, not for a time to pass
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers/sources.rs
