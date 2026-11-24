@@ -104,9 +104,15 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     ]);
     assert_eq!(created["backup_created"], true);
 
-    // in place
+    // in place, told the proxies in front of it as the package tells its container
     let next = source.path("next.json");
-    let migrated = source.ok(&["migrate", "--from-schema", "21", "--output-config", &next]);
+    let migrate = ["migrate", "--from-schema", "21", "--output-config", &next];
+    let mut told = source.command();
+    told.env("ALT_TRUSTED_PROXIES", "127.0.0.1,::1,172.30.91.1");
+    let migrated = told.args(migrate).output().unwrap();
+    let said = String::from_utf8_lossy(&migrated.stderr);
+    assert!(migrated.status.success(), "{said}");
+    let migrated: alt_json::Value = alt_json::from_slice(&migrated.stdout).unwrap();
     assert_eq!(migrated["migrated"], true);
     assert_eq!(migrated["schema"], 22);
     assert_eq!(copies(&source.dsn), (22, 0, 0));
@@ -118,6 +124,11 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert!(
         megabytes.is_some_and(|megabytes| megabytes <= 1536),
         "{megabytes:?}"
+    );
+    // it named no proxy, and the next one names those it was told
+    assert_eq!(
+        written["http"]["trusted_proxies"],
+        alt_json::json!(["127.0.0.1", "::1", "172.30.91.1"])
     );
     // the request is given its moment by the server as it runs, and counted until then
     assert_eq!(moments(&source.dsn), Some((0, 0)));

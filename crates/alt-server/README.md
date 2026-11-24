@@ -428,6 +428,14 @@ alt-server --config server.json migrate --from-schema 19 --output-config server-
 alt-server --config server-next.json health
 ```
 
+The old version reads `server.json` until the new one is in use, and knows
+none of the keys this version added: add them to the configuration `migrate`
+writes, not to the one it reads. Where the old configuration names no proxy in
+`http.trusted_proxies`, `migrate` writes those the environment variable
+`ALT_TRUSTED_PROXIES` names (addresses or networks with commas between, as the
+package gives its application container), and none where the variable is not
+set.
+
 `migrate` refuses the configuration of a Cloud instance, whose schema moves with
 its platform generation. From schema 18 every version in between is applied in the same transaction.
 An instance at schema 17 or older is first upgraded to schema 18 with the last

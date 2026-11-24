@@ -69,9 +69,11 @@ impl Config {
 
     /// This configuration as it is migrated: one from before the memory for
     /// the packs of pushes was a key takes more for them than the container of
-    /// the package has, and is given what goes with its container.
+    /// the package has, and is given what goes with its container; and one that
+    /// names no proxy is given those its container is told of.
     pub(in crate::operator) fn for_its_container(&self) -> Result<Self> {
         let mut next = self.clone();
+        next.http.trusted_proxies = super::proxies::to_write(&self.http.trusted_proxies)?;
         if next.http.indexing_megabytes.is_none() {
             let megabytes = next.megabytes_for_packs(to_write_for()?);
             next.http.indexing_megabytes = Some(megabytes);
