@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: an object several entries of a pack make is read from the entry with the fewest deltas below it
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/chosen.rs
+touched: crates/alt-pack-segment/src/descend.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/readable.rs
