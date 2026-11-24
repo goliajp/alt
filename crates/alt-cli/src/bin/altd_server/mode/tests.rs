@@ -18,7 +18,7 @@ fn a_repository_put_aside_and_put_back_is_written_through_the_one_writer_it_has(
     let (served, aside) = (tmp.path().join("served"), tmp.path().join("aside"));
     repository(&served);
     let cache = Opened::of(4);
-    let open = || opened(&cache, "served", served.clone()).unwrap();
+    let open = || opened(&cache, "served", served.clone(), None).unwrap();
     let writer = |handle: &RepoHandle| handle.writer.clone().unwrap();
     let put_aside = || {
         std::fs::rename(&served, &aside).unwrap();
@@ -62,7 +62,7 @@ fn the_writer_of_a_repository_that_was_closed_is_not_kept() {
         if !at.exists() {
             repository(&at);
         }
-        opened(&cache, name, at).unwrap()
+        opened(&cache, name, at, None).unwrap()
     };
     let first = Arc::downgrade(&open("first").writer.unwrap());
     assert!(first.upgrade().is_some());
@@ -82,7 +82,7 @@ fn a_sync_that_failed_after_its_repository_was_put_aside_is_known_when_it_is_put
     let (served, aside) = (tmp.path().join("served"), tmp.path().join("aside"));
     repository(&served);
     let cache = Opened::of(4);
-    let open = || opened(&cache, "served", served.clone()).unwrap();
+    let open = || opened(&cache, "served", served.clone(), None).unwrap();
     let in_hand = open().writer.unwrap();
     std::fs::rename(&served, &aside).unwrap();
     repository(&served);
@@ -97,4 +97,22 @@ fn a_sync_that_failed_after_its_repository_was_put_aside_is_known_when_it_is_put
     std::fs::rename(&aside, &served).unwrap();
     let back = open().writer.unwrap();
     assert_eq!(back.group.failed().as_deref(), Some("no room"));
+}
+
+/// A repository of a root is opened under the name the root lists it by.
+/// Where the file system opens the directory under another writing of the
+/// name too, that writing is no repository: it would have a writer of its
+/// own beside the first, and the rules of a name that is not its own.
+#[test]
+fn a_repository_of_a_root_is_opened_under_the_name_the_root_lists_and_no_other() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let root = tmp.path();
+    repository(&root.join("secret"));
+    let cache = Opened::of(4);
+    let open = |name: &str| opened(&cache, name, root.join(name), Some(root));
+    assert!(open("secret").is_ok());
+    assert!(open("SECRET").is_err() && open("Secret").is_err());
+    assert!(readers::listed(root, "secret").unwrap());
+    assert!(!readers::listed(root, "SECRET").unwrap());
+    assert_eq!(cache.take().repos.len(), 1);
 }

@@ -39,6 +39,20 @@ pub(super) fn named(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Whether `root` lists a directory as `name`, byte for byte. A file system
+/// may open one directory under several writings of its name, in another
+/// case or another composition of its letters: a repository asked for under
+/// one of those would be held to the rules of another name, and opened a
+/// second time beside itself.
+pub(super) fn listed(root: &Path, name: &str) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir(root)? {
+        if entry?.file_name() == name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// What tells the directory of a repository from another under its name,
 /// and that directory open: while it is, its number is given to no other,
 /// and one put in its place is not taken for it. Only a repository that

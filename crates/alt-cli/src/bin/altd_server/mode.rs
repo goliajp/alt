@@ -154,15 +154,23 @@ impl Opened {
 }
 
 /// The repository at `repo_path` as `cache` has it open under `name`,
-/// opened where it is not or is no longer the one that is there.
+/// opened where it is not or is no longer the one that is there. One of
+/// the directories of `root` is opened under the name the root lists it
+/// by and no other.
 fn opened(
     cache: &Held<Opened>,
     name: &str,
     repo_path: PathBuf,
+    root: Option<&std::path::Path>,
 ) -> Result<RepoHandle, Box<dyn std::error::Error>> {
     let (dir, open) = readers::directory(&repo_path)?;
     if let Some(handle) = cache.take().known(name, dir) {
         return Ok(handle);
+    }
+    if let Some(root) = root
+        && !readers::listed(root, name)?
+    {
+        return Err(format!("repo '{name}' not found under server root").into());
     }
     // opened with the cache let go of: an open that waits for a lock of
     // this repository keeps no request for another waiting. The probe
@@ -189,7 +197,7 @@ impl ServeMode {
         // Fail-fast: a misconfigured ALT_SERVER_REPO surfaces at boot
         // rather than on the first request.
         let cache = Opened::of(1);
-        let handle = opened(&cache, "*", repo_path.clone());
+        let handle = opened(&cache, "*", repo_path.clone(), None);
         let handle = handle.unwrap_or_else(|e| die(&format!("opening repo: {e}")));
         if handle.writer.is_none() {
             eprintln!(
@@ -254,7 +262,7 @@ pub(super) fn resolve_repo(
 ) -> Result<(RepoHandle, String, String), Box<dyn std::error::Error>> {
     match mode {
         ServeMode::Single { repo_path, cache } => {
-            let handle = opened(cache, "*", repo_path.clone())?;
+            let handle = opened(cache, "*", repo_path.clone(), None)?;
             Ok((handle, path.to_owned(), "*".to_owned()))
         }
         ServeMode::Multi { root, cache } => {
@@ -263,7 +271,7 @@ pub(super) fn resolve_repo(
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
                 None => (trimmed, ""),
             };
-            let handle = opened(cache, name, readers::named(root, name)?)?;
+            let handle = opened(cache, name, readers::named(root, name)?, Some(root))?;
             Ok((handle, rest.to_owned(), name.to_owned()))
         }
     }
