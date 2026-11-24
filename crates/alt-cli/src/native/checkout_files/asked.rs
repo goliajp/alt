@@ -24,8 +24,16 @@ impl Asked {
             true => control.join("names-asked"),
             false => root.join(NAMES_ASKED),
         };
-        if dir.symlink_metadata().is_ok() {
-            std::fs::remove_dir_all(&dir)?;
+        match left_there(&dir)? {
+            Some(true) => std::fs::remove_dir_all(&dir)?,
+            Some(false) => {
+                let why = format!(
+                    "'{}' is taken here by a name the file system takes for the same: the directory alt asks the file system in cannot be made beside it",
+                    dir.display()
+                );
+                return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
+            }
+            None => {}
         }
         std::fs::create_dir(&dir)?;
         Ok(Asked { dir })
@@ -73,10 +81,31 @@ impl Drop for Asked {
 /// Removes the directory a command cut short left in the working tree
 /// at `root`.
 pub(in crate::native) fn clear_left(root: &Path) -> Res<()> {
-    match std::fs::remove_dir_all(root.join(NAMES_ASKED)) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        done => Ok(done?),
+    let dir = root.join(NAMES_ASKED);
+    if left_there(&dir)? == Some(true) {
+        std::fs::remove_dir_all(dir)?;
     }
+    Ok(())
+}
+
+/// What is at `dir`, the directory to ask in: `None` where nothing is,
+/// and else whether its directory lists it under this very name. What
+/// the file system reaches by the name but lists under another is not
+/// what a command left: it is somebody's, and stays.
+fn left_there(dir: &Path) -> Res<Option<bool>> {
+    if dir.symlink_metadata().is_err() {
+        return Ok(None);
+    }
+    let (above, name) = (dir.parent(), dir.file_name());
+    let (above, name) = above
+        .zip(name)
+        .ok_or("the directory to ask in has no name")?;
+    for entry in std::fs::read_dir(above)? {
+        if entry?.file_name() == name {
+            return Ok(Some(true));
+        }
+    }
+    Ok(Some(false))
 }
 
 /// Whether names that differ in case are one name in the directory

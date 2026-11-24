@@ -33,6 +33,7 @@ mod branch_switch;
 mod byte_names;
 mod capability_gate;
 mod casefold;
+mod casefold_asked;
 mod casefold_dirs;
 mod casefold_left;
 mod casefold_meet;

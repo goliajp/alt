@@ -42,7 +42,12 @@ pub(in crate::native) fn names_control_directory(name: &[u8]) -> bool {
 /// steps may be taken for a control directory.
 pub(in crate::native) fn ensure_no_control_directory(path: &[u8]) -> Res<()> {
     let mut steps = path.split(|b| *b == b'/');
-    let asked = steps.clone().next() == Some(alt_worktree::NAMES_ASKED.as_bytes());
+    // in any case of its letters: where names fold it is that directory
+    let asked = alt_worktree::NAMES_ASKED.as_bytes();
+    let asked = steps
+        .clone()
+        .next()
+        .is_some_and(|first| first.eq_ignore_ascii_case(asked));
     if asked || steps.any(names_control_directory) {
         let path = String::from_utf8_lossy(path);
         return Err(said::refused(
