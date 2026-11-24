@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a segment is merged though a delta of it stands before its base
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/merge.rs
+touched: crates/alt-pack-segment/tests/it/readable.rs
