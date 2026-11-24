@@ -4,13 +4,13 @@ use super::{git, git_in, objects, oid, segment, text};
 use alt_pack_segment::SegmentSet;
 use std::{collections::HashSet, fs, path::Path};
 
-fn write(dir: &Path, path: &str, body: &[u8]) {
+pub(super) fn write(dir: &Path, path: &str, body: &[u8]) {
     let path = dir.join(path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, body).unwrap();
 }
 
-fn commit(dir: &Path, message: &str) -> String {
+pub(super) fn commit(dir: &Path, message: &str) -> String {
     git(dir, &["add", "-A"]);
     git(dir, &["commit", "-q", "-m", message]);
     text(git(dir, &["rev-parse", "HEAD"]))
@@ -32,7 +32,13 @@ fn noise(len: usize) -> Vec<u8> {
 /// Selects `wants` for a client that holds `haves`, checks the selection against what
 /// Git itself would send, and applies the pack to a repository holding only `haves`.
 /// Returns the objects selected beyond Git's answer.
-fn fetch(dir: &Path, set: &SegmentSet, wants: &[&str], haves: &[&str], name: &str) -> Vec<String> {
+pub(super) fn fetch(
+    dir: &Path,
+    set: &SegmentSet,
+    wants: &[&str],
+    haves: &[&str],
+    name: &str,
+) -> Vec<String> {
     let mut range: Vec<String> = wants.iter().map(|want| want.to_string()).collect();
     range.extend(haves.iter().map(|have| format!("^{have}")));
     let range: Vec<&str> = range.iter().map(String::as_str).collect();
@@ -224,46 +230,6 @@ fn a_directory_that_returns_to_an_earlier_state_is_sent_whole() {
         fetch(&source, &set, &[&back], &[&created], "from the first state"),
         Vec::<String>::new()
     );
-}
-
-/// A file gives way to a directory of its name, and the directory to a file again:
-/// what is at a name is compared with what was there only where both are of one kind.
-#[test]
-fn a_file_and_a_directory_of_one_name_are_not_compared_with_each_other() {
-    let work = alt_os::temp::tempdir().unwrap();
-    let source = work.path().join("source");
-    fs::create_dir(&source).unwrap();
-    git(&source, &["init", "-q", "--initial-branch=main"]);
-    write(&source, "thing", b"a file\n");
-    write(
-        &source,
-        "thing-x",
-        b"before the directory, after the file\n",
-    );
-    write(&source, "thing.d", b"as well\n");
-    let file = commit(&source, "a file");
-    fs::remove_file(source.join("thing")).unwrap();
-    write(&source, "thing/inside.txt", b"in the directory\n");
-    let directory = commit(&source, "a directory of its name");
-    write(&source, "thing/inside.txt", b"changed\n");
-    let changed = commit(&source, "change in the directory");
-    fs::remove_dir_all(source.join("thing")).unwrap();
-    write(&source, "thing", b"a file again\n");
-    let again = commit(&source, "a file again");
-
-    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
-    let set = SegmentSet::new(vec![segment(
-        work.path(),
-        "all.seg",
-        &pack,
-        &SegmentSet::default(),
-    )]);
-    let none = Vec::<String>::new();
-    assert_eq!(fetch(&source, &set, &[&again], &[], "clone"), none);
-    assert_eq!(fetch(&source, &set, &[&directory], &[&file], "to it"), none);
-    assert_eq!(fetch(&source, &set, &[&changed], &[&file], "past it"), none);
-    assert_eq!(fetch(&source, &set, &[&again], &[&changed], "back"), none);
-    assert_eq!(fetch(&source, &set, &[&again], &[&file], "over"), none);
 }
 
 /// More versions of one directory than a walk keeps at once: those it let go of are

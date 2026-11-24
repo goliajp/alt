@@ -3,6 +3,7 @@ mod bases;
 mod budget;
 mod build;
 mod fetch;
+mod kinds;
 mod many_of_one;
 mod mend;
 mod merge;
