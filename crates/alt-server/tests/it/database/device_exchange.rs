@@ -160,3 +160,58 @@ fn a_code_whose_request_left_before_it_was_spent_is_good_for_its_token_still() {
     assert!(told["access_token"].as_str().is_some_and(|t| t.len() == 69));
     assert_eq!(left(&f), (1, 0));
 }
+
+/// A code is asked for while the rows the codes of an address are counted in are
+/// held by another transaction for longer than a statement has: the device is
+/// told that the service has no answer now, and to ask again in a second. Asked
+/// again when the rows are let go of, it is given its code.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_code_asked_for_while_the_database_gives_no_answer_is_told_to_ask_again_in_a_second() {
+    let mut f = Fixture::new();
+    let server = sign_in_deadline::start(&mut f, |factory, _| {
+        factory.statement_timeout = Duration::from_secs(2)
+    });
+    let ask = || {
+        let asking = [("client_id", CLI_CLIENT_ID), ("scope", CLI_SCOPE)];
+        let request = ureq::post(&format!("{}/oauth/device/code", server.url));
+        match request.timeout(Duration::from_secs(30)).send_form(&asking) {
+            Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+            Err(error) => panic!("{error}"),
+        }
+    };
+    let mut holder = f.client();
+    let mut held = holder.transaction().unwrap();
+    held.batch_execute("LOCK TABLE alt_login_budgets IN ACCESS EXCLUSIVE MODE")
+        .unwrap();
+    let refused = ask();
+    assert_eq!(refused.status(), 503);
+    assert_eq!(refused.header("Retry-After"), Some("1"));
+    let told: alt_json::Value = json::body(refused);
+    assert_eq!(told["error"], "temporarily_unavailable");
+    held.commit().unwrap();
+    let given = ask();
+    assert_eq!(given.status(), 200);
+    assert!(given.header("Retry-After").is_none());
+    assert_eq!(left(&f), (0, 1));
+}
+
+/// The transaction that spends the code fails as it is committed, and whether the
+/// code is gone is not known to the service: the token is taken back, so that it
+/// is good for nobody whichever it is, and the device is told to begin again. The
+/// code, which is still there, stands for a token that is revoked.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_code_not_known_to_be_spent_has_its_token_taken_back() {
+    let mut f = Fixture::new();
+    let server = sign_in_deadline::start(&mut f, |_, _| ());
+    let code = approved(&server);
+    assert_eq!(left(&f), (1, 1));
+    f.client().batch_execute("CREATE FUNCTION fail_as_committed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure of a commit'; END $$; CREATE CONSTRAINT TRIGGER fail_as_committed AFTER DELETE ON alt_device_authorizations DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_as_committed()").unwrap();
+    assert_eq!(polled(&server, &code), (400, "expired_token".into()));
+    assert_eq!(left(&f), (0, 1));
+    f.client()
+        .batch_execute("DROP TRIGGER fail_as_committed ON alt_device_authorizations")
+        .unwrap();
+    assert_eq!(polled(&server, &code), (400, "access_denied".into()));
+}

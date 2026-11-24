@@ -88,7 +88,12 @@ pub(super) fn exchange(
         // the code may be gone or not: with its token revoked it is good for
         // nothing either way, and the device is told to begin again
         Err(Error::OutcomeUnknown) => {
-            withdraw(factory, &token).map_err(mapped)?;
+            // not taken back, the token is good and nobody has it: the
+            // device asks again, and whoever runs the instance is told
+            if let Err(error) = withdraw(factory, &token) {
+                alt_server_telemetry::BackgroundLog::current().failed("device token", "", &error);
+                return Err(mapped(error));
+            }
             return Err(DeviceError::ExpiredToken.into());
         }
         Err(error) => return Err(mapped(error)),
