@@ -22,6 +22,9 @@ impl Run {
             self.ledger.begun = None;
         }
         self.ledger.reconciled(told, cut);
+        if let Some(last) = told.last() {
+            self.ledger.cut_at = last.from;
+        }
     }
 
     /// What a call on handle `index` came to that reads the log or
@@ -125,7 +128,13 @@ impl Run {
         asked: &[(Vec<u8>, bool)],
         (cut, told): (Option<Unconfirmed>, Vec<Discarded>),
     ) -> bool {
-        let gone = asked.iter().any(|(_, held)| !held).then(|| {
+        // what was never finished at the end of the log was cut before
+        // the look's own cut
+        let own = asked.iter().any(|(_, held)| !held);
+        if let Some(last) = told[..told.len().saturating_sub(own as usize)].last() {
+            self.ledger.cut_at = last.from;
+        }
+        let gone = own.then(|| {
             let refused = refused.as_ref().expect("an op was refused");
             let index = self.ledger.ops.iter().position(|op| op.payload == *refused);
             self.cut_kept_nothing(index.expect("the op to cut is in the log"));

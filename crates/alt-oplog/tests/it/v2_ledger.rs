@@ -106,6 +106,8 @@ pub struct Ledger {
     /// appended, whether the writer was one that syncs, the request,
     /// and where the receipt ends.
     pub receipts: Vec<(usize, bool, [u8; 16], u64)>,
+    /// where the log was last cut, as far as the driver has taken in
+    pub cut_at: u64,
 }
 
 impl Ledger {

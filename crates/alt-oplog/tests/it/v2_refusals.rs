@@ -27,7 +27,8 @@ impl Run {
         if within && self.rng.one_in(6) {
             let said = self.log().said_synced;
             let ops = &self.ledger.ops;
-            let kept = |index: usize| self.to_keep(index).0.is_some();
+            let cut_at = self.ledger.cut_at;
+            let kept = |index: usize| self.to_keep(index, cut_at).0.is_some();
             let inside =
                 |(index, op): &(usize, &Entry)| op.at >= said && op.at < synced && kept(*index);
             let inside: Vec<&Entry> = ops
@@ -55,22 +56,21 @@ impl Run {
     }
 
     /// Whether a sync that covers a frame past op `index` of the log may
-    /// not have seen to that op, as the ops between the two are: for
-    /// each op after it, in the order of the log. A sync sees to a ref
-    /// transaction, and to a change of an index until an op of the same
-    /// workspace replaces it or takes the workspace away.
-    fn unseen_after(&self, index: usize) -> Vec<bool> {
+    /// not have seen to that op. Every sync sees to a ref transaction it
+    /// covers, and to a change of an index while no op of the same
+    /// workspace replaces it or takes the workspace away: one that ends
+    /// past such an op sees to that one instead, and covers the frames
+    /// in between as well. An op that takes its workspace away is none
+    /// a sync sees to.
+    fn unseen(&self, index: usize, cut_at: u64) -> bool {
         let ops = &self.ledger.ops;
         let refused = &ops[index];
-        let of_workspace = refused.workspace.is_some();
-        let mut unseen = !(refused.staged && of_workspace);
+        let changes = refused.staged && refused.workspace.is_some() && !refused.retired;
         let replaces = |op: &Entry| op.workspace == refused.workspace && (op.staged || op.retired);
-        let mut after = Vec::new();
-        for op in &ops[index + 1..] {
-            unseen |= of_workspace && replaces(op);
-            after.push(unseen && !refused.linked);
-        }
-        after
+        // where the log was cut past the op, at `cut_at` last, one that
+        // replaced it may have been among what was cut
+        let last = !ops[index + 1..].iter().any(replaces) && refused.at >= cut_at;
+        !refused.linked && !(changes && last)
     }
 
     /// Where the first frame past op `index` of the log starts that a
@@ -78,25 +78,18 @@ impl Run {
     /// to that op: an op, as far as the driver knows where, and whether
     /// a receipt of a request none of whose ops is cut with that op lies
     /// past it.
-    fn to_keep(&self, index: usize) -> (Option<u64>, bool) {
+    fn to_keep(&self, index: usize, cut_at: u64) -> (Option<u64>, bool) {
         let ops = &self.ledger.ops;
-        let unseen = self.unseen_after(index);
-        let mut after = ops[index + 1..].iter().zip(&unseen);
-        let op = after.find(|(op, unseen)| **unseen && !op.unsynced);
+        if !self.unseen(index, cut_at) {
+            return (None, false);
+        }
+        let op = ops[index + 1..].iter().find(|op| !op.unsynced);
         let cut = |request: [u8; 16]| ops[index..].iter().any(|op| op.request == Some(request));
-        // as the ops before a receipt are: those the log held when it
-        // was appended
-        let refused = &ops[index];
-        let alone = !refused.linked && !(refused.staged && refused.workspace.is_some());
-        let unseen_at = |held: usize| match held.checked_sub(index + 2) {
-            Some(before) => unseen[before],
-            None => alone,
-        };
         let mut receipts = self.ledger.receipts.iter();
         let kept = |(after, synced, request, _): &(usize, bool, [u8; 16], u64)| {
-            *after > index && *synced && !cut(*request) && unseen_at(*after)
+            *after > index && *synced && !cut(*request)
         };
-        (op.map(|(op, _)| op.at), receipts.any(kept))
+        (op.map(|op| op.at), receipts.any(kept))
     }
 
     /// A writer's look came to a cut that the log refused with `why`: it
@@ -125,7 +118,9 @@ impl Run {
         match why {
             OpLogError::Kept { unheld, kept } => {
                 assert_eq!(*unheld, at, "a cut is refused at another op");
-                let (op, receipt) = self.to_keep(index);
+                // the look cut nothing: the file tells where the log
+                // was last cut when it was refused
+                let (op, receipt) = self.to_keep(index, self.log().cut_at);
                 assert!(
                     op == Some(*kept) || (receipt && op.is_none_or(|op| *kept < op)),
                     "a cut is refused for the frame at {kept}: no writer who syncs left it"
@@ -150,7 +145,8 @@ impl Run {
     /// syncs left lies past that op that a sync may have covered, op or
     /// receipt.
     pub fn cut_kept_nothing(&self, index: usize) {
-        let (op, receipt) = self.to_keep(index);
+        // the cut itself is not yet among those taken in
+        let (op, receipt) = self.to_keep(index, self.ledger.cut_at);
         assert!(
             op.is_none(),
             "a cut took the op at {op:?}, which a writer who syncs left and a sync may \

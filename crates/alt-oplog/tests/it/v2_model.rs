@@ -62,6 +62,8 @@ pub struct Reference {
     pub cut: (u32, u64),
     /// its receipts: where each ends, and the request it is of
     pub receipts: Vec<(u64, [u8; 16])>,
+    /// where the last frame starts that says the log was cut before it
+    pub cut_at: u64,
 }
 
 pub fn reference(dir: &Path) -> Reference {
@@ -73,10 +75,10 @@ pub fn reference(dir: &Path) -> Reference {
         strict: true,
     };
     let (mut state, mut ops, mut cut_end) = (State::empty(), Vec::new(), 0);
-    let mut receipts = Vec::new();
+    let (mut receipts, mut cut_at) = (Vec::new(), 0);
     let walked = walk.run(&mut state, &mut |at, end, view| {
         if view.ext.cut.is_some() {
-            cut_end = end;
+            (cut_at, cut_end) = (at, end);
         }
         if view.head.kind == KIND_RECEIPT {
             let receipt = Receipt::decode(view.body).expect("a receipt reads");
@@ -103,6 +105,7 @@ pub fn reference(dir: &Path) -> Reference {
         said_synced: state.synced,
         cut: (state.generation, cut_end),
         receipts,
+        cut_at,
     }
 }
 
