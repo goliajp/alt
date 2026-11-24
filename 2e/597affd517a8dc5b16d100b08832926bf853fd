@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the cut of the oplog and the tests of this round within the sizes files and functions are held to
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/kept.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_note_other.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/reading.rs
+touched: crates/alt-refs/tests/it/owed_sync.rs
+touched: crates/alt-refs/tests/it/v2.rs
