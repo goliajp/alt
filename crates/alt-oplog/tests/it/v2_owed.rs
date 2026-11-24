@@ -118,6 +118,7 @@ impl Run {
             self.counts.unjudged_more.fetch_add(1, Ordering::Relaxed);
         }
         self.counts.unjudged.fetch_add(1, Ordering::Relaxed);
+        self.to_look = true;
     }
 
     /// Handle `index` read the log anew with its caller told that ops

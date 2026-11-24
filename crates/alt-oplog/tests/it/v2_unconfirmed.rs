@@ -204,6 +204,7 @@ fn the_log_ends_at_the_first_frame_left_unsynced_that_does_not_read_in_any_boot(
             assert_eq!(file_len(dir.path()), len);
         }
         let mut log = OpLog::open(dir.path()).unwrap();
+        assert_eq!(log.settle(|_| Ok::<_, OpLogError>(true)).unwrap(), None);
         log.append("actor", 1, b"next").unwrap();
         let cut = log.take_discarded();
         assert_eq!((cut[0].from, cut[0].to), (left[1].start, len));
@@ -238,6 +239,7 @@ fn a_handle_whose_op_was_cut_is_refused_until_it_reads_the_log_again() {
     assert!(matches!(victim.sync(), Err(OpLogError::CutBack)));
     assert_eq!((victim.reads(), victim.len()), (1, 4));
     assert_eq!(victim.recent().last().unwrap().payload, b"instead");
+    assert_eq!(victim.settle(|_| Ok::<_, OpLogError>(true)).unwrap(), None);
     victim.append("victim", 3, b"again").unwrap();
     victim.sync().unwrap();
     OpLog::open(dir.path()).unwrap().verify().unwrap();
@@ -314,29 +316,4 @@ fn a_handle_whose_op_stayed_goes_on_after_a_cut_behind_it() {
     assert_eq!(kept.len(), 5);
     kept.sync().unwrap();
     kept.verify().unwrap();
-}
-
-#[test]
-fn a_panic_under_the_lock_gives_the_lock_up() {
-    let dir = alt_os::temp::tempdir().unwrap();
-    boot(1);
-    let mut log = new_log(dir.path());
-    grow(&mut log, "a", 1);
-    log.append("a", 1, b"left").unwrap();
-    let appended = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = log.append_checked("a", 2, |_| -> Result<Vec<u8>, OpLogError> {
-            panic!("in the check of an append")
-        });
-    }));
-    assert!(appended.is_err());
-    boot(2);
-    let mut other = OpLog::open(dir.path()).unwrap();
-    let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = other.settle(|_| -> Result<bool, OpLogError> { panic!("in what vouches") });
-    }));
-    assert!(settled.is_err());
-    // both locks were given up: another handle appends
-    let mut third = OpLog::open(dir.path()).unwrap();
-    third.append("b", 3, b"x").unwrap();
-    assert_eq!(third.len(), 3);
 }

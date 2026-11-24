@@ -71,6 +71,11 @@ impl Run {
                 self.trace.push("  it fails as it was made to".into());
                 None
             }
+            // a writer that syncs looks before it appends
+            Err(OpLogError::Unjudged { at }) => {
+                self.unjudged(index, at);
+                None
+            }
             Err(other) => panic!("{other:?}"),
         }
     }
@@ -195,7 +200,8 @@ impl Run {
                     cuts.fetch_add(cut as u64, Ordering::Relaxed);
                 }
                 Outcome::Failed(why) => {
-                    assert!(why.starts_with("Io("), "{why}");
+                    let looks_first = why.starts_with("Unjudged");
+                    assert!(why.starts_with("Io(") || looks_first, "{why}");
                     self.trace
                         .push(format!("  meanwhile a handle fails: {why}"));
                 }

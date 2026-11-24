@@ -47,7 +47,10 @@ fn costs_with_a_hole(hole: u64, claimed: Option<u32>) -> Vec<(u64, u64)> {
         costs.push((log.bytes_read(), log.file_reads()));
     }
     let mut log = OpLog::open(dir.path()).unwrap();
+    // a writer looks at what another boot left before it appends
     let ((), held) = peak(|| {
+        let all = |_: &alt_oplog::Op| Ok::<_, alt_oplog::OpLogError>(true);
+        assert_eq!(log.settle(all).unwrap(), None);
         log.append("a", 1, b"next").unwrap();
     });
     assert!(held < 1 << 20, "{held} bytes held");

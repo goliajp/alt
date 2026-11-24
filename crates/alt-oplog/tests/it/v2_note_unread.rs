@@ -177,8 +177,15 @@ fn a_look_over_a_note_that_does_not_read_beside_a_log_that_was_cut_leaves_the_op
         assert!(reader.unsettled(), "{how}: a reader after the look");
         let mut writer = OpLog::open(dir.path()).unwrap();
         assert!(writer.unsettled(), "{how}: a writer after the look");
-        // and a writer that syncs gives it to whoever sees to what ops name
+        // a writer that syncs appends nothing before it has looked, and
+        // gives `left` to whoever sees to what ops name
         let given = collecting(&mut writer);
+        let appended = writer.append("a", 5, b"more");
+        assert!(
+            matches!(appended, Err(OpLogError::Unjudged { .. })),
+            "{how}: {appended:?}"
+        );
+        assert_eq!(writer.settle(|_| Ok::<_, OpLogError>(true)).unwrap(), None);
         writer.append("a", 5, b"more").unwrap();
         writer.sync().unwrap();
         let given = given.lock().unwrap();

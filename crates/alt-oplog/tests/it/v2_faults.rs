@@ -244,11 +244,14 @@ fn boundary_sync_fails(dir: &Path) {
     let mut log = new_log(dir);
     grow(&mut log, "a", 2);
     let synced = log.appended_len();
-    log.append("a", 3, b"left by boot 1").unwrap();
+    // a ref transaction: an op a sync sees to
+    let linked = super::v2_image::linked();
+    log.append_with("a", 3, b"left by boot 1", &linked).unwrap();
     let len = log.appended_len();
     drop(log);
     boot(2);
     let mut log = OpLog::open(dir).unwrap();
+    log.sync_named_with(std::sync::Arc::new(|_| Ok(())));
     fail_syncs(dir, true);
     io_error(log.append("b", 4, b"after it"));
     assert_eq!((file_len(dir), log.len()), (len, 3));

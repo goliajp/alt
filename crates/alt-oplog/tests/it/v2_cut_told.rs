@@ -103,12 +103,8 @@ fn where_no_boot_is_told_a_handle_past_a_cut_that_died_is_told_so_and_appends_to
                     assert_eq!(held.len(), 2, "{case}");
                 }
                 _ => {
-                    // a writer that sets a boundary over all the log holds
-                    // sees to what other boots left, as before it appends
-                    match (step, way) {
-                        (1, 3 | 5) => {
-                            assert!(matches!(did, Err(OpLogError::Unjudged { .. })), "{case}")
-                        }
+                    match step {
+                        1 => assert!(matches!(did, Err(OpLogError::Unjudged { .. })), "{case}"),
                         _ => did.unwrap_or_else(|told| panic!("{case}: {told:?}")),
                     }
                     assert_eq!((held.len(), held.reads()), (left, 1), "{case}");

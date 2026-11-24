@@ -86,8 +86,9 @@ fn a_commit_that_was_answered_before_the_power_went_is_not_cut_with_an_op_refuse
     }
 }
 
-/// With `noted_since`, a reader of the boot after has left a note beside
-/// the log before the look: it knows of no sync of the boot before.
+/// With `noted_since`, a writer of the boot after that does not sync
+/// has left a note beside the log before the look: it knows of no sync
+/// of the boot before.
 fn answered_before_the_power_went(noted_since: bool) {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
@@ -105,15 +106,17 @@ fn answered_before_the_power_went(noted_since: bool) {
     log.sync().unwrap();
     assert!(log.confirmed());
     drop(log);
-    let len = file_len(dir.path());
     // the power went, and of what `left` names a part is gone
     boot(2);
     if noted_since {
-        let reader = OpLog::open_read_only(dir.path(), None).unwrap();
-        assert_eq!(reader.unconfirmed(but_left).unwrap().unwrap().ops, 2);
+        // it appends with no look, and notes that ops are left to look at
+        let _unsynced = alt_os::durability::leave_unsynced(true);
+        let mut staging = OpLog::open(dir.path()).unwrap();
+        staging.append("b", 5, b"staged").unwrap();
         let note = fs::read(dir.path().join("tail")).unwrap();
         assert_eq!(note[8..24], [2; 16], "a note of this boot");
     }
+    let len = file_len(dir.path());
     let mut log = OpLog::open(dir.path()).unwrap();
     let said = settled(&mut log);
     assert_eq!(

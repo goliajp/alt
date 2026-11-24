@@ -71,13 +71,26 @@ impl Log {
 
     pub fn unconfirmed_past<E: From<OpLogError>>(
         &self,
-        held: impl FnMut(&Op, bool) -> Result<bool, E>,
+        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         let from = self.judged.get();
         if from >= self.state.end {
             return Ok(None);
         }
-        let found = self.first_unheld(from, held)?;
+        let found = self.first_unheld(from, &mut held)?;
+        // a writer told the same would not cut the log there: the op is
+        // followed by a frame to keep, and the log ends nowhere short
+        // of that for a reader
+        if let Some(cut) = found {
+            let discarded = self.to_cut(from, cut)?;
+            if let Some(kept) = self.kept_past(&discarded, held)? {
+                return Err(OpLogError::Kept {
+                    unheld: cut.at,
+                    kept,
+                }
+                .into());
+            }
+        }
         // a note that is not written costs the next command this look
         let _ = self.note_look(found.map(|found| found.at));
         if found.is_none() {
@@ -87,6 +100,18 @@ impl Log {
             self.judged.set(if all { u64::MAX } else { self.state.end });
         }
         Ok(found)
+    }
+
+    /// What a cut at the op `cut` tells of takes off the log, where the
+    /// ops from byte `from` on were looked at.
+    fn to_cut(&self, from: u64, cut: Unconfirmed) -> Result<Discarded, OpLogError> {
+        let ops = self.ops_past(from)?;
+        Ok(Discarded {
+            from: cut.at,
+            to: self.state.end,
+            ops: ops[ops.len() - cut.ops..].to_vec(),
+            unread: 0,
+        })
     }
 
     pub fn settle_past<E: From<OpLogError>>(
@@ -114,15 +139,7 @@ impl Log {
             self.judged.set(u64::MAX);
             return Ok(None);
         };
-        let discarded = Discarded {
-            from: cut.at,
-            to: self.state.end,
-            ops: {
-                let ops = self.ops_past(from)?;
-                ops[ops.len() - cut.ops..].to_vec()
-            },
-            unread: 0,
-        };
+        let discarded = self.to_cut(from, cut)?;
         let kept = self.kept_past(&discarded, held)?;
         self.cut_at(cut.at, discarded, (true, kept))?;
         Ok(Some(cut))

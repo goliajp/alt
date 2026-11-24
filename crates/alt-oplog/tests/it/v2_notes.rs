@@ -191,25 +191,32 @@ fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_
                 false => Err(std::io::Error::other("what it names is not there")),
             }
         }));
-        // a writer that syncs has what was left seen to before it appends:
-        // the ref transaction, and of each workspace the op that last staged
+        // a writer that syncs appends nothing after them before it has
+        // looked: among them are ops a sync does not see to, the ones
+        // staged that an op of their workspace replaced
         let appended = log.append("c", 1, b"committed");
-        let named = [
-            b"left".to_vec(),
-            vec![37; 120],
-            vec![38; 120],
-            vec![39; 120],
-        ];
-        assert_eq!(*given.lock().unwrap(), named);
+        assert!(matches!(appended, Err(OpLogError::Unjudged { .. })));
+        assert!(given.lock().unwrap().is_empty());
+        assert_eq!(file_len(dir.path()), len);
+        assert_eq!(log.bounded_to(), Some(synced));
         if stored {
-            appended.unwrap();
-            assert_eq!(alt_oplog::bounded_in(dir.path()), Some(len));
+            // it looks, appends, and its sync has what was left seen
+            // to: the ref transaction, and of each workspace the op
+            // that last staged
+            assert_eq!(log.settle(vouched).unwrap(), None);
+            log.append("c", 1, b"committed").unwrap();
+            log.sync().unwrap();
+            let named = [
+                b"left".to_vec(),
+                vec![37; 120],
+                vec![38; 120],
+                vec![39; 120],
+            ];
+            assert_eq!(*given.lock().unwrap(), named);
+            assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
             assert!(!OpLog::open(dir.path()).unwrap().unsettled());
             continue;
         }
-        assert!(matches!(appended, Err(OpLogError::Io(_))));
-        assert_eq!(file_len(dir.path()), len);
-        assert_eq!(log.bounded_to(), Some(synced));
         // and a writer that looks cuts the op and all that was appended after
         let mut writer = OpLog::open(dir.path()).unwrap();
         assert!(writer.unsettled());
@@ -259,8 +266,8 @@ fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() 
         assert!(!log.unsettled());
     }
 
-    // a writer that syncs has them seen to, and its boundary is in the
-    // log once the next frame says it
+    // a writer that syncs looks first; its sync has them seen to, and
+    // its boundary is in the log once the next frame says it
     let mut log = OpLog::open(dir.path()).unwrap();
     let given = Arc::new(Mutex::new(0));
     let seen = given.clone();
@@ -268,14 +275,19 @@ fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() 
         *seen.lock().unwrap() += ops.len();
         Ok(())
     }));
+    assert!(matches!(
+        log.append("w", 1, b"committed"),
+        Err(OpLogError::Unjudged { .. })
+    ));
+    assert_eq!(log.settle(vouched).unwrap(), None);
     log.append("w", 1, b"committed").unwrap();
+    log.sync().unwrap();
     // of the sixty ops, the one of each workspace that last staged
     assert_eq!(*given.lock().unwrap(), 3);
-    log.sync().unwrap();
     let committed = log.appended_len();
     assert!(log.confirmed() && log.synced_here() == committed);
     assert!(!dir.path().join("tail").exists());
-    assert_eq!(OpLog::open(dir.path()).unwrap().bounded_to(), Some(len));
+    assert_eq!(OpLog::open(dir.path()).unwrap().bounded_to(), Some(synced));
     log.append("w", 2, b"next").unwrap();
     let reader = OpLog::open(dir.path()).unwrap();
     assert_eq!((reader.len(), reader.bounded_to()), (64, Some(committed)));

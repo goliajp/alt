@@ -38,6 +38,7 @@ mod v2_holes;
 mod v2_image;
 mod v2_kept;
 mod v2_kept_past;
+mod v2_kept_state;
 mod v2_ledger;
 mod v2_log;
 mod v2_looked;

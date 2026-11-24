@@ -64,6 +64,9 @@ pub struct Run {
     pub by_sink: bool,
     /// the next handle opened to write leaves its syncs to a sink
     pub to_defer: bool,
+    /// a handle was refused for an op nobody looked at, since this
+    /// was last asked
+    pub to_look: bool,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -141,6 +144,7 @@ impl Run {
             died: 0,
             by_sink: false,
             to_defer: false,
+            to_look: false,
             trace: Vec::new(),
             counts,
         }

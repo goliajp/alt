@@ -228,7 +228,11 @@ impl Log {
     /// before a frame is appended after them. A writer that syncs gives
     /// them to whoever syncs what ops name, with the lock given up, and
     /// the log is then recorded as synced up to where it ended before
-    /// that. One that does not notes that they are left to be looked at.
+    /// that: where every op among them is one a sync sees to. An op that
+    /// is not names what nobody has held it to, and a writer looks first
+    /// ([`OpLogError::Unjudged`]): the boundary is not set over it, and
+    /// nothing a command is answered for is appended after it. A writer
+    /// that does not sync notes that they are left to be looked at.
     pub(super) fn catch_up_bounded(&mut self) -> Result<(), OpLogError> {
         self.catch_up()?;
         self.check_synced()?;
@@ -241,6 +245,9 @@ impl Log {
             return self.note_left();
         }
         let upto = self.state.end;
+        if let Some(at) = self.unlooked(upto)? {
+            return Err(OpLogError::Unjudged { at });
+        }
         if let Some(sync) = self.named.clone() {
             // from the boundary on: an op somebody vouched for is one
             // whose content is there, not one whose content is synced
