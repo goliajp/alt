@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: one process serves a database at a time, by a lock of the database it holds while it serves
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/serving.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/bounded.rs
+touched: crates/alt-server/src/http/serving.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/serving.rs
