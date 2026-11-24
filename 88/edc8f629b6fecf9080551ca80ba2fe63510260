@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a push under moving segments is held to the bound, not to the round it is published in
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/moved/bounded.rs
