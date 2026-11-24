@@ -54,12 +54,23 @@ pub(crate) fn networks(told: &str) -> Result<Vec<Network>, String> {
             Some((address, bits)) => (address, Some(bits)),
             None => (text, None),
         };
-        let address = plain(address.parse().ok()?);
+        let written: IpAddr = address.parse().ok()?;
+        let address = plain(written);
         let most = if address.is_ipv4() { 32 } else { 128 };
         // digits alone: a sign is none
         let digits = |bits: &&str| bits.bytes().all(|byte| byte.is_ascii_digit());
+        // the bits of an IPv4 network written as an IPv6 one count from the
+        // 96 that say it is one
+        let before: u8 = if written.is_ipv6() && address.is_ipv4() {
+            96
+        } else {
+            0
+        };
         let bits = match bits {
-            Some(bits) => bits.parse().ok().filter(|_| digits(&bits))?,
+            Some(bits) => {
+                let bits: u8 = bits.parse().ok().filter(|_| digits(&bits))?;
+                bits.checked_sub(before)?
+            }
             None => most,
         };
         (bits <= most).then_some(Network(address, bits))
@@ -157,11 +168,17 @@ mod tests {
             networks("::ffff:10.0.0.1").unwrap(),
             networks("10.0.0.1").unwrap()
         );
+        assert_eq!(
+            networks("::ffff:10.0.0.0/104").unwrap(),
+            networks("10.0.0.0/8").unwrap()
+        );
 
         for told in [
             "",
             "10.0.0.0/33",
             "::/129",
+            "::ffff:10.0.0.0/95",
+            "::ffff:10.0.0.0/129",
             "host",
             "10.0.0.1/",
             "1.2.3.4/+8",
