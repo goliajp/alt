@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a move to another file system, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/src/native/mv/along.rs
+touched: crates/alt-cli/tests/it/mv_rename.rs
+touched: crates/alt-cli/tests/it/mv_rename/across_devices.rs
