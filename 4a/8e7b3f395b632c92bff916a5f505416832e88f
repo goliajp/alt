@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: a push and a merge are published behind the segments they were verified behind, and a segment with its file
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/merge.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/pack_sweep.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/statements.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/tests/it/database/pack_sweep.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/moved.rs
