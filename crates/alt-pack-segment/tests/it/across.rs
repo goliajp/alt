@@ -48,7 +48,7 @@ fn all_read(segments: &[Arc<Segment>], what: &str) -> BTreeSet<[u8; 20]> {
 fn what_packs_bring_again_behind_one_another_is_read_from_every_segment() {
     let work = alt_os::temp::tempdir().unwrap();
     let mut state = 0x2545_f491_4f6c_dd1du64;
-    let (mut taken, mut refused, mut again, mut merged) = (0, 0, 0, 0);
+    let (mut taken, mut refused, mut again, mut merged, mut anew) = (0, 0, 0, 0, 0);
     for round in 0..300 {
         let universe = 3 + noise(&mut state) % 8;
         let mut segments: Vec<Arc<Segment>> = Vec::new();
@@ -86,6 +86,21 @@ fn what_packs_bring_again_behind_one_another_is_read_from_every_segment() {
                 anew.write_index(&mut second).unwrap();
                 assert_eq!(index, second, "{what}");
             }
+            // verified behind fewer of the segments and told anew behind all of
+            // them, it is the segment it is when it is verified behind all of them
+            for fewer in 0..segments.len() {
+                let before = SegmentSet::new(segments[..fewer].to_vec());
+                let Ok(mut moved) = ingest(&pack, &before, &LIMITS) else {
+                    continue;
+                };
+                let mut first = Vec::new();
+                moved.write_index(&mut first).unwrap();
+                moved.behind(&set).unwrap();
+                let mut second = Vec::new();
+                moved.write_index(&mut second).unwrap();
+                assert_eq!(index, second, "{what}, behind {fewer} at first");
+                anew += usize::from(first != second);
+            }
             taken += 1;
             again += usize::from(ingested.flags() & alt_pack_segment::FLAG_OVERLAP != 0);
             let mut bytes = pack;
@@ -106,12 +121,12 @@ fn what_packs_bring_again_behind_one_another_is_read_from_every_segment() {
         }
     }
     // all of these happen among the packs
-    let counts = (taken, refused, again, merged);
+    let counts = (taken, refused, again, merged, anew);
     assert!(
-        taken > 300 && refused > 0 && again > 100 && merged > 50,
+        taken > 300 && refused > 0 && again > 100 && merged > 50 && anew > 50,
         "{counts:?}"
     );
-    println!("taken, refused, bringing again, merges: {counts:?}");
+    println!("taken, refused, bringing again, merges, told anew: {counts:?}");
 }
 
 /// A delta that names an object the pack carries and an earlier segment holds

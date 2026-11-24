@@ -27,6 +27,7 @@ mod search;
 mod select;
 mod send;
 mod set;
+mod settled;
 mod stream;
 mod told;
 mod trees;

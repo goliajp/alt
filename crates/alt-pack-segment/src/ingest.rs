@@ -1,12 +1,12 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Limits, Oid, Record, SegmentSet,
-    carried::Carried,
+    Error, Kind, Limits, Oid, Record, SegmentSet,
     descend::{self, Root, Shared},
-    format::{self, CommitRow, Delta},
+    format::{self, CommitRow},
     object_id, plain, room,
     scan::{self, Form},
+    settled::Resolved,
     told::Told,
 };
 use alt_git_pack::{
@@ -55,6 +55,7 @@ pub struct Ingested {
     flags: u32,
     pack_len: u64,
     work: IndexWork,
+    resolved: Resolved,
 }
 
 impl Ingested {
@@ -96,6 +97,20 @@ impl Ingested {
                     self.commits[index].parents.as_slice(),
                 )
             })
+    }
+
+    /// Tells the segment of the pack anew, for being published behind
+    /// `existing` where it was verified behind other segments: how deep its
+    /// deltas of earlier segments lie, which of two ways an object is read
+    /// by, and whether it brings an object again are told of the segments
+    /// before it. No entry is inflated for this and no object hashed: what
+    /// each entry makes does not depend on the segments.
+    pub fn behind(&mut self, existing: &SegmentSet) -> Result<(), Error> {
+        let settled = self.resolved.settle(existing, |_| Ok(()))?;
+        self.records = settled.records;
+        self.commits = settled.commits;
+        self.flags = settled.flags;
+        Ok(())
     }
 
     /// appends the index; the caller has already written the `pack_len` pack bytes
@@ -259,68 +274,39 @@ fn verified(
         }
     }
     (work.held, work.spilled) = budget.most();
-    let entries = &scanned.entries;
-    let resolved = metas.into_iter().zip(entries).map(|(meta, raw)| {
+    let resolved = metas.into_iter().zip(&scanned.entries).map(|(meta, raw)| {
         meta.ok_or(match raw.form {
             Form::Reference(base) => Error::MissingBase(base),
             _ => Error::Format("delta without a resolvable base"),
         })
     });
     let metas: Vec<Meta> = resolved.collect::<Result<_, Error>>()?;
-    earlier.sort_unstable();
-
-    let chosen = crate::chosen::choose(&metas, entries, &earlier, limits.delta_depth)?;
-    let kept = &chosen.kept;
-    let mut flags = if chosen.duplicates {
-        FLAG_DUPLICATES
-    } else {
-        0
-    };
-    // every reference resolves inside the pack or in the segments already present
-    let carried = Carried::new(
-        kept.iter()
-            .map(|index| (metas[*index].oid, metas[*index].kind)),
-    );
-    told.wanted
-        .check(&carried, |from| metas[from as usize].oid)?;
-    if alt_threads::any(kept, 1024, |index| {
-        existing.locate(&metas[*index].oid).is_some()
-    }) {
-        flags |= FLAG_OVERLAP;
-    }
-
     // an object the pack carries twice told of its commit twice
     commits.sort_unstable_by_key(|commit| commit.oid);
     commits.dedup_by(|a, b| a.oid == b.oid);
-    crate::generation::assign(&mut commits, existing)?;
-    let records = kept
-        .iter()
-        .enumerate()
-        .map(|(at, index)| {
-            let (meta, raw) = (&metas[*index], &entries[*index]);
-            Record {
-                oid: meta.oid,
-                blake3: meta.blake3,
-                offset: raw.offset,
-                size: meta.size,
-                crc: raw.crc,
-                len: raw.len,
-                base: chosen.base[at],
-                kind: meta.kind,
-                delta: match (raw.form, chosen.outside[at]) {
-                    (Form::Plain(_), _) => Delta::Plain,
-                    (_, true) => Delta::Outside,
-                    (_, false) => Delta::Inside,
-                },
-                depth: chosen.depth[at],
-            }
-        })
-        .collect();
-    Ok(Ingested {
-        records,
+    // what the walks had is given back; what is kept of the pack stays taken
+    let mut entries = scanned.entries;
+    for raw in &mut entries {
+        raw.data = None;
+    }
+    let resolved = Resolved {
+        _held: memory.keeping(&entries),
+        metas,
+        entries,
         commits,
-        flags,
+        depth: limits.delta_depth,
+    };
+    // every reference resolves inside the pack or in the segments already present
+    let settled = resolved.settle(existing, |carried| {
+        told.wanted
+            .check(carried, |from| resolved.metas[from as usize].oid)
+    })?;
+    Ok(Ingested {
+        records: settled.records,
+        commits: settled.commits,
+        flags: settled.flags,
         pack_len: pack.len() as u64,
         work,
+        resolved,
     })
 }

@@ -207,6 +207,14 @@ pub(crate) struct Resolving<'a> {
 }
 
 impl<'a> Resolving<'a> {
+    /// What is kept of a pack once its deltas are resolved: of its memory, as
+    /// much as `entries` and what is known of each take.
+    pub(crate) fn keeping(mut self, entries: &[crate::scan::Raw]) -> Option<Taken<'static>> {
+        let mut taken = self.taken.take()?;
+        taken.keep((entries.len() as u64).saturating_mul(ENTRY_BYTES + DELTA_BYTES));
+        Some(taken)
+    }
+
     /// Tells the walks where their memory is, how long they wait, and where the
     /// bases in files go.
     pub(crate) fn told_to(
