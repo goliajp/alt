@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: one that has room for its pack is let in before one that waits for more memory, a few times
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack/memory.rs
+touched: crates/alt-git-pack/tests/it/index_memory.rs
+touched: crates/alt-server/README.md
