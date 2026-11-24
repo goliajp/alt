@@ -323,6 +323,9 @@ impl Store {
         if row.get::<_, String>("state") != "ready" {
             return Err(Error::Precondition("request not ready"));
         }
+        // a lease of the service that is over is no fault of the request: it
+        // stays ready, as it does where the lease ends while this runs
+        crate::cloud::service(&mut tx, &self.spec)?;
         let reject = |tx: &mut Transaction<'_>, code, message: String| -> Result<()> {
             use alt_remote_protocol::{Failure, Retry};
             let result = RequestState::Rejected {
