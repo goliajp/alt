@@ -38,6 +38,7 @@ mod casefold_left;
 mod casefold_meet;
 mod casefold_wider;
 mod charset;
+mod checkout_order;
 mod cherry_pick;
 mod cherry_pick_resume;
 mod ci_validate;

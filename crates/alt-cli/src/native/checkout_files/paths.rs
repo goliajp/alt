@@ -53,6 +53,23 @@ pub(in crate::native) fn ensure_no_control_directory(path: &[u8]) -> Res<()> {
     Ok(())
 }
 
+/// Removes `path` when it is a directory with nothing but empty directories
+/// inside; a file anywhere in it is an error.
+pub(super) fn remove_empty_directories(path: &Path) -> Res<()> {
+    if !path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            return Err("checkout target is occupied by a directory".into());
+        }
+        remove_empty_directories(&entry.path())?;
+    }
+    std::fs::remove_dir(path)?;
+    Ok(())
+}
+
 impl NativeRepo<'_> {
     /// Checks that `bytes` names a path inside the working tree whose
     /// parents are real directories. A parent that is a file or a symlink
@@ -99,6 +116,56 @@ impl NativeRepo<'_> {
             }
         }
         Ok(beneath_owned)
+    }
+
+    /// What stands above `path` right now: every step a directory of the
+    /// working tree itself, or a step that is not there yet, or `Err`
+    /// with the step that is a file or a symlink.
+    pub(super) fn steps_above(&self, path: &[u8]) -> Res<Result<bool, BString>> {
+        for at in (0..path.len()).filter(|at| path[*at] == b'/') {
+            let step = BString::from(&path[..at]);
+            match self.abs(&step)?.symlink_metadata() {
+                Ok(found) if found.is_dir() => {}
+                Ok(_) => return Ok(Err(step)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Ok(false)),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(Ok(true))
+    }
+
+    /// Whether a file can be put at `path` now: no step above it is a
+    /// file or a symlink.
+    pub(super) fn may_stand(&self, path: &[u8]) -> Res<bool> {
+        Ok(self.steps_above(path)?.is_ok())
+    }
+
+    /// Whether every step above `path` is a directory of the working
+    /// tree; refused where one is a file or a symlink, which nothing is
+    /// reached through.
+    pub(super) fn beneath_directories(&self, path: &[u8]) -> Res<bool> {
+        self.steps_above(path)?.map_err(|step| {
+            let path = BString::from(path);
+            format!("'{step}', above '{path}', is not a directory of the working tree").into()
+        })
+    }
+
+    /// Makes the directories above `path` that are not there, one step
+    /// at a time: none is made, and nothing is written, past a step that
+    /// is a file or a symlink.
+    pub(super) fn make_directories_above(&self, path: &[u8]) -> Res<()> {
+        while !self.beneath_directories(path)? {
+            let missing = (0..path.len())
+                .filter(|at| path[*at] == b'/')
+                .map(|at| self.abs(&BString::from(&path[..at])))
+                .find(|step| {
+                    !step
+                        .as_ref()
+                        .is_ok_and(|step| step.symlink_metadata().is_ok())
+                });
+            std::fs::create_dir(missing.expect("a step is not there")?)?;
+        }
+        Ok(())
     }
 
     /// Newly created or removed directory entries must reach disk too,

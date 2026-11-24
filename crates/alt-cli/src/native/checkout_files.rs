@@ -128,8 +128,11 @@ impl NativeRepo<'_> {
         })
     }
 
-    /// Applies recorded changes, removals first: a path can only turn from
-    /// a directory into a file, or back, once the old side is out of the way.
+    /// Applies recorded changes. What leaves goes first: a path can only
+    /// turn from a file or a symlink into a directory, or back, once the
+    /// old side is out of the way. A file that only moves is renamed
+    /// then, and what could not be renamed leaves and is written with
+    /// the rest.
     pub(super) fn apply_changes<'c>(
         &self,
         changes: impl Iterator<Item = &'c FileChange> + Clone,
@@ -141,15 +144,21 @@ impl NativeRepo<'_> {
             let applied = self.apply_file_state(&path, &change.after);
             applied.map_err(|e| format!("cannot write '{path}': {e}").into())
         };
-        // a file that only moves is renamed, before anything is removed
         let all: Vec<&FileChange> = changes.collect();
-        let moved = self.rename_moved(&all)?;
+        let moves = moves::moves_among(&all);
+        let stays = |c: &&FileChange| !moves.contains_key(c.path.as_slice());
+        let leaving = all.iter().copied().filter(removed);
+        leaving.filter(stays).try_for_each(apply)?;
+        let moved = self.rename_moved(&all, &moves)?;
         let rest = || {
             all.iter()
                 .copied()
                 .filter(|c| !moved.contains(c.path.as_slice()))
         };
-        rest().filter(removed).try_for_each(apply)?;
+        rest()
+            .filter(removed)
+            .filter(|c| !stays(c))
+            .try_for_each(apply)?;
         rest().filter(|c| !removed(c)).try_for_each(apply)
     }
 
@@ -182,11 +191,13 @@ impl NativeRepo<'_> {
     }
 
     /// The files in the directory at `path`, relative to the root; none
-    /// when there is no directory there.
+    /// when there is no directory of the working tree there: what a
+    /// symlink above the path leads to is not looked at.
     pub(super) fn files_beneath(&self, path: &BString) -> Res<Vec<BString>> {
         let abs = self.abs(path)?;
         let mut found = Vec::new();
-        if !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        let reached = self.steps_above(path)? == Ok(true);
+        if !reached || !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
             return Ok(found);
         }
         let mut stack = vec![abs];
@@ -212,6 +223,7 @@ impl NativeRepo<'_> {
         let abs = self.abs(path)?;
         match state {
             None => {
+                self.beneath_directories(path)?;
                 match abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
                     true => super::checkout_plan::remove_left_empty(&abs, path)?,
                     false => crate::durable::remove_file(&abs)?,
@@ -222,10 +234,15 @@ impl NativeRepo<'_> {
                 self.prune_empty_dirs(abs.parent());
             }
             Some(state) if state.mode == 0o160000 => {
-                if abs.symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                    crate::durable::remove_file(&abs)?;
+                self.make_directories_above(path)?;
+                match abs.symlink_metadata() {
+                    Ok(found) if found.is_dir() => {}
+                    Ok(_) => {
+                        crate::durable::remove_file(&abs)?;
+                        std::fs::create_dir(&abs)?;
+                    }
+                    Err(_) => std::fs::create_dir(&abs)?,
                 }
-                std::fs::create_dir_all(&abs)?;
                 std::fs::File::open(&abs)?.sync_all()?;
                 if let Some(parent) = abs.parent() {
                     std::fs::File::open(parent)?.sync_all()?;
@@ -234,8 +251,8 @@ impl NativeRepo<'_> {
             Some(state) => {
                 let bytes = self.read_snapshot(&state.contents)?;
                 let parent = abs.parent().ok_or("checkout path has no parent")?;
-                std::fs::create_dir_all(parent)?;
-                remove_empty_directories(&abs)?;
+                self.make_directories_above(path)?;
+                paths::remove_empty_directories(&abs)?;
                 if state.mode == 0o120000 {
                     let temp = alt_os::temp::tempdir_in(parent)?;
                     let link = temp.path().join("link");
@@ -275,21 +292,4 @@ impl NativeRepo<'_> {
         }
         Ok(())
     }
-}
-
-/// Removes `path` when it is a directory with nothing but empty directories
-/// inside; a file anywhere in it is an error.
-fn remove_empty_directories(path: &Path) -> Res<()> {
-    if !path.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            return Err("checkout target is occupied by a directory".into());
-        }
-        remove_empty_directories(&entry.path())?;
-    }
-    std::fs::remove_dir(path)?;
-    Ok(())
 }

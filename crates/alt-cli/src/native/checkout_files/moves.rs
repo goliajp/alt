@@ -4,7 +4,7 @@
 //! renamed keeps its permissions and its times, and is not read.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::super::checkout_recovery::FileChange;
 use super::super::*;
@@ -34,34 +34,48 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Renames `from` to `to`, where nothing else is; whether it did. A
-/// rename the file system cannot make from one of its parts to another
-/// is left to be made as any other change.
-fn renamed(from: &Path, to: &Path) -> Res<bool> {
-    if to.symlink_metadata().is_ok() && !same_file(from, to) {
-        return Ok(false);
-    }
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    match crate::durable::rename(from, to) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => Ok(false),
-        Err(e) => Err(e.into()),
-    }
-}
-
 impl NativeRepo<'_> {
-    /// Makes those of `changes` that move a file by renaming it, and
-    /// returns the paths whose change is made with that.
-    pub(super) fn rename_moved<'c>(&self, changes: &[&'c FileChange]) -> Res<HashSet<&'c [u8]>> {
-        let moves = moves_among(changes);
+    /// Renames `from` to `to`, where nothing else is; whether it did. One
+    /// that would pass a file or a symlink above either path is not
+    /// made, nor one the file system cannot make from one of its parts
+    /// to another: it is left to be made as any other change.
+    fn renamed(&self, from: &[u8], to: &[u8]) -> Res<bool> {
+        if !self.may_stand(to)? || !self.beneath_directories(from)? {
+            return Ok(false);
+        }
+        let (source, target) = (
+            self.abs(&BString::from(from))?,
+            self.abs(&BString::from(to))?,
+        );
+        if target.symlink_metadata().is_ok() && !same_file(&source, &target) {
+            return Ok(false);
+        }
+        crash_point!("checkout-move:before");
+        self.make_directories_above(to)?;
+        match crate::durable::rename(&source, &target) {
+            Ok(()) => {
+                self.prune_empty_dirs(source.parent());
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Makes those of the `moves` among `changes` it can by renaming, and
+    /// returns the paths whose change is made with that. What leaves
+    /// without moving is gone by now; a move to beneath a file that
+    /// moves itself waits for that one.
+    pub(super) fn rename_moved<'c>(
+        &self,
+        changes: &[&'c FileChange],
+        moves: &HashMap<&'c [u8], &'c [u8]>,
+    ) -> Res<HashSet<&'c [u8]>> {
         let mut done: HashSet<&'c [u8]> = HashSet::new();
         if moves.is_empty() {
             return Ok(done);
         }
         super::super::tree_state::wrote_file(&self.root);
-        let abs = |path: &[u8]| -> Res<PathBuf> { self.abs(&BString::from(path)) };
         // a directory first, the shortest before those within it
         let mut whole: Vec<(&[u8], &[u8])> = moves
             .iter()
@@ -84,30 +98,43 @@ impl NativeRepo<'_> {
             };
             let others = changes.iter().filter(|c| inside(&c.path, to));
             let expected = others.filter(|c| c.after.is_some()).count();
-            if files.is_empty() || !files.iter().all(goes) || expected != files.len() {
+            // no directory is renamed to within itself
+            let apart = !inside(to, from) && !inside(from, to);
+            if files.is_empty() || !apart || !files.iter().all(goes) || expected != files.len() {
                 continue;
             }
-            if renamed(&abs(from)?, &abs(to)?)? {
+            if self.renamed(from, to)? {
                 for (gone, come) in moves.iter().filter(|(gone, _)| inside(gone, from)) {
                     done.extend([*gone, *come]);
                 }
-                self.prune_empty_dirs(abs(from)?.parent());
             }
         }
-        for (from, to) in &moves {
-            if !done.contains(from) && renamed(&abs(from)?, &abs(to)?)? {
-                done.extend([*from, *to]);
-                self.prune_empty_dirs(abs(from)?.parent());
+        let mut waiting: Vec<(&'c [u8], &'c [u8])> = moves
+            .iter()
+            .filter(|(from, _)| !done.contains(*from))
+            .map(|(from, to)| (*from, *to))
+            .collect();
+        waiting.sort();
+        loop {
+            let mut blocked = Vec::new();
+            for (from, to) in &waiting {
+                match self.renamed(from, to)? {
+                    true => done.extend([*from, *to]),
+                    false => blocked.push((*from, *to)),
+                }
             }
+            if blocked.len() == waiting.len() {
+                return Ok(done);
+            }
+            waiting = blocked;
         }
-        Ok(done)
     }
 }
 
 /// The moves among `changes`: a path whose file goes, with a path where
 /// nothing was and the same file comes to be. Of several such paths the
 /// one that ends most like the first is taken.
-fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
+pub(super) fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
     let file = |c: &FileChange| c.before.as_ref().or(c.after.as_ref()).map(|s| s.mode);
     let plain = |c: &&&'c FileChange| file(c).is_some_and(|mode| mode != 0o160000);
     let gone = changes.iter().filter(plain).filter(|c| c.after.is_none());
