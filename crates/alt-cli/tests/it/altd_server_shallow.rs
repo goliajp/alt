@@ -30,11 +30,11 @@ fn git_at(dir: &Path, time: u64, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn git(dir: &Path, args: &[&str]) -> Output {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Output {
     git_at(dir, 1_700_000_000, args)
 }
 
-fn done(out: Output) -> String {
+pub(crate) fn done(out: Output) -> String {
     let told = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "{told}");
     String::from_utf8(out.stdout).unwrap().trim().to_owned()
@@ -57,7 +57,7 @@ fn held(clone: &Path) -> (Vec<String>, Vec<String>) {
 /// A history of twelve commits a thousand seconds apart from
 /// 1 700 001 000 on: four, the tag `old`, a branch `side` of three, two
 /// more, the merge of `side`, two more, the annotated tag `v1`.
-fn history(src: &Path) {
+pub(crate) fn history(src: &Path) {
     fs::create_dir(src).unwrap();
     done(git(src, &["init", "-q", "-b", "work", "."]));
     let time = std::cell::Cell::new(1_700_000_000);

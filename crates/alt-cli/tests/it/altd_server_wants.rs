@@ -79,7 +79,7 @@ fn a_fetch_is_given_what_the_refs_reach_and_nothing_else_of_the_store() {
 }
 
 /// The status and the body of a `fetch` command of `lines`.
-fn fetched(url: &str, dir: &Path, lines: &[u8]) -> (String, Vec<u8>) {
+pub(crate) fn fetched(url: &str, dir: &Path, lines: &[u8]) -> (String, Vec<u8>) {
     let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4).into_bytes();
     let mut body = [pkt("command=fetch\n"), b"0001".to_vec(), lines.to_vec()].concat();
     body.extend([pkt("done\n"), b"0000".to_vec()].concat());

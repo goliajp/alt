@@ -27,6 +27,7 @@ mod altd_server_refused_objects;
 mod altd_server_relay;
 mod altd_server_sending;
 mod altd_server_shallow;
+mod altd_server_shallow_lines;
 mod altd_server_signed_commits;
 mod altd_server_slow_peers;
 mod altd_server_temp;
