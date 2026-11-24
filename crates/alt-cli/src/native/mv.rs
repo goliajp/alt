@@ -90,6 +90,11 @@ impl NativeRepo<'_> {
                 Err(why) => return Err(why),
             }
         }
+        // a directory moved into that held nothing is one no longer
+        let hollow = into && !renamed.is_empty() && !destination.is_empty();
+        if hollow && std::fs::read_dir(self.abs(&destination)?)?.next().is_none() {
+            edit.files.push((destination.clone(), Put::NoDirectory));
+        }
         if !how.dry_run {
             self.ensure_writable("mv")?;
             self.respell(&respelled)?;
@@ -255,6 +260,15 @@ impl NativeRepo<'_> {
             let state = self.file_state(&file, true)?.ok_or("file went away")?;
             edit.files.push((moved(&file), Put::Found(state)));
             edit.files.push((file, Put::Nothing));
+        }
+        // as git, which renames the directory: those in it that hold
+        // nothing go along
+        if is_dir && !spelling {
+            for hollow in self.empty_beneath(from)? {
+                let state = self.empty_directory(true)?;
+                edit.files.push((moved(&hollow), Put::Found(state)));
+                edit.files.push((hollow, Put::NoDirectory));
+            }
         }
         Ok((beneath, spelling))
     }

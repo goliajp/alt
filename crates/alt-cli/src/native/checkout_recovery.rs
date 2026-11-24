@@ -18,6 +18,10 @@ pub(super) struct FileState {
     pub(super) contents: String,
 }
 
+/// The mode of a directory that holds nothing, where a change is of one:
+/// a directory a command moves by name goes with those it holds.
+pub(super) const EMPTY_DIRECTORY: u32 = 0o040000;
+
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub(super) struct FileChange {

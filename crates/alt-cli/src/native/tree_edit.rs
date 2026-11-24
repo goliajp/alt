@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::checkout_files::apart::{Coming, respell};
-use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
+use super::checkout_recovery::{CheckoutIntent, EMPTY_DIRECTORY, FileChange, FileState};
 use super::*;
 use recovery::canonical_index;
 
@@ -27,6 +27,8 @@ pub(super) enum Put {
     Found(FileState),
     /// nothing: the file that is there is removed
     Nothing,
+    /// nothing: the directory that is there, which holds nothing, is removed
+    NoDirectory,
 }
 
 impl TreeEdit {
@@ -87,10 +89,10 @@ fn coming<'a>(files: &'a [(BString, Put)], index: &'a Index) -> Coming<'a> {
     let submodule = |put: &Put| match put {
         Put::Entry(entry) => entry.mode == 0o160000,
         Put::Found(state) => state.mode == 0o160000,
-        Put::Nothing => false,
+        Put::Nothing | Put::NoDirectory => false,
     };
-    let written = |(_, put): &&(BString, Put)| !matches!(put, Put::Nothing);
-    let removed = |(_, put): &&(BString, Put)| matches!(put, Put::Nothing);
+    let removed = |(_, put): &&(BString, Put)| matches!(put, Put::Nothing | Put::NoDirectory);
+    let written = |file: &&(BString, Put)| !removed(file);
     Coming {
         come: files
             .iter()
@@ -139,10 +141,13 @@ impl NativeRepo<'_> {
                     Some(state)
                 }
                 Put::Found(state) => Some(state.clone()),
-                Put::Nothing => None,
+                Put::Nothing | Put::NoDirectory => None,
             };
-            let gitlink = after.as_ref().is_some_and(|state| state.mode == 0o160000);
-            let before = self.observed(path, true, gitlink, &owned)?;
+            let of = |mode| after.as_ref().is_some_and(|state| state.mode == mode);
+            let before = match matches!(put, Put::NoDirectory) || of(EMPTY_DIRECTORY) {
+                true => self.observed_directory(path, true, &owned)?,
+                false => self.observed(path, true, of(0o160000), &owned)?,
+            };
             if before != after {
                 touched.insert(path.clone());
                 changes.push(FileChange {

@@ -93,8 +93,11 @@ impl NativeRepo<'_> {
             let inside = |path: &[u8], dir: &[u8]| {
                 path.len() > dir.len() && path.starts_with(dir) && path[dir.len()] == b'/'
             };
-            // every file in the directory goes along, to the same place
-            let files = self.files_beneath(&BString::from(from))?;
+            // all the directory holds goes along, to the same place: a
+            // directory in it that holds nothing stays where no change
+            // is of it
+            let mut files = self.files_beneath(&BString::from(from))?;
+            files.extend(self.empty_beneath(&BString::from(from))?);
             let goes = |file: &BString| {
                 let there = [to, &file[from.len()..]].concat();
                 moves
@@ -174,7 +177,11 @@ fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
     };
     let mut moves = HashMap::new();
     for from in gone {
-        let same = |c: &&FileChange| c.after == from.before;
+        // a directory that holds what comes is no longer one that holds
+        // nothing, and has gone nowhere
+        let within =
+            |a: &[u8], b: &[u8]| a.len() > b.len() && a.starts_with(b) && a[b.len()] == b'/';
+        let same = |c: &&FileChange| c.after == from.before && !within(&c.path, &from.path);
         let Some(to) = come
             .iter()
             .copied()

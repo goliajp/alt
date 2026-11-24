@@ -2,12 +2,13 @@
 //! time, and the checks that run before the first write.
 
 use super::checkout_plan::holds_untracked;
-use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
+use super::checkout_recovery::{CheckoutIntent, EMPTY_DIRECTORY, FileChange, FileState};
 use super::*;
 use recovery::hash;
 
 pub(super) mod apart;
 mod asked;
+mod directories;
 mod folded;
 mod moves;
 mod paths;
@@ -87,13 +88,13 @@ impl NativeRepo<'_> {
         paths: &std::collections::HashSet<&[u8]>,
         change: &FileChange,
     ) -> Res<Option<FileState>> {
-        let gitlink = [&change.before, &change.after]
-            .into_iter()
-            .flatten()
-            .any(|state| state.mode == 0o160000);
-        self.observed(&BString::from(change.path.clone()), false, gitlink, &|p| {
-            paths.contains(p)
-        })
+        let states = || [&change.before, &change.after].into_iter().flatten();
+        let path = BString::from(change.path.clone());
+        if states().any(|state| state.mode == EMPTY_DIRECTORY) {
+            return self.observed_directory(&path, false, &|p| paths.contains(p));
+        }
+        let gitlink = states().any(|state| state.mode == 0o160000);
+        self.observed(&path, false, gitlink, &|p| paths.contains(p))
     }
 
     /// The working-tree state `entry` is checked out as, under the
@@ -175,7 +176,8 @@ impl NativeRepo<'_> {
             .map(|c| c.path.as_slice())
             .collect();
         for change in &intent.files {
-            if change.after.as_ref().is_some_and(|s| s.mode != 0o160000) {
+            let file = |s: &FileState| s.mode != 0o160000 && s.mode != EMPTY_DIRECTORY;
+            if change.after.as_ref().is_some_and(file) {
                 self.ensure_replaceable(&BString::from(change.path.clone()), &|p| {
                     removed.contains(p)
                 })?;
@@ -191,34 +193,6 @@ impl NativeRepo<'_> {
             true => Ok(()),
             false => Err(holds_untracked(path)),
         }
-    }
-
-    /// The files in the directory at `path`, relative to the root; none
-    /// when there is no directory of the working tree there: what a
-    /// symlink above the path leads to is not looked at.
-    pub(super) fn files_beneath(&self, path: &BString) -> Res<Vec<BString>> {
-        let abs = self.abs(path)?;
-        let mut found = Vec::new();
-        let reached = self.steps_above(path)? == Ok(true);
-        if !reached || !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-            return Ok(found);
-        }
-        let mut stack = vec![abs];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir)? {
-                let entry = entry?;
-                if entry.file_type()?.is_dir() {
-                    stack.push(entry.path());
-                    continue;
-                }
-                let inner = entry.path();
-                let rel = inner
-                    .strip_prefix(&self.root)
-                    .map_err(|_| "path outside root")?;
-                found.push(self.as_tracked(rel.as_os_str().as_encoded_bytes())?);
-            }
-        }
-        Ok(found)
     }
 
     fn apply_file_state(&self, path: &BString, state: &Option<FileState>) -> Res<()> {
@@ -251,6 +225,7 @@ impl NativeRepo<'_> {
                     std::fs::File::open(parent)?.sync_all()?;
                 }
             }
+            Some(state) if state.mode == EMPTY_DIRECTORY => self.put_directory(path, &abs)?,
             Some(state) => {
                 let bytes = self.read_snapshot(&state.contents)?;
                 let parent = abs.parent().ok_or("checkout path has no parent")?;
