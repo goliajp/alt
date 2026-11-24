@@ -177,6 +177,20 @@ impl NativeRepo<'_> {
         }))
     }
 
+    /// The remote-tracking branch `<remote>/<name>`, where one remote
+    /// alone has a branch `name`: what a checkout of a name that is no
+    /// branch here makes a branch of, as by git.
+    pub fn tracked_by_one_remote(&self, name: &str) -> Res<Option<String>> {
+        let remotes = self.read_remotes()?;
+        let tracking = remotes
+            .iter()
+            .map(|remote| format!("{}/{name}", remote.name));
+        let mut there =
+            tracking.filter(|at| self.store.refs.get(&format!("refs/remotes/{at}")).is_some());
+        let first = there.next();
+        Ok(first.filter(|_| there.next().is_none()))
+    }
+
     /// Has the branch `name` follow `followed`, in the configuration alt
     /// keeps, and returns git's line for it.
     pub(super) fn follow(&mut self, name: &str, followed: &Followed) -> Res<String> {

@@ -186,11 +186,24 @@ fn checkout<W: Write>(
             return repo.switch(name, None, args.json, out);
         }
         // before `--` the name is no path: what is no branch is refused
-        if args.dashed {
-            if !repo.names_commit(name)? {
-                return Err(invalid_reference(name));
-            }
+        if args.dashed && !repo.names_commit(name)? {
+            return Err(invalid_reference(name));
+        }
+        // a name that is a commit is never a path, though a file has it
+        if args.dashed || repo.names_commit(name)? {
             return repo.switch(name, None, args.json, out);
+        }
+        if let Some(tracking) = repo.tracked_by_one_remote(name)? {
+            if repo.file_named(name)? {
+                let said = format!(
+                    "fatal: '{name}' could be both a local file and a tracking branch.\n\
+                     Please use -- (and optionally --no-guess) to disambiguate\n"
+                );
+                return Err(crate::native::said::refused(&said, 128));
+            }
+            let start = Some(tracking.as_str());
+            let create = Create { start, over: false };
+            return repo.switch(name, Some(create), args.json, out);
         }
     }
     if names.is_empty() && args.paths.is_empty() {

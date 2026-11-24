@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use crate::like_git::{alt, alt_daemon, fails, files, git, heads, index, ok};
 
 /// A clone of a git repository and an import of that clone.
-struct Cloned {
+pub(crate) struct Cloned {
     _dir: alt_os::temp::TempDir,
-    alt: PathBuf,
-    git: PathBuf,
+    pub(crate) alt: PathBuf,
+    pub(crate) git: PathBuf,
 }
 
 /// `main` with two commits and `topic` with a third at the remote, the
 /// tag `v1` at the first and the annotated tag `v2` at the second; in
 /// the clone, the branch `side` at the first commit, and `main` checked
 /// out.
-fn cloned() -> Cloned {
+pub(crate) fn cloned() -> Cloned {
     let dir = alt_os::temp::tempdir().unwrap();
     let at = |name: &str| dir.path().join(name);
     let (up, clone, imported) = (at("up"), at("clone"), at("imported"));
@@ -49,20 +49,20 @@ fn cloned() -> Cloned {
 }
 
 impl Cloned {
-    fn write(&self, path: &str, content: &str) {
+    pub(crate) fn write(&self, path: &str, content: &str) {
         for root in [&self.alt, &self.git] {
             std::fs::write(root.join(path), content).unwrap();
         }
     }
 
-    fn assert_same_state(&self) {
+    pub(crate) fn assert_same_state(&self) {
         assert_eq!(index(&self.alt), ok(git(&self.git, &["ls-files", "-s"])));
         assert_eq!(files(&self.alt), files(&self.git));
         assert_eq!(heads(&self.alt), heads(&self.git));
     }
 
     /// The command fails in both with `code`, alt saying what git says.
-    fn same_failure(&self, args: &[&str], code: i32) -> String {
+    pub(crate) fn same_failure(&self, args: &[&str], code: i32) -> String {
         let said = fails(alt(&self.alt, args), code);
         let git_said = fails(git(&self.git, args), code);
         assert!(said.starts_with(&git_said), "alt: {said}\ngit: {git_said}");
@@ -70,7 +70,7 @@ impl Cloned {
     }
 
     /// What each branch named follows, in both the same.
-    fn same_upstream(&self, branch: &str) -> String {
+    pub(crate) fn same_upstream(&self, branch: &str) -> String {
         let name = format!("{branch}@{{u}}");
         let args = ["rev-parse", "--abbrev-ref", name.as_str()];
         let followed = ok(alt(&self.alt, &args));
