@@ -249,7 +249,7 @@ fn a_commit_made_now_is_in_the_zone_of_the_caller_as_git_writes_it() {
                 root,
                 daemon,
                 &env,
-                &["commit", "--amend", "-m", "again"],
+                &["commit", "--amend", "--allow-empty", "-m", "again"],
             ));
             let amended = alt_lines(root, "HEAD");
             assert_eq!(zones_of(&amended)[1], expected[1], "{told}");

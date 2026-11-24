@@ -13,6 +13,36 @@ impl NativeRepo<'_> {
         }
     }
 
+    /// The tree of the index for a commit that takes the place of one
+    /// with `parents` and the tree `base`. A commit amended into one that
+    /// changes nothing is refused as by git, a merge aside, unless
+    /// `allow_empty` asks for it.
+    fn amended_tree(
+        &mut self,
+        parents: &[ObjectId],
+        base: Option<ObjectId>,
+        allow_empty: bool,
+    ) -> Res<ObjectId> {
+        let nothing = || {
+            let said = "You asked to amend the most recent commit, but doing so would make\n\
+                        it empty. You can repeat your command with --allow-empty, or you can\n\
+                        remove the commit entirely with \"git reset HEAD^\".\n";
+            said::refused(said, 1)
+        };
+        if parents.is_empty() && !allow_empty && self.index()?.entries.is_empty() {
+            return Err(nothing());
+        }
+        let tree = self.staged_tree(base)?;
+        let before = match parents[..] {
+            [parent] => Some(self.commit_tree(parent)?),
+            _ => None,
+        };
+        if before == Some(tree) && !allow_empty {
+            return Err(nothing());
+        }
+        Ok(tree)
+    }
+
     /// `alt commit --amend [-m <msg>]`: replace the branch tip with a new
     /// commit built from the index, as git does — same parents and author,
     /// the new (or, without `-m`, the old) message, a fresh committer. The
@@ -57,7 +87,7 @@ impl NativeRepo<'_> {
                 .to_owned(),
         };
 
-        let tree = self.staged_tree(prev.tree())?;
+        let tree = self.amended_tree(&parents, prev.tree(), opts.allow_empty)?;
         if !opts.no_verify {
             self.run_precommit()?;
         }

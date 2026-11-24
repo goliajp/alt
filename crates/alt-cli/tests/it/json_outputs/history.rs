@@ -70,6 +70,14 @@ fn commits_branches_and_tags() {
     s.json(&["commit", "-m", "empty", "--json"]);
     s.json(&["commit", "-m", "allowed empty", "--allow-empty", "--json"]);
     s.json(&["commit", "--amend", "-m", "amended empty", "--json"]);
+    s.json(&[
+        "commit",
+        "--amend",
+        "-m",
+        "amended empty",
+        "--allow-empty",
+        "--json",
+    ]);
     s.json(&["status", "--json"]);
     s.json(&["branch", "--json"]);
     s.json(&["switch", "-c", "feat", "--json"]);

@@ -23,6 +23,7 @@ mod altd_server_trees;
 mod altd_server_unsynced_objects;
 mod ambiguous_args;
 mod amend;
+mod amend_empty;
 mod argument_bindings;
 mod bisect;
 mod blame;
