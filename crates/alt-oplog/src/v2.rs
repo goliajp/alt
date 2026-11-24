@@ -26,6 +26,7 @@ mod log;
 mod looked;
 mod mark;
 mod named;
+mod noted;
 mod notes;
 mod open;
 mod owed;
