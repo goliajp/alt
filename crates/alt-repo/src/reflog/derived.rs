@@ -16,6 +16,40 @@ pub(super) struct Derived {
     pub moves: Vec<Move>,
     /// the ref was deleted on the way: its log began anew
     pub anew: bool,
+    /// the name the ref had at the first of the ops read: a branch that
+    /// was renamed since has, of what was logged before them, the log
+    /// of that name
+    pub first: String,
+}
+
+/// A rename by its op: the name a branch had and the one it took.
+type Renamed = HashMap<OpId, (String, String)>;
+
+/// The renames that led to the branch `want`, each by its op with the
+/// name the branch had before and the one it took, and the name it had
+/// before the first of them. `ops` are those read, the oldest first.
+fn renames(ops: &[alt_oplog::Op], want: &str) -> Result<(Renamed, String), RepoError> {
+    let mut renamed = HashMap::new();
+    let mut name = want.to_owned();
+    for op in ops.iter().rev().filter(|op| verb_of(&op.actor) == "branch") {
+        let Some(tx) = alt_refs::parse_tx(&op.payload)? else {
+            continue;
+        };
+        // a branch that goes, and this one that comes where it was
+        let came = tx
+            .changes
+            .iter()
+            .find(|c| c.name == name && c.new.is_some());
+        let went = |c: &&alt_refs::RefChange| c.new.is_none() && c.name != name;
+        let went = tx.changes.iter().find(went);
+        if let (Some(came), Some(went)) = (came, went)
+            && came.new == went.old
+        {
+            renamed.insert(op.id, (went.name.clone(), name));
+            name = went.name.clone();
+        }
+    }
+    Ok((renamed, name))
 }
 
 /// What an actor string says the command was.
@@ -61,11 +95,25 @@ pub(super) fn derived(
     // where each rebase under way began: its scratch ref and the new base
     let mut bases: HashMap<String, ObjectId> = HashMap::new();
     let mut counting = !matches!(after, Some(Some(_)));
+    let ops = refs.oplog().ops()?;
+    let read = match after {
+        Some(Some(last)) => ops
+            .iter()
+            .position(|op| op.id == last)
+            .map_or(0, |at| at + 1),
+        _ => 0,
+    };
+    let (renamed, first) = match head {
+        true => (HashMap::new(), want.to_owned()),
+        false => renames(&ops[read..], want)?,
+    };
+    let mut name = first.clone();
     let mut found = Derived {
         moves: Vec::new(),
         anew: false,
+        first,
     };
-    for op in refs.oplog().ops()? {
+    for op in ops {
         let Some(tx) = alt_refs::parse_tx(&op.payload)? else {
             counting |= after == Some(Some(op.id));
             continue;
@@ -132,7 +180,20 @@ pub(super) fn derived(
             }
             continue;
         }
-        for c in tx.changes.iter().filter(|c| c.name == want) {
+        if let Some((from, to)) = renamed.get(&op.id).filter(|(from, _)| *from == name) {
+            // the log goes along, and git says of it what was renamed
+            let at = oid(&state.get(to).cloned());
+            found.moves.push(Move {
+                old: at,
+                new: at,
+                by: None,
+                at_ms: Some(op.timestamp_ms),
+                said: Said::Kept(Some(format!("Branch: renamed {from} to {to}").into_bytes())),
+            });
+            name = to.clone();
+            continue;
+        }
+        for c in tx.changes.iter().filter(|c| c.name == name) {
             match &c.new {
                 Some(RefTarget::Oid(new)) => found.moves.push(told(oid(&c.old), *new, None, None)),
                 Some(RefTarget::Symbolic(_)) => {}

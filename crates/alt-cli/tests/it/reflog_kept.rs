@@ -24,6 +24,33 @@ fn a_branch_renamed_under_the_head_is_no_branch_left() {
 }
 
 #[test]
+fn a_branch_that_is_renamed_takes_its_log_along() {
+    let pair = Pair::new();
+    pair.write("f", "f\n");
+    pair.commit_all("one");
+    pair.both(&["switch", "-c", "side"]);
+    pair.write("f", "g\n");
+    pair.commit_all("two");
+    pair.both(&["switch", "main"]);
+    let same = |args: &[&str]| assert_eq!(ok(alt(&pair.alt, args)), ok(git(&pair.git, args)));
+    // one that is not checked out, then the one that is, twice
+    pair.both(&["branch", "-m", "side", "side2"]);
+    same(&["reflog", "-n", "2", "side2"]);
+    pair.both(&["switch", "side2"]);
+    pair.both(&["branch", "-m", "side3"]);
+    pair.write("f", "h\n");
+    pair.commit_all("three");
+    pair.both(&["branch", "-m", "side4"]);
+    same(&["reflog", "-n", "5", "side4"]);
+    same(&["rev-parse", "side4@{1}", "side4@{2}", "side4@{4}"]);
+    // nothing is logged under the names it had
+    for gone in ["side", "side2", "side3"] {
+        let (ours, theirs) = pair.run(&["reflog", gone]);
+        assert!(!ours.status.success() && !theirs.status.success(), "{gone}");
+    }
+}
+
+#[test]
 fn a_second_import_keeps_the_moves_git_never_saw() {
     let dir = alt_os::temp::tempdir().unwrap();
     let (source, to) = (dir.path().join("source"), dir.path().join("to"));

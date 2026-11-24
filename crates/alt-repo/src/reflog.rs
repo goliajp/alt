@@ -187,9 +187,9 @@ impl Repository {
         let since = derived::derived(alt.refs()?, name, is_head(name), after)?;
         let mut moves = match since.anew {
             true => Vec::new(),
-            false => match apart(&alt.alt_dir, name) {
+            false => match apart(&alt.alt_dir, &since.first) {
                 held if held.is_file() => logged(&alt.alt_dir.join(APART), &file_of(&held))?,
-                _ => logged(&alt.alt_dir.join(KEPT), name)?,
+                _ => logged(&alt.alt_dir.join(KEPT), &since.first)?,
             },
         };
         moves.extend(since.moves);
