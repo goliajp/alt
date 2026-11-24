@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: cover what the gate asks of a corpus run of the cli, and have it say so in every shell
+author-type: human
+author: doracawl
+touched: scripts/gate.sh
+touched: scripts/test-gate.py
