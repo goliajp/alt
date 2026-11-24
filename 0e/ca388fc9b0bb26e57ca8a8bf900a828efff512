@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: take the merge base committed last for the one a rebase with -r moves lines from
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/rebase/merges.rs
+touched: crates/alt-cli/tests/it/rebase_merges.rs
