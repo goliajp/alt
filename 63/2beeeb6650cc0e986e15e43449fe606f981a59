@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: record no sync of the oplog over ops that name something where nobody syncs what they name
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
+touched: crates/alt-oplog/tests/it/v2_kept.rs
+touched: crates/alt-oplog/tests/it/v2_kept_past.rs
+touched: crates/alt-oplog/tests/it/v2_looked.rs
+touched: crates/alt-oplog/tests/it/v2_tables.rs
+touched: crates/alt-oplog/tests/it/v2_unseen.rs
+touched: crates/alt-oplog/tests/it/v2_untrusted.rs
+touched: crates/alt-refs/tests/it/v2.rs
