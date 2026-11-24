@@ -8,6 +8,7 @@
 //! entries, which git reads from the log of `refs/stash`, is told from
 //! the ref the store has for each entry.
 
+mod again;
 mod asked;
 mod derived;
 mod said;
@@ -21,6 +22,8 @@ use alt_git_refs::stash;
 use alt_oplog::OpId;
 
 use crate::{Backend, RepoError, Repository};
+
+pub use again::{Carried, carried};
 
 /// Where an import keeps the logs of the git repository, from the store.
 const KEPT: &str = "git-import/logs";
@@ -112,7 +115,14 @@ fn is_head(name: &str) -> bool {
 /// notes that the log of the store ended at the op `last` names then: the moves of a
 /// ref are those git logged and then those of the operations after it.
 /// The log of `refs/stash` is the stack, which the import reads itself.
-pub fn take(dir: &Path, alt_dir: &Path, last: Option<String>) -> Result<(), RepoError> {
+/// `ours` are the logs the store had before this import: one that git's
+/// does not begin with stays, and ends with the import.
+pub fn take(
+    dir: &Path,
+    alt_dir: &Path,
+    last: Option<String>,
+    ours: (Carried, alt_git_codec::HashAlgo),
+) -> Result<(), RepoError> {
     let kept = alt_dir.join(KEPT);
     if kept.exists() {
         fs::remove_dir_all(&kept)?;
@@ -138,6 +148,7 @@ pub fn take(dir: &Path, alt_dir: &Path, last: Option<String>) -> Result<(), Repo
             fs::copy(entry.path(), to)?;
         }
     }
+    again::keep_ours(alt_dir, ours.0, ours.1)?;
     fs::create_dir_all(alt_dir.join("git-import"))?;
     Ok(fs::write(alt_dir.join(KEPT_AT), last.unwrap_or_default())?)
 }

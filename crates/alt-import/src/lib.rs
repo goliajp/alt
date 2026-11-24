@@ -224,13 +224,16 @@ pub fn import_git_with(
     let changes = refs::changes(&refs, wanted);
 
     let refs_changed = changes.len();
+    // the logs as they are before the refs move
+    let names: Vec<String> = refs.iter().map(|(name, _)| name.to_owned()).collect();
+    let logs = alt_repo::reflog::carried(alt_dir, names.iter().map(String::as_str))?;
     let op = if changes.is_empty() {
         None
     } else {
         Some(refs.commit(actor, timestamp_ms, &changes)?)
     };
 
-    kept::keep(repo, alt_dir, refs.head_op().map(|op| op.to_string()))?;
+    kept::keep(repo, alt_dir, refs.head_op().map(|op| op.to_string()), logs)?;
 
     Ok(ImportReport {
         objects_seen: seen,

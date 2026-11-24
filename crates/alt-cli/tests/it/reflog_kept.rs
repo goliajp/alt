@@ -1,4 +1,5 @@
-//! What the log of a ref keeps across a branch that takes another name.
+//! What the log of a ref keeps across a branch that takes another name
+//! and across a second import.
 
 use crate::like_git::{Pair, alt, git, ok};
 
@@ -20,4 +21,43 @@ fn a_branch_renamed_under_the_head_is_no_branch_left() {
     assert!(on.contains("On branch side"), "{on}");
     assert_eq!(ok(alt(&pair.alt, &left)), "main2\n");
     assert_eq!(ok(git(&pair.git, &left)), "main2\n");
+}
+
+#[test]
+fn a_second_import_keeps_the_moves_git_never_saw() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (source, to) = (dir.path().join("source"), dir.path().join("to"));
+    std::fs::create_dir(&source).unwrap();
+    ok(git(&source, &["init", "-q", "."]));
+    for text in ["one", "two"] {
+        std::fs::write(source.join("f"), text).unwrap();
+        ok(git(&source, &["add", "f"]));
+        ok(git(&source, &["commit", "-q", "-m", text]));
+    }
+    ok(alt(&source, &["import", to.to_str().unwrap()]));
+    let at = |rev: &str| ok(alt(&to, &["rev-parse", rev]));
+    let theirs = at("main");
+    let mut made = Vec::new();
+    for text in ["a", "b", "c"] {
+        std::fs::write(to.join("f"), text).unwrap();
+        ok(alt(&to, &["add", "f"]));
+        ok(alt(&to, &["commit", "-m", text]));
+        made.push(at("main"));
+    }
+    // not exported: git has the branch where it was
+    ok(alt(&source, &["import", to.to_str().unwrap()]));
+    assert_eq!(at("main"), theirs);
+    assert_eq!(at("main@{1}"), made[2]);
+    assert_eq!(at("main@{2}"), made[1]);
+    assert_eq!(at("main@{3}"), made[0]);
+    assert_eq!(at("main@{4}"), theirs);
+    assert_eq!(at("HEAD@{1}"), made[2]);
+    let log = ok(alt(&to, &["reflog", "main"]));
+    let first = log.lines().next().unwrap_or_default();
+    assert!(first.contains("main@{0}: import: moving to "), "{log}");
+    assert!(log.contains("main@{1}: commit: c\n"), "{log}");
+    // what was made here is found again, and a third import changes nothing
+    ok(alt(&source, &["import", to.to_str().unwrap()]));
+    assert_eq!(ok(alt(&to, &["reflog", "main"])), log);
+    ok(alt(&to, &["cat-file", "-p", made[2].trim()]));
 }
