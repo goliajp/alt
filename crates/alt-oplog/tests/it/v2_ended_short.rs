@@ -72,3 +72,44 @@ fn a_sync_of_a_handle_the_log_ended_short_for_leaves_what_lies_past_there_to_be_
         assert_eq!(next.len(), 3);
     }
 }
+
+#[test]
+fn a_reader_the_log_ended_short_for_notes_nothing_of_the_ops_past_there_by_vouching_for_its_own() {
+    for read_only in [true, false] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        let mut log = new_log(dir.path());
+        grow(&mut log, "a", 2);
+        log.append("a", 3, b"left").unwrap();
+        drop(log);
+        // a cut of that op dies with the header of the log alone
+        // telling of it, and the machine goes down
+        boot(2);
+        let mut cutter = OpLog::open(dir.path()).unwrap();
+        alt_oplog::v2::cut_dies_after(Some(1));
+        let died = cutter.settle(|_| Ok::<_, OpLogError>(false));
+        alt_oplog::v2::cut_dies_after(None);
+        assert!(matches!(died, Err(OpLogError::Io(_))), "{died:?}");
+        drop(cutter);
+        // the log ends for a handle where that cut was begun; a writer
+        // then reads it to its end, and the header tells of no cut
+        boot(3);
+        let held = match read_only {
+            true => OpLog::open_read_only(dir.path(), None).unwrap(),
+            false => OpLog::open(dir.path()).unwrap(),
+        };
+        assert_eq!(held.len(), 2);
+        OpLog::open(dir.path()).unwrap().refresh().unwrap();
+        // it vouches for the two ops it holds
+        let vouched = held.unconfirmed(|_| Ok::<_, OpLogError>(true));
+        assert_eq!(vouched.unwrap(), None);
+        for opened in [
+            OpLog::open(dir.path()),
+            OpLog::open_read_only(dir.path(), None),
+        ] {
+            let opened = opened.unwrap();
+            assert_eq!(opened.len(), 3);
+            assert!(opened.unsettled(), "read only: {read_only}");
+        }
+    }
+}

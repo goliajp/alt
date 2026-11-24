@@ -12,9 +12,12 @@ impl Log {
     /// on a file as long as the one it read is no log to a reader. It
     /// holds no lock on the log: of a log that was cut since it read or
     /// is being cut, or that somebody noted or synced further than it
-    /// knows, it notes nothing.
+    /// knows, it notes nothing. Nor does one that vouched for all it
+    /// holds where the log ended for it short of the file: of the
+    /// frames past there it has seen none, and a note that tells of
+    /// nothing left would have them taken for looked at.
     pub(super) fn note_look(&self, unheld: Option<u64>) -> std::io::Result<()> {
-        if !self.notes()? {
+        if !self.notes()? || (unheld.is_none() && self.hidden.is_some()) {
             return Ok(());
         }
         let (generation, synced) = (self.state.generation, self.synced);
