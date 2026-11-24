@@ -209,7 +209,7 @@ impl Watcher {
             return;
         };
         // the control directories of the root are not part of the tree
-        if dir.is_empty() && (name == b".alt" || name == b".git") {
+        if dir.is_empty() && crate::control::outside(true, name) {
             return;
         }
         seen.lost |= dir.is_empty() && mask & IN_DELETE_SELF != 0;
@@ -221,7 +221,9 @@ impl Watcher {
             // the watches beneath a directory that moved away still
             // report under the path it had
             seen.lost |= mask & IN_MOVED_FROM != 0;
-            if mask & (IN_CREATE | IN_MOVED_TO) != 0 && name != b".alt" && name != b".git" {
+            if mask & (IN_CREATE | IN_MOVED_TO) != 0
+                && !crate::control::outside(dir.is_empty(), name)
+            {
                 seen.made.push(path.clone());
             }
         }

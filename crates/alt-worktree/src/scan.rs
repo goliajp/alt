@@ -174,7 +174,7 @@ fn scan_dir(
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
-        if name == ".alt" || name == ".git" {
+        if crate::control::outside(dir == root, name.as_encoded_bytes()) {
             continue; // control directories are not working-tree content
         }
         let path = entry.path();

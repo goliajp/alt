@@ -4,6 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
+/// Whether `name`, found in the root of the tree or in a directory
+/// beneath it, is no part of the tree.
+pub(crate) fn outside(at_root: bool, name: &[u8]) -> bool {
+    matches!(name, b".alt" | b".git") || (at_root && name == crate::NAMES_ASKED.as_bytes())
+}
+
 /// Starts the name of the file whose time of writing a scan reads the
 /// clock from; the id of the process follows.
 const CLOCK: &str = ".clock";

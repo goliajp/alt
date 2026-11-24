@@ -20,3 +20,8 @@ impl ChangeKind {
         }
     }
 }
+
+/// The directory a command asks the file system in which names are one
+/// name, at the root of a working tree whose `.alt` is no directory to
+/// hold it. It is no part of the tree.
+pub const NAMES_ASKED: &str = ".alt-names-asked";

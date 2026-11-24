@@ -41,7 +41,9 @@ pub(in crate::native) fn names_control_directory(name: &[u8]) -> bool {
 /// Refuses a path a command is to write at or to record where one of its
 /// steps may be taken for a control directory.
 pub(in crate::native) fn ensure_no_control_directory(path: &[u8]) -> Res<()> {
-    if path.split(|b| *b == b'/').any(names_control_directory) {
+    let mut steps = path.split(|b| *b == b'/');
+    let asked = steps.clone().next() == Some(alt_worktree::NAMES_ASKED.as_bytes());
+    if asked || steps.any(names_control_directory) {
         let path = String::from_utf8_lossy(path);
         return Err(said::refused(
             &format!("error: invalid path '{path}'\n"),

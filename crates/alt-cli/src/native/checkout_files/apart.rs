@@ -6,9 +6,9 @@
 //! and an import checks out what a clone by git leaves of it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
+use super::asked::Asked;
 use super::*;
 
 /// A file, to the file system.
@@ -86,62 +86,6 @@ fn one_name(path: &BString, other: &BString) -> Box<dyn std::error::Error> {
 struct Clash {
     files: Vec<usize>,
     beneath: Vec<usize>,
-}
-
-/// A directory to ask the file system in which names are one name.
-struct Asked {
-    dir: PathBuf,
-}
-
-impl Asked {
-    /// An empty directory where names fold as they do in the tree at
-    /// `root`; one left by a command cut short is cleared first.
-    fn at(root: &Path) -> Res<Self> {
-        let control = root.join(".alt");
-        let dir = match control.is_dir() {
-            true => control.join("names-asked"),
-            false => root.join(".alt-names-asked"),
-        };
-        if dir.symlink_metadata().is_ok() {
-            std::fs::remove_dir_all(&dir)?;
-        }
-        std::fs::create_dir(&dir)?;
-        Ok(Asked { dir })
-    }
-
-    /// `names` in groups of those that are one name here.
-    fn grouped<'n>(&self, names: impl Iterator<Item = &'n [u8]>) -> Res<Vec<Vec<&'n [u8]>>> {
-        let mut groups: Vec<Vec<&[u8]>> = Vec::new();
-        let mut of: HashMap<u64, usize> = HashMap::new();
-        let mut made = Vec::new();
-        for name in names {
-            let path = self.dir.join(std::ffi::OsStr::from_bytes(name));
-            let file = match path.symlink_metadata() {
-                Ok(found) => found.ino(),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    let file = std::fs::File::create(&path)?.metadata()?.ino();
-                    made.push(path);
-                    file
-                }
-                Err(e) => return Err(e.into()),
-            };
-            let at = *of.entry(file).or_insert(groups.len());
-            if at == groups.len() {
-                groups.push(Vec::new());
-            }
-            groups[at].push(name);
-        }
-        for path in made {
-            std::fs::remove_file(path)?;
-        }
-        Ok(groups)
-    }
-}
-
-impl Drop for Asked {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir(&self.dir);
-    }
 }
 
 /// Sorts `items`, each the rest of a path below one directory and the

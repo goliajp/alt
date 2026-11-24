@@ -29,6 +29,24 @@ pub(super) fn locked(index_path: &Path) -> Res<File> {
     Ok(file)
 }
 
+impl NativeRepo<'_> {
+    /// One OS lock per workspace, retained for this view's lifetime. Separate
+    /// workspaces continue independently; shared refs still use their CAS lock.
+    /// Under it, what a command cut short left in the tree of a parallel
+    /// workspace to ask the file system in is cleared away.
+    pub(in crate::native) fn lock_workspace(&mut self) -> Res<()> {
+        if self.write_lock.is_none() {
+            self.write_lock = Some(locked(&self.index_path)?);
+            self.store.refresh()?;
+            self.caps = self.store.capabilities_for(&self.id.principal);
+            if self.workspace != DEFAULT_WORKSPACE {
+                checkout_files::clear_left(&self.root)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Store {
     /// The lock of the workspace `named` from `cwd`, for a removal of
     /// lost records `id` asks for: no command changes the index of that

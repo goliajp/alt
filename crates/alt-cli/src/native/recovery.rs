@@ -155,17 +155,6 @@ pub(super) fn workspace_identity_at(index_path: &Path, name: &str) -> Res<Worksp
 }
 
 impl NativeRepo<'_> {
-    /// One OS lock per workspace, retained for this view's lifetime. Separate
-    /// workspaces continue independently; shared refs still use their CAS lock.
-    pub(super) fn lock_workspace(&mut self) -> Res<()> {
-        if self.write_lock.is_none() {
-            self.write_lock = Some(held::locked(&self.index_path)?);
-            self.store.refresh()?;
-            self.caps = self.store.capabilities_for(&self.id.principal);
-        }
-        Ok(())
-    }
-
     pub(super) fn workspace_identity(&self) -> Res<WorkspaceIdentity> {
         workspace_identity_at(&self.index_path, &self.workspace)
     }

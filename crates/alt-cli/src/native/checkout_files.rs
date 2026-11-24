@@ -7,10 +7,12 @@ use super::*;
 use recovery::hash;
 
 pub(super) mod apart;
+mod asked;
 mod folded;
 mod moves;
 mod paths;
 
+pub(super) use asked::clear_left;
 pub(super) use paths::ensure_no_control_directory;
 
 impl NativeRepo<'_> {

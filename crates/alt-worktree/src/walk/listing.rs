@@ -220,7 +220,7 @@ impl Walk<'_> {
         let mut path = base.to_vec();
         for item in (0..names.len()).filter(|&i| !here.taken[i]) {
             let name = names.name(item);
-            if name == b".alt" || name == b".git" {
+            if crate::control::outside(base.is_empty(), name) {
                 continue;
             }
             let is_dir = names.kind(item) == Kind::Dir;

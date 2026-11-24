@@ -148,7 +148,7 @@ impl Watcher {
             for entry in entries {
                 let entry = entry?;
                 let name = entry.file_name();
-                if name == ".alt" || name == ".git" {
+                if crate::control::outside(rel.is_empty(), name.as_encoded_bytes()) {
                     continue;
                 }
                 match entry.file_type() {
