@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: tell what a rename starts from and whether a switch may begin apart from the commands
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/branch/moved.rs
+touched: crates/alt-cli/src/native/switch.rs
