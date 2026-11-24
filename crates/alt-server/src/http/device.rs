@@ -65,7 +65,8 @@ fn mapped(error: Error) -> Refused {
             DeviceError::TemporarilyUnavailable,
             Some(left.div_ceil(1000)),
         ),
-        _ => DeviceError::TemporarilyUnavailable.into(),
+        // a transaction that was ended for another is good again at once
+        _ => Refused(DeviceError::TemporarilyUnavailable, Some(1)),
     }
 }
 pub(super) async fn handle(

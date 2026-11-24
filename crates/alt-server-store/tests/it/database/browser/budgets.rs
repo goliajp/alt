@@ -25,16 +25,22 @@ fn set(f: &Fixture, key: &str, attempts: i32) {
 
 /// a sign-in attempted from `network`, each for a login nobody else attempts
 fn sign_in(f: &mut Fixture, network: &str) -> std::result::Result<(), Error> {
+    sign_in_at(&mut f.store, network)
+}
+
+fn sign_in_at(store: &mut Store, network: &str) -> std::result::Result<(), Error> {
     let login = format!("u{}", alt_browser_auth::digest(network));
     let network = network.parse().unwrap();
-    let admitted = f
-        .store
-        .admit_browser_password(&origin(), &login[..32], PASSWORD, network);
+    let admitted = store.admit_browser_password(&origin(), &login[..32], PASSWORD, network);
     admitted.map(|_| ())
 }
 
 /// a device code asked for from `network`
 fn code(f: &mut Fixture, network: &str) -> std::result::Result<u64, Error> {
+    code_at(&mut f.store, network)
+}
+
+fn code_at(store: &mut Store, network: &str) -> std::result::Result<u64, Error> {
     let device = alt_browser_auth::digest(&alt_browser_auth::secret());
     let mut random = [0u8; 8];
     alt_os::random::fill(&mut random);
@@ -43,13 +49,51 @@ fn code(f: &mut Fixture, network: &str) -> std::result::Result<u64, Error> {
         .map(|b| alt_remote_protocol::login::USER_CODE_ALPHABET[(b & 31) as usize] as char)
         .collect();
     let token = alt_browser_auth::token();
-    f.store.begin_device_authorization(
+    store.begin_device_authorization(
         &origin(),
         &device,
         &human,
         &alt_server_store::cloud_credential_digest(&token).unwrap(),
         network.parse().unwrap(),
     )
+}
+
+/// Sign-ins and codes are counted at once, by eight connections, each time just
+/// after the minutes of all the rows are over: every one of them then counts its
+/// own rows in anew and removes the rows that are over. None waits for a row of
+/// another while the other waits for one of its own: all of them are let in.
+#[test]
+#[ignore = "requires isolated PostgreSQL; transactions that count attempts at once"]
+fn attempts_counted_at_once_when_the_minutes_are_over_do_not_end_each_other() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    let mut stores: Vec<Store> = (0..8).map(|_| f.reopen()).collect();
+    for round in 0..30 {
+        let over = "UPDATE alt_login_budgets SET window_start=window_start-120000";
+        f.client().execute(over, &[]).unwrap();
+        let together = std::sync::Barrier::new(stores.len());
+        let failed: Vec<String> = std::thread::scope(|scope| {
+            let counting: Vec<_> = (stores.iter_mut().enumerate())
+                .map(|(at, store)| {
+                    let together = &together;
+                    scope.spawn(move || {
+                        let network = format!("198.51.{at}.7");
+                        together.wait();
+                        match at % 2 {
+                            0 => code_at(store, &network).map(|_| ()),
+                            _ => sign_in_at(store, &network),
+                        }
+                    })
+                })
+                .collect();
+            let ended = counting.into_iter().map(|thread| thread.join().unwrap());
+            ended
+                .filter_map(|ended| ended.err())
+                .map(|error| format!("{error:?}"))
+                .collect()
+        });
+        assert!(failed.is_empty(), "round {round}: {failed:?}");
+    }
 }
 
 #[test]

@@ -66,9 +66,12 @@ fn key(kind: &str, of: &str) -> String {
     format!("{kind}:{}", alt_browser_auth::digest(of))
 }
 
+/// Removes the rows whose minute is over. One that another transaction has just
+/// counted in is left to it: waiting for it here, with rows of one's own counted
+/// in that the other waits for in turn, is two transactions that end each other.
 fn stale(tx: &mut Transaction<'_>, time: i64) -> Result<()> {
     tx.execute(
-        "DELETE FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000",
+        "DELETE FROM alt_login_budgets WHERE key IN (SELECT key FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000 FOR UPDATE SKIP LOCKED)",
         &[&time],
     )?;
     Ok(())
