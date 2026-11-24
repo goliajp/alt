@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a request another transaction had locked is still owed its moment after the round that passed it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/earlier_requests.rs
+touched: crates/alt-server-store/tests/it/database/schema_22/earlier_requests.rs
