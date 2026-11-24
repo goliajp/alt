@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: the pages of a directory are turned in a browser
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-cli/tests/it/task_remote/base.rs
+touched: workbench/scripts/acceptance.mjs
