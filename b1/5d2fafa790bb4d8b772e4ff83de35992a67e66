@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the refs are read once for all the names a fetch leaves out
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/shallow.rs
