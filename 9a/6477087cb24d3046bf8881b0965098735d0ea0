@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: a fetch is gone on with for as long as one may take and its peer waits for it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/shallow.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/bin/altd_server/until.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_fetch_time.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/reach.rs
