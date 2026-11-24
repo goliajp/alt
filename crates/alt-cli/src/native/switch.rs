@@ -127,13 +127,9 @@ impl NativeRepo<'_> {
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
-        self.ensure_no_merge_in_progress("switch")?;
         let full = format!("refs/heads/{name}");
+        self.ensure_may_switch_to(name, &full)?;
         let current = self.head_branch()?;
-        if let Some((at, _)) = self.busy_at(&full, false)? {
-            let said = format!("'{name}' is already used by worktree at '{}'", at.display());
-            return Err(settings::fatal(said));
-        }
         let mut follows = None;
         let there = self.store.refs.get(&full).is_some();
         let (result, human) = if let Some(create) = create.filter(|c| c.over && there) {

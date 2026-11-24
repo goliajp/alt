@@ -133,18 +133,21 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// `alt branch -m [<old>] <new>`, and `-M` with `over`: the branch
-    /// under another name, with what it follows, in every workspace
-    /// that has it checked out. `-M` takes the place of a branch of the
-    /// new name.
-    pub fn branch_rename(
-        &mut self,
-        old: Option<&str>,
-        new: &str,
-        over: bool,
-        out: &mut impl Write,
-    ) -> Res<()> {
-        check_branch_name(new)?;
+    /// A switch to the branch `name`, `full`, may begin: nothing is under
+    /// way here, and no other workspace rebases or bisects the branch.
+    pub(in crate::native) fn ensure_may_switch_to(&self, name: &str, full: &str) -> Res<()> {
+        self.ensure_no_merge_in_progress("switch")?;
+        if let Some((at, _)) = self.busy_at(full, false)? {
+            let said = format!("'{name}' is already used by worktree at '{}'", at.display());
+            return Err(settings::fatal(said));
+        }
+        Ok(())
+    }
+
+    /// The branch `branch -m` renames, `old` or the current one: its ref,
+    /// its short name and what it points at. Refused, in git's words,
+    /// where there is none or a rebase or a bisect has HEAD off it.
+    fn renamed_from(&self, old: Option<&str>) -> Res<(String, String, RefTarget)> {
         let from = match old {
             Some(old) => format!("refs/heads/{old}"),
             None => self.head_branch()?,
@@ -160,6 +163,22 @@ impl NativeRepo<'_> {
             let said = format!("branch {from} is being {doing} at {}", at.display());
             return Err(settings::fatal(said));
         }
+        Ok((from, old, at))
+    }
+
+    /// `alt branch -m [<old>] <new>`, and `-M` with `over`: the branch
+    /// under another name, with what it follows, in every workspace
+    /// that has it checked out. `-M` takes the place of a branch of the
+    /// new name.
+    pub fn branch_rename(
+        &mut self,
+        old: Option<&str>,
+        new: &str,
+        over: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        check_branch_name(new)?;
+        let (from, old, at) = self.renamed_from(old)?;
         if old == new {
             return Ok(());
         }
