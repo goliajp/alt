@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: sync the header of the oplog before a cut lays its checkpoint, and take a cut made again there for one of ops
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/mark.rs
+touched: crates/alt-oplog/tests/it/v2_cut_unsynced.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
+touched: crates/alt-oplog/tests/it/v2_kept_ends.rs
