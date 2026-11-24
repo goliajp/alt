@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: lead a program that reads the store's own configuration alone to the copy an import kept, and name the format there
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/config_layers.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: crates/alt-cli/tests/it/mixed_versions/config_layers.rs
+touched: crates/alt-cli/tests/it/mixed_versions/new_imports.rs
+touched: crates/alt-import/tests/it/import_flow.rs
+touched: crates/alt-repo/src/kept_config.rs
