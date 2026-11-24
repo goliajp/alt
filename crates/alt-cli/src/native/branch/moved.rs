@@ -145,9 +145,10 @@ impl NativeRepo<'_> {
     }
 
     /// The branch `branch -m` renames, `old` or the current one: its ref,
-    /// its short name and what it points at. Refused, in git's words,
-    /// where there is none or a rebase or a bisect has HEAD off it.
-    fn renamed_from(&self, old: Option<&str>) -> Res<(String, String, RefTarget)> {
+    /// its short name and what it points at, which is nothing yet for
+    /// the current branch before its first commit. Refused, in git's
+    /// words, where there is none or a rebase or a bisect has HEAD off it.
+    fn renamed_from(&self, old: Option<&str>) -> Res<(String, String, Option<RefTarget>)> {
         let from = match old {
             Some(old) => format!("refs/heads/{old}"),
             None => self.head_branch()?,
@@ -156,9 +157,10 @@ impl NativeRepo<'_> {
             let said = "cannot rename the current branch while not on any";
             return Err(settings::fatal(said.to_owned()));
         };
-        let Some(at) = self.store.refs.get(&from).cloned() else {
+        let at = self.store.refs.get(&from).cloned();
+        if at.is_none() && from != self.head_branch()? {
             return Err(settings::fatal(format!("no branch named '{old}'")));
-        };
+        }
         if let Some((at, doing)) = self.busy_at(&from, true)? {
             let said = format!("branch {from} is being {doing} at {}", at.display());
             return Err(settings::fatal(said));
@@ -192,18 +194,20 @@ impl NativeRepo<'_> {
             self.ensure_may_move(new)?;
         }
         self.ensure_may_move(&old)?;
-        let mut changes = vec![
-            RefChange {
+        // a branch without a commit is a name its heads have, and no ref
+        let mut changes = Vec::new();
+        if let Some(at) = at {
+            changes.push(RefChange {
                 name: from.clone(),
                 old: Some(at.clone()),
                 new: None,
-            },
-            RefChange {
+            });
+            changes.push(RefChange {
                 name: to.clone(),
                 old: taken,
                 new: Some(at),
-            },
-        ];
+            });
+        }
         // every HEAD on the branch follows it to its new name
         let on_it = RefTarget::Symbolic(from);
         let heads = self

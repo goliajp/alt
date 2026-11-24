@@ -232,3 +232,22 @@ fn a_branch_another_workspace_is_on_stays_under_it() {
     assert_eq!(std::fs::read_to_string(pair.alt.join("a")).unwrap(), "3\n");
     assert_eq!(on(&tree), "mine\n");
 }
+
+#[test]
+fn the_branch_of_a_repository_without_a_commit_is_renamed_as_by_git() {
+    let pair = Pair::new();
+    let named = |repo: &std::path::Path| ok(git(repo, &["symbolic-ref", "--short", "HEAD"]));
+    pair.both(&["branch", "-m", "new"]);
+    let told = ok(alt(&pair.alt, &["status"]));
+    assert!(told.contains("On branch new"), "{told}");
+    assert_eq!(named(&pair.git), "new\n");
+    pair.both(&["branch", "-m", "new", "other"]);
+    assert_eq!(named(&pair.git), "other\n");
+    pair.same_failure(&["branch", "-m", "nosuch", "x"], 128);
+    pair.both(&["branch", "-m", "other"]);
+    // the first commit is made on the name it has by now
+    pair.write("f", "f\n");
+    pair.commit_all("one");
+    pair.assert_same_state();
+    assert_eq!(on(&pair.alt), "other\n");
+}
