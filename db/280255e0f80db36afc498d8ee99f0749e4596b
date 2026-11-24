@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: feat
+summary: a backup names the segments it holds unread, and a restoration that fails before it is activated leaves nothing
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server/src/action.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/restore.rs
+touched: crates/alt-server/src/operator/backup/unread.rs
+touched: crates/alt-server/src/operator/error.rs
+touched: crates/alt-server/src/unconfigured.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/scrubbed.rs
+touched: crates/alt-server/tests/it/database/operator/unread.rs
