@@ -28,6 +28,7 @@ mod v2_cut_notes;
 mod v2_cut_told;
 mod v2_cuts;
 mod v2_driver;
+mod v2_ended_short;
 #[cfg(target_os = "linux")]
 mod v2_faults;
 mod v2_features;

@@ -93,12 +93,15 @@ fn a_sync_over_a_note_that_does_not_read_leaves_noted_that_ops_may_be_left_to_lo
         stage(&mut staging, 40);
         drop(staging);
         spoil(dir.path(), how);
-        held.sync().unwrap();
-        if deferred {
-            sink.fsync().unwrap();
-        }
-        assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
-        // `left` lies past where that sync took the log for synced
+        let (bounded, left) = (alt_oplog::bounded_in(dir.path()), held.appended_len());
+        // the sync reads the log to its end first, past where the log
+        // ended for the handle, and sets no boundary over `left`
+        let synced = held.sync();
+        let refused = matches!(synced, Err(OpLogError::Unjudged { at }) if at == left);
+        assert!(refused, "deferred: {deferred}, {how}: {synced:?}");
+        sink.fsync().unwrap();
+        assert_eq!(held.len(), 43);
+        assert_eq!(alt_oplog::bounded_in(dir.path()), bounded);
         let mut writer = OpLog::open(dir.path()).unwrap();
         assert!(writer.unsettled(), "deferred: {deferred}, {how}");
         assert_eq!(writer.settle(but_left).unwrap().unwrap().ops, 41);

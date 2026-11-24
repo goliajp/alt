@@ -67,13 +67,13 @@ impl Log {
         self.leave(&of)
     }
 
-    /// Has a handle that may hold frames which are gone, or that stopped
-    /// short of frames `of` is owed an answer for, read the log to its
-    /// end as a writer does.
-    fn resolved(&mut self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
-        let account = self.account.lock().unwrap();
-        let behind = account.stale || (self.hidden.is_some() && account.owes(of));
-        drop(account);
+    /// Has a handle that may hold frames which are gone, or for which
+    /// the log ended short of the file, read the log to its end as a
+    /// writer does. What it notes of a sync it notes for whoever opens
+    /// the log after: of frames another boot left past where it stopped
+    /// it knows nothing, and would leave them taken for looked at.
+    fn resolved(&mut self) -> Result<(), OpLogError> {
+        let behind = self.account.lock().unwrap().stale || self.hidden.is_some();
         if !behind {
             return Ok(());
         }
@@ -106,7 +106,7 @@ impl Log {
     /// owed an answer after that when `spent`.
     fn sync_as(&mut self, of: &dyn Fn(Holder) -> bool, spent: bool) -> Result<(), OpLogError> {
         loop {
-            self.resolved(of)?;
+            self.resolved()?;
             self.answered(of, spent)?;
             match self.sync_to_end() {
                 // frames it holds are gone: none `of` holds, as far as
@@ -130,7 +130,7 @@ impl Log {
     /// frames `of` holds.
     fn leave(&mut self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
         loop {
-            self.resolved(of)?;
+            self.resolved()?;
             match self.defer_sync() {
                 Err(OpLogError::CutBack) => {}
                 Err(other) => return Err(other),

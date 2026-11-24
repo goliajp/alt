@@ -195,7 +195,11 @@ fn with_the_note_beside_the_log_gone_a_cut_that_died_is_told_to_whoever_holds_or
         assert!(matches!(held.follow(), Err(OpLogError::CutBack)));
         held.reopen().unwrap();
         assert_eq!(held.len(), 2);
-        held.sync().unwrap();
+        // a sync reads the log to its end: with the cut only told, the
+        // ops are all there again, and nobody has looked at them
+        let synced = held.sync();
+        let unjudged = matches!(synced, Err(OpLogError::Unjudged { .. }));
+        assert!(unjudged == (step == 1) && (unjudged || synced.is_ok()));
     }
 }
 
