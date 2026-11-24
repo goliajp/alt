@@ -19,6 +19,7 @@
 mod back;
 mod head;
 mod paced;
+mod peers;
 mod request;
 mod response;
 mod shares;
@@ -32,6 +33,7 @@ use std::time::Duration;
 
 pub(crate) use head::{Header, Method};
 pub(crate) use paced::Limits;
+pub(crate) use peers::{LOOPBACK, Network, networks};
 pub(crate) use request::Request;
 pub(crate) use response::{Response, StatusCode};
 pub(crate) use shares::{Share, Shares};
@@ -52,6 +54,8 @@ struct Shared {
     /// the bytes of the bodies received and still held, by the address they came from
     held: Arc<Shares>,
     limits: Limits,
+    /// the networks whose peers are of this host, and counted for nothing
+    here: &'static [Network],
 }
 
 pub(crate) struct Server {
@@ -78,23 +82,6 @@ impl Drop for Open {
     }
 }
 
-/// What the connections of `peer` are counted under: nothing for this
-/// host, the address for IPv4 and on the link, the network of a host for
-/// IPv6 elsewhere.
-fn counted(peer: IpAddr) -> Option<IpAddr> {
-    let peer = match peer {
-        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(peer, IpAddr::V4),
-        v4 => v4,
-    };
-    match peer {
-        _ if peer.is_loopback() => None,
-        // the hosts of the link the server is on share their first 64 bits
-        IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => Some(peer),
-        IpAddr::V6(v6) => Some(IpAddr::V6((u128::from(v6) >> 64 << 64).into())),
-        v4 => Some(v4),
-    }
-}
-
 impl Shared {
     /// Counts a connection from `peer` in, where the server and the
     /// address have room for one more.
@@ -103,7 +90,7 @@ impl Shared {
             drop(Open(Arc::clone(self), None));
             return None;
         }
-        let address = counted(peer);
+        let address = peers::counted(peer, self.here);
         if let Some(address) = address {
             let mut from = self.from.lock().expect("addresses");
             let open = from.entry(address).or_insert(0);
@@ -126,8 +113,13 @@ impl Shared {
 
 impl Server {
     /// Listens at `address` for `most` connections at once, whose peers are
-    /// given `limits`.
-    pub(crate) fn listen(address: &str, limits: Limits, most: usize) -> io::Result<Server> {
+    /// given `limits`; those of the networks `here` are of this host.
+    pub(crate) fn listen(
+        address: &str,
+        limits: Limits,
+        most: usize,
+        here: &'static [Network],
+    ) -> io::Result<Server> {
         let listener = TcpListener::bind(address)?;
         let shared = Arc::new(Shared {
             waiting: Mutex::default(),
@@ -136,6 +128,7 @@ impl Server {
             from: Mutex::default(),
             held: Shares::of(limits.spool),
             limits,
+            here,
         });
         let server = Server {
             address: listener.local_addr()?,

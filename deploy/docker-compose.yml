@@ -15,6 +15,13 @@ services:
     ports:
       # 8080 is taken by dadaya-server on t01 — bind 8090 on host instead.
       - "127.0.0.1:8090:8080"
+    environment:
+      # Caddy on the host reaches the published port from the gateway of
+      # the network below, so every client's connection comes from that
+      # one address. It is named as one of this host: the server then
+      # holds it to no part of the connections and of the room for bodies
+      # and responses, as it holds a proxy that reaches it over loopback.
+      ALT_SERVER_LOCAL_PEERS: "127.0.0.0/8,::1,172.30.90.1"
     volumes:
       # Read-write because altd-server / alt-web both need to write the
       # oplog `sync.lock` on open even for read-only operations. The
@@ -51,3 +58,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# The addresses are fixed so that the gateway can be named above. Change
+# both where the subnet is taken on the host.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+          gateway: 172.30.90.1

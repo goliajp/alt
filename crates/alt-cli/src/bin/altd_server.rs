@@ -133,7 +133,7 @@ fn main() {
     // earlier would take the default action and skip the drain.
     install_signal_handlers();
 
-    let server = Server::listen(&bind, told.io, told.connections);
+    let server = Server::listen(&bind, told.io, told.connections, told.here);
     let server = Arc::new(server.unwrap_or_else(|e| die(&format!("bind {bind}: {e}"))));
     eprintln!(
         "altd-server: listening on {} ({}, workers={workers})",

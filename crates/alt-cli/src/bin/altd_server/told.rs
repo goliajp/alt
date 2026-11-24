@@ -26,12 +26,13 @@ const INFLATED_TIMES: u64 = 128;
 const LINGER: Duration = Duration::from_secs(2);
 
 /// What else the environment may give, as `--help` tells it. Each but the
-/// first is a whole number above zero.
+/// first and `ALT_SERVER_LOCAL_PEERS` is a whole number above zero.
 pub(super) const HELP: &str = "  \
 ALT_SERVER_TEMP_DIR                     a directory on a disk for what is written for a time (the temporary files of the host)
   ALT_SERVER_WORKERS                      requests handled at once (4)
   ALT_SERVER_MAX_CONNECTIONS              connections open at once (256)
-  ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not this host (a quarter)
+  ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not of this host (a quarter)
+  ALT_SERVER_LOCAL_PEERS                  the addresses and networks that are of this host, with commas between (127.0.0.0/8,::1)
   ALT_SERVER_MAX_PUSH_BYTES               bytes of the body of a push (1 GiB)
   ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
   ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in, and as much on disk (3 pushes and 1 GiB)
@@ -83,6 +84,10 @@ pub(super) struct Told {
     /// connections unless it is set; `ALT_SERVER_MAX_RECEIVING_BYTES`,
     /// four bodies of the largest size unless it is set
     pub(super) io: Limits,
+    /// `ALT_SERVER_LOCAL_PEERS`: the networks whose peers are of this host
+    /// and counted for no address, a proxy in front of the server among
+    /// them; the loopback addresses unless it is set
+    pub(super) here: &'static [super::http::Network],
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
     pub(super) shutdown: Duration,
 }
@@ -118,6 +123,14 @@ impl Told {
         let spool = push_bytes.saturating_mul(4);
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
+        let here: &[super::http::Network] = match lookup("ALT_SERVER_LOCAL_PEERS") {
+            None => &super::http::LOOPBACK,
+            Some(told) => {
+                let read = told.to_str().ok_or("no text".to_owned());
+                let read = read.and_then(super::http::networks);
+                Vec::leak(read.map_err(|why| format!("ALT_SERVER_LOCAL_PEERS={told:?}: {why}"))?)
+            }
+        };
         Ok(Told {
             push_bytes,
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
@@ -136,6 +149,7 @@ impl Told {
                 each: number(lookup, "ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS", each)?,
                 spool: number(lookup, "ALT_SERVER_MAX_RECEIVING_BYTES", spool)?,
             },
+            here,
             shutdown: Duration::from_millis(shutdown),
         })
     }
@@ -218,6 +232,19 @@ mod tests {
                 assert!(why.starts_with(&format!("{name}={value:?}: ")), "{why}");
             }
             assert!(with(&[(name, "5")]).is_ok());
+        }
+        // the networks that are of this host: the loopback ones, or those told
+        assert_eq!(unset.here, super::super::http::LOOPBACK);
+        let told = with(&[("ALT_SERVER_LOCAL_PEERS", "172.30.90.1,10.0.0.0/8")]).unwrap();
+        assert_eq!(told.here.len(), 2);
+        for value in ["", "10.0.0.0/33", "localhost"] {
+            let why = with(&[("ALT_SERVER_LOCAL_PEERS", value)])
+                .err()
+                .expect(value);
+            assert!(
+                why.starts_with(&format!("ALT_SERVER_LOCAL_PEERS={value:?}: ")),
+                "{why}"
+            );
         }
         // the largest number there is counts on without wrapping
         let most = with(&[("ALT_SERVER_MAX_PUSH_BYTES", "18446744073709551615")]).unwrap();

@@ -264,7 +264,11 @@ slow peer keeps a connection and never one of the request handlers: the
 connections open at once are limited, and so are those of one address that
 is not the host itself. Behind a reverse proxy on the same host every
 client comes from the host, and the proxy is where the connections of one
-client are limited. The response to a fetch is a file until its peer has
+client are limited. Which peers are of the host is what `ALT_SERVER_LOCAL_PEERS`
+says, a list of addresses and networks, the loopback ones unless it is set: a
+server in a container sees the proxy on its host under the address the
+container's network gives the host, and has to be told that address, or all
+clients together are held to what one address may have. The response to a fetch is a file until its peer has
 taken it, and those files together take no more than
 `ALT_SERVER_MAX_SENDING_BYTES`, half of what is free for temporary files
 when the server starts unless it is set: a fetch whose response has no room

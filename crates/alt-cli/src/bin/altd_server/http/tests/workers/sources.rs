@@ -18,7 +18,12 @@ fn outward() -> IpAddr {
 /// A server at every address of this host with one worker, which answers a
 /// request once its body is received: 200, or 503 where it had no room.
 fn receiving(limits: Limits) -> u16 {
-    let server = Server::listen("0.0.0.0:0", limits, 16).unwrap();
+    receiving_here(limits, &LOOPBACK)
+}
+
+/// [`receiving`], with the peers of the networks `here` counted for nothing.
+fn receiving_here(limits: Limits, here: &'static [Network]) -> u16 {
+    let server = Server::listen("0.0.0.0:0", limits, 16, here).unwrap();
     let port = server.server_addr().port();
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
@@ -122,4 +127,79 @@ fn a_body_moves_by_what_it_has_and_not_by_the_lines_around_its_chunks() {
     let _ = chunked.write_all(b"0\r\n\r\n");
     let status = status(&mut reader);
     assert!(status.starts_with("HTTP/1.1 408"), "{status}");
+}
+
+/// An address may have one connection, and the outward address of this host is
+/// one like any other: its second connection is not taken. A server told that
+/// the address is of this host, as the address a container's network gives the
+/// proxy in front of it is, takes as many as come from it, and holds what they
+/// send to the room alone.
+#[test]
+fn the_peers_of_a_network_told_to_be_of_this_host_are_held_to_no_part() {
+    let limits = Limits {
+        spool: 4000,
+        each: 1,
+        ..within(LONG)
+    };
+    // whether a second connection from the outward address is answered
+    let second = |port: u16| {
+        let far = SocketAddr::new(outward(), port);
+        let (_first, _reader) = posted(far, 2000, 1900);
+        std::thread::sleep(Duration::from_millis(300));
+        let mut stream = TcpStream::connect(far).unwrap();
+        stream.set_read_timeout(Some(LONG)).unwrap();
+        let sent = stream.write_all(b"POST /p HTTP/1.1\r\nContent-Length: 1500\r\n\r\n");
+        let sent = sent.and_then(|()| stream.write_all(&[b'x'; 1500]));
+        let mut line = String::new();
+        let read = sent.and_then(|()| BufReader::new(stream).read_line(&mut line));
+        read.ok().filter(|read| *read > 0).map(|_| line)
+    };
+    assert_eq!(second(receiving(limits)), None);
+    let here = networks(&format!("127.0.0.0/8,{}", outward())).unwrap();
+    let told = second(receiving_here(limits, Vec::leak(here)));
+    // more than a quarter of the room beside the first, which has as much
+    assert_eq!(told.as_deref(), Some("HTTP/1.1 200 OK\r\n"));
+}
+
+/// The connections of an address are counted for it, those of the
+/// network of a host for IPv6, and those of this host for nobody.
+#[test]
+fn an_address_has_so_many_connections_open_and_no_more() {
+    let shared = Arc::new(Shared {
+        waiting: Mutex::default(),
+        arrived: Condvar::new(),
+        open: AtomicUsize::new(0),
+        from: Mutex::default(),
+        held: Shares::of(u64::MAX),
+        limits: within(GRACE),
+        here: &LOOPBACK,
+    });
+    let open = |address: &str| shared.open(address.parse().unwrap(), 8);
+    let two = [open("203.0.113.7"), open("::ffff:203.0.113.7")];
+    assert!(two.iter().all(Option::is_some));
+    assert!(open("203.0.113.7").is_none());
+    let other = [
+        open("203.0.113.8"),
+        open("2001:db8::1"),
+        open("2001:db8::2"),
+    ];
+    assert!(other.iter().all(Option::is_some));
+    assert!(open("2001:db8:0:0:1::").is_none());
+    assert!(open("2001:db8:0:1::1").is_some());
+    assert!(open("fe80::1").is_some() && open("fe80::2").is_some());
+    drop(two);
+    assert!(open("203.0.113.7").is_some());
+    // a proxy on this host stands for everybody behind it
+    let local: Vec<_> = (0..4)
+        .map(|_| open("127.0.0.1"))
+        .chain([open("::1")])
+        .collect();
+    assert!(local.iter().all(Option::is_some));
+    // and all of them together are within what the server takes
+    assert_eq!(shared.open.load(Ordering::Acquire), 8);
+    assert!(open("127.0.0.1").is_none() && open("198.51.100.1").is_none());
+    assert_eq!(shared.open.load(Ordering::Acquire), 8);
+    drop((other, local));
+    assert_eq!(shared.open.load(Ordering::Acquire), 0);
+    assert!(shared.from.lock().unwrap().is_empty());
 }

@@ -29,7 +29,7 @@ struct Told {
 /// received first; one for `/refuse` without its body, one for `/large`
 /// with 64 MiB.
 fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
-    let server = Server::listen("127.0.0.1:0", limits, 4).unwrap();
+    let server = Server::listen("127.0.0.1:0", limits, 4, &LOOPBACK).unwrap();
     let address = server.server_addr();
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
@@ -269,46 +269,4 @@ fn a_connection_above_the_limit_is_not_taken() {
         assert!(Instant::now() < until, "no connection is taken again");
         std::thread::sleep(Duration::from_millis(10));
     }
-}
-
-/// The connections of an address are counted for it, those of the
-/// network of a host for IPv6, and those of this host for nobody.
-#[test]
-fn an_address_has_so_many_connections_open_and_no_more() {
-    let shared = Arc::new(Shared {
-        waiting: Mutex::default(),
-        arrived: Condvar::new(),
-        open: AtomicUsize::new(0),
-        from: Mutex::default(),
-        held: Shares::of(u64::MAX),
-        limits: within(GRACE),
-    });
-    let open = |address: &str| shared.open(address.parse().unwrap(), 8);
-    let two = [open("203.0.113.7"), open("::ffff:203.0.113.7")];
-    assert!(two.iter().all(Option::is_some));
-    assert!(open("203.0.113.7").is_none());
-    let other = [
-        open("203.0.113.8"),
-        open("2001:db8::1"),
-        open("2001:db8::2"),
-    ];
-    assert!(other.iter().all(Option::is_some));
-    assert!(open("2001:db8:0:0:1::").is_none());
-    assert!(open("2001:db8:0:1::1").is_some());
-    assert!(open("fe80::1").is_some() && open("fe80::2").is_some());
-    drop(two);
-    assert!(open("203.0.113.7").is_some());
-    // a proxy on this host stands for everybody behind it
-    let local: Vec<_> = (0..4)
-        .map(|_| open("127.0.0.1"))
-        .chain([open("::1")])
-        .collect();
-    assert!(local.iter().all(Option::is_some));
-    // and all of them together are within what the server takes
-    assert_eq!(shared.open.load(Ordering::Acquire), 8);
-    assert!(open("127.0.0.1").is_none() && open("198.51.100.1").is_none());
-    assert_eq!(shared.open.load(Ordering::Acquire), 8);
-    drop((other, local));
-    assert_eq!(shared.open.load(Ordering::Acquire), 0);
-    assert!(shared.from.lock().unwrap().is_empty());
 }
