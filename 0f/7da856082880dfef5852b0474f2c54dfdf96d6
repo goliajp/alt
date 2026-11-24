@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: a segment is read through with each delta applied to its base once
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/mend.rs
+touched: crates/alt-pack-segment/src/ordered.rs
+touched: crates/alt-pack-segment/tests/it/mend.rs
