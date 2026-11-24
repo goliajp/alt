@@ -3,14 +3,30 @@
 use super::*;
 
 impl Store {
+    /// The live segments of `repository` as they are now, with their ids: what a
+    /// push is verified behind anew whose publication found them moved.
+    pub fn segments_now(&mut self, repository: &str) -> Result<(Vec<String>, SegmentSet)> {
+        let (ids, segments) = self.live_segments(repository)?;
+        Ok((ids.into_iter().map(|(id, _)| id).collect(), segments))
+    }
+
     /// Publishes ref updates, and the segment that carries their new objects, in one
     /// transaction. The segment file must already be durable under its final name.
+    ///
+    /// The segment was verified behind the live segments `behind`: the depth of
+    /// its deltas and whether it brings an object again are told of those. With
+    /// the row of the repository locked the live segments are held against them,
+    /// and where a push or a merge was published meanwhile nothing is published
+    /// ([`crate::SEGMENTS_MOVED`]): the caller verifies the pack behind the
+    /// segments as they are now. The file of the segment is looked for under
+    /// that lock too, which a sweep holds while it removes files no row knows.
     pub fn pack_publish(
         &mut self,
         credential: &Credential,
         publication: &Publication,
         graph: &impl Graph,
         segment: Option<NewSegment<'_>>,
+        behind: &[String],
     ) -> Result<Receipt> {
         let repository = &publication.key.scope.repository_instance_id;
         let mut tx = self.client.transaction()?;
@@ -32,7 +48,14 @@ impl Store {
             )?
             .get(0),
         )?;
+        let live = Self::live_segment_ids(&mut tx, repository)?;
+        if !live.iter().map(|(id, _)| id).eq(behind) {
+            return Err(Error::Precondition(crate::SEGMENTS_MOVED));
+        }
         if let Some(segment) = &segment {
+            if !segment_file(self.bytes.root(), repository, segment.id)?.is_file() {
+                return Err(Error::Integrity("pack segment file is gone"));
+            }
             if tx.execute(
                 "UPDATE alt_repositories SET stored_bytes=stored_bytes+$2 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes-link_bytes",
                 &[repository, &integer(segment.bytes)?],

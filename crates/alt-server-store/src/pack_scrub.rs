@@ -53,12 +53,13 @@ impl Store {
         &self,
         repository: &str,
         content: &[u8],
-    ) -> Result<(String, std::path::PathBuf)> {
+    ) -> Result<(String, std::path::PathBuf, crate::Writing)> {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
         let mut nonce = [0u8; 16];
         alt_os::random::fill(&mut nonce);
         let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
         let path = self.pack_path(repository, &id)?;
+        let writing = crate::writing(&path);
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -69,7 +70,7 @@ impl Store {
             file.sync_all()?;
             std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
         }
-        Ok((id, path))
+        Ok((id, path, writing))
     }
 
     /// The repositories of the instance, in the order of their names.
@@ -161,7 +162,7 @@ impl Store {
                     _ => Error::Integrity("pack of the segment does not verify"),
                 },
             )?;
-        let (id, path) = self.write_segment(repository, &content)?;
+        let (id, path, _writing) = self.write_segment(repository, &content)?;
         let inline = content.len() <= INLINE_SEGMENT_BYTES;
         let anew = Segment::open(&path).map(Arc::new);
         let whole = anew.as_ref().is_ok_and(|anew| {
@@ -172,7 +173,7 @@ impl Store {
             return Err(Error::Integrity("pack segment indexed anew is not read"));
         }
         let parts = std::slice::from_ref(part);
-        match self.publish_merge(repository, parts, &id, &content, &path, inline) {
+        match self.publish_merge(repository, None, parts, &id, &content, &path, inline) {
             Ok(Some(segment)) => {
                 self.adopt_segment(repository, &id, Arc::clone(&segment))?;
                 Ok((id, segment))

@@ -55,6 +55,9 @@ pub struct PackView {
     pub ref_scope: RefScope,
     pub default_branch: String,
     pub segments: SegmentSet,
+    /// the ids of those segments, in their order: what a push that was verified
+    /// against them is published against, or verified anew
+    pub segment_ids: Vec<String>,
     /// some stored objects may be unreachable from the refs
     pub unreachable: bool,
     pub actor_id: String,
@@ -240,6 +243,7 @@ impl Store {
                 .ok_or(Error::Integrity("credential actor"))?,
             attribution: alt_json::from_value(attribution)?,
             segments: self.open_segments(repository, &ids)?,
+            segment_ids: ids.into_iter().map(|(id, _)| id).collect(),
         }))
     }
 
@@ -272,6 +276,7 @@ impl Store {
             actor_id: auth.actor_id,
             attribution: auth.attribution,
             segments: self.open_segments(repository, &ids)?,
+            segment_ids: ids.into_iter().map(|(id, _)| id).collect(),
         })
     }
 }

@@ -1,6 +1,7 @@
 use super::*;
 mod given_up;
 mod many_refs;
+mod moved;
 mod raw_push;
 mod reverted;
 mod said;

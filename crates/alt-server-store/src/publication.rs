@@ -60,7 +60,7 @@ impl PublicationWork {
     }
 }
 /// the live segments were not the ones the request's objects were packed against
-const SEGMENTS_MOVED: &str = "repository segments changed during publication; publish again";
+pub const SEGMENTS_MOVED: &str = "repository segments changed during publication; publish again";
 /// what became of packing the request's Git objects
 enum Packed {
     Ready(Option<crate::packs::Materialized>),

@@ -150,6 +150,32 @@ fn copy(
     Ok(())
 }
 
+/// Whether `above`, a segment verified behind the segments `was`, stands as well
+/// behind `now`, which hold the same objects: the depth its records tell is
+/// counted from the records of what its deltas are made of, and none of those
+/// lies deeper in `now` than it did. A merge of segments under another keeps one
+/// record of an object they held several times, and it may be the deeper one.
+pub fn stands_on(above: &Segment, was: &SegmentSet, now: &SegmentSet) -> Result<bool, Error> {
+    for index in 0..above.len() {
+        let record = above.record(index)?;
+        if record.delta != Delta::Outside {
+            continue;
+        }
+        let Form::Reference(base) = scan::header(above.entry(&record)?, 0)?.0 else {
+            return Err(Error::Corrupt("record and entry disagree"));
+        };
+        let depth =
+            |set: &SegmentSet| Ok::<_, Error>(set.base_record(&base)?.map(|base| base.depth));
+        match (depth(was)?, depth(now)?) {
+            // made of what a segment between the two has: it is not moved
+            (None, _) => {}
+            (Some(was), Some(now)) if now <= was => {}
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 fn write_whole(pack: &mut Vec<u8>, kind: Kind, data: &[u8]) {
     pack.extend_from_slice(&entry_header(kind as u8, data.len() as u64));
     pack.extend_from_slice(&alt_deflate::compress(data, 1, alt_deflate::Format::Zlib));

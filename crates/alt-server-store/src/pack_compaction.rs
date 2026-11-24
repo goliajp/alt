@@ -88,9 +88,18 @@ impl Store {
         let (older, parts) = set.segments().split_at(start);
         let content = alt_pack_segment::merge(parts, &SegmentSet::new(older.to_vec()))
             .map_err(|_| Error::Integrity("pack segments do not merge"))?;
-        let (id, path) = self.write_segment(repository, &content)?;
+        let (id, path, _writing) = self.write_segment(repository, &content)?;
         let inline = content.len() <= INLINE_SEGMENT_BYTES;
-        let published = self.publish_merge(repository, &ids[start..], &id, &content, &path, inline);
+        let read = Some((&ids[..start], &set));
+        let published = self.publish_merge(
+            repository,
+            read,
+            &ids[start..],
+            &id,
+            &content,
+            &path,
+            inline,
+        );
         match published {
             Ok(Some(segment)) => {
                 self.adopt_segment(repository, &id, segment)?;
@@ -111,9 +120,17 @@ impl Store {
 
     /// Replaces the rows of `parts` with the row of the merged segment. None when a
     /// part is no longer live: another merge got there first.
+    ///
+    /// The merge was made of `parts` behind the segments `read.0`, with `read.1`
+    /// all of them opened. None too where the live segments no longer begin with
+    /// those, or where a segment published behind the parts meanwhile, verified
+    /// with them under it, would not stand on the merged one
+    /// ([`alt_pack_segment::stands_on`]): it is merged with them the next time.
+    #[expect(clippy::too_many_arguments, reason = "the parts of one merge")]
     pub(crate) fn publish_merge(
         &mut self,
         repository: &str,
+        read: Option<(&[(String, bool)], &SegmentSet)>,
         parts: &[(String, bool)],
         id: &str,
         content: &[u8],
@@ -123,47 +140,80 @@ impl Store {
         let segment =
             Arc::new(Segment::open(path).map_err(|_| Error::Integrity("merged pack segment"))?);
         let part_ids: Vec<&str> = parts.iter().map(|(id, _)| id.as_str()).collect();
-        let mut tx = self.client.transaction()?;
-        // a backup holds the instance row while it copies the files of the live
-        // segments; like every write, a merge waits behind it
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        // publications take this lock too, so the set of live segments stands still
-        tx.query_one(
-            "SELECT 1 FROM alt_repositories WHERE id=$1 FOR UPDATE",
-            &[&repository],
-        )?;
-        let time = now(&mut tx)?;
-        let retired = tx.query(
-            "UPDATE alt_pack_segments SET state='retired',retired_at=$3 WHERE repository=$1 AND segment_id=ANY($2) AND state='live' RETURNING sequence,bytes",
-            &[&repository, &part_ids, &integer(time)?],
-        )?;
-        if retired.len() != parts.len() {
-            return Ok(None);
+        // the segments behind the parts that were found to stand on the merged one
+        let mut standing: Vec<(String, bool)> = Vec::new();
+        loop {
+            let mut tx = self.client.transaction()?;
+            // a backup holds the instance row while it copies the files of the live
+            // segments; like every write, a merge waits behind it
+            instance(&mut tx, &self.spec, &self.signing_key)?;
+            // publications take this lock too, so the set of live segments stands still
+            tx.query_one(
+                "SELECT 1 FROM alt_repositories WHERE id=$1 FOR UPDATE",
+                &[&repository],
+            )?;
+            if let Some((before, was)) = read {
+                let live = Self::live_segment_ids(&mut tx, repository)?;
+                let under = before.len() + parts.len();
+                if live.len() < under
+                    || !live
+                        .iter()
+                        .zip(before.iter().chain(parts))
+                        .all(|(a, b)| a == b)
+                {
+                    return Ok(None);
+                }
+                if live[under..] != standing[..] {
+                    // looked at with the lock let go of, and the list read again after
+                    let behind = live[under..].to_vec();
+                    drop(tx);
+                    let mut merged = was.segments()[..before.len()].to_vec();
+                    merged.push(Arc::clone(&segment));
+                    let merged = SegmentSet::new(merged);
+                    for above in self.open_segments(repository, &behind)?.segments() {
+                        if !alt_pack_segment::stands_on(above, was, &merged)
+                            .map_err(|_| Error::Integrity("pack segment index"))?
+                        {
+                            return Ok(None);
+                        }
+                    }
+                    standing = behind;
+                    continue;
+                }
+            }
+            let time = now(&mut tx)?;
+            let retired = tx.query(
+                "UPDATE alt_pack_segments SET state='retired',retired_at=$3 WHERE repository=$1 AND segment_id=ANY($2) AND state='live' RETURNING sequence,bytes",
+                &[&repository, &part_ids, &integer(time)?],
+            )?;
+            if retired.len() != parts.len() {
+                return Ok(None);
+            }
+            let mut sequence = 0;
+            let mut before = 0i64;
+            for row in &retired {
+                sequence = sequence.max(unsigned(row.get(0))?);
+                before += row.get::<_, i64>(1);
+            }
+            insert_segment(
+                &mut tx,
+                repository,
+                sequence,
+                &NewSegment {
+                    id,
+                    objects: segment.len() as u64,
+                    bytes: content.len() as u64,
+                    flags: segment.flags(),
+                    inline: inline.then_some(content),
+                },
+            )?;
+            tx.execute(
+                "UPDATE alt_repositories SET stored_bytes=greatest(stored_bytes+$2,0) WHERE id=$1",
+                &[&repository, &(integer(content.len() as u64)? - before)],
+            )?;
+            tx.commit().map_err(|_| Error::OutcomeUnknown)?;
+            return Ok(Some(segment));
         }
-        let mut sequence = 0;
-        let mut before = 0i64;
-        for row in &retired {
-            sequence = sequence.max(unsigned(row.get(0))?);
-            before += row.get::<_, i64>(1);
-        }
-        insert_segment(
-            &mut tx,
-            repository,
-            sequence,
-            &NewSegment {
-                id,
-                objects: segment.len() as u64,
-                bytes: content.len() as u64,
-                flags: segment.flags(),
-                inline: inline.then_some(content),
-            },
-        )?;
-        tx.execute(
-            "UPDATE alt_repositories SET stored_bytes=greatest(stored_bytes+$2,0) WHERE id=$1",
-            &[&repository, &(integer(content.len() as u64)? - before)],
-        )?;
-        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
-        Ok(Some(segment))
     }
 }
 

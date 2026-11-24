@@ -9,7 +9,7 @@ use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
 use std::{
     collections::BTreeSet,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     os::unix::fs::OpenOptionsExt,
     sync::Arc,
 };
@@ -144,6 +144,7 @@ pub(crate) fn receive(
             path,
             file,
             pack,
+            ..
         }) => publish(
             store,
             credential,

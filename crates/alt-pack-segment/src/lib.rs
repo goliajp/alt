@@ -34,11 +34,11 @@ mod wanted;
 
 pub use alt_git_pack::{BaseFiles, IndexWork, Memory, Wait};
 pub use build::{Builder, Built, Compress};
-pub use format::{CommitInfo, Record, Segment};
+pub use format::{CommitInfo, Delta, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_while_waited_for};
 pub use limits::Limits;
 pub use mend::{indexed_anew, unread};
-pub use merge::merge;
+pub use merge::{merge, stands_on};
 pub use readback::UNREADABLE;
 pub use room::least_memory;
 pub use room::{DELTA_BYTES, ENTRY_BYTES};

@@ -17,6 +17,7 @@ mod pack_scrub;
 mod pack_sweep;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 pub use pack_scrub::{NO_REPOSITORY, Scrubbed, Unread};
+pub use pack_sweep::{Writing, writing};
 mod pack_view;
 pub use pack_view::{ARRAY_TIPS, DEFERRED_REFS, PackView, RefFilter, RefScope};
 mod packs;

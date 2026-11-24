@@ -26,7 +26,7 @@ macro_rules! view {
  ",
             $refs,
             ",
- (SELECT coalesce(json_agg(json_build_array(segment_id,inline IS NOT NULL) ORDER BY sequence),'[]'::json) FROM alt_pack_segments WHERE repository=$2 AND state='live'),
+ (SELECT coalesce(json_agg(json_build_array(segment_id,inline IS NOT NULL) ORDER BY sequence,segment_id),'[]'::json) FROM alt_pack_segments WHERE repository=$2 AND state='live'),
  floor(extract(epoch FROM clock_timestamp())*1000)::bigint,
  ",
             $others

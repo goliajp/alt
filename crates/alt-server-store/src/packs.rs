@@ -203,7 +203,7 @@ impl Store {
         repository: &str,
     ) -> Result<Vec<(String, bool)>> {
         Ok(tx
-            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence", &[&repository])?
+            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence,segment_id", &[&repository])?
             .iter()
             .map(|row| (row.get(0), row.get(1)))
             .collect())
