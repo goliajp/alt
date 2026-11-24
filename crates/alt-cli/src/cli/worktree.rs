@@ -191,7 +191,7 @@ fn checkout<W: Write>(
         }
         // a name that is a commit is never a path, though a file has it
         if args.dashed || repo.names_commit(name)? {
-            return repo.switch(name, None, args.json, out);
+            return Err(crate::native::said::no_branch_at(name));
         }
         if let Some(tracking) = repo.tracked_by_one_remote(name)? {
             if repo.file_named(name)? {

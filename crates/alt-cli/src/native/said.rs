@@ -21,6 +21,17 @@ pub(crate) fn refused(text: &str, code: u8) -> Box<dyn std::error::Error> {
     })
 }
 
+/// Why `alt checkout <name>` checks nothing out where `name` is a commit
+/// and no branch: git leaves HEAD at the commit itself, on no branch,
+/// which a store does not have. Says how a branch is made there.
+pub(crate) fn no_branch_at(name: &str) -> Box<dyn std::error::Error> {
+    let said = format!(
+        "invalid reference: {name}: it names a commit and no branch, and a commit is checked \
+         out on a branch only; `alt switch -c <new-branch> {name}` makes one at it"
+    );
+    crate::machine::Failure::refusal("precondition_failed", said).into()
+}
+
 /// git's refusal to write over what is not committed at `paths`, for the
 /// command it calls `verb`, with `advice` on what to do first.
 pub(super) fn would_overwrite(

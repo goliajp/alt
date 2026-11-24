@@ -59,6 +59,17 @@ fn a_word_that_names_a_commit_is_not_restored_as_the_file_of_that_name() {
     let kept = std::fs::read_to_string(both.alt.join("v1")).unwrap();
     assert_eq!(kept, "committed\nnot staged\n");
     assert!(ok(alt(&both.alt, &["status"])).contains("On branch main"));
+    // git leaves HEAD at the commit, on no branch; here the refusal says
+    // how to have a branch at it, and that works
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(said.contains("`alt switch -c <new-branch> v1`"), "{said}");
+    let refused = alt(&both.alt, &["checkout", "v1", "--"]);
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(said.contains("`alt switch -c <new-branch> v1`"), "{said}");
+    std::fs::write(both.alt.join("v1"), "committed\n").unwrap();
+    ok(alt(&both.alt, &["switch", "-c", "at-v1", "v1"]));
+    let at = |rev: &str| ok(alt(&both.alt, &["rev-parse", rev]));
+    assert_eq!(at("HEAD"), at("v1^{commit}"));
 }
 
 #[test]
