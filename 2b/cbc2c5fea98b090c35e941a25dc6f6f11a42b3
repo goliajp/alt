@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: fix
+summary: a push refers to what the refs its sender reads lead to, or carries it
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/reach.rs
+touched: crates/alt-pack-segment/src/settled.rs
+touched: crates/alt-pack-segment/src/told.rs
+touched: crates/alt-pack-segment/src/wanted.rs
+touched: crates/alt-pack-segment/tests/it/reach.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs/made.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/led.rs
