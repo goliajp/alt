@@ -224,7 +224,7 @@ fn connection(open: Open, stream: TcpStream) {
         shared.enqueue(Request::new(head, source, back));
         let (back, answer) = loop {
             match returned.recv() {
-                Ok(request::Back::Answer(source, answer)) => break (source, answer),
+                Ok(request::Back::Answer(answered)) => break *answered,
                 Ok(request::Back::Receive(mut request, most)) => {
                     // one whose body has no file to go to is let go of,
                     // and answers itself

@@ -42,7 +42,7 @@ struct Spool {
 /// What a request hands to the thread of its connection.
 pub(super) enum Back {
     /// the answer, with the connection it goes out on
-    Answer(Source, Outgoing),
+    Answer(Box<(Source, Outgoing)>),
     /// the request, for its body to be received within so many bytes
     Receive(Box<Request>, u64),
 }
@@ -314,7 +314,7 @@ impl Request {
         let last = self.head.last || !body.over();
         let bodiless = self.head.method == Method::Head;
         // the thread is gone where its connection is
-        let answer = Back::Answer(body.source, response.outgoing(last, bodiless));
+        let answer = Back::Answer(Box::new((body.source, response.outgoing(last, bodiless))));
         let _ = self.back.send(answer);
     }
 }

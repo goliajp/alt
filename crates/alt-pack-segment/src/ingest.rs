@@ -166,7 +166,7 @@ fn verified(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
             // what the scan does not keep is hashed and taken in as it goes by
-            scan::scan(pack, limits, KEEP, held, &going, |index, kind, data| {
+            scan::scan(pack, limits, KEEP, held, going, |index, kind, data| {
                 let (oid, blake3) = digest(kind, data);
                 match told.object(index as u32, &oid, kind, data) {
                     Ok(row) => commits.extend(row),
