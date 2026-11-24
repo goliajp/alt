@@ -21,6 +21,7 @@ mod provenance;
 mod publication;
 mod read;
 mod refs;
+mod review;
 pub use refs::Refs;
 mod registration;
 mod repository_authority;
@@ -161,7 +162,7 @@ pub use chunks::*;
 mod browser;
 pub use browser::*;
 mod workbench;
-pub use tasks::CurrentReviewAssessment;
+pub use review::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.

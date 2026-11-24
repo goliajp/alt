@@ -1,10 +1,11 @@
 use crate::Jsonb;
-use crate::requests::{active, check_key, request_row, upload_selection};
+use crate::requests::{active, check_key, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store, reading};
-use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
+use crate::{Credential, Error, PublicationWork, Result, Store, reading};
+use alt_remote_protocol::{ContentEntry, Publication, RequestKey, Scope};
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
+
 impl Store {
     pub(crate) fn published_records_once(
         &mut self,
@@ -35,71 +36,6 @@ impl Store {
             .map(|row| alt_remote_protocol::RecordRoot {kind,id:row.get(0)}).collect();
         tx.commit()?;
         Ok(records)
-    }
-    /// A current reviewer inspects the exact selected pending publication.
-    /// The response is received history plus present refs, not approval.
-    pub fn review_selection(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-    ) -> Result<ReviewSelection> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (row, current) = review_request(&mut tx, &self.spec, credential, key)?;
-        let (collector_generation, _) =
-            crate::tasks::collector_policy(&mut tx, &key.scope.repository_instance_id)?;
-        let result = ReviewSelection {
-            publication: row.get::<_, Jsonb>("publication").read()?,
-            manifest: row.get::<_, Jsonb>("manifest").read()?,
-            current_refs: current
-                .refs
-                .into_iter()
-                .map(|(name, oid)| (name, oid.to_string()))
-                .collect(),
-            policy_version: current.policy_version.to_string(),
-            runtime_generation: self.spec.runtime_generation.to_string(),
-            collector_generation: collector_generation.to_string(),
-            revocation_generation: current.revocation_generation.to_string(),
-        };
-        tx.commit()?;
-        Ok(result)
-    }
-    pub fn open_review_content(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-        digest: &str,
-    ) -> Result<(u64, crate::StoredReader)> {
-        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (row, _) = review_request(&mut tx, &self.spec, credential, key)?;
-        let manifest: Manifest = row.get::<_, Jsonb>("manifest").read()?;
-        let entry = manifest
-            .entries
-            .iter()
-            .find(|entry| entry.blake3 == digest)
-            .ok_or(Error::Unauthorized)?;
-        let time = integer(now(&mut tx)?)?;
-        if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {
-            // a selected Git object that was published earlier was not uploaded again
-            let entry = entry.clone();
-            tx.commit()?;
-            let segments = self.published_segments(&key.scope.repository_instance_id)?;
-            if crate::pack_native::holds_entry(&segments, &entry)?
-                && let Some(content) = segment_content(&segments, digest)?
-            {
-                return Ok(content);
-            }
-            return Err(Error::Precondition("review content pin expired"));
-        }
-        let location =
-            crate::segments::location(&mut tx, &key.scope.repository_instance_id, digest)?;
-        let file = self
-            .bytes
-            .read_payload(&key.scope, digest, entry.bytes, location.as_ref())?;
-        tx.commit()?;
-        Ok((entry.bytes, file))
     }
     /// Early admission for Git receive-pack before reading a potentially large
     /// body. Exact per-ref/path/force checks still occur at publication.
@@ -270,7 +206,7 @@ impl Store {
             crate::tasks::reviewer(&mut tx, &self.spec, credential, &current)?;
         }
         crate::publication::worker(&mut tx, work)?;
-        tx.execute("UPDATE alt_requests SET worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND fence=$5", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(work.fence)?])?;
+        tx.execute("UPDATE alt_requests SET worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND fence=$5", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(work.fence.ok_or(Error::Precondition("stale publication worker"))?)?])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }
@@ -380,29 +316,9 @@ impl Store {
         Ok(result)
     }
 }
-fn review_request(
-    tx: &mut crate::database::Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-    key: &RequestKey,
-) -> Result<(alt_pg::Row, alt_repository_service::RepositorySnapshot)> {
-    key.validate()?;
-    let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
-    crate::tasks::reviewer(tx, spec, credential, &current)?;
-    if current.scope != key.scope {
-        return Err(Error::Unauthorized);
-    }
-    let row = request_row(tx, key)?.ok_or(Error::Unauthorized)?;
-    active(&row, now(tx)?)?;
-    if row.get::<_, String>("state") != "ready" {
-        return Err(Error::Precondition("publication not ready for review"));
-    }
-    Ok((row, current))
-}
-
 /// The object whose content has this digest, inflated into an unnamed temporary file
 /// as it is read from its segment.
-fn segment_content(
+pub(crate) fn segment_content(
     segments: &alt_pack_segment::SegmentSet,
     digest: &str,
 ) -> Result<Option<(u64, crate::StoredReader)>> {

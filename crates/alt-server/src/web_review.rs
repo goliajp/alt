@@ -29,13 +29,8 @@ pub fn inspect(
     key: &RequestKey,
 ) -> Result<Value> {
     let limits = store.limits();
-    let work = store.acquire_review(
-        credential,
-        key,
-        options.worker_lease_ms,
-        limits.graph_objects,
-    )?;
-    let result = (|| {
+    let work = store.read_review(credential, key, limits.graph_objects)?;
+    {
         let verified = VerifiedPublication::verify(
             work.publication(),
             work.manifest(),
@@ -176,14 +171,6 @@ pub fn inspect(
         Ok(
             json!({"key":key,"inspected":inspected,"integration_id":integration_id,"candidate_id":review.candidate,"historical_reviewer":review.reviewer,"changes":projected,"changes_truncated":truncated,"original_changes_url":original_url,"evidence":[{"id":review.evidence,"command":evidence.actual_context.commands.iter().map(|v|v.join(" ")).collect::<Vec<_>>().join("\n"),"outcome":alt_json::to_string(&evidence.termination)?,"source":current.evidence.source_proof,"accepted":current.evidence.eligible,"reason":current.evidence.reasons.join(", ")}],"approved":current.approved,"eligible":current.eligible,"reason":current.reason}),
         )
-    })();
-    let released = store.release_publication(credential, &work);
-    match result {
-        Ok(value) => {
-            released?;
-            Ok(value)
-        }
-        Err(error) => Err(error),
     }
 }
 

@@ -511,12 +511,16 @@ fn completed_source(
         ref_operation: operation.map(|(_, raw)| add(payload, ContentKind::Attachment, raw)),
     }
 }
-struct IntegrationPayload {
-    payload: Payload,
+pub(super) struct IntegrationPayload {
+    pub(super) payload: Payload,
     policy: CollectorPolicy,
-    integration: String,
+    pub(super) integration: String,
 }
-fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> IntegrationPayload {
+pub(super) fn integration_payload(
+    base: &Payload,
+    omit_output: bool,
+    recover: bool,
+) -> IntegrationPayload {
     let mut payload = Payload::new("reviewed-integration", Some(base.commit));
     // Original notes history is independent of the target branch.
     let notes = Payload::new("original notes", None);
@@ -833,7 +837,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         integration: integration.id().unwrap(),
     }
 }
-fn ready_integration(
+pub(super) fn ready_integration(
     f: &mut Fixture,
     data: &IntegrationPayload,
 ) -> (
@@ -868,7 +872,7 @@ fn ready_integration(
         .unwrap();
     (work, graph, tasks)
 }
-fn current_reviewer(f: &mut Fixture, data: &IntegrationPayload) -> (String, Credential) {
+pub(super) fn current_reviewer(f: &mut Fixture, data: &IntegrationPayload) -> (String, Credential) {
     f.store
         .set_collector_policy(&f.credential, "repository", &data.policy)
         .unwrap();

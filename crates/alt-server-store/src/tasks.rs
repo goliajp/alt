@@ -172,7 +172,7 @@ pub(crate) fn reviewer(
     }
     Ok(auth.actor_id)
 }
-fn integration_review<'a>(
+pub(crate) fn integration_review<'a>(
     work: &PublicationWork,
     tasks: &'a VerifiedTaskGraph,
     integration_id: &str,
@@ -413,103 +413,6 @@ pub(crate) fn approve_current(
     assessment(tasks, review, current, &policy, time)?;
     current.approved_publications.insert(digest);
     Ok(())
-}
-
-#[derive(alt_json::ToJson)]
-pub struct CurrentReviewAssessment {
-    pub approved: bool,
-    pub selection: alt_remote_protocol::ReviewSelection,
-    pub evidence: alt_task_service::EvidenceAssessment,
-    pub eligible: bool,
-    pub reason: &'static str,
-}
-impl Store {
-    pub fn inspect_current_integration(
-        &mut self,
-        credential: &Credential,
-        work: &PublicationWork,
-        graph: &VerifiedGraph,
-        tasks: &VerifiedTaskGraph,
-        integration_id: &str,
-    ) -> Result<CurrentReviewAssessment> {
-        check_selection(work, Some(tasks))?;
-        let review = integration_review(work, tasks, integration_id)?;
-        work.check_read_integrity()?;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let mut current = snapshot(&mut tx, &self.spec, &work.key.scope.repository_instance_id)?;
-        reviewer(&mut tx, &self.spec, credential, &current)?;
-        if current.scope != work.key.scope {
-            return Err(Error::Unauthorized);
-        }
-        let row = crate::publication::worker(&mut tx, work)?;
-        if row.get::<_, String>("state") != "ready" {
-            return Err(Error::Precondition("publication not ready for review"));
-        }
-        crate::publication::check_graph_pins(&mut tx, work, graph)?;
-        check_pins(&mut tx, work, graph, Some(tasks))?;
-        let (generation, policy) =
-            collector_policy(&mut tx, &current.scope.repository_instance_id)?;
-        let target = review
-            .target_expected
-            .keys()
-            .filter_map(|name| {
-                current
-                    .refs
-                    .get(name)
-                    .map(|id| (name.clone(), id.to_string()))
-            })
-            .collect::<BTreeMap<_, _>>();
-        let evidence = tasks.assess_evidence(&review.evidence, &target, &policy, now(&mut tx)?)?;
-        let eligible =
-            current.writes_enabled && target == review.target_expected && evidence.eligible;
-        let reason = if !current.writes_enabled {
-            "repository_read_only"
-        } else if target != review.target_expected {
-            "target_changed"
-        } else if !evidence.eligible {
-            "evidence_not_accepted"
-        } else {
-            "current_policy_accepted"
-        };
-        let approved = if eligible {
-            match approve_current(
-                &mut tx,
-                &self.spec,
-                work,
-                Some(tasks),
-                &mut current,
-                self.limits,
-            ) {
-                Ok(()) => true,
-                Err(Error::Unauthorized | Error::Precondition(_)) => false,
-                Err(error) => return Err(error),
-            }
-        } else {
-            false
-        };
-        let selection = alt_remote_protocol::ReviewSelection {
-            publication: work.publication.clone(),
-            manifest: work.manifest.clone(),
-            current_refs: current
-                .refs
-                .into_iter()
-                .map(|(name, oid)| (name, oid.to_string()))
-                .collect(),
-            policy_version: current.policy_version.to_string(),
-            runtime_generation: self.spec.runtime_generation.to_string(),
-            collector_generation: generation.to_string(),
-            revocation_generation: current.revocation_generation.to_string(),
-        };
-        tx.commit()?;
-        Ok(CurrentReviewAssessment {
-            approved,
-            selection,
-            evidence,
-            eligible,
-            reason,
-        })
-    }
 }
 
 /// The selected approval was already validated before ref changes. Recheck its

@@ -15,6 +15,7 @@ mod reading;
 mod reading_uploads;
 mod registration;
 mod retention;
+mod review_reads;
 mod schema_20;
 mod schema_21;
 mod schema_22;

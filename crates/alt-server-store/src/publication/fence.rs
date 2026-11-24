@@ -5,7 +5,8 @@ pub(crate) fn worker(tx: &mut Transaction<'_>, work: &PublicationWork) -> Result
     let row = request_row(tx, &work.key)?.ok_or(Error::Precondition("request not registered"))?;
     let time = now(tx)?;
     active(&row, time)?;
-    if unsigned(row.get("fence"))? != work.fence || unsigned(row.get("worker_lease_until"))? <= time
+    if Some(unsigned(row.get("fence"))?) != work.fence
+        || unsigned(row.get("worker_lease_until"))? <= time
     {
         return Err(Error::Precondition("stale publication worker"));
     }

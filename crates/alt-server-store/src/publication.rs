@@ -21,7 +21,8 @@ use std::collections::{BTreeMap, BTreeSet};
 /// stale worker can leave orphan bytes but cannot publish or change a result.
 pub struct PublicationWork {
     pub(crate) key: RequestKey,
-    pub(crate) fence: u64,
+    /// none where the request was only read: no transition is made through it
+    pub(crate) fence: Option<u64>,
     pub(crate) publication: Publication,
     pub(crate) manifest: Manifest,
     pub(crate) source: PinnedSource,
