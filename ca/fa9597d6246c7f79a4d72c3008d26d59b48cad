@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: log a branch a switch makes where the head is as made from HEAD
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/switch/made.rs
+touched: crates/alt-cli/tests/fixtures/cli/commits-branches-tags.txt
+touched: crates/alt-cli/tests/fixtures/cli/request-receipts.txt
+touched: crates/alt-cli/tests/fixtures/cli/state-rebase-stopped.txt
+touched: crates/alt-cli/tests/fixtures/cli/task-delivery.txt
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-repo/src/reflog/derived.rs
