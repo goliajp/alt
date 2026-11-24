@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the tools a backup runs are a file of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/tools.rs
