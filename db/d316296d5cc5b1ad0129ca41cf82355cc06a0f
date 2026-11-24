@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave an empty directory where it is when a checkout moves the files beside it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/tests/it/checkout_moves.rs
+touched: crates/alt-cli/tests/it/main.rs
