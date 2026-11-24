@@ -4,12 +4,13 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 
-use crate::altd_server::{alt, ok, spawn_server};
+use crate::altd_server::{Server, ok};
 use crate::altd_server_no_new_objects::{creation, push, seeded, tip};
 
 const FILE: &[u8] = b"what the file holds, the same in both of its entries\n";
@@ -53,8 +54,45 @@ fn repeated(parent: Option<&str>) -> (ObjectId, Vec<u8>) {
     (id(ObjectKind::Commit, commit.as_bytes()), pack)
 }
 
-/// What `work` comes to, or a failure where it has not ended in two minutes:
-/// a read that goes round does not end.
+/// The address space a process of these tests is given, in kilobytes. A read
+/// that goes round takes memory until there is none: with this it ends in a
+/// moment, and the test with it.
+const MOST: u64 = 4_000_000;
+
+/// What runs `program` with that much address space and no more, where the
+/// system has such a limit.
+fn given(program: &std::ffi::OsStr) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", "ulimit -v \"$0\" 2>/dev/null; exec \"$@\""]);
+    cmd.arg(MOST.to_string()).arg(program);
+    cmd
+}
+
+/// A server of the repository at `origin`, given so much.
+fn served(origin: &std::path::Path) -> Server {
+    let mut cmd = given(std::ffi::OsStr::new(env!("CARGO_BIN_EXE_altd-server")));
+    cmd.args(["--bind", "127.0.0.1:0"])
+        .env("ALT_SERVER_REPO", origin)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut line = String::new();
+    let addr = loop {
+        line.clear();
+        assert_ne!(stderr.read_line(&mut line).unwrap(), 0, "the server ended");
+        if let Some((_, after)) = line.split_once("listening on ") {
+            break after.split_whitespace().next().unwrap().to_owned();
+        }
+    };
+    Server {
+        child,
+        addr,
+        stderr: Some(stderr),
+    }
+}
+
+/// What `work` comes to, or a failure where it has not ended in two minutes.
 fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
     let (done, ended) = mpsc::channel();
     std::thread::spawn(move || done.send(work()));
@@ -65,7 +103,7 @@ fn within<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
 #[test]
 fn a_server_pushed_an_object_again_as_a_delta_of_itself_takes_it_and_gives_it() {
     let (origin, seed) = seeded();
-    let server = spawn_server(origin.path());
+    let server = served(origin.path());
     let url = format!("http://{}/", server.addr);
     let (commit, pack) = repeated(Some(&seed));
     let name = commit.to_string();
@@ -85,10 +123,7 @@ fn a_server_pushed_an_object_again_as_a_delta_of_itself_takes_it_and_gives_it() 
             &url,
             to.to_str().unwrap(),
         ];
-        let out = std::process::Command::new("git")
-            .args(args)
-            .output()
-            .unwrap();
+        let out = Command::new("git").args(args).output().unwrap();
         (out, std::fs::read(to.join("file")))
     });
     assert!(cloned.0.status.success(), "{:?}", cloned.0);
@@ -164,7 +199,19 @@ fn a_client_sent_an_object_again_as_a_delta_of_itself_takes_it_and_has_the_file(
     let temp = alt_os::temp::tempdir().unwrap();
     let (at, to) = (temp.path().to_owned(), temp.path().join("clone"));
     let cloned = to.clone();
-    let out = within(move || alt(&at, &["clone", &url, cloned.to_str().unwrap()]));
+    let out = within(move || {
+        let plain = crate::alt_command();
+        let mut cmd = given(plain.get_program());
+        for (name, value) in plain.get_envs() {
+            match value {
+                Some(value) => cmd.env(name, value),
+                None => cmd.env_remove(name),
+            };
+        }
+        cmd.current_dir(&at).env("ALT_NO_DAEMON", "1");
+        cmd.args(["clone", &url, cloned.to_str().unwrap()]);
+        cmd.output().unwrap()
+    });
     ok(out);
     assert_eq!(std::fs::read(to.join("file")).unwrap(), FILE);
     assert_eq!(tip(&to, "HEAD"), commit.to_string());
