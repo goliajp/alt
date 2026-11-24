@@ -259,7 +259,12 @@ pub(crate) fn opened(
                 if *held {
                     // the file of an unsettled segment was never flushed; the row is the truth
                     let bytes = inline(id)?.ok_or(Error::Integrity("pack segment bytes"))?;
-                    let staging = path.with_extension("restore");
+                    // under a name of its own: another request, or a command of the
+                    // operator, may be writing the same segment out
+                    let mut nonce = [0u8; 8];
+                    alt_os::random::fill(&mut nonce);
+                    let staging =
+                        path.with_extension(format!("{}.restore", u64::from_le_bytes(nonce)));
                     std::fs::write(&staging, &bytes)?;
                     std::fs::rename(&staging, &path)?;
                 }
