@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: docs
+summary: collect is what removes unretained content, and is run on a schedule
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: self-hosted/README.md
