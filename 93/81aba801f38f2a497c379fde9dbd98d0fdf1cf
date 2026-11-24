@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a push whose body did not come or had no room is told so, not that it sent no request
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/tests/it/altd_server_push_refused.rs
+touched: crates/alt-cli/tests/it/main.rs
