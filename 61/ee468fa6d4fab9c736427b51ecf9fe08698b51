@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a response goes on while its peer takes it, by what the peer acknowledged and not by the writes that succeeded
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
+touched: crates/alt-os/src/lib.rs
+touched: crates/alt-os/src/socket.rs
+touched: crates/alt-os/src/sys/linux.rs
+touched: crates/alt-os/src/sys/macos.rs
+touched: crates/alt-server/src/http/paced.rs
+touched: crates/alt-server/tests/it/database/connections/slow_readers.rs
