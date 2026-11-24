@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: keep two functions of the oplog and its tests within the length they had
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/tests/it/v2_cuts.rs
