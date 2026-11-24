@@ -53,3 +53,12 @@ export function documentFromHash(hash: string): Document | undefined {
   if (data.kind === 'record' && ['task', 'candidate', 'evidence', 'review', 'integration', 'delivery'].includes(String(data.recordKind)) && text('id', 64) && /^[0-9a-f]{64}$/.test(data.id as string) && exact('kind', 'repository', 'recordKind', 'id')) return data as Document;
   if (data.kind === 'review' && identity('actor') && identity('request') && text('epoch', 20) && /^[1-9][0-9]*$/.test(data.epoch as string) && exact('kind', 'repository', 'actor', 'request', 'epoch')) return data as Document;
 }
+
+/** The pages of one directory that were turned to: what each was asked for with, the first with nothing. */
+export type TreePaging = { directory: string; cursors: string[] };
+/** The pages turned to in `directory`: none but the first once another directory is shown. */
+export const treeCursors = (paging: TreePaging, directory: string): string[] => paging.directory === directory ? paging.cursors : [''];
+/** What the page shown is asked for with, and the pages after turning on to `next` or back by one. */
+export const treeAfter = (cursors: string[]): string | undefined => cursors.at(-1) || undefined;
+export const treeForward = (cursors: string[], next: string): string[] => [...cursors, next];
+export const treeBack = (cursors: string[]): string[] => cursors.length > 1 ? cursors.slice(0, -1) : cursors;
