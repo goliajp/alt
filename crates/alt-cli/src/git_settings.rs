@@ -202,6 +202,13 @@ pub(crate) fn file_mode(settings: &Config) -> Res<bool> {
     Ok(set.unwrap_or(true))
 }
 
+/// `core.ignoreCase`: whether the file system of the working tree takes
+/// names that differ in case for one.
+pub(crate) fn ignore_case(settings: &Config) -> Res<bool> {
+    let set = settings.get_bool("core", None, "ignorecase").transpose()?;
+    Ok(set.unwrap_or(false))
+}
+
 /// A failure that changed nothing, with the exit status git has for it.
 pub(crate) fn fatal(message: String) -> Box<dyn std::error::Error> {
     let refusal = crate::machine::Failure::refusal("execution_error", message);

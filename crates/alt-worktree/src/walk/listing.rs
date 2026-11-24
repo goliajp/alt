@@ -47,7 +47,7 @@ impl Walk<'_> {
             below: Vec::new(),
             files: Vec::new(),
         };
-        self.tracked_in(dir, &names, ignore, hidden, reach, &mut here, found);
+        self.tracked_in(&fd, dir, &names, ignore, hidden, reach, &mut here, found)?;
         let stat = |&(first, end, item): &(usize, usize, usize), found: &mut Found| {
             match fd.stat(names.c_name(item))? {
                 Some(st) if kind_of(st.mode) != Kind::Dir => self.tracked(first, end, st, found),
@@ -69,6 +69,7 @@ impl Walk<'_> {
     #[expect(clippy::too_many_arguments, reason = "one step of `listed`")]
     fn tracked_in(
         &self,
+        fd: &DirFd,
         dir: usize,
         names: &Listing,
         ignore: &IgnoreStack,
@@ -76,7 +77,7 @@ impl Walk<'_> {
         reach: Reach,
         here: &mut Here,
         found: &mut Found,
-    ) {
+    ) -> io::Result<()> {
         for child in self.children(dir) {
             let Some(reach) = self.reach(reach, self.path(&child)) else {
                 continue;
@@ -91,31 +92,74 @@ impl Walk<'_> {
                         found.gitlinks.push(first as u32);
                         continue;
                     }
-                    let Some(item) = names.find(name, false) else {
+                    let item = match names.find(name, false) {
+                        None => self.spelled(fd, names, name, false, &here.taken)?,
+                        item => item,
+                    };
+                    let Some(item) = item else {
                         self.no_file(names, name, (first, end), reach, here, found);
                         continue;
                     };
                     here.taken[item] = true;
                     here.files.push((first, end, item));
                 }
-                Child::Dir(c) => match names.find(name, true) {
-                    Some(item) => {
-                        here.taken[item] = true;
-                        let inside = hidden;
-                        let hidden = hidden || ignore.is_ignored(self.snapshot.dir_path(c), true);
-                        if hidden && !inside {
-                            found.unwalked.push(self.snapshot.dir_path(c).to_vec());
-                        }
-                        here.below.push(Below {
-                            item,
-                            tracked: Some((c, hidden)),
-                            reach,
-                        });
+                Child::Dir(c) => {
+                    let item = match names.find(name, true) {
+                        None => self.spelled(fd, names, name, true, &here.taken)?,
+                        item => item,
+                    };
+                    let Some(item) = item else {
+                        self.all_gone(c, reach, found);
+                        continue;
+                    };
+                    here.taken[item] = true;
+                    let inside = hidden;
+                    let hidden = hidden || ignore.is_ignored(self.snapshot.dir_path(c), true);
+                    if hidden && !inside {
+                        found.unwalked.push(self.snapshot.dir_path(c).to_vec());
                     }
-                    None => self.all_gone(c, reach, found),
-                },
+                    here.below.push(Below {
+                        item,
+                        tracked: Some((c, hidden)),
+                        reach,
+                    });
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Where the file system takes names that differ in case for one:
+    /// the name the listing has for what `name` reaches there, a
+    /// directory or not as `dir` says. The file system tells which it is,
+    /// by the file the two names reach.
+    fn spelled(
+        &self,
+        fd: &DirFd,
+        names: &Listing,
+        name: &[u8],
+        dir: bool,
+        taken: &[bool],
+    ) -> io::Result<Option<usize>> {
+        if !self.ignore_case {
+            return Ok(None);
+        }
+        let reached = std::ffi::CString::new(name).map_err(io::Error::other)?;
+        let Some(stat) = fd.stat(&reached)? else {
+            return Ok(None);
+        };
+        if (kind_of(stat.mode) == Kind::Dir) != dir {
+            return Ok(None);
+        }
+        for item in (0..names.len()).filter(|&i| !taken[i]) {
+            let same = |s: crate::snapshot::FileStat| (s.dev, s.ino) == (stat.dev, stat.ino);
+            if (names.kind(item) == Kind::Dir) == dir
+                && fd.stat(names.c_name(item))?.is_some_and(same)
+            {
+                return Ok(Some(item));
+            }
+        }
+        Ok(None)
     }
 
     /// The entries `at` have no file by their `name`. A directory by that

@@ -98,6 +98,7 @@ fn scanned_within(root: &Path, untracked: Untracked, within: &[&[u8]]) -> Vec<St
     let mut snapshot = Snapshot::of_index(&index(root), b"id", ALGO, None);
     let options = ScanOptions {
         file_mode: true,
+        ignore_case: false,
         untracked,
         within,
         clean: None,

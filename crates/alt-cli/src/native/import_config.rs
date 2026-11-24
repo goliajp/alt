@@ -54,6 +54,24 @@ impl NativeRepo<'_> {
     }
 }
 
+/// Whether the file system that holds the store `alt_dir` takes names
+/// that differ in case for one: told, as git tells it, by reaching the
+/// directory under another spelling.
+pub(super) fn folds_case(alt_dir: &Path) -> bool {
+    alt_dir.with_file_name(".ALT").symlink_metadata().is_ok()
+}
+
+/// Writes `core.ignoreCase` into the configuration of the new store
+/// `alt_dir` where its file system ignores case, as `git init` does.
+pub(super) fn note_case(alt_dir: &Path) -> Res<()> {
+    if folds_case(alt_dir) {
+        let kept = alt_dir.join("git-import");
+        std::fs::create_dir_all(&kept)?;
+        crate::durable::write(&kept.join("config"), "[core]\n\tignorecase = true\n")?;
+    }
+    Ok(())
+}
+
 /// Why a variable the git repository read is not read here.
 pub(super) const WHY: &str = "a file the git configuration includes sets it, and the path to that file leads elsewhere from here";
 

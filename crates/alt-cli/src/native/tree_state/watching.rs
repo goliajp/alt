@@ -165,7 +165,9 @@ mod linux {
         options: &ScanOptions<'_>,
         settings: (&[&Path], &[u8]),
     ) -> Res<Option<Delta>> {
-        match super::super::HELD.started() {
+        // events name a file as it is spelled on disk, which need not be
+        // how the index spells it where case is ignored
+        match super::super::HELD.started() && !options.ignore_case {
             true => Ok(scan_tree(root, snapshot, options, settings)),
             false => Ok(None),
         }

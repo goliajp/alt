@@ -32,6 +32,8 @@ pub(crate) struct Walk<'a> {
     pub(crate) untracked: Untracked,
     /// whether a file can be executed is told from its stat
     file_mode: bool,
+    /// names that differ in case are one name to the file system
+    ignore_case: bool,
 }
 
 /// A directory in the one being walked, which takes a walk of its own:
@@ -59,6 +61,7 @@ pub(crate) fn walk(
         within: Within::new(within),
         untracked,
         file_mode: opts.file_mode,
+        ignore_case: opts.ignore_case,
     };
     let reach = match within.is_empty() {
         true => Reach::Inside,

@@ -40,6 +40,10 @@ pub struct ScanOptions<'a> {
     /// stat. Where not, a file the index has is taken to have the mode
     /// the index has for it
     pub file_mode: bool,
+    /// `core.ignoreCase`: the file system takes names that differ in case
+    /// for one, so a file the index has may be listed under another
+    /// spelling than the index has for it
+    pub ignore_case: bool,
     /// when the scan began: a file changed at or after it is compared but
     /// not recorded as unchanged, because a later change within the same
     /// tick of the clock would leave its stat as it is
@@ -54,6 +58,7 @@ impl ScanOptions<'_> {
     pub fn plain(untracked: Untracked, clock: Clock) -> Self {
         ScanOptions {
             file_mode: true,
+            ignore_case: false,
             untracked,
             within: &[],
             clean: None,

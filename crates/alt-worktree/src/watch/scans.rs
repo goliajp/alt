@@ -14,6 +14,7 @@ use crate::untracked::Untracked;
 fn held_for<'a>(opts: &ScanOptions<'a>, within: &'a [&'a [u8]]) -> ScanOptions<'a> {
     ScanOptions {
         file_mode: opts.file_mode,
+        ignore_case: opts.ignore_case,
         untracked: Untracked::Normal,
         within,
         clean: opts.clean,

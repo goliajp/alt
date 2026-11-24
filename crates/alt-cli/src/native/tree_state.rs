@@ -143,6 +143,7 @@ impl NativeRepo<'_> {
         let files: Vec<&Path> = inputs.files.iter().map(PathBuf::as_path).collect();
         let options = ScanOptions {
             file_mode: inputs.file_mode,
+            ignore_case: inputs.ignore_case,
             untracked,
             within,
             clean: Some(&clean),

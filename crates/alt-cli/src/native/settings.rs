@@ -15,6 +15,8 @@ pub(super) struct ScanInputs {
     pub(super) excludes: Vec<PathBuf>,
     /// `core.fileMode`
     pub(super) file_mode: bool,
+    /// `core.ignoreCase`
+    pub(super) ignore_case: bool,
 }
 
 impl NativeRepo<'_> {
@@ -35,6 +37,8 @@ impl NativeRepo<'_> {
             branch,
             excludes: self.exclude_files(&settings)?,
             file_mode: crate::git_settings::file_mode(&settings)?,
+            ignore_case: crate::git_settings::ignore_case(&settings)?
+                || import_config::folds_case(&self.store.alt_dir),
         })
     }
 
