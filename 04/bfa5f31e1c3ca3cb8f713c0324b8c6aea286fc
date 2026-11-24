@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: hold the oplog again to what three tests pinned before they were changed
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cuts.rs
+touched: crates/alt-oplog/tests/it/v2_left_seen.rs
+touched: crates/alt-refs/tests/it/owed_tickets.rs
