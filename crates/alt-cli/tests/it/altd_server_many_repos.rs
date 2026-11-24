@@ -35,6 +35,21 @@ fn open_files(pid: u32) -> usize {
     fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
 }
 
+/// Has the one worker of the server at `address` answer a request for a
+/// repository that is not there. A request is answered before its worker
+/// lets go of the repository it read: once the worker has answered this
+/// one, it is done with the request before, and has no repository in hand.
+#[cfg(target_os = "linux")]
+fn worker_is_free(address: &str) {
+    use std::io::{Read, Write};
+    let mut socket = std::net::TcpStream::connect(address).unwrap();
+    let absent = "GET /absent/info/refs?service=git-upload-pack HTTP/1.1\r\nHost: h\r\nConnection: close\r\n\r\n";
+    socket.write_all(absent.as_bytes()).unwrap();
+    let mut answer = String::new();
+    socket.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 4"), "{answer}");
+}
+
 /// Six repositories are asked for one after the other, and the server is
 /// told to keep two open: it has no more files open after the sixth than
 /// after the second, and one that was closed is opened again when it is
@@ -51,10 +66,12 @@ fn no_more_repositories_of_a_root_stay_open_than_the_server_is_told() {
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_ROOT", root.to_str().unwrap()),
         ("ALT_SERVER_MAX_OPEN_REPOS", "2"),
+        ("ALT_SERVER_WORKERS", "1"),
     ]);
     let mut open = Vec::new();
     for name in names {
         assert!(listed(&format!("http://{}/{name}/", server.addr)).contains("refs/heads/main"));
+        worker_is_free(&server.addr);
         open.push(open_files(server.child.id()));
     }
     assert!(open[1] > open[0], "{open:?}");
