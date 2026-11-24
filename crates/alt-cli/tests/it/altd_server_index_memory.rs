@@ -112,6 +112,34 @@ fn a_push_waits_for_the_memory_another_is_indexed_in_and_is_told_when_it_waited_
     assert!(again.status.success(), "{}", said(&again));
 }
 
+/// How many pushes the server has taken whole under `held`, where it keeps what
+/// it writes for a time: the body of each, or the pack made of it, is a file of
+/// a commit of 100,000 bytes of noise.
+fn received(held: &std::path::Path) -> usize {
+    let under = |directory: &std::path::Path| -> Vec<std::path::PathBuf> {
+        let read = fs::read_dir(directory).into_iter().flatten();
+        read.flatten().map(|entry| entry.path()).collect()
+    };
+    let requests = under(held).into_iter().flat_map(|server| under(&server));
+    let whole = |file: &std::path::PathBuf| {
+        let named = file.extension().is_none_or(|extension| extension == "pack");
+        named && fs::metadata(file).is_ok_and(|file| file.len() >= 100_000)
+    };
+    requests
+        .filter(|request| under(request).iter().any(whole))
+        .count()
+}
+
+/// Lets the key file be read to its end when this is let go of, however the test
+/// ends: the threads that wait for that are waited for themselves.
+struct Released(mpsc::Sender<()>);
+
+impl Drop for Released {
+    fn drop(&mut self) {
+        let _ = self.0.send(());
+    }
+}
+
 /// A push waits for the memory another has, on one of two workers, and
 /// the client of it goes away. The worker is there for the next request
 /// long before the push would have waited to its end.
@@ -128,12 +156,16 @@ fn a_push_that_waits_for_memory_keeps_no_worker_once_its_client_is_gone() {
     let pipe = trust.join("slow.pub");
     let made = Command::new("mkfifo").arg(&pipe).status().unwrap();
     assert!(made.success());
+    // where the server keeps the packs of pushes while it has them
+    let held = tmp.path().join("held-by-the-server");
+    fs::create_dir(&held).unwrap();
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_ROOT", root.to_str().unwrap()),
         ("ALT_SERVER_WORKERS", "2"),
         ("ALT_SERVER_MAX_PUSH_BYTES", "400000"),
         ("ALT_SERVER_MAX_INDEX_BYTES", "500000"),
         ("ALT_SERVER_MAX_INDEX_WAIT_MS", "300000"),
+        ("ALT_SERVER_TEMP_DIR", held.to_str().unwrap()),
     ]);
     let url = |name: &str| format!("http://{}/{name}/", server.addr);
     let (large, waits) = (source(tmp.path(), "large"), source(tmp.path(), "waits"));
@@ -143,6 +175,7 @@ fn a_push_that_waits_for_memory_keeps_no_worker_once_its_client_is_gone() {
     let (reach, reached) = mpsc::channel();
     let (release, released) = mpsc::channel::<()>();
     let listed = std::thread::scope(|scope| {
+        let release = Released(release);
         scope.spawn(|| push(&large, &url("held"), "large"));
         let to = pipe.clone();
         scope.spawn(move || {
@@ -166,8 +199,13 @@ fn a_push_that_waits_for_memory_keeps_no_worker_once_its_client_is_gone() {
             .process_group(0)
             .spawn()
             .unwrap();
-        // long enough for its pack to be there and the wait for memory begun
-        std::thread::sleep(Duration::from_secs(4));
+        // its pack is there whole beside that of the first: what comes next
+        // for it is the memory the first has
+        let began = std::time::Instant::now();
+        while received(&held) < 2 {
+            assert!(began.elapsed() < Duration::from_secs(120), "no second push");
+            std::thread::sleep(Duration::from_millis(20));
+        }
         assert!(
             waiting.try_wait().unwrap().is_none(),
             "the push did not wait"
@@ -181,7 +219,7 @@ fn a_push_that_waits_for_memory_keeps_no_worker_once_its_client_is_gone() {
         let (other, from) = (url("other"), &large);
         scope.spawn(move || tell.send(git(from, &["ls-remote", &other])));
         let listed = told.recv_timeout(Duration::from_secs(60));
-        release.send(()).unwrap();
+        drop(release);
         listed
     });
     let listed = listed.expect("the worker of a push nobody waits for was not given up");
