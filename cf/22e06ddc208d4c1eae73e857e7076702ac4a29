@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the cloud client gives up a platform that says nothing or never ends its answer
+author-type: human
+author: doracawl
+touched: crates/alt-cloud-client/tests/it/main.rs
