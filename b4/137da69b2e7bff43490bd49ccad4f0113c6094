@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: what tips lead to is found from what earlier tips led to, and a walk that ends early leaves what it came to
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/led.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/reach.rs
+touched: crates/alt-pack-segment/tests/it/led.rs
+touched: crates/alt-pack-segment/tests/it/led_cost.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
