@@ -3,11 +3,14 @@
 //! A lease that nears its end is renewed by the request that finds it so, and
 //! that request waits for the platform. While the platform gives no answer,
 //! every request would find the same lease and wait the same time, each on a
-//! worker. So one request asks at a time for one thing, and after an asking
-//! that got no answer nobody asks for a while, longer each time: the others go
-//! on with what the lease still allows, as they do when the asking fails.
+//! worker. So one request asks at a time for one thing. While the lease is good
+//! for what is left of it, the others go on with it, and after an asking that
+//! got no answer nobody asks for a while, longer each time. Once the lease is
+//! over there is nothing to go on with: a request then asks whatever came
+//! before, and where another is asking and the platform answered last time, it
+//! waits for that one and looks at the lease again.
 
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 /// the wait after the first asking without an answer; it doubles up to `MOST`
@@ -22,8 +25,17 @@ struct State {
     again: Option<Instant>,
 }
 
+impl State {
+    fn waits(&self, now: Instant) -> bool {
+        self.again.is_some_and(|again| now < again)
+    }
+}
+
 #[derive(Default)]
-pub(crate) struct Asking(Mutex<State>);
+pub(crate) struct Asking {
+    state: Mutex<State>,
+    ended: Condvar,
+}
 
 /// The right to ask the platform for one thing. Dropped without
 /// [`Turn::answered`], the platform is taken to have given no answer.
@@ -33,28 +45,40 @@ pub(crate) struct Turn<'a> {
     over: bool,
 }
 
-impl State {
-    fn waits(&self, now: Instant) -> bool {
-        self.again.is_some_and(|again| now < again)
-    }
+/// What a request that finds a lease to renew is to do.
+pub(crate) enum Asked<'a> {
+    /// ask the platform
+    Turn(Turn<'a>),
+    /// another request asked meanwhile: look at the lease again
+    Look,
+    /// go on with the lease as it is
+    No,
 }
 
 impl Asking {
-    /// A turn to ask for the service, or for the account of `credential`; none
-    /// while another request asks for the same, and none for a time after the
-    /// platform gave no answer.
-    pub(crate) fn turn(&self, credential: Option<&str>) -> Option<Turn<'_>> {
-        self.turn_at(credential, Instant::now())
+    /// For the service, or for the account of `credential`; `over` is whether
+    /// the lease is good for nothing any more.
+    pub(crate) fn turn(&self, credential: Option<&str>, over: bool) -> Asked<'_> {
+        self.turn_at(credential, over, Instant::now())
     }
 
-    fn turn_at(&self, credential: Option<&str>, now: Instant) -> Option<Turn<'_>> {
-        let mut state = self.0.lock().unwrap();
+    fn turn_at(&self, credential: Option<&str>, over: bool, now: Instant) -> Asked<'_> {
+        let mut state = self.state.lock().unwrap();
         let of = credential.map(str::to_owned);
-        if state.waits(now) || state.under_way.contains(&of) {
-            return None;
+        if state.under_way.contains(&of) {
+            // a platform that answered last time is waited for
+            if !over || state.unanswered > 0 {
+                return Asked::No;
+            }
+            let asked = |state: &mut State| state.under_way.contains(&of);
+            drop(self.ended.wait_while(state, asked).unwrap());
+            return Asked::Look;
+        }
+        if !over && state.waits(now) {
+            return Asked::No;
         }
         state.under_way.push(of.clone());
-        Some(Turn {
+        Asked::Turn(Turn {
             asking: self,
             of,
             over: false,
@@ -69,7 +93,7 @@ impl Turn<'_> {
     }
 
     fn end(&mut self, answered: bool, now: Instant) {
-        let mut state = self.asking.0.lock().unwrap();
+        let mut state = self.asking.state.lock().unwrap();
         state.under_way.retain(|of| *of != self.of);
         self.over = true;
         if answered {
@@ -80,6 +104,7 @@ impl Turn<'_> {
             state.unanswered += 1;
             state.again = Some(now + wait.min(MOST));
         }
+        self.asking.ended.notify_all();
     }
 }
 
@@ -95,46 +120,80 @@ impl Drop for Turn<'_> {
 mod tests {
     use super::*;
 
+    fn turn<'a>(
+        asking: &'a Asking,
+        of: Option<&str>,
+        over: bool,
+        now: Instant,
+    ) -> Option<Turn<'a>> {
+        match asking.turn_at(of, over, now) {
+            Asked::Turn(turn) => Some(turn),
+            Asked::No => None,
+            Asked::Look => panic!("waited for another"),
+        }
+    }
+
     #[test]
     fn one_asks_for_a_thing_at_a_time_and_nobody_for_a_while_after_no_answer() {
         let asking = Asking::default();
         let start = Instant::now();
         let at = |seconds: u64| start + Duration::from_secs(seconds);
         // one for the service and one for each account, and no second for any
-        let mut service = asking.turn_at(None, at(0)).unwrap();
-        let mut account = asking.turn_at(Some("a"), at(0)).unwrap();
-        assert!(asking.turn_at(None, at(0)).is_none());
-        assert!(asking.turn_at(Some("a"), at(0)).is_none());
-        let mut other = asking.turn_at(Some("b"), at(0)).unwrap();
+        let mut service = turn(&asking, None, false, at(0)).unwrap();
+        let mut account = turn(&asking, Some("a"), false, at(0)).unwrap();
+        assert!(turn(&asking, None, false, at(0)).is_none());
+        assert!(turn(&asking, Some("a"), false, at(0)).is_none());
+        let mut other = turn(&asking, Some("b"), false, at(0)).unwrap();
         // an answer leaves the next free to ask at once
         service.end(true, at(0));
         other.end(true, at(0));
-        asking.turn_at(None, at(0)).unwrap().end(true, at(0));
+        turn(&asking, None, false, at(0)).unwrap().end(true, at(0));
         // no answer: nobody asks for a second, for anything; then one may,
         // and after each further one for twice as long, a minute at the most
         account.end(false, at(10));
-        assert!(asking.turn_at(None, at(10)).is_none());
-        assert!(asking.turn_at(Some("b"), at(10)).is_none());
+        assert!(turn(&asking, None, false, at(10)).is_none());
+        assert!(turn(&asking, Some("b"), false, at(10)).is_none());
         let mut waited = Vec::new();
         let mut now = 10;
         for _ in 0..8 {
-            let free = (now..).find(|second| !asking.0.lock().unwrap().waits(at(*second)));
-            let free = free.unwrap();
+            let waits = |second: &u64| asking.state.lock().unwrap().waits(at(*second));
+            let free = (now..).find(|second| !waits(second)).unwrap();
             waited.push(free - now);
             now = free;
-            asking
-                .turn_at(Some("a"), at(now))
-                .unwrap()
-                .end(false, at(now));
+            let mut next = turn(&asking, Some("a"), false, at(now)).unwrap();
+            next.end(false, at(now));
         }
         assert_eq!(waited, [1, 2, 4, 8, 16, 32, 60, 60]);
+        // a lease that is over is asked for though nobody else asks, by one
+        // at a time, and after no answer the others do not wait for that one
+        let mut over = turn(&asking, Some("a"), true, at(now)).unwrap();
+        assert!(turn(&asking, Some("a"), true, at(now)).is_none());
         // a turn that is let go of is one without an answer; an answer ends the waiting
-        now += 60;
-        drop(asking.turn_at(None, at(now)).unwrap());
-        assert!(asking.0.lock().unwrap().waits(Instant::now()));
-        asking.0.lock().unwrap().again = None;
-        asking.turn_at(None, at(now)).unwrap().end(true, at(now));
-        assert_eq!(asking.0.lock().unwrap().unanswered, 0);
-        assert!(asking.turn_at(Some("a"), at(now)).is_some());
+        over.end(true, at(now));
+        assert_eq!(asking.state.lock().unwrap().unanswered, 0);
+        assert!(turn(&asking, Some("b"), false, at(now)).is_some());
+        drop(turn(&asking, None, false, at(now)).unwrap());
+        assert!(asking.state.lock().unwrap().waits(Instant::now()));
+    }
+
+    /// A lease that is over while the platform answers: whoever comes while
+    /// another asks waits for that one, and is told to look again.
+    #[test]
+    fn a_request_whose_lease_is_over_waits_for_the_one_that_asks() {
+        let asking = Asking::default();
+        let now = Instant::now();
+        let first = turn(&asking, None, true, now).unwrap();
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| matches!(asking.turn_at(None, true, now), Asked::Look));
+            // the one that waits is parked, or is yet to come: both end with the answer
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!waiting.is_finished());
+            first.answered();
+            assert!(waiting.join().unwrap());
+        });
+        // and for another thing nobody waits
+        let service = turn(&asking, None, true, now).unwrap();
+        assert!(turn(&asking, Some("a"), true, now).is_some());
+        service.answered();
     }
 }

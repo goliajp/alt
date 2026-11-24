@@ -1,7 +1,8 @@
 //! Server-owned platform transport. Network operations never hold a product
 //! database transaction; every resulting lease is checked again by the store.
 use alt_cloud_client::{Client, GrantSealer};
-use alt_server_store::{Error, Result, Store};
+use alt_server_store::{Error, Renewal, Result, Store};
+use asking::Asked;
 use golia_platform_contract::{Audience, Secret};
 
 mod asking;
@@ -115,43 +116,53 @@ impl Runtime {
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
         // Check that a local credential exists before admitting control traffic.
         store.cloud_refresh(token)?;
-        if store.cloud_service_refresh_needed()?
-            && let Some(turn) = self.asking.turn(None)
-        {
-            match self.client.service(clock) {
-                Ok(service) => {
-                    turn.answered();
-                    store.refresh_cloud_service(&service)?
-                }
-                Err(alt_cloud_client::Error::Unauthorized) => {
-                    turn.answered();
-                    store.revoke_cloud_service()?
-                }
-                Err(_) => (), // Never extend the persisted lease on failure.
+        loop {
+            let renewal = store.cloud_service_renewal()?;
+            if renewal == Renewal::Fresh {
+                break;
             }
+            match self.asking.turn(None, renewal == Renewal::Due) {
+                Asked::Turn(turn) => match self.client.service(clock) {
+                    Ok(service) => {
+                        turn.answered();
+                        store.refresh_cloud_service(&service)?
+                    }
+                    Err(alt_cloud_client::Error::Unauthorized) => {
+                        turn.answered();
+                        store.revoke_cloud_service()?
+                    }
+                    Err(_) => (), // Never extend the persisted lease on failure.
+                },
+                Asked::Look => continue,
+                Asked::No => (),
+            }
+            break;
         }
         // Service refresh may have advanced the shared revocation generation.
-        let descriptor = store.cloud_refresh(token)?;
-        if descriptor.refresh_needed {
-            let grant = self
-                .sealer
-                .open(&descriptor.sealed_grant, &descriptor.credential_digest)
-                .map_err(|_| Error::Unauthorized)?;
+        loop {
+            let descriptor = store.cloud_refresh(token)?;
+            if !descriptor.refresh_needed {
+                break;
+            }
+            let digest = &descriptor.credential_digest;
             // whoever has no turn to ask goes on as one whose asking failed
-            let asked = self.asking.turn(Some(&descriptor.credential_digest));
-            let asked = asked.map(|turn| {
-                let told = self.client.introspect(&grant, clock);
-                if matches!(told, Ok(_) | Err(alt_cloud_client::Error::Unauthorized)) {
-                    turn.answered();
+            let asked = match self.asking.turn(Some(digest), !descriptor.serves) {
+                Asked::Look => continue,
+                Asked::No => None,
+                Asked::Turn(turn) => {
+                    let grant = self.sealer.open(&descriptor.sealed_grant, digest);
+                    let grant = grant.map_err(|_| Error::Unauthorized)?;
+                    let told = self.client.introspect(&grant, clock);
+                    if matches!(told, Ok(_) | Err(alt_cloud_client::Error::Unauthorized)) {
+                        turn.answered();
+                    }
+                    Some(told)
                 }
-                told
-            });
+            };
             match asked {
-                Some(Ok(claims)) => {
-                    store.refresh_cloud_account(&descriptor.credential_digest, &claims)?
-                }
+                Some(Ok(claims)) => store.refresh_cloud_account(digest, &claims)?,
                 Some(Err(alt_cloud_client::Error::Unauthorized)) => {
-                    store.revoke_cloud_credential(&descriptor.credential_digest)?;
+                    store.revoke_cloud_credential(digest)?;
                     return Err(Error::Unauthorized);
                 }
                 Some(Err(_)) | None => match store.authenticate(token) {
@@ -160,6 +171,7 @@ impl Runtime {
                     Err(error) => return Err(error),
                 },
             }
+            break;
         }
         Ok(())
     }

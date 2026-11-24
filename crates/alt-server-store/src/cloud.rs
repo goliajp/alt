@@ -28,6 +28,18 @@ pub struct CloudRefresh {
     pub claims: AccountAuthorization,
     pub browser: bool,
     pub refresh_needed: bool,
+    /// whether the lease is good as it is, for the time it has left
+    pub serves: bool,
+}
+/// Whether a lease is to be renewed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Renewal {
+    /// not yet
+    Fresh,
+    /// it nears its end and is good until then
+    Soon,
+    /// it is over, or was never given, or is no longer the one that counts
+    Due,
 }
 /// Stable local identifier for authenticated grant encryption; not a bearer.
 pub fn cloud_credential_digest(token: &str) -> Result<String> {
@@ -347,16 +359,20 @@ impl Store {
         let claims: AccountAuthorization = row.get::<_, Jsonb>("claims").read_serde()?;
         let authority = binding(&mut tx)?;
         let audience: Audience = authority.get::<_, Jsonb>("audience").read_serde()?;
-        let refresh_needed = claims
-            .check(&audience, now(&mut tx)?.saturating_add(10_000))
-            .is_err()
-            || claims.lease.revocation_generation.0
-                < unsigned(authority.get("authority_revision"))?;
+        let time = now(&mut tx)?;
+        let stale =
+            claims.lease.revocation_generation.0 < unsigned(authority.get("authority_revision"))?;
+        let near = claims
+            .check(&audience, time.saturating_add(10_000))
+            .is_err();
+        let refresh_needed = near || stale;
+        let serves = !stale && claims.check(&audience, time).is_ok();
         let result = CloudRefresh {
             credential_digest: upstream.to_owned(),
             sealed_grant: row.get("sealed_grant"),
             claims,
             refresh_needed,
+            serves,
             browser: parent.is_none() && row.get::<_, bool>("browser"),
         };
         tx.commit()?;
@@ -415,7 +431,7 @@ impl Store {
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
-    pub fn cloud_service_refresh_needed(&mut self) -> Result<bool> {
+    pub fn cloud_service_renewal(&mut self) -> Result<Renewal> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         if self.spec.deployment_mode != DeploymentMode::Cloud {
@@ -426,14 +442,22 @@ impl Store {
         let needed = match row.get::<_, Option<Jsonb>>("service") {
             Some(value) => {
                 let service: AltServiceAuthorization = value.read_serde()?;
-                service
-                    .check(&audience, now(&mut tx)?.saturating_add(10_000))
+                let time = now(&mut tx)?;
+                let stale = service.lease.revocation_generation.0
+                    < unsigned(row.get("authority_revision"))?
+                    || service.lease.issued_at_unix_ms.0 <= unsigned(row.get("service_denied_at"))?;
+                if stale || service.check(&audience, time).is_err() {
+                    Renewal::Due
+                } else if service
+                    .check(&audience, time.saturating_add(10_000))
                     .is_err()
-                    || service.lease.revocation_generation.0
-                        < unsigned(row.get("authority_revision"))?
-                    || service.lease.issued_at_unix_ms.0 <= unsigned(row.get("service_denied_at"))?
+                {
+                    Renewal::Soon
+                } else {
+                    Renewal::Fresh
+                }
             }
-            None => true,
+            None => Renewal::Due,
         };
         tx.commit()?;
         Ok(needed)
