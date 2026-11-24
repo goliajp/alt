@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: tell what does not read before where the log is cut as damage, at once, to a handle that holds frames past the cut
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/named.rs
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_damage.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
