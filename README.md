@@ -279,13 +279,39 @@ has a quarter; a single body or response may pass the quarter as far as half,
 one such at a time, so that one slow client with one large thing leaves half
 to the others.
 
+Behind a proxy the server counts a body as the proxy hands it on, and Caddy
+hands it on as it comes: a body past what its address may hold is answered
+`503` at once, and its connection to the server is closed. When the client
+reads that answer is the proxy's matter. Caddy sends an HTTP/2 client the
+answer at once. To an HTTP/1.1 client it sends it once it has read the rest
+of the body, up to 256 KiB of it, so a client that sends on is told a moment
+later, and one that has stopped sending is told when it sends again or not at
+all: it then keeps its connection to Caddy, not to the server, and nothing
+of what the server holds for others. `servers { enable_full_duplex }` in
+Caddy's global options has the answer sent to HTTP/1.1 clients at once
+(Caddy warns that some HTTP/1.1 clients do not read while they send), and
+`servers { timeouts { read_body <duration> } }` ends a body that takes longer
+than that in all, slow or stalled alike, which is a limit on how long a push
+may take.
+
 A signed push (`alt push` with a sign policy) is signed over what Git has a
-pusher sign in a push certificate: the principal, the repository as the client
-names it (`pushee`, the URL without credentials), the nonce the server gave
-for this one push, and the ref updates. The server takes the signature only
-where the nonce is one it gave and has not seen used, and the repository is the
-one the request is for by its `Host` header and path; a proxy in front of the
-server has to pass both on as the client sent them, as Caddy does. A client
+pusher sign in a push certificate: the principal, the repository as the push
+is sent to it (`pushee`: the scheme, the host and the path of the request,
+as they go out once the URL is parsed), the nonce the server gave for this
+one push, and the ref updates. The server takes the signature only where the
+nonce is one it gave and has not seen used, and the repository is this one.
+Tell the server where its clients reach it, `ALT_SERVER_ORIGINS`, a list like
+`https://alt.example,http://10.0.0.5:8090`: a certificate is then taken for
+one of these addresses and the path of the request, and for no other, and
+the server names the addresses before a push, so that a client pushing to
+another name of it is told before it packs anything. Without it the server
+goes by the `Host` header of the request, which is its sender's word: a push
+that was signed for another server that trusts the same key is then taken
+from whoever sends it on under that server's name, and the server says so
+when it starts. A proxy in front of the server has to pass the path on as
+the client sent it, as Caddy does. A verified signature tells who pushes,
+and where the request also signed in with an account, the push is held to
+what the policy allows both. A client
 from before this, which signs the updates alone or the nonce and the updates,
 is no longer taken as signed: where the policy requires signed pushes it is
 refused, elsewhere its push is recorded as not verified. The response to a fetch is a file until its peer has
