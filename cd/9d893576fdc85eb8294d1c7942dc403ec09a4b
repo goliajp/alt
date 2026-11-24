@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a cloud restoration that failed before it activated is given again and restores
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance/executor.rs
