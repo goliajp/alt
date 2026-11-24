@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a pack is verified no further once the time of its request is over
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/raw_push.rs
+touched: crates/alt-server/tests/it/database/git/verifying.rs
