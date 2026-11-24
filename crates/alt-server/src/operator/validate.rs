@@ -18,8 +18,13 @@ fn temporary(directory: &Path) -> Result<()> {
     let mut lock = std::fs::OpenOptions::new();
     lock.read(true).custom_flags(alt_os::sys::O_NOFOLLOW);
     let lock = lock.open(directory).map_err(|_| Error::File)?;
-    if lock.try_lock().is_err() {
-        return Err(Error::Config("another server serves these bytes"));
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Err(Error::Config("another server serves these bytes"));
+        }
+        // a lock that cannot be asked for is held by nobody
+        Err(std::fs::TryLockError::Error(_)) => return Err(Error::File),
     }
     std::mem::forget(lock);
     alt_os::temp::emptied(directory).map_err(|_| Error::File)
