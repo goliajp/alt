@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: fail a merge and a pick over names that meet as they fail over a file that is not tracked
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/switch.rs
+touched: crates/alt-cli/tests/it/casefold_meet.rs
