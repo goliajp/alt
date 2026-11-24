@@ -155,7 +155,7 @@ impl Account {
 
     /// How many frames are owed an answer, and how many holders are to
     /// be told of a cut.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "hooks"))]
     pub fn len(&self) -> (usize, usize) {
         (self.owed.len(), self.cut.len())
     }
