@@ -39,10 +39,20 @@ fn sweep(parent: &Path, owner: u32) -> io::Result<()> {
             && let Ok(lock) = File::open(entry.path().join("lock"))
             && lock.try_lock().is_ok()
         {
-            std::fs::remove_dir_all(entry.path())?;
+            removed(&entry.path())?;
         }
     }
     Ok(())
+}
+
+/// Removes a directory that was left. Servers that start at the same moment
+/// each find it: the lock is free again once one of them has removed it, and
+/// another that had the lock file open by then comes here for what is gone.
+fn removed(left: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(left) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        removed => removed,
+    }
 }
 
 /// Makes the directory of this process under `parent`, and gives it with
@@ -88,6 +98,20 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn what_another_server_removed_first_is_removed() {
+        let parent = alt_os::temp::tempdir().unwrap();
+        let left = parent.path().join("altd-server.left");
+        std::fs::create_dir(&left).unwrap();
+        std::fs::write(left.join("lock"), b"").unwrap();
+        removed(&left).unwrap();
+        assert_eq!(names(parent.path()), [""; 0]);
+        removed(&left).unwrap();
+        // what is in the way of removing it otherwise is told
+        std::fs::write(&left, b"").unwrap();
+        assert!(removed(&left).is_err());
     }
 
     #[test]
