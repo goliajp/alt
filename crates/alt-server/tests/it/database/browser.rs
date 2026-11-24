@@ -6,6 +6,7 @@ mod downloads;
 mod led_to;
 mod migration;
 mod migration_room;
+mod reviews;
 mod tree_pages;
 mod unwaited;
 const ORIGIN: &str = "https://workbench.example.test";
