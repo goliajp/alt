@@ -9,7 +9,15 @@
 
 services:
   alt-server:
-    build: .
+    build:
+      # the defaults build develop from GitHub and read nothing of this
+      # directory; a checkout is built by naming it as the context, with
+      # ALT_BUILD_DOCKERFILE=deploy/Dockerfile and ALT_SOURCE=context
+      context: ${ALT_BUILD_CONTEXT:-.}
+      dockerfile: ${ALT_BUILD_DOCKERFILE:-Dockerfile}
+      args:
+        ALT_SOURCE: ${ALT_SOURCE:-github}
+        ALT_REF: ${ALT_REF:-develop}
     container_name: alt-server
     restart: unless-stopped
     ports:
@@ -40,7 +48,12 @@ services:
       start_period: 10s
 
   alt-web:
-    build: .
+    build:
+      context: ${ALT_BUILD_CONTEXT:-.}
+      dockerfile: ${ALT_BUILD_DOCKERFILE:-Dockerfile}
+      args:
+        ALT_SOURCE: ${ALT_SOURCE:-github}
+        ALT_REF: ${ALT_REF:-develop}
     container_name: alt-web
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/alt-web"]

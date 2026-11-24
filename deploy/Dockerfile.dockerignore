@@ -1,0 +1,9 @@
+**
+!Cargo.toml
+!Cargo.lock
+!crates/
+!crates/**
+!vendor/
+!vendor/**
+!shell/
+!shell/**
