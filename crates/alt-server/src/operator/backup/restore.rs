@@ -155,6 +155,10 @@ pub fn restore(
                 original.schema,
             )?
         };
+        stage = "restored objects read";
+        if store.unread_pack_objects()? != 0 {
+            return Err(Error::Config(super::UNREAD));
+        }
         stage = "recovery activation";
         if let Some(cloud) = &cloud {
             store.activate_restored_cloud(

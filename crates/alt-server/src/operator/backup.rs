@@ -97,6 +97,10 @@ fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
 /// Physical access to the configuration, receipt key and database is required;
 /// an HTTP administrator token alone cannot export passwords or signing keys.
 /// The recipient is a public age key. Keep its private identity off the server.
+/// what a backup or a restoration ends with where a segment has objects no read gives
+pub(super) const UNREAD: &str =
+    "pack segments hold objects that are not read: scrub the instance, with --mend";
+
 pub fn create(config: &Config, schema: u32, recipient: &str, output: &Path) -> Result<Manifest> {
     // The older schema cannot record maintenance events. Its signed
     // completion manifest remains the authority; never migrate just to back up.
@@ -105,6 +109,12 @@ pub fn create(config: &Config, schema: u32, recipient: &str, output: &Path) -> R
     } else {
         None
     };
+    // a copy of segments that do not give their objects back is no backup
+    if let Some(store) = &mut store
+        && store.unread_pack_objects()? != 0
+    {
+        return Err(Error::Config(UNREAD));
+    }
     let operation = alt_browser_auth::secret();
     if let Some(store) = &mut store {
         store.record_backup_event(&operation, alt_server_store::BackupEvent::Started)?;

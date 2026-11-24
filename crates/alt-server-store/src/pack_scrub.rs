@@ -145,6 +145,30 @@ impl Store {
         Ok(scrubbed)
     }
 
+    /// How many objects of the live segments of the instance are not read, each
+    /// read as a scrub reads it. A backup holds the files of the segments to
+    /// their digests, and a file whose index leads to no object, or to another,
+    /// has the digest it was copied with: what is backed up and what was
+    /// restored is read through before it is taken for a copy of the instance.
+    pub fn unread_pack_objects(&mut self) -> Result<u64> {
+        let mut tx = self.client.transaction()?;
+        instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
+        let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
+        tx.commit()?;
+        let mut unread = 0;
+        for row in &rows {
+            let (_, set) = self.live_segments(row.get(0))?;
+            let mut older: Vec<Arc<Segment>> = Vec::new();
+            for segment in set.segments() {
+                let lost = alt_pack_segment::unread(segment, &SegmentSet::new(older.clone()));
+                let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
+                unread += lost.len() as u64;
+                older.push(Arc::clone(segment));
+            }
+        }
+        Ok(unread)
+    }
+
     /// Puts the pack of `segment`, indexed anew behind `before`, in the place of
     /// the live segment `part`. The id of the new segment, and the segment.
     fn index_anew(

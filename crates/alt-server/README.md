@@ -453,7 +453,16 @@ replaced by its own pack with an index made anew, in one transaction as a merge
 replaces segments, and is then read again; a segment whose pack does not verify
 is left in place and named with `kept_because`. Versions before this one could
 take in a pack whose index then led reads of some objects down a delta chain
-longer than is read; run `scrub` once after upgrading from them.
+longer than is read; run `scrub` once after upgrading from them. A repository
+that cannot be read through does not keep the others from being read: they are
+told of as above, the ones that failed are listed under `failed` with why, and
+the command ends with status 1 (75 where the outcome of a replacement is not
+known). A name that is no repository of the instance fails so, and is not told
+of as a repository without unread objects. A pack is indexed anew within
+`http.indexing_megabytes`; a segment whose pack takes more stays, with
+`kept_because`. `backup` reads the instance through in the same way before it
+copies anything and refuses an instance with unread objects, and `restore`
+does so with what it restored before it activates it.
 
 From schema 19 the transaction changes how a committed publication is stored.
 That version kept the whole publication four times: in the request, in the
