@@ -1,4 +1,4 @@
-//! A pack that holds an object twice, the second time as a delta of
+//! A pack that holds an object twice, the first time as a delta of
 //! itself: the server that is pushed it and the client that fetches it
 //! take it, as Git does, and read what it holds.
 
@@ -30,8 +30,10 @@ fn entry(kind: u8, before: &[u8], data: &[u8]) -> Vec<u8> {
 }
 
 /// A commit on `parent`, where there is one, of a tree with the one file,
-/// and the pack of them: the file stored, and once more as a delta of
-/// itself that copies all of it.
+/// and the pack of them: the file as a delta of itself that copies all of
+/// it, and stored behind that. The delta is the entry of the file an index
+/// lists first: a read that took the first entry of an id for the object
+/// would go from the delta to the delta.
 fn repeated(parent: Option<&str>) -> (ObjectId, Vec<u8>) {
     let id = |kind, data: &[u8]| ObjectId::hash_object(HashAlgo::Sha1, kind, data);
     let file = id(ObjectKind::Blob, FILE);
@@ -47,8 +49,8 @@ fn repeated(parent: Option<&str>) -> (ObjectId, Vec<u8>) {
     let mut pack = [&b"PACK"[..], &2u32.to_be_bytes(), &4u32.to_be_bytes()].concat();
     pack.extend(entry(1, b"", commit.as_bytes()));
     pack.extend(entry(2, b"", &tree));
-    pack.extend(entry(3, b"", FILE));
     pack.extend(entry(7, file.as_bytes(), &all_of_itself));
+    pack.extend(entry(3, b"", FILE));
     let sum = alt_hash::sha1(&pack);
     pack.extend_from_slice(&sum);
     (id(ObjectKind::Commit, commit.as_bytes()), pack)
