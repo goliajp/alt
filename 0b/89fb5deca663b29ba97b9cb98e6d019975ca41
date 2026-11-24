@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: tag the commit a release or a hotfix finish leaves on the production branch
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/cli/vcs.rs
+touched: crates/alt-cli/src/flow_args.rs
+touched: crates/alt-cli/src/lib.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/flow.rs
+touched: crates/alt-cli/src/native/flow/init.rs
+touched: crates/alt-cli/src/native/flow/tag.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/fixtures/cli/flow-workspaces.txt
+touched: crates/alt-cli/tests/it/flow_tags.rs
+touched: crates/alt-cli/tests/it/main.rs
