@@ -56,6 +56,11 @@ impl Run {
     /// writer that syncs wrote it is owed one still.
     pub fn sync_unpromised(&mut self) {
         let index = self.writer();
+        self.sync_unpromised_of(index);
+    }
+
+    /// [`Self::sync_unpromised`] by handle `index`.
+    pub fn sync_unpromised_of(&mut self, index: usize) {
         let before = (self.handles[index].log.reads(), self.file_len());
         let handle = &mut self.handles[index];
         let claim = (!handle.claims.is_empty() && self.also.one_in(2)).then_some(0);

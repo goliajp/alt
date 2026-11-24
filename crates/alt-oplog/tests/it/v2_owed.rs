@@ -57,7 +57,7 @@ impl Run {
     }
 
     /// Up to where the log is synced now, as far as the driver knows.
-    fn synced_now(&mut self) -> u64 {
+    pub fn synced_now(&mut self) -> u64 {
         self.calls();
         let log = self.log();
         let claimed = self.claimed(&log);
@@ -155,12 +155,11 @@ impl Run {
         let who = format!("handle {index}, asked without a ticket,");
         let before = (self.handles[index].log.reads(), self.file_len());
         let handle = &mut self.handles[index];
-        let deferred = handle.sink.is_some();
+        let (deferred, leaves) = (handle.sink.is_some(), handle.sink.is_some() && how == 0);
         let asked = match how {
             0 => handle.log.sync(),
             _ => handle.log.bound_now(),
         };
-        let leaves = deferred && how == 0;
         let mut frames = std::mem::take(&mut handle.mine);
         if !deferred {
             frames.append(&mut handle.left);
@@ -192,7 +191,7 @@ impl Run {
             Err(_) if !leaves => self.handles[index].mine = frames,
             _ => {}
         }
-        if !leaves || asked.is_err() || self.rng.one_in(4) {
+        if !leaves || asked.is_err() || self.leaves_only || self.rng.one_in(4) {
             return asked;
         }
         self.sink_asked(index, unsettled)

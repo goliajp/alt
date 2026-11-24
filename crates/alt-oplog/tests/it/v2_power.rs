@@ -46,6 +46,17 @@ impl Power {
         power
     }
 
+    /// The file as it was when it was last fsynced.
+    pub fn held(&self) -> Vec<u8> {
+        self.held.lock().unwrap().clone()
+    }
+
+    /// The file is on disk as `bytes`: the machine came up with them,
+    /// or the driver laid them itself.
+    pub fn hold(&self, bytes: Vec<u8>) {
+        *self.held.lock().unwrap() = bytes;
+    }
+
     /// Has the fsyncs of this thread made again, and told to nobody.
     pub fn off() {
         alt_oplog::v2::fsyncs_left_out(false);

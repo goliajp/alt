@@ -27,6 +27,22 @@ use alt_oplog::{Discarded, OpLogError};
 use super::v2_driver::{Run, name};
 use super::v2_ledger::Entry;
 
+impl super::v2_ledger::Ledger {
+    /// How many ops of the log start before byte `at`.
+    pub fn before(&self, at: u64) -> usize {
+        self.ops.iter().take_while(|op| op.at < at).count()
+    }
+
+    /// What a cut at byte `at` leaves before it: the last op, how many
+    /// ops, and how many receipts.
+    pub fn left_by(&self, at: u64) -> (Option<alt_oplog::OpId>, usize, usize) {
+        let ops = self.before(at);
+        let last = ops.checked_sub(1).map(|last| self.ops[last].id);
+        let receipts = self.receipts.iter().filter(|(.., end)| *end <= at);
+        (last, ops, receipts.count())
+    }
+}
+
 impl Run {
     fn stores(&self, payload: &[u8]) -> bool {
         self.model.stored.lock().unwrap().contains(payload)
@@ -120,13 +136,35 @@ impl Run {
              whose ops are in the log, which a sync covered",
             ops[index].n
         );
-        // the cut is made by now: where the log was last cut before it
+        // the cut is made by now: where the log was cut of ops before it
         assert!(
             self.to_keep(index, &self.cuts_seen) == (None, None),
             "a cut from op {} on took a frame a sync can have covered",
             ops[index].n
         );
+        let left = self.ledger.left_by(ops[index].at);
+        self.ledger.cuts.push(left);
         self.ledger.cut_from(payload, self.model.synced)
+    }
+
+    /// Whether the driver saw a cut of ops made, or die with its
+    /// checkpoint laid, where the checkpoint at `at` lies or would.
+    pub fn cut_seen(&self, at: u64) -> bool {
+        self.ledger.cuts.contains(&self.ledger.left_by(at))
+    }
+
+    /// Where the log was cut of ops, as the driver knows: where the
+    /// checkpoints lie of the cuts it saw made, and where the log ends
+    /// while the checkpoint of one is to be laid again, the power
+    /// having taken a part of it.
+    pub fn cuts_known(&self, log: &super::v2_model::Reference) -> Vec<u64> {
+        let laid = log.cut_at.iter().copied();
+        let mut known: Vec<u64> = laid.filter(|cut| self.cut_seen(*cut)).collect();
+        let lies = |cut: &u64| self.ledger.left_by(*cut) == self.ledger.left_by(log.end);
+        if self.cut_seen(log.end) && !log.cut_at.iter().any(lies) {
+            known.push(log.end);
+        }
+        known
     }
 
     /// A writer's look came to a cut that the log refused with `why`:
@@ -178,8 +216,18 @@ impl Run {
     /// such frame. Counted by whether the log had to refuse.
     fn kept_for(&self, index: usize, kept: u64) {
         let ops = &self.ledger.ops;
-        // the look that was refused cut nothing
-        let found = match self.to_keep(index, &self.log().cuts) {
+        // the look that was refused cut nothing; a cut made again where
+        // one of what was left unfinished died is taken for one of ops
+        let log = self.log();
+        let mut cuts = self.cuts_known(&log);
+        cuts.extend(log.cuts.iter().filter(|cut| !self.cut_seen(**cut)));
+        // and so is, by whoever has not made it again, one the header
+        // tells of where the log ends
+        let (generation, at) = super::v2_cut_told::cut_told(self.path());
+        if generation > log.cut.0 && at == log.end {
+            cuts.push(at);
+        }
+        let found = match self.to_keep(index, &cuts) {
             _ if self.looks_behind => true,
             (Some(op), receipt) if receipt.is_none_or(|end| op < end) => kept == op,
             (_, Some(end)) => kept < end && ops.iter().all(|op| op.at != kept),

@@ -141,7 +141,9 @@ impl Run {
             let after = self.ledger.ops.len();
             let end = self.handles[index].log.appended_len();
             self.wrote(index, Wrote::Receipt(request, end), ticket, unsynced);
-            self.ledger.receipts.push((after, !unsynced, request, end));
+            let slip = (after, !unsynced, request, end);
+            self.ledger.slips.insert(request, slip);
+            self.ledger.receipts.push(slip);
             self.request += 1;
             self.ledger.begun = None;
             self.counts.receipts.fetch_add(1, Ordering::Relaxed);

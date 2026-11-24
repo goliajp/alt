@@ -64,23 +64,33 @@ pub struct Reference {
     /// its receipts: where each ends, and the request it is of
     pub receipts: Vec<(u64, [u8; 16])>,
     /// where each frame starts that says the log was cut before it, of
-    /// a cut that took ops
+    /// a cut that took ops; and of any cut
     pub cuts: Vec<u64>,
+    pub cut_at: Vec<u64>,
 }
 
 pub fn reference(dir: &Path) -> Reference {
     let data = fs::read(dir.join("log")).unwrap();
+    let (log, walked) = reference_of(&data);
+    walked.expect("the frames of the file hold to the full check");
+    log
+}
+
+/// The log as the bytes `data` of its file tell it, and whether the
+/// frames held to the full check as far as they read.
+pub fn reference_of(data: &[u8]) -> (Reference, Result<(), alt_oplog::OpLogError>) {
     let walk = Walk {
-        layout: FileHeader::decode(&data).unwrap().layout(),
-        data: &data,
+        layout: FileHeader::decode(data).unwrap().layout(),
+        data,
         base: 0,
         strict: true,
     };
     let (mut state, mut ops, mut cut_end) = (State::empty(), Vec::new(), 0);
-    let (mut receipts, mut cuts) = (Vec::new(), Vec::new());
+    let (mut receipts, mut cuts, mut cut_at) = (Vec::new(), Vec::new(), Vec::new());
     let walked = walk.run(&mut state, &mut |at, end, view| {
         if let Some(cut) = view.ext.cut {
             cut_end = end;
+            cut_at.push(at);
             if cut.of_the_log {
                 cuts.push(at);
             }
@@ -103,15 +113,16 @@ pub fn reference(dir: &Path) -> Reference {
         }
         Ok(())
     });
-    walked.expect("the frames of the file hold to the full check");
-    Reference {
+    let log = Reference {
         ops,
         end: state.end,
         said_synced: state.synced,
         cut: (state.generation, cut_end),
         receipts,
         cuts,
-    }
+        cut_at,
+    };
+    (log, walked.map(drop))
 }
 
 impl Reference {

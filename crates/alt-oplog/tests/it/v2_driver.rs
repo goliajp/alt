@@ -76,6 +76,8 @@ pub struct Run {
     pub to_defer: bool,
     /// the next op appended is written on a ticket
     pub to_ticket: bool,
+    /// the next sync a handle leaves to its sink, the sink is not asked
+    pub leaves_only: bool,
     /// a look is made by a handle that has not read the log to its end
     pub looks_behind: bool,
     /// where the log was cut of ops, before the call a handle is in
@@ -141,6 +143,7 @@ impl Run {
         }
         Self::in_boot(beside, 1);
         super::v2_beside::new_log(dir.path(), block_exp, seed);
+        power.hold(std::fs::read(dir.path().join("log")).unwrap());
         let stored = Stored::default();
         Run {
             dir,
@@ -165,6 +168,7 @@ impl Run {
             by_sink: false,
             to_defer: false,
             to_ticket: false,
+            leaves_only: false,
             looks_behind: false,
             cuts_seen: Vec::new(),
             to_look: false,

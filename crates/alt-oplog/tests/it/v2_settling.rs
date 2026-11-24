@@ -15,6 +15,8 @@ impl Run {
     pub fn cut_died(&mut self, index: usize, step: u8, refused: Option<&[u8]>) {
         self.counts.cuts_died.fetch_add(1, Ordering::Relaxed);
         self.died += 1;
+        let begun_at = super::v2_cut_told::cut_told(self.path()).1;
+        self.ledger.died_at.push(begun_at);
         self.dies(index);
         self.ledger.hides.clear();
         self.ledger.begun = None;

@@ -6,8 +6,8 @@ use std::io::Write;
 
 use alt_oplog::OpLog;
 
-use super::v2_cut_told::tell_cut;
 use super::v2_driver::Run;
+use super::v2_outage::Loss;
 
 impl Run {
     /// A writer dies in the middle of an append: it has read the log to
@@ -44,53 +44,9 @@ impl Run {
         file.write_all(&torn).unwrap();
     }
 
-    /// The machine goes down: the handles are gone, and of what lies past
-    /// where the file was synced a part may be. The ops whose frames end
-    /// before the first byte that changed are in the log after, and no
-    /// other. With `whole`, nothing is lost.
+    /// The machine goes down, and of what was not synced any part may
+    /// be lost; with `whole`, nothing is.
     pub fn reboot(&mut self, whole: bool) {
-        self.all_die();
-        let path = self.path().join("log");
-        let before = fs::read(&path).unwrap();
-        let len = before.len() as u64;
-        let from = self.durable_to();
-        let lost = match self.rng.below(4) {
-            _ if whole => "nothing is lost".to_owned(),
-            0 if len > from => {
-                let kept = from + self.rng.below(len - from + 1);
-                let file = fs::OpenOptions::new().write(true).open(&path).unwrap();
-                file.set_len(kept).unwrap();
-                format!("the file ends at {kept}")
-            }
-            1 if len > from => {
-                let start = from + self.rng.below(len - from);
-                let end = start + 1 + self.rng.below(len - start);
-                let mut bytes = before.clone();
-                bytes[start as usize..end as usize].fill(0);
-                fs::write(&path, bytes).unwrap();
-                format!("{start}..{end} is zeros")
-            }
-            _ => "nothing is lost".to_owned(),
-        };
-        let after = fs::read(&path).unwrap();
-        let same = super::v2_power::same_to(&before, &after) as u64;
-        if same < len {
-            self.ledger.lost_from(same, self.model.synced);
-        }
-        self.ledger.hides.clear();
-        // what the header of the log tells of a cut that never came to
-        // it was not synced: it is there after, or it is not
-        if self.ledger.begun.is_some() && !whole && self.also.one_in(2) {
-            tell_cut(self.path(), (0, 0));
-            self.ledger.begun = None;
-        }
-        if !whole {
-            self.lose_unsynced();
-        }
-        let log = self.log();
-        self.model.rebooted(&log);
-        Self::in_boot(self.beside, self.model.boot);
-        self.trace
-            .push(format!("boot {} of {len} bytes: {lost}", self.model.boot));
+        self.reboot_as(if whole { Loss::Nothing } else { Loss::Any });
     }
 }

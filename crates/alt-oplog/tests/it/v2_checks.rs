@@ -86,6 +86,16 @@ impl Run {
         if super::v2_cut_told::cut_told(self.path()).0 <= log.cut.0 {
             self.ledger.begun = None;
         }
+        // the log says of no cut that it took ops but of one that did,
+        // or of one made again where a cut had died
+        for cut in &log.cuts {
+            let before = self.ledger.before(*cut);
+            let died = |at: &u64| self.ledger.before(*at) == before;
+            assert!(
+                self.cut_seen(*cut) || self.ledger.died_at.iter().any(died),
+                "the log says a cut at {cut} took ops: none was made of ops or died there"
+            );
+        }
         let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
         // no boundary is recorded over bytes a loss of power could take

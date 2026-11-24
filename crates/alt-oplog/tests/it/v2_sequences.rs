@@ -24,7 +24,7 @@ impl Run {
     pub fn unsettled_before(&mut self, end: u64) -> Vec<Laid> {
         self.calls();
         let log = self.log();
-        self.cuts_seen = log.cuts.clone();
+        self.cuts_seen = self.cuts_known(&log);
         let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
         let left = self.model.unsettled(&log);
@@ -219,9 +219,8 @@ impl Run {
                 self.trace.push(format!("handle {gone} is closed"));
                 self.handles.remove(gone);
             }
-            10..40 => self.append(),
-            40..41 => self.staged_committed_staged(),
-            41..42 => self.cut_begun(),
+            10..32 => self.append(),
+            scene @ 32..42 => self.scene(scene - 32),
             42..50 => {
                 let (index, how) = (self.writer(), self.rng.below(4));
                 self.sync(index, how);

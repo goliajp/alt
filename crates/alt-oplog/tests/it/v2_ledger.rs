@@ -5,7 +5,7 @@
 //! that were damaged. The log is held to it: it holds these ops, in this
 //! order, at these places, and no other.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::path::Path;
@@ -88,7 +88,15 @@ fn lies(
 pub struct Ledger {
     pub ops: Vec<Entry>,
     /// the payloads of the ops that were cut or lost
-    gone: HashSet<Vec<u8>>,
+    pub gone: HashSet<Vec<u8>>,
+    /// every op that was ever appended, by its payload, and every
+    /// receipt, by its request
+    pub ever: HashMap<Vec<u8>, Entry>,
+    pub slips: HashMap<[u8; 16], (usize, bool, [u8; 16], u64)>,
+    /// Every cut of ops, by what it left before it ([`Self::left_by`]).
+    /// And where the header told of each cut that died.
+    pub cuts: Vec<(Option<OpId>, usize, usize)>,
+    pub died_at: Vec<u64>,
     /// the ops that were cut or lost last
     pub was: Vec<Entry>,
     /// Where a handle may take the log to end before its last op: at the
@@ -142,7 +150,7 @@ impl Ledger {
             told, found,
             "the handle that appended op {n} has it elsewhere than the file"
         );
-        self.ops.push(Entry {
+        let entry = Entry {
             n,
             seq,
             payload: payload.to_vec(),
@@ -155,7 +163,9 @@ impl Ledger {
             workspace: meta.workspace,
             staged: meta.index_after.is_some(),
             retired: meta.retired,
-        });
+        };
+        self.ever.insert(payload.to_vec(), entry.clone());
+        self.ops.push(entry);
     }
 
     /// Where the op of `payload` starts, which the log holds.
@@ -199,13 +209,6 @@ impl Ledger {
         let from = self.ops.iter().position(|op| op.payload == payload);
         let from = from.expect("the op to cut is in the log");
         self.went((from, self.ops[from].at), synced)
-    }
-
-    /// The bytes of the file from `byte` on were damaged: an op whose
-    /// frame does not end before is lost, and every op after it.
-    pub fn lost_from(&mut self, byte: u64, synced: u64) {
-        let from = self.ops.iter().position(|op| op.end > byte);
-        self.went((from.unwrap_or(self.ops.len()), byte), synced);
     }
 
     /// Whether the receipt of `request` is among those the log holds, as

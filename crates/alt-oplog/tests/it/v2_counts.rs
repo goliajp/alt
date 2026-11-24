@@ -11,6 +11,8 @@ pub struct Counts {
     pub fsyncs: AtomicU64,
     pub cuts: AtomicU64,
     pub cuts_died: AtomicU64,
+    /// ops in the log again once the power went, which were cut off it
+    pub back: AtomicU64,
     pub cut_back: AtomicU64,
     /// of them, those whose ops the log held: a cut of them was begun
     pub cut_back_begun: AtomicU64,
@@ -35,6 +37,12 @@ pub struct Counts {
     pub claims_dropped: AtomicU64,
     pub claims_again: AtomicU64,
     pub unpromised: AtomicU64,
+    /// Steps of callers that share a handle: one that syncs beside one
+    /// that does not, a ticket given up, a caller told while the handle
+    /// cannot tell, and syncs asked within a write on a ticket. And
+    /// steps that lead the log into a state over several boots.
+    pub shared: [AtomicU64; 4],
+    pub scenes: [AtomicU64; 5],
     /// syncs refused a boundary over an op nobody looked at
     pub unjudged: AtomicU64,
     /// of them, over an op the driver knows nobody has to look at: with
@@ -79,6 +87,7 @@ impl Counts {
             fsyncs: AtomicU64::new(0),
             cuts: AtomicU64::new(0),
             cuts_died: AtomicU64::new(0),
+            back: AtomicU64::new(0),
             cut_back: AtomicU64::new(0),
             cut_back_begun: AtomicU64::new(0),
             untold: AtomicU64::new(0),
@@ -93,6 +102,8 @@ impl Counts {
             claims_dropped: AtomicU64::new(0),
             claims_again: AtomicU64::new(0),
             unpromised: AtomicU64::new(0),
+            shared: [const { AtomicU64::new(0) }; 4],
+            scenes: [const { AtomicU64::new(0) }; 5],
             unjudged: AtomicU64::new(0),
             unjudged_more: AtomicU64::new(0),
             unjudged_more_noted: AtomicU64::new(0),
@@ -180,7 +191,7 @@ impl Counts {
 
     /// The counts of what became of syncs and of cuts that were refused.
     fn named_of_syncs(&self) -> Vec<(&'static str, &AtomicU64)> {
-        vec![
+        let mut named = vec![
             ("sequences with their fsyncs made", &self.real),
             ("fsyncs asked for", &self.fsyncs),
             (
@@ -222,6 +233,43 @@ impl Counts {
                 "cuts refused within where the log is synced",
                 &self.lost_refused,
             ),
+        ];
+        named.extend(self.named_of_scenes());
+        named
+    }
+
+    /// The counts of the steps that are made of several.
+    fn named_of_scenes(&self) -> Vec<(&'static str, &AtomicU64)> {
+        let (shared, scenes) = (&self.shared, &self.scenes);
+        vec![
+            ("ops in the log again once the power went", &self.back),
+            (
+                "handles that synced with ops left past a cut begun",
+                &scenes[0],
+            ),
+            (
+                "appends past a cut whose checkpoint was not synced",
+                &scenes[1],
+            ),
+            (
+                "cuts of ops whose checkpoint the power took a part of",
+                &scenes[2],
+            ),
+            ("ops refused with two cuts past them", &scenes[3]),
+            (
+                "handles that read the log anew over a cut made before",
+                &scenes[4],
+            ),
+            (
+                "ops of a caller that syncs cut beside one that does not",
+                &shared[0],
+            ),
+            ("tickets given up before another wrote", &shared[1]),
+            (
+                "callers told of a cut while their handle could not tell",
+                &shared[2],
+            ),
+            ("syncs asked within a write on a ticket", &shared[3]),
         ]
     }
 }
