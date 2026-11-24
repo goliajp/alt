@@ -1086,22 +1086,6 @@ impl<'a> NativeRepo<'a> {
         Ok(())
     }
 
-    /// Materialise HEAD's tree into the working directory, replacing any
-    /// existing tracked files. Used by clone after wiring HEAD to a newly
-    /// created branch — `switch`'s "already on this branch" short-circuit
-    /// would otherwise skip the checkout. Errors if HEAD doesn't resolve
-    /// to a commit (a fresh init with no commits).
-    pub fn materialise_head(&mut self) -> Res<()> {
-        let target = self.head_entries()?;
-        if target.is_empty() {
-            return Ok(());
-        }
-        // start from an empty old work-tree state — clone's target dir is
-        // empty by construction, so there's nothing to remove
-        self.checkout(&[], &target)?;
-        Ok(())
-    }
-
     fn head_branch(&self) -> Res<String> {
         match self.store.refs.get(&self.head_ref) {
             Some(RefTarget::Symbolic(b)) => Ok(b.clone()),

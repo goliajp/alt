@@ -20,7 +20,7 @@ impl NativeRepo<'_> {
     }
 
     /// Which file is at `path`, to the file system; `None` where none is.
-    fn file_there(&self, path: &BString) -> Res<Option<(u64, u64)>> {
+    pub(super) fn file_there(&self, path: &BString) -> Res<Option<(u64, u64)>> {
         let found = self.abs(path)?.symlink_metadata().ok();
         Ok(found.map(|m| (m.dev(), m.ino())))
     }

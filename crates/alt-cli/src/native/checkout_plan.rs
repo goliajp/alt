@@ -1,6 +1,7 @@
 //! What a checkout will do, worked out before anything is written: the
 //! checks that can refuse it, and the list of paths it changes.
 
+use super::checkout_files::apart::{Coming, respell};
 use super::checkout_recovery::{CheckoutIntent, FileChange};
 use super::*;
 use recovery::canonical_index;
@@ -58,11 +59,43 @@ impl NativeRepo<'_> {
         }
     }
 
+    /// Ends the list of what a checkout changes: a file that a path
+    /// which comes reaches by another spelling is not removed, and the
+    /// ignored files in a directory that becomes a file are removed with
+    /// it, recorded so that an undo brings them back.
+    fn settle_changes<'p>(
+        &self,
+        files: &mut Vec<FileChange>,
+        come: impl Iterator<Item = &'p BString>,
+        ignored: Vec<BString>,
+    ) -> Res<()> {
+        self.keep_respelled(files, come)?;
+        for path in ignored {
+            files.push(FileChange {
+                before: self.file_state(&path, true)?,
+                path: path.to_vec(),
+                after: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// What refuses a checkout before anything is written.
     pub(super) fn preflight_checkout(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
+        self.preflight_paths(old, target)?;
+        self.ensure_new_apart(&Coming::of(old, target, &unchanged(old, target)))
+    }
+
+    /// The checks of [`preflight_checkout`](Self::preflight_checkout) but
+    /// the one that the paths which come are apart from each other, which
+    /// an import has settled by leaving paths out.
+    pub(super) fn preflight_paths(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
         let old_paths: std::collections::HashSet<&[u8]> =
             old.iter().map(|e| e.path.as_slice()).collect();
-        let tracked = |p: &[u8]| old_paths.contains(p);
         let same = unchanged(old, target);
+        let coming = Coming::of(old, target, &same);
+        let respelled = self.respelled_by(&coming)?;
+        let tracked = |p: &[u8]| old_paths.contains(p) || respelled.contains_key(p);
         let mut visible = Visible::default();
         for entry in old.iter().filter(|e| !same.contains(e.path.as_slice())) {
             self.validate_path_among(&entry.path, &tracked)?;
@@ -108,8 +141,9 @@ impl NativeRepo<'_> {
             target.iter().map(|t| (&t.path, t)).collect();
         let old_paths: std::collections::HashSet<&[u8]> =
             old.iter().map(|e| e.path.as_slice()).collect();
-        let tracked = |p: &[u8]| old_paths.contains(p);
         let same = unchanged(old, target);
+        let respelled = self.respelled_by(&Coming::of(old, target, &same))?;
+        let tracked = |p: &[u8]| old_paths.contains(p) || respelled.contains_key(p);
         let paths: std::collections::BTreeSet<_> = old
             .iter()
             .chain(target)
@@ -131,10 +165,10 @@ impl NativeRepo<'_> {
         let mut files = Vec::new();
         let mut planned = std::collections::HashMap::new();
         for path in paths {
-            let beneath_file = path
-                .iter()
-                .enumerate()
-                .any(|(at, b)| *b == b'/' && files_on_disk.contains(&path.as_slice()[..at]));
+            let file =
+                |above: &[u8]| files_on_disk.contains(above) || respelled.contains_key(above);
+            let mut parents = path.iter().enumerate().filter(|(_, b)| **b == b'/');
+            let beneath_file = parents.any(|(at, _)| file(&path.as_slice()[..at]));
             let found = match beneath_file {
                 true => None,
                 false => self.file_state(path, true)?,
@@ -171,20 +205,10 @@ impl NativeRepo<'_> {
                 });
             }
         }
+        respell(&mut files, &respelled);
         let come = target.iter().map(|e| &e.path);
-        self.keep_respelled(
-            &mut files,
-            come.filter(|p| !old_paths.contains(p.as_slice())),
-        )?;
-        // ignored files in a directory that becomes a file are removed with
-        // it, and recorded so that an undo brings them back
-        for path in ignored {
-            files.push(FileChange {
-                before: self.file_state(&path, true)?,
-                path: path.to_vec(),
-                after: None,
-            });
-        }
+        let come = come.filter(|p| !old_paths.contains(p.as_slice()));
+        self.settle_changes(&mut files, come, ignored)?;
         let index_after = target_index(target)?;
         let index_after = self.snapshot(&canonical_index(index_after, self.store.algo()?))?;
         *self.planned.borrow_mut() = Some(super::tree_state::Planned {

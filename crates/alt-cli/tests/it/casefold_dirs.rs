@@ -8,13 +8,13 @@ use crate::casefold::{clean, clean_but_staged, code, pair, place};
 use crate::casefold_wider::cut;
 use crate::like_git::{Pair, alt, alt_daemon, git, index, ok};
 
-fn read(root: &Path, file: &str) -> String {
+pub(crate) fn read(root: &Path, file: &str) -> String {
     std::fs::read_to_string(root.join(file)).unwrap()
 }
 
 /// What `alt status` tells of the tree, without the lines that say how
 /// to go on.
-fn told(said: &str) -> Vec<String> {
+pub(crate) fn told(said: &str) -> Vec<String> {
     let mut lines: Vec<String> = said
         .lines()
         .filter(|line| line.starts_with('\t'))

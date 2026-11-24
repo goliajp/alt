@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use super::checkout_files::apart::{Coming, respell};
 use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::canonical_index;
@@ -79,6 +80,28 @@ fn differing(before: &[IndexEntry], after: &[IndexEntry]) -> BTreeSet<BString> {
     paths
 }
 
+/// The files an edit writes and removes, and the paths of the index it
+/// leaves, as a checkout is told of to a file system that takes names
+/// differing in case for one.
+fn coming<'a>(files: &'a [(BString, Put)], index: &'a Index) -> Coming<'a> {
+    let submodule = |put: &Put| match put {
+        Put::Entry(entry) => entry.mode == 0o160000,
+        Put::Found(state) => state.mode == 0o160000,
+        Put::Nothing => false,
+    };
+    let written = |(_, put): &&(BString, Put)| !matches!(put, Put::Nothing);
+    let removed = |(_, put): &&(BString, Put)| matches!(put, Put::Nothing);
+    Coming {
+        come: files
+            .iter()
+            .filter(written)
+            .map(|(p, put)| (p, submodule(put)))
+            .collect(),
+        leave: files.iter().filter(removed).map(|(p, _)| p).collect(),
+        held: index.entries.iter().map(|e| &e.path).collect(),
+    }
+}
+
 impl NativeRepo<'_> {
     /// What making `edit` changes, as the intent of a checkout: the index
     /// to come, and for each path written the file that is there and the
@@ -103,6 +126,9 @@ impl NativeRepo<'_> {
         self.store.odb.flush_synced()?;
         let attrs = self.converter()?;
         let among: HashSet<&[u8]> = edit.files.iter().map(|(p, _)| p.as_slice()).collect();
+        let coming = coming(&edit.files, &index);
+        let respelled = self.kept_apart(&coming)?;
+        let owned = |p: &[u8]| among.contains(p) || respelled.contains_key(p);
         let mut changes = Vec::new();
         let mut planned = HashMap::new();
         for (path, put) in &edit.files {
@@ -116,7 +142,7 @@ impl NativeRepo<'_> {
                 Put::Nothing => None,
             };
             let gitlink = after.as_ref().is_some_and(|state| state.mode == 0o160000);
-            let before = self.observed(path, true, gitlink, &|p| among.contains(p))?;
+            let before = self.observed(path, true, gitlink, &owned)?;
             if before != after {
                 touched.insert(path.clone());
                 changes.push(FileChange {
@@ -126,11 +152,8 @@ impl NativeRepo<'_> {
                 });
             }
         }
-        let come = edit
-            .files
-            .iter()
-            .filter(|(_, put)| !matches!(put, Put::Nothing));
-        self.keep_respelled(&mut changes, come.map(|(path, _)| path))?;
+        respell(&mut changes, &respelled);
+        self.keep_respelled(&mut changes, coming.come.iter().map(|(path, _)| *path))?;
         let algo = self.store.algo()?;
         let index_after = self.snapshot(&canonical_index(index, algo))?;
         *self.planned.borrow_mut() = Some(tree_state::Planned {

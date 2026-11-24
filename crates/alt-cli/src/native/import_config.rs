@@ -79,20 +79,51 @@ impl NativeRepo<'_> {
     /// Checks out the head of a store imported into an empty directory,
     /// and says so. An import whose files cannot be written stands.
     pub(super) fn materialise_fresh(&mut self, target: &Path, out: &mut impl Write) -> Res<()> {
-        if let Err(e) = self.materialise_head() {
-            let said = "warning: import succeeded but work-tree materialize failed";
-            return Ok(writeln!(out, "{said}: {e}")?);
-        }
+        let met = match self.materialise_head() {
+            Ok(met) => met,
+            Err(e) => {
+                let said = "warning: import succeeded but work-tree materialize failed";
+                return Ok(writeln!(out, "{said}: {e}")?);
+            }
+        };
         let branch = self.head_branch().unwrap_or_else(|_| "HEAD".to_string());
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
         writeln!(out, "materialized {short} into {}", target.display())?;
-        self.say_collided(out)
+        self.say_collided(out, met)
+    }
+
+    /// Checks out the tree of HEAD into a working directory that holds
+    /// none of it, the index with every path of the tree. Where a file
+    /// and a directory of the tree have one name to the file system, the
+    /// files are those a clone by git leaves; returns each group of paths
+    /// that met so. Nothing is done where HEAD has no commit.
+    pub fn materialise_head(&mut self) -> Res<Vec<Vec<BString>>> {
+        let target = self.head_entries()?;
+        if target.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (out, met) = self.left_out(&target)?;
+        self.lock_workspace()?;
+        self.ensure_no_pending_recovery()?;
+        let written = target.iter().filter(|e| !out.contains(e.path.as_slice()));
+        let written: Vec<WorkEntry> = written.cloned().collect();
+        self.preflight_paths(&[], &written)?;
+        let mut intent = self.prepare_checkout(&[], &target)?;
+        intent.files.retain(|change| !out.contains(&change.path));
+        if let Some(planned) = self.planned.borrow_mut().as_mut() {
+            planned.files.retain(|path, _| !out.contains(path));
+        }
+        self.record_and_checkout(intent)?;
+        Ok(met)
     }
 
     /// Says, as a git clone does, which paths of the head came to be one
-    /// file on a file system that takes names differing in case for one.
-    fn say_collided(&self, out: &mut impl Write) -> Res<()> {
-        let groups = self.collided(&self.head_entries()?)?;
+    /// file on a file system that takes names differing in case for one,
+    /// `met` among them: the groups of which a file and a directory had
+    /// one name.
+    fn say_collided(&self, out: &mut impl Write, met: Vec<Vec<BString>>) -> Res<()> {
+        let mut groups = self.collided(&self.head_entries()?)?;
+        groups.extend(met);
         if groups.is_empty() {
             return Ok(());
         }

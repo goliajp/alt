@@ -2,6 +2,7 @@
 //! index.
 
 use super::*;
+use checkout_files::apart::Coming;
 use checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use recovery::canonical_index;
 
@@ -50,6 +51,27 @@ impl NativeRepo<'_> {
         Ok(files)
     }
 
+    /// The resolutions among `resolved` that write something, refused
+    /// where a file and a directory among them have one name to the file
+    /// system.
+    fn changed_apart<'r>(&self, resolved: &'r [Resolved], was: &Whole) -> Res<Vec<&'r Resolved>> {
+        let changed: Vec<&Resolved> = resolved.iter().filter(|r| !untouched(r, was)).collect();
+        let file = |r: &&&Resolved| r.worktree.is_some() || r.entry.is_some();
+        let submodule = |r: &Resolved| r.entry.as_ref().is_some_and(|e| e.mode == 0o160000);
+        let come = changed.iter().filter(file).map(|r| (&r.path, submodule(r)));
+        let come: Vec<(&BString, bool)> = come.collect();
+        let leave = changed
+            .iter()
+            .filter(|r| !file(r) && was.contains_key(&r.path));
+        let leave = leave.map(|r| &r.path).collect();
+        let held = was
+            .keys()
+            .chain(come.iter().map(|(path, _)| *path))
+            .collect();
+        self.ensure_none_respelled(&Coming { come, leave, held })?;
+        Ok(changed)
+    }
+
     /// Writes a conflicted merge state to disk: each resolution's working-tree
     /// bytes, then an index carrying stage-0 entries for clean paths and
     /// stage 1/2/3 entries for conflicted ones (so git tools see the merge).
@@ -63,7 +85,7 @@ impl NativeRepo<'_> {
             .filter(|e| e.stage() == 0)
             .map(|e| (e.path.clone(), e))
             .collect();
-        let changed: Vec<&Resolved> = resolved.iter().filter(|r| !untouched(r, &was)).collect();
+        let changed = self.changed_apart(resolved, &was)?;
         // refused before the first write, as a checkout is: over an
         // untracked file, or a directory that holds one. A directory that
         // holds only ignored files goes with them, as in git

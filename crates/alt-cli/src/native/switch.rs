@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use super::checkout_files::apart::Coming;
 use super::*;
 
 mod made;
@@ -236,21 +237,18 @@ impl NativeRepo<'_> {
         })?;
         let staged = by_path(&old);
         let mut in_the_way = Vec::new();
-        let tracked = |path: &[u8]| staged.contains_key(&BString::from(path));
+        let both = old.iter().map(|e| e.path.as_slice()).collect();
+        let coming = Coming::of(&old, &kept, &both);
+        let respelled = self.respelled_by(&coming)?;
+        let tracked =
+            |path: &[u8]| staged.contains_key(&BString::from(path)) || respelled.contains_key(path);
         for entry in kept.iter().filter(|e| !staged.contains_key(&e.path)) {
             // nothing is beneath a tracked file or symlink that gives way
             let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
             let found = self.abs(&entry.path)?.symlink_metadata();
-            let leaving = || {
-                let stays: HashSet<&BString> = kept.iter().map(|e| &e.path).collect();
-                staged
-                    .keys()
-                    .copied()
-                    .filter(move |path| !stays.contains(path))
-            };
             if !beneath_tracked
                 && found.is_ok_and(|m| !m.is_dir())
-                && !self.respells(&entry.path, leaving())?
+                && !self.respells(&entry.path, coming.leave.iter().copied())?
             {
                 in_the_way.push(entry.path.clone());
             }
