@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: alt-shares is not published
+author-type: human
+author: doracawl
+touched: crates/alt-shares/Cargo.toml
