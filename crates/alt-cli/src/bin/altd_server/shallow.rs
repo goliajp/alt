@@ -163,11 +163,7 @@ impl History<'_> {
 
 /// The one ref `name` is short for, as Git expands a name, peeled to its
 /// commit. `None` where it is short for none or for more than one.
-fn named(
-    history: &mut History,
-    refs: &[(String, ObjectId, Option<String>)],
-    name: &str,
-) -> Res<Option<ObjectId>> {
+fn named(history: &mut History, refs: &Refs, name: &str) -> Res<Option<ObjectId>> {
     let full = [
         name.to_owned(),
         format!("refs/{name}"),
@@ -186,6 +182,19 @@ fn named(
 /// The ends of the history `req` is given, or why it is given none: what
 /// `git upload-pack` dies of.
 pub(super) fn ends(repo: &Repository, req: &FetchRequest) -> Res<Result<Shallow, String>> {
+    ends_of(repo, req, &mut || Ok(repo.list_refs()?))
+}
+
+/// The refs of a repository, as [`Repository::list_refs`] gives them.
+type Refs = Vec<(String, ObjectId, Option<String>)>;
+
+/// [`ends`], with the refs read through `listed`: once at the most for a
+/// request, however many of them it names.
+fn ends_of(
+    repo: &Repository,
+    req: &FetchRequest,
+    listed: &mut dyn FnMut() -> Res<Refs>,
+) -> Res<Result<Shallow, String>> {
     let depth: &Depth = &req.depth;
     let theirs: Ids = depth.shallows.iter().copied().collect();
     if !depth.asked() {
@@ -220,12 +229,8 @@ pub(super) fn ends(repo: &Repository, req: &FetchRequest) -> Res<Result<Shallow,
         Some(count) => history.down(tips, count)?,
         None => {
             let mut not = Vec::new();
-            // read once for all the names a request gives
-            let refs = if depth.not.is_empty() {
-                Vec::new()
-            } else {
-                repo.list_refs()?
-            };
+            // read once for all the names a request gives, and not for none
+            let refs = depth.not.first().map_or(Ok(Vec::new()), |_| listed())?;
             for name in &depth.not {
                 match named(&mut history, &refs, name)? {
                     Some(oid) => not.push(oid),
@@ -265,4 +270,62 @@ pub(super) fn ends(repo: &Repository, req: &FetchRequest) -> Res<Result<Shallow,
         },
         parents,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A request may name 1024 refs whose histories it leaves out. The refs of
+    /// the repository are read once for all of them, and the answer is that
+    /// of the request with each name once.
+    #[test]
+    fn the_refs_are_read_once_for_all_the_names_a_request_leaves_out() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        alt_testutil::make_repo(dir.path(), "sha1");
+        let repo = Repository::discover(dir.path()).unwrap();
+        let tip = |name: &str| {
+            let refs = repo.list_refs().unwrap();
+            let found = refs.into_iter().find(|(of, ..)| of == name);
+            found.unwrap().1
+        };
+        let asked = |not: Vec<String>| {
+            let depth = Depth {
+                not,
+                ..Depth::default()
+            };
+            let req = FetchRequest {
+                wants: vec![tip("refs/heads/main")],
+                depth,
+                ..FetchRequest::default()
+            };
+            let mut read = 0;
+            let ends = ends_of(&repo, &req, &mut || {
+                read += 1;
+                Ok(repo.list_refs()?)
+            });
+            let told = ends.unwrap().unwrap().told.unwrap();
+            (read, format!("{told:?}"))
+        };
+        // the branch that was merged, as three of the names it has
+        let names = ["feat", "refs/heads/feat", "heads/feat"];
+        let many: Vec<String> = (0..1024).map(|n| names[n % 3].to_owned()).collect();
+        let (read, told) = asked(many);
+        assert_eq!(read, 1);
+        let (once, same) = asked(names.map(str::to_owned).to_vec());
+        assert_eq!((once, &same), (1, &told));
+        assert!(told.contains("Shallow"), "{told}");
+        // no name: the refs are not read at all, and the request asks for no end
+        let none = FetchRequest {
+            wants: vec![tip("refs/heads/main")],
+            ..FetchRequest::default()
+        };
+        let mut read = 0;
+        let ends = ends_of(&repo, &none, &mut || {
+            read += 1;
+            Ok(repo.list_refs()?)
+        });
+        assert!(ends.unwrap().unwrap().told.is_none());
+        assert_eq!(read, 0);
+    }
 }
