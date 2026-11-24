@@ -60,3 +60,42 @@ fn a_word_that_names_a_commit_is_not_restored_as_the_file_of_that_name() {
     assert_eq!(kept, "committed\nnot staged\n");
     assert!(ok(alt(&both.alt, &["status"])).contains("On branch main"));
 }
+
+#[test]
+fn what_an_imported_branch_follows_goes_with_its_name_and_with_the_branch() {
+    let both = cloned();
+    for root_args in [
+        &["checkout", "topic"][..],
+        &["branch", "-m", "topic", "moved"],
+    ] {
+        ok(alt(&both.alt, root_args));
+        ok(git(&both.git, root_args));
+    }
+    // imported again: what `moved` follows is in the copy of git's file
+    ok(alt(&both.git, &["import", both.alt.to_str().unwrap()]));
+    assert_eq!(both.same_upstream("moved"), "origin/topic\n");
+    for args in [&["branch", "-m", "moved", "again"][..], &["switch", "main"]] {
+        ok(alt(&both.alt, args));
+        ok(git(&both.git, args));
+    }
+    assert_eq!(both.same_upstream("again"), "origin/topic\n");
+    // the old name follows nothing: there is no such branch
+    assert_eq!(
+        alt(&both.alt, &["rev-parse", "moved@{u}"]).status.code(),
+        Some(128)
+    );
+    assert!(!ok(alt(&both.alt, &["config", "--list"])).contains("branch.moved."));
+    for args in [&["branch", "-D", "again"][..], &["branch", "again", "main"]] {
+        ok(git(&both.git, args));
+    }
+    ok(alt(&both.alt, &["branch", "-f", "again", "main"]));
+    ok(alt(&both.alt, &["branch", "-d", "again"]));
+    ok(alt(&both.alt, &["branch", "again", "main"]));
+    // made anew, it follows nothing
+    let ours = alt(&both.alt, &["rev-parse", "again@{u}"]);
+    let theirs = git(&both.git, &["rev-parse", "again@{u}"]);
+    assert_eq!(
+        (ours.status.code(), theirs.status.code()),
+        (Some(128), Some(128))
+    );
+}

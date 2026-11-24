@@ -97,29 +97,37 @@ pub(crate) fn set(repo: &Repository, key: &str, value: &str) -> Res<()> {
     Ok(())
 }
 
-/// Takes what the store's own file sets in `[<section> "<subsection>"]`
-/// out of it.
-pub(crate) fn drop_section(repo: &Repository, section: &str, subsection: &str) -> Res<()> {
-    rewrite(repo, |file| {
-        let removed = alt_git_config::remove_section(file, section, subsection.as_bytes());
-        Ok(removed?)
-    })?;
+/// Both files a section of a branch is written in: the store's own, and
+/// the copy an import kept of git's, which git would have written.
+fn rewrite_both(repo: &Repository, edit: impl Fn(&[u8]) -> Res<Option<Vec<u8>>>) -> Res<()> {
+    rewrite(repo, &edit)?;
+    alt_repo::kept_config::rewrite_copy(repo.git_dir(), &edit)?;
+    crate::git_settings::forget();
     Ok(())
 }
 
-/// Has what the store's own file sets in `[<section> "<from>"]` set in
-/// `[<section> "<to>"]` instead.
+/// Takes what is set in `[<section> "<subsection>"]` out of the store's
+/// own file and out of the copy of git's.
+pub(crate) fn drop_section(repo: &Repository, section: &str, subsection: &str) -> Res<()> {
+    rewrite_both(repo, |file| {
+        let removed = alt_git_config::remove_section(file, section, subsection.as_bytes());
+        Ok(removed?)
+    })
+}
+
+/// Has what is set in `[<section> "<from>"]` set in `[<section> "<to>"]`
+/// instead, in the store's own file and in the copy of git's; what was
+/// set for `to` goes from both.
 pub(crate) fn rename_section(repo: &Repository, section: &str, from: &str, to: &str) -> Res<()> {
-    rewrite(repo, |file| {
-        let (from, to) = (from.as_bytes(), to.as_bytes());
-        if alt_git_config::rename_section(file, section, from, to)?.is_none() {
-            return Ok(None);
-        }
+    let (from, to) = (from.as_bytes(), to.as_bytes());
+    rewrite_both(repo, |file| {
         let cleared = alt_git_config::remove_section(file, section, to)?;
-        let file = cleared.as_deref().unwrap_or(file);
-        Ok(alt_git_config::rename_section(file, section, from, to)?)
-    })?;
-    Ok(())
+        let renamed = {
+            let file = cleared.as_deref().unwrap_or(file);
+            alt_git_config::rename_section(file, section, from, to)?
+        };
+        Ok(renamed.or(cleared))
+    })
 }
 
 fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {

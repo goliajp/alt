@@ -25,7 +25,7 @@ use crate::RepoError;
 
 mod own;
 
-pub use own::rewrite_own;
+pub use own::{rewrite_copy, rewrite_own};
 
 const OWN: &str = "git-import/config";
 const SOURCE: &str = "git-import/source";

@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use super::OWN;
+use super::{OWN, SOURCE};
 
 /// Rewrites the store's own file under `alt_dir` as `edit` makes it of
 /// its text, the empty text where the file is not there. `None` from
@@ -17,7 +17,27 @@ pub fn rewrite_own<E: From<std::io::Error>>(
     alt_dir: &Path,
     edit: impl FnOnce(&[u8]) -> Result<Option<Vec<u8>>, E>,
 ) -> Result<bool, E> {
-    let own = alt_dir.join(OWN);
+    rewrite(&alt_dir.join(OWN), edit)
+}
+
+/// As [`rewrite_own`], of the copy an import kept of git's `config`,
+/// where there is one: for what git itself would have written there,
+/// the section of a branch that is renamed or deleted.
+pub fn rewrite_copy<E: From<std::io::Error>>(
+    alt_dir: &Path,
+    edit: impl FnOnce(&[u8]) -> Result<Option<Vec<u8>>, E>,
+) -> Result<bool, E> {
+    let copy = alt_dir.join(SOURCE).join("config");
+    match copy.is_file() {
+        true => rewrite(&copy, edit),
+        false => Ok(false),
+    }
+}
+
+fn rewrite<E: From<std::io::Error>>(
+    own: &Path,
+    edit: impl FnOnce(&[u8]) -> Result<Option<Vec<u8>>, E>,
+) -> Result<bool, E> {
     if let Some(parent) = own.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -35,7 +55,7 @@ pub fn rewrite_own<E: From<std::io::Error>>(
         Err(e) => return Err(e.into()),
     };
     let write = || -> Result<bool, E> {
-        let was = match fs::read(&own) {
+        let was = match fs::read(own) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.into()),
@@ -45,7 +65,7 @@ pub fn rewrite_own<E: From<std::io::Error>>(
         };
         held.write_all(&bytes)?;
         held.sync_all()?;
-        fs::rename(&lock, &own)?;
+        fs::rename(&lock, own)?;
         Ok(true)
     };
     match write() {
