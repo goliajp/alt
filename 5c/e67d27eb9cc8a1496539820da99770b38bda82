@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: compare the index after a rebase is given up
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/rebase.rs
+touched: crates/alt-cli/tests/it/rebase_merges.rs
