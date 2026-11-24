@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: give the server of a test a directory of its own for what it keeps for a while
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server/served.rs
