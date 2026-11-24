@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: one taker at a time passes its part of an amount many share, and has half of it
+author-type: human
+author: doracawl
+touched: crates/alt-shares/src/lib.rs
