@@ -165,3 +165,55 @@ fn what_is_read_is_held_against_its_id_and_a_pack_that_changed_is_not_indexed_an
     }
     assert!(indexed_anew(&changed, &none, memory(1 << 30)).is_err());
 }
+
+/// A chain of four thousand deltas with a delta beside each link is read through
+/// with each delta applied once, where one object after another read by its own
+/// chain is sixteen million deltas applied. Where little is kept at once, a base
+/// that was let go is read again by its chain: more deltas are applied, and
+/// what is found is the same. A segment whose deltas are made of the objects of
+/// another is read with one more read for each base.
+#[test]
+fn a_segment_is_read_through_with_each_delta_applied_once() {
+    use alt_pack_segment::unread_holding;
+    const LINKS: usize = 4000;
+    let work = alt_os::temp::tempdir().unwrap();
+    let none = SegmentSet::default();
+    let deep = super::waiting::pack(LINKS);
+    let deep = super::segment(work.path(), "deep.seg", &deep, &none);
+    assert_eq!(deep.len(), 2 * LINKS + 1);
+    let (lost, applied) = unread_holding(&deep, &none, 256 << 20).unwrap();
+    assert!(lost.is_empty(), "{lost:?}");
+    assert_eq!(applied, 2 * LINKS as u64);
+    // three objects kept beside the one that is read, of a shorter chain
+    const FEW: usize = 500;
+    let short = super::waiting::pack(FEW);
+    let short = super::segment(work.path(), "short.seg", &short, &none);
+    let (lost, again) = unread_holding(&short, &none, 3000).unwrap();
+    assert!(lost.is_empty(), "{lost:?}");
+    assert!(
+        (2 * FEW as u64 + 1..(FEW * FEW) as u64).contains(&again),
+        "{again}"
+    );
+
+    // behind it: deltas of the end of the chain, of one another, and of one base
+    let end = 2 * LINKS;
+    let thin = pack(&[
+        (9001, Of::Object(end)),
+        (9002, Of::Entry(0)),
+        (9003, Of::Object(end)),
+        (9004, Of::Object(LINKS)),
+    ]);
+    let behind = SegmentSet::new(vec![deep.clone()]);
+    let thin = super::segment(work.path(), "thin.seg", &thin, &behind);
+    let (lost, applied) = unread_holding(&thin, &behind, 256 << 20).unwrap();
+    assert!(lost.is_empty(), "{lost:?}");
+    // four deltas of the segment, and the chains of the bases they are made of
+    let chains = [end, end, LINKS].map(|n| {
+        let at = deep.find(&id(&object(n))).unwrap();
+        u64::from(deep.record(at).unwrap().depth)
+    });
+    assert!(
+        (4 + chains[2]..=4 + chains.iter().sum::<u64>()).contains(&applied),
+        "{applied} {chains:?}"
+    );
+}

@@ -10,23 +10,36 @@
 use crate::{Error, Limits, Memory, Oid, Segment, SegmentSet, ingest, object_id};
 use std::sync::Arc;
 
+/// the bytes of objects kept at once while the deltas made of them are read
+const KEPT: usize = 256 << 20;
+
 /// The objects of `segment` that a read does not give back as what their ids
 /// tell, each with what its read ended in. `older` are the segments published
-/// before it.
+/// before it. An object is made of its base once: a segment is read in the
+/// time its entries take, whatever the length of its chains.
 pub fn unread(segment: &Arc<Segment>, older: &SegmentSet) -> Result<Vec<(Oid, Error)>, Error> {
+    Ok(unread_holding(segment, older, KEPT)?.0)
+}
+
+/// `unread` with a chosen bound on the bytes of objects kept at once, which the
+/// result does not depend on; and the deltas that were applied.
+#[doc(hidden)]
+pub fn unread_holding(
+    segment: &Arc<Segment>,
+    older: &SegmentSet,
+    kept: usize,
+) -> Result<(Vec<(Oid, Error)>, u64), Error> {
     let mut all = older.segments().to_vec();
     all.push(Arc::clone(segment));
     let all = SegmentSet::new(all);
     let mut unread = Vec::new();
-    for index in 0..segment.len() {
-        let oid = segment.record(index)?.oid;
-        match all.read(&oid) {
-            Ok((kind, data)) if object_id(kind, &data) == oid => {}
-            Ok(_) => unread.push((oid, Error::Corrupt("object differs from its id"))),
-            Err(error) => unread.push((oid, error)),
-        }
-    }
-    Ok(unread)
+    let applied = all.each_of_the_newest(kept, |record, read| match read {
+        Ok(data) if object_id(record.kind, data) == record.oid => {}
+        Ok(_) => unread.push((record.oid, Error::Corrupt("object differs from its id"))),
+        Err(error) => unread.push((record.oid, error)),
+    })?;
+    unread.sort_unstable_by_key(|(oid, _)| *oid);
+    Ok((unread, applied))
 }
 
 /// The pack of `segment` with an index made of it anew, as if it had just come
