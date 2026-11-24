@@ -8,6 +8,8 @@ use alt_task_service::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod named;
+
 pub(super) fn task_limits() -> TaskLimits {
     TaskLimits {
         objects: 1000,
@@ -340,52 +342,6 @@ fn task_publication_accepts_git_objects_held_only_by_a_segment() {
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
     assert_eq!((size, bytes), (tree_bytes.len() as u64, tree_bytes));
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn task_publication_preserves_baseline_after_ref_deletion() {
-    let mut f = Fixture::new();
-    let old = Payload::new("historical-task-baseline", None);
-    old.upload(&mut f.store, &f.credential);
-    old.publish(&mut f.store, &f.credential);
-    let mut payload = task_payload("historical-task-baseline");
-    payload.publication.key.request_id = "publish-task-baseline".into();
-    assert_eq!(payload.commit, old.commit);
-    payload.upload(&mut f.store, &f.credential);
-    let work = f
-        .store
-        .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
-        .unwrap();
-    let (graph, tasks) = verified(&work, payload.commit);
-    f.store
-        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
-        .unwrap();
-    f.store
-        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
-        .unwrap();
-    let mut deletion = Payload::new("remove-current-ref", Some(old.commit));
-    deletion.publication.refs[0].new = None;
-    deletion.manifest.entries.clear();
-    deletion.contents.clear();
-    deletion.publication.content_manifest = deletion.manifest.id(limits()).unwrap();
-    deletion.upload(&mut f.store, &f.credential);
-    deletion.publish(&mut f.store, &f.credential);
-    assert_eq!(f.counts().0, 0);
-    f.store
-        .collect_orphans(&f.credential, "repository", 100)
-        .unwrap();
-    let (_, mut file) = f
-        .store
-        .open_published_content(
-            &f.credential,
-            &payload.publication.key.scope,
-            &old.manifest.entries[1].blake3,
-        )
-        .expect("task baseline must survive current ref deletion");
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
-    assert_eq!(bytes, old.contents[1]);
 }
 
 #[test]

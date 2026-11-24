@@ -5,7 +5,7 @@ use crate::{Credential, Error, PublicationWork, Result, Store, reading};
 use alt_remote_protocol::{ContentEntry, Publication, RequestKey, Scope};
 
 mod git_content;
-pub(crate) use git_content::segment_content;
+pub(crate) use git_content::{Led, segment_content};
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
 
@@ -222,7 +222,7 @@ impl Store {
         credential: &Credential,
         scope: &Scope,
         digest: &str,
-        reached: bool,
+        led: Led,
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = reading::transaction(&mut self.client, &self.spec)?;
@@ -234,7 +234,7 @@ impl Store {
         }
         let Some(row) = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])? else {
             tx.commit()?;
-            return self.open_published_git_content(credential, scope, digest, reached);
+            return self.open_published_git_content(credential, scope, digest, led);
         };
         let size = unsigned(row.get(0))?;
         let location = crate::segments::location(&mut tx, &scope.repository_instance_id, digest)?;

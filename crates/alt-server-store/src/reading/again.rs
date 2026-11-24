@@ -1,6 +1,7 @@
 //! The reads that are begun again where they were overtaken.
 
 use super::twice;
+use crate::transport::Led;
 use crate::{Credential, Result, Store};
 use alt_remote_protocol::{ContentEntry, RecordRoot, RequestKey, Scope};
 use golia_change_link::HistoricalEvent;
@@ -94,26 +95,28 @@ impl Store {
         twice(|| self.bundles_for_record_once(credential, scope, root, after_digest, count))
     }
 
+    /// A published payload by its digest. A Git object of a repository that
+    /// holds what no ref leads to is given where a ref the caller reads leads
+    /// to it, or the manifest of a published publication of records names it.
     pub fn open_published_content(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
-        twice(|| self.open_published_content_once(credential, scope, digest, false))
+        twice(|| self.open_published_content_once(credential, scope, digest, Led::RefsOrRecords))
     }
 
     /// [`Self::open_published_content`] for a caller that is shown the
-    /// repository by its refs: a Git object is given where a ref leads to it.
-    /// The native protocol gives the objects records name too, which stay
-    /// when the ref they were published under is deleted.
+    /// repository by its refs alone: a Git object is given where a ref leads
+    /// to it.
     pub fn open_reached_content(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
-        twice(|| self.open_published_content_once(credential, scope, digest, true))
+        twice(|| self.open_published_content_once(credential, scope, digest, Led::Refs))
     }
 
     /// Early admission for Git receive-pack before reading a potentially large
