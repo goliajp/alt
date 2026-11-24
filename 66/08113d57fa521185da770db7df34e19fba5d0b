@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: remove what leaves before a checkout renames or writes, and reach no path through a file or a symlink
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/src/native/checkout_files/paths.rs
+touched: crates/alt-cli/tests/it/checkout_order.rs
+touched: crates/alt-cli/tests/it/checkout_order/random.rs
+touched: crates/alt-cli/tests/it/main.rs
