@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: walk directories that differ in case as one, respell names that fold to another length, and cut a respelling short
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/casefold_dirs.rs
+touched: crates/alt-cli/tests/it/casefold_wider.rs
+touched: crates/alt-cli/tests/it/main.rs
