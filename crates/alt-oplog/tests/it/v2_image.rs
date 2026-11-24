@@ -154,6 +154,7 @@ pub fn first_cut(bytes: u64, ops: u32) -> Cut {
     Cut {
         bytes,
         ops,
+        of_the_log: ops != 0,
         after: 0,
         generation: 0,
     }

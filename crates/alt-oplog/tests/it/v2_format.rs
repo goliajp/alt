@@ -23,6 +23,7 @@ fn full_ext() -> Ext {
         cut: Some(Cut {
             bytes: 5,
             ops: 2,
+            of_the_log: true,
             after: 640,
             generation: 3,
         }),

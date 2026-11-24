@@ -64,6 +64,7 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
     let whole = Cut {
         bytes: all,
         ops: 41,
+        of_the_log: true,
         after: 0,
         generation: 0,
     };
@@ -96,6 +97,7 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
             Cut {
                 bytes: rest,
                 ops: 0,
+                of_the_log: false,
                 after: at as u64,
                 generation: 1,
             }

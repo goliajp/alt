@@ -169,11 +169,16 @@ impl Log {
 
     /// Says where the log ends what `discarded` holds was cut, in a
     /// checkpoint of `generation` that is synced, and has the file end
-    /// with it.
-    fn lay_cut(&mut self, discarded: &Discarded, generation: u32) -> Result<(), OpLogError> {
+    /// with it; `looked` for ops of the log that a look refused.
+    fn lay_cut(
+        &mut self,
+        discarded: &Discarded,
+        (generation, looked): (u32, bool),
+    ) -> Result<(), OpLogError> {
         let cut = Cut {
             bytes: discarded.to - discarded.from,
             ops: discarded.ops.len() as u32,
+            of_the_log: looked,
             after: self.state.cut,
             generation: self.state.generation,
         };
@@ -259,7 +264,7 @@ impl Log {
         };
         tail.write(&self.beside(), &held)?;
         cut_reached(1)?;
-        self.lay_cut(&discarded, generation)?;
+        self.lay_cut(&discarded, (generation, looked))?;
         // the checkpoint is synced with the cut; of a frame this handle
         // wrote that was cut, its caller is told by the look
         self.unsynced = false;

@@ -10,7 +10,9 @@ pub struct OdbBounds {
 }
 
 /// Bytes that were cut off the end of the log before the frame that says
-/// so, and how many ops among them read. The frame also tells under which
+/// so, and how many ops among them read: ops of the log that a writer
+/// looked at and cut, or what read past where an append was left
+/// unfinished, which was no log. The frame also tells under which
 /// generation the frames before it were written, back to the frame that
 /// says the same of an earlier cut: a frame from before a cut reads under
 /// its own generation, and a reader finds that from the last cut back.
@@ -18,6 +20,9 @@ pub struct OdbBounds {
 pub struct Cut {
     pub bytes: u64,
     pub ops: u32,
+    /// the bytes held frames of the log, up to which a sync may have
+    /// been made
+    pub of_the_log: bool,
     /// where the frame of the cut before this one starts, or zero
     pub after: u64,
     /// the generation of the frames between that one and this
@@ -83,7 +88,8 @@ impl Ext {
         if let Some(cut) = &self.cut {
             let mut content = [0u8; 24];
             content[..8].copy_from_slice(&cut.bytes.to_le_bytes());
-            content[8..12].copy_from_slice(&cut.ops.to_le_bytes());
+            let ops = cut.ops | (cut.of_the_log as u32) << 31;
+            content[8..12].copy_from_slice(&ops.to_le_bytes());
             content[12..20].copy_from_slice(&cut.after.to_le_bytes());
             content[20..].copy_from_slice(&cut.generation.to_le_bytes());
             item(&mut out, 5, &content);
@@ -128,7 +134,8 @@ impl Ext {
                         |at: usize| u32::from_le_bytes(content[at..at + 4].try_into().unwrap());
                     ext.cut = Some(Cut {
                         bytes: word(content, 0),
-                        ops: part(8),
+                        ops: part(8) & !(1 << 31),
+                        of_the_log: part(8) >> 31 != 0,
                         after: word(content, 12),
                         generation: part(20),
                     });
