@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a second server process of a database with a data directory of its own is turned away
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/serving.rs
