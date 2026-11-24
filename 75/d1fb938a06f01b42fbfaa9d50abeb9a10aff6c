@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: tell a writer that opens an oplog made shorter than it is noted as synced that synced ops are lost
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/noted.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/v2_note_other.rs
