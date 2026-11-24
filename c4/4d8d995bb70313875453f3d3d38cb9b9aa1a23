@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: test
+summary: lead the driven oplog sequences into the states a review built, and have a loss of power bring back what was last fsynced
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_checks.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_mishaps.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_outage.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_power.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
+touched: crates/alt-oplog/tests/it/v2_scenes.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
+touched: crates/alt-oplog/tests/it/v2_shared.rs
+touched: crates/alt-oplog/tests/it/v2_told.rs
