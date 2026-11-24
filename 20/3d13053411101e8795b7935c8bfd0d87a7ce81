@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the pack that waits for memory is waited for, not slept for
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/tests/it/bases.rs
