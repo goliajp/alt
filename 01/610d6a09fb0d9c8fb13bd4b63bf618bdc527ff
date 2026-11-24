@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: say how to have a branch at a commit where checkout is given one
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/worktree.rs
+touched: crates/alt-cli/src/native/said.rs
+touched: crates/alt-cli/tests/it/checkout_guess.rs
