@@ -17,7 +17,7 @@ use super::back::{Back, Way};
 use super::head::{Framing, Head, Header, Method};
 use super::paced::{Sent, Source};
 use super::response::Response;
-use super::shares::{Share, Shares};
+use super::{Share, Shares};
 
 /// Where the reading of a chunked body is.
 enum Chunks {

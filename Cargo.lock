@@ -103,6 +103,7 @@ dependencies = [
  "alt-runner",
  "alt-server",
  "alt-server-store",
+ "alt-shares",
  "alt-sign",
  "alt-store",
  "alt-task",
@@ -589,6 +590,7 @@ dependencies = [
  "alt-repository-service",
  "alt-server-store",
  "alt-server-telemetry",
+ "alt-shares",
  "alt-tar",
  "alt-task",
  "alt-task-service",
@@ -654,6 +656,13 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "alt-shares"
+version = "0.1.0"
+dependencies = [
+ "alt-os",
 ]
 
 [[package]]

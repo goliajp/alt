@@ -27,7 +27,7 @@ struct Held {
     by: HashMap<IpAddr, u64>,
 }
 
-pub(crate) struct Shares {
+pub struct Shares {
     most: u64,
     /// a taker that is alone has no limit
     alone: bool,
@@ -35,7 +35,7 @@ pub(crate) struct Shares {
 }
 
 /// What one taker has, given back when it is gone.
-pub(crate) struct Share {
+pub struct Share {
     of: Arc<Shares>,
     /// the address it counts for; none for this host
     from: Option<IpAddr>,
@@ -44,38 +44,70 @@ pub(crate) struct Share {
 
 /// there is no room for what a taker asked for
 #[derive(Debug)]
-pub(crate) struct Full;
+pub struct Full;
 
 impl Shares {
-    pub(crate) fn of(most: u64) -> Arc<Self> {
+    pub fn of(most: u64) -> Arc<Self> {
         let (alone, held) = (false, Mutex::default());
         Arc::new(Shares { most, alone, held })
     }
 
-    pub(crate) fn passed_by_one_alone(most: u64) -> Arc<Self> {
+    pub fn passed_by_one_alone(most: u64) -> Arc<Self> {
         let (alone, held) = (true, Mutex::default());
         Arc::new(Shares { most, alone, held })
     }
 
     /// A taker for the address `from`, which has nothing yet.
-    pub(crate) fn share(self: &Arc<Self>, from: Option<IpAddr>) -> Share {
+    pub fn share(self: &Arc<Self>, from: Option<IpAddr>) -> Share {
         let (of, bytes) = (Arc::clone(self), 0);
         Share { of, from, bytes }
     }
 
-    #[cfg(test)]
-    pub(crate) fn held(&self) -> u64 {
+    /// what all the takers there are have between them
+    pub fn held(&self) -> u64 {
         self.held.lock().expect("shares").all
     }
 }
 
+/// What a taker for `peer` is counted under: nothing where the peer is this
+/// host, the address for IPv4 and on the link, the network of a host for IPv6
+/// elsewhere.
+pub fn address(peer: IpAddr) -> Option<IpAddr> {
+    let peer = match peer {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(peer, IpAddr::V4),
+        v4 => v4,
+    };
+    match peer {
+        _ if peer.is_loopback() => None,
+        // the hosts of the link the server is on share their first 64 bits
+        IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => Some(peer),
+        IpAddr::V6(v6) => Some(IpAddr::V6((u128::from(v6) >> 64 << 64).into())),
+        v4 => Some(v4),
+    }
+}
+
+/// Half of what is free on the disk `directory` is on.
+pub fn half_of_what_is_free(directory: &std::path::Path) -> std::io::Result<u64> {
+    use std::os::fd::AsRawFd;
+    let directory = std::fs::File::open(directory)?;
+    let mut value = std::mem::MaybeUninit::<alt_os::sys::statvfs>::uninit();
+    // SAFETY: fstatvfs writes the structure it is pointed to where it succeeds,
+    // and the descriptor is open through the call
+    if unsafe { alt_os::sys::fstatvfs(directory.as_raw_fd(), value.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: the call succeeded and filled every field
+    let value = unsafe { value.assume_init() };
+    Ok(((value.f_frsize as u128 * value.f_bavail as u128) / 2).min(u64::MAX as u128) as u64)
+}
+
 impl Share {
-    pub(crate) fn bytes(&self) -> u64 {
+    pub fn bytes(&self) -> u64 {
         self.bytes
     }
 
     /// Takes `bytes` more, or nothing where they are not there to be taken.
-    pub(crate) fn take(&mut self, bytes: u64) -> Result<(), Full> {
+    pub fn take(&mut self, bytes: u64) -> Result<(), Full> {
         let mut held = self.of.held.lock().expect("shares");
         let mine = self.bytes + bytes;
         let all = held.all + bytes;
@@ -173,5 +205,19 @@ mod tests {
         assert!(taker(&shares, 1, 1000).is_err());
         drop(other);
         assert_eq!(shares.held(), 0);
+    }
+
+    #[test]
+    fn a_peer_is_counted_under_its_address_or_the_network_of_its_host() {
+        let under = |peer: &str| address(peer.parse().unwrap()).map(|under| under.to_string());
+        for here in ["127.0.0.1", "::1", "::ffff:127.0.0.9"] {
+            assert_eq!(under(here), None, "{here}");
+        }
+        assert_eq!(under("203.0.113.7").unwrap(), "203.0.113.7");
+        assert_eq!(under("::ffff:203.0.113.7").unwrap(), "203.0.113.7");
+        assert_eq!(under("2001:db8:1:2:3:4:5:6").unwrap(), "2001:db8:1:2::");
+        assert_eq!(under("fe80::1:2").unwrap(), "fe80::1:2");
+        let free = half_of_what_is_free(&std::env::temp_dir()).unwrap();
+        assert!(free > 0);
     }
 }

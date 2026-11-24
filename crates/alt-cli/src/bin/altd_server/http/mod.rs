@@ -22,7 +22,6 @@ mod paced;
 mod peers;
 mod request;
 mod response;
-mod shares;
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -31,12 +30,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+pub(crate) use alt_shares::{Share, Shares};
 pub(crate) use head::{Header, Method};
 pub(crate) use paced::Limits;
 pub(crate) use peers::{LOOPBACK, Network, networks};
 pub(crate) use request::Request;
 pub(crate) use response::{Response, StatusCode};
-pub(crate) use shares::{Share, Shares};
 
 #[derive(Default)]
 struct Waiting {

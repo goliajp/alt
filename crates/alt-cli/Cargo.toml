@@ -25,6 +25,7 @@ path = "src/bin/altd_server.rs"
 [dependencies]
 alt-hash.workspace = true
 alt-os.workspace = true
+alt-shares.workspace = true
 golia-change-link.workspace = true
 alt-provenance.workspace = true
 alt-portable.workspace = true
