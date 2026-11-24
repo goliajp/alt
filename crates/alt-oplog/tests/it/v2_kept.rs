@@ -58,7 +58,10 @@ fn a_transaction_another_handle_synced_is_not_cut_with_an_op_before_it_whatever_
         drop(log);
         boot(2);
         let mut looking = OpLog::open(dir.path()).unwrap();
+        // another handle looks, finds what both name stored, and syncs
         let mut syncing = OpLog::open(dir.path()).unwrap();
+        let all = |_: &alt_oplog::Op| Ok::<_, OpLogError>(true);
+        assert_eq!(syncing.settle(all).unwrap(), None);
         syncing.sync().unwrap();
         let end = syncing.appended_len();
         assert_eq!(alt_oplog::bounded_in(dir.path()), Some(end));

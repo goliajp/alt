@@ -118,17 +118,4 @@ impl Log {
             None => Ok(synced),
         }
     }
-
-    /// The cut at `at` is made: its checkpoint is synced with it and
-    /// awaits no answer. The frame this handle wrote before the cut, and
-    /// whether it awaited an answer from a sync, is `wrote`: one before
-    /// `at` awaits its answer as before; of one that was cut the caller
-    /// is told by the look.
-    pub(super) fn cut_laid(&mut self, at: u64, wrote: ((u64, [u8; 4]), bool)) {
-        self.unsynced = false;
-        (self.wrote, self.owes) = match wrote.0.0 > at {
-            true => (self.wrote, false),
-            false => wrote,
-        };
-    }
 }

@@ -1,5 +1,7 @@
-//! A handle on a version 2 log is told that its ops were cut when they
-//! were, and only then.
+//! A handle on a version 2 log that holds ops which were cut is told so
+//! by whatever it reads the log with, and by nothing else. A sync tells
+//! of a cut to whoever holds frames that were cut, and reads the log
+//! again for a handle that holds none of its own.
 
 use std::path::Path;
 use std::sync::mpsc::channel;
@@ -9,6 +11,7 @@ use alt_oplog::{Meta, Op, OpLog, OpLogError};
 use super::v2_bounds::stage;
 use super::v2_log::{boot, file_len, grow, new_log};
 use super::v2_named::{Given, collecting};
+use super::v2_reread::cut_from;
 
 pub fn but_left(op: &Op) -> Result<bool, OpLogError> {
     Ok(op.payload != b"left")
@@ -51,14 +54,25 @@ pub fn held_past_left(dir: &Path, deferred: bool, required: bool) -> (OpLog, Giv
 }
 
 /// What a handle is told by each of the things it reads without a lock
-/// on the log: its sync, its full check, the ops before the ones it
-/// holds.
-pub fn told(held: &mut OpLog) -> String {
-    let synced = held.sync().err();
-    format!("{:?}", (synced, held.verify().err(), held.ops().err()))
+/// on the log: its full check, the ops before the ones it holds.
+pub fn told(held: &OpLog) -> String {
+    format!("{:?}", (held.verify().err(), held.ops().err()))
 }
 
-pub const CUT_BACK: &str = "(Some(CutBack), Some(CutBack), Some(CutBack))";
+pub const CUT_BACK: &str = "(Some(CutBack), Some(CutBack))";
+
+/// A handle that wrote none of the ops which were cut syncs: it reads
+/// the log again by itself, and holds the two ops left.
+pub fn syncs_what_is_left(held: &mut OpLog, case: &str) {
+    let reads = held.reads();
+    held.sync()
+        .unwrap_or_else(|told| panic!("{case}: {told:?}"));
+    if let Ok(sink) = held.sync_handle() {
+        sink.fsync()
+            .unwrap_or_else(|told| panic!("{case}: {told:?}"));
+    }
+    assert_eq!((held.len(), held.reads()), (2, reads + 1), "{case}");
+}
 
 #[test]
 fn the_sink_of_a_handle_that_holds_no_frame_syncs_and_is_told_of_no_cut() {
@@ -76,7 +90,7 @@ fn the_sink_of_a_handle_that_holds_no_frame_syncs_and_is_told_of_no_cut() {
 }
 
 #[test]
-fn a_handle_whose_ops_another_cut_is_told_so_when_it_syncs_and_not_that_the_log_is_damaged() {
+fn a_handle_past_ops_another_cut_syncs_what_is_left_and_is_not_told_that_the_log_is_damaged() {
     for deferred in [false, true] {
         let dir = alt_os::temp::tempdir().unwrap();
         let (mut held, _given) = held_past_left(dir.path(), deferred, false);
@@ -84,14 +98,8 @@ fn a_handle_whose_ops_another_cut_is_told_so_when_it_syncs_and_not_that_the_log_
         assert_eq!(cutter.settle(but_left).unwrap().unwrap().ops, 41);
         // the ref transaction a sync has to see to is no longer where
         // the frames this handle holds say it is
-        let synced = held.sync();
-        assert!(
-            matches!(synced, Err(OpLogError::CutBack)),
-            "deferred: {deferred}, {synced:?}"
-        );
-        held.reopen().unwrap();
-        assert_eq!(held.len(), 2);
-        held.sync().unwrap();
+        syncs_what_is_left(&mut held, &format!("deferred: {deferred}"));
+        assert!(held.confirmed());
     }
 }
 
@@ -109,10 +117,8 @@ fn a_cut_that_died_with_its_checkpoint_laid_over_an_op_tells_a_handle_past_it_th
         assert!(cut.is_err(), "the cut died");
         drop(cutter);
         assert_eq!(file_len(dir.path()), len);
-        assert_eq!(told(&mut held), CUT_BACK, "step {step}, {deferred}");
-        held.reopen().unwrap();
-        assert_eq!(held.len(), 2);
-        held.sync().unwrap();
+        assert_eq!(told(&held), CUT_BACK, "step {step}, {deferred}");
+        syncs_what_is_left(&mut held, &format!("step {step}, {deferred}"));
     }
 }
 
@@ -134,18 +140,16 @@ fn a_handle_past_an_op_another_thread_is_cutting_the_log_at_is_told_that_it_was_
         // the cutter holds its locks, with its checkpoint over `left`
         is_reached.recv().unwrap();
         assert_eq!(file_len(dir.path()), len);
-        let told = told(&mut held);
+        let told = told(&held);
         go.send(()).unwrap();
         assert_eq!(cutting.join().unwrap(), 41);
         assert_eq!(told, CUT_BACK, "step {step}, {deferred}");
-        held.reopen().unwrap();
-        assert_eq!(held.len(), 2);
-        held.sync().unwrap();
+        syncs_what_is_left(&mut held, &format!("step {step}, {deferred}"));
     }
 }
 
 #[test]
-fn a_handle_that_holds_a_frame_to_be_known_where_the_log_was_cut_is_told_that_it_was_cut() {
+fn a_handle_that_holds_a_frame_to_be_known_where_the_log_was_cut_syncs_what_is_left() {
     for deferred in [false, true] {
         let dir = alt_os::temp::tempdir().unwrap();
         let (mut held, _given) = held_past_left(dir.path(), deferred, true);
@@ -153,14 +157,7 @@ fn a_handle_that_holds_a_frame_to_be_known_where_the_log_was_cut_is_told_that_it
         assert_eq!(cutter.settle(but_left).unwrap().unwrap().ops, 42);
         drop(cutter);
         // the frame that has to be known lies past the end of the file
-        let synced = held.sync();
-        assert!(
-            matches!(synced, Err(OpLogError::CutBack)),
-            "deferred: {deferred}, {synced:?}"
-        );
-        held.reopen().unwrap();
-        assert_eq!(held.len(), 2);
-        held.sync().unwrap();
+        syncs_what_is_left(&mut held, &format!("deferred: {deferred}"));
     }
 }
 
@@ -168,13 +165,15 @@ fn a_handle_that_holds_a_frame_to_be_known_where_the_log_was_cut_is_told_that_it
 fn a_sink_tells_once_of_the_cut_of_what_it_was_left_with_though_its_handle_was_told_and_read_anew()
 {
     let dir = alt_os::temp::tempdir().unwrap();
-    let (mut held, _given) = held_past_left(dir.path(), true, false);
+    boot(1);
+    let mut held = new_log(dir.path());
+    grow(&mut held, "a", 2);
+    held.set_defer_durability(true);
     let sink = held.sync_handle().unwrap();
-    // its sink is left to sync up to the last of the forty ops
+    // its sink is left to sync an op of the handle
+    held.append("a", 8, b"mine").unwrap();
     held.sync().unwrap();
-    let mut cutter = OpLog::open(dir.path()).unwrap();
-    assert_eq!(cutter.settle(but_left).unwrap().unwrap().ops, 41);
-    drop(cutter);
+    assert_eq!(cut_from(dir.path(), b"mine"), 1);
     let appended = held.append("a", 9, b"more");
     assert!(matches!(appended, Err(OpLogError::CutBack)), "{appended:?}");
     held.reopen().unwrap();

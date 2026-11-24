@@ -145,7 +145,6 @@ fn a_cut_whose_process_dies_at_any_step_leaves_a_log_that_is_whole_or_ends_where
                     // who holds the ops that are cut appends nothing after
                     // them and has none of them recorded as synced
                     let synced = alt_oplog::bounded_in(dir.path());
-                    assert!(matches!(staging.sync(), Err(OpLogError::CutBack)), "{case}");
                     let appended = staging.append("s", 1, b"after what was cut");
                     assert!(matches!(appended, Err(OpLogError::CutBack)), "{case}");
                     assert_eq!(alt_oplog::bounded_in(dir.path()), synced, "{case}");

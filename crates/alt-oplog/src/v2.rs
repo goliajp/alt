@@ -23,10 +23,12 @@ mod kept;
 mod lift;
 mod locate;
 mod log;
+mod looked;
 mod mark;
 mod named;
 mod notes;
 mod open;
+mod owed;
 mod passed;
 pub mod receipt;
 mod reread;
@@ -52,6 +54,7 @@ pub use hooks::{
 };
 pub(crate) use hooks::{cut_asked, cut_reached, note_read};
 pub(crate) use log::Log;
+pub use owed::{Answer, Ticket};
 pub use sink::Reached;
 pub(crate) use sink::Sink;
 

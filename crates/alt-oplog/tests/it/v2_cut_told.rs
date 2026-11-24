@@ -10,7 +10,7 @@ use std::sync::mpsc::channel;
 use alt_oplog::{OpLog, OpLogError};
 
 use super::v2_bounds::stage;
-use super::v2_cut_back::{CUT_BACK, but_left, held_past_left, told};
+use super::v2_cut_back::{CUT_BACK, but_left, held_past_left, syncs_what_is_left, told};
 use super::v2_fields::values;
 use super::v2_image::linked;
 use super::v2_log::{boot, file_len, frames, grow, new_log};
@@ -79,11 +79,16 @@ fn where_no_boot_is_told_a_handle_past_a_cut_that_died_is_told_so_and_appends_to
             let dir = alt_os::temp::tempdir().unwrap();
             let mut held = held_where_no_boot_is_told(dir.path());
             cut_that_dies(dir.path(), step);
+            // whatever reads the log tells that ops it holds were cut; a
+            // sync reads the log again by itself, as a writer does. A
+            // cut that was no more than told is taken back by that,
+            // and no boundary is set over the ops nobody looked at
+            let left = if step == 1 { 43 } else { 2 };
             let did = match way {
                 0 => held.append("a", 9, b"more").map(drop),
-                1 => held.sync(),
-                2 => held.refresh(),
-                3 => held.follow(),
+                1 => held.refresh(),
+                2 => held.follow(),
+                3 => held.sync(),
                 4 => held.bound_now(),
                 _ => {
                     held.set_defer_durability(true);
@@ -91,10 +96,27 @@ fn where_no_boot_is_told_a_handle_past_a_cut_that_died_is_told_so_and_appends_to
                     held.sync().and_then(|()| sink.fsync())
                 }
             };
-            assert!(matches!(did, Err(OpLogError::CutBack)), "{case}: {did:?}");
-            held.reopen().unwrap();
-            assert_eq!(held.len(), 2, "{case}");
+            match way {
+                0..3 => {
+                    assert!(matches!(did, Err(OpLogError::CutBack)), "{case}: {did:?}");
+                    held.reopen().unwrap();
+                    assert_eq!(held.len(), 2, "{case}");
+                }
+                _ => {
+                    // a writer that sets a boundary over all the log holds
+                    // sees to what other boots left, as before it appends
+                    match (step, way) {
+                        (1, 3 | 5) => {
+                            assert!(matches!(did, Err(OpLogError::Unjudged { .. })), "{case}")
+                        }
+                        _ => did.unwrap_or_else(|told| panic!("{case}: {told:?}")),
+                    }
+                    assert_eq!((held.len(), held.reads()), (left, 1), "{case}");
+                }
+            }
             held.set_defer_durability(false);
+            let all = |_: &alt_oplog::Op| Ok::<_, OpLogError>(true);
+            assert_eq!(held.settle(all).unwrap(), None, "{case}");
             held.append("a", 9, b"more").unwrap();
             held.sync().unwrap();
             assert!(held.confirmed(), "{case}");
@@ -135,13 +157,7 @@ fn where_no_boot_is_told_a_handle_past_where_another_thread_cuts_the_log_is_told
             matches!(told, Some(OpLogError::CutBack)),
             "step {step}: {told:?}"
         );
-        let synced = held.sync();
-        assert!(
-            matches!(synced, Err(OpLogError::CutBack)),
-            "step {step}: {synced:?}"
-        );
-        held.reopen().unwrap();
-        assert_eq!(held.len(), 2);
+        syncs_what_is_left(&mut held, &format!("step {step}"));
     }
 }
 
@@ -166,12 +182,13 @@ fn with_the_note_beside_the_log_gone_a_cut_that_died_is_told_to_whoever_holds_or
             opened.verify().unwrap();
         }
         // while the cut is only told, the frames all read
-        let told = told(&mut held);
+        let told = told(&held);
         let all_told = match step {
-            1 => "(Some(CutBack), None, None)",
+            1 => "(None, None)",
             _ => CUT_BACK,
         };
         assert_eq!(told, all_told, "step {step}");
+        assert!(matches!(held.follow(), Err(OpLogError::CutBack)));
         held.reopen().unwrap();
         assert_eq!(held.len(), 2);
         held.sync().unwrap();

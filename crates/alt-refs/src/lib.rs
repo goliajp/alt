@@ -29,7 +29,7 @@ use alt_git_codec::ObjectId;
 use alt_oplog::OpLog;
 use state::Refs;
 
-pub use alt_oplog::{OpId, Unconfirmed};
+pub use alt_oplog::{Answer, OpId, Ticket, Unconfirmed};
 pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
 pub use reading::left_out;

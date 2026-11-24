@@ -10,7 +10,7 @@ use crate::v2::block::{FILE_HEADER_LEN, FileHeader, Layout};
 use crate::v2::cuts::Cuts;
 use crate::v2::mark::{Mark, header_of};
 use crate::v2::open::{Loaded, Source, load};
-use crate::v2::sink::Deferred;
+use crate::v2::owed::Shared;
 use crate::v2::state::State;
 use crate::{Anchor, Discarded, Op, OpId, OpLogError, SyncNamed};
 
@@ -53,24 +53,18 @@ pub(crate) struct Log {
     pub(super) hidden: Option<u64>,
     /// how long the file was when this handle last read it as an open does
     pub(super) seen: u64,
+    /// Up to where the file held frames then that are still in the log:
+    /// a frame from here on was appended in the running boot, after that
+    /// read or after a cut made since.
+    pub(super) left_to: u64,
     /// this handle noted that ops are left to be looked at
     pub(super) left_noted: bool,
     pub(super) defer: bool,
     pub(super) write_count: u64,
     pub(super) unsynced: bool,
-    /// where the last frame this handle wrote ends, and the four bytes
-    /// of the file before that
-    pub(super) wrote: (u64, [u8; 4]),
-    /// the last frame this handle wrote awaits an answer from a sync of
-    /// the handle: it was neither synced nor left to the sink
-    pub(super) owes: bool,
-    /// frames this handle wrote that awaited such an answer were cut, and
-    /// no sync of it has told so yet
-    pub(super) lost: bool,
-    /// a sync of this handle told that frames it holds were cut, and the
-    /// handle has not read the log anew since
-    pub(super) told_cut: bool,
-    pub(super) deferred: Deferred,
+    /// the frames this handle wrote that no sync is recorded over, and
+    /// what it left for its sink, which shares it
+    pub(super) account: Shared,
     pub(super) clamped: bool,
     pub(super) passed: bool,
     pub(super) reads: u64,
@@ -134,15 +128,12 @@ impl Log {
             judged: Cell::new(0),
             hidden: None,
             seen: 0,
+            left_to: 0,
             left_noted: false,
             defer: false,
             write_count: 0,
             unsynced: false,
-            wrote: (0, [0; 4]),
-            owes: false,
-            lost: false,
-            told_cut: false,
-            deferred: Deferred::default(),
+            account: Shared::default(),
             clamped: false,
             passed: false,
             reads: 0,
@@ -188,6 +179,12 @@ impl Log {
         self.synced = self.synced.max(synced);
         self.judged.set(judged);
         (self.hidden, self.seen) = (hidden, seen);
+        // past the frames held are frames of the log only where the log
+        // ends short of them for this handle
+        self.left_to = match hidden {
+            Some(_) => seen,
+            None => self.state.end,
+        };
         (self.clamped, self.passed) = (clamped, passed);
         Ok(())
     }

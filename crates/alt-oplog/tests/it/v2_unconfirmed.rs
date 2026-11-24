@@ -228,14 +228,14 @@ fn a_handle_whose_op_was_cut_is_refused_until_it_reads_the_log_again() {
     writer.append("writer", 2, b"instead").unwrap();
     writer.sync().unwrap();
 
-    assert!(matches!(victim.sync(), Err(OpLogError::CutBack)));
     assert!(matches!(
         victim.append("victim", 3, b"x"),
         Err(OpLogError::CutBack)
     ));
     assert!(matches!(victim.refresh(), Err(OpLogError::CutBack)));
     assert!(matches!(victim.follow(), Err(OpLogError::CutBack)));
-    victim.reopen().unwrap();
+    // its sync tells that its op is gone, and reads the log again
+    assert!(matches!(victim.sync(), Err(OpLogError::CutBack)));
     assert_eq!((victim.reads(), victim.len()), (1, 4));
     assert_eq!(victim.recent().last().unwrap().payload, b"instead");
     victim.append("victim", 3, b"again").unwrap();

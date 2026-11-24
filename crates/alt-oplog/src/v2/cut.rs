@@ -39,7 +39,7 @@ impl Log {
     /// The ops among which those whose frames start at or after `from`
     /// are all found: the ones held, or all of the log where the read
     /// began after `from`.
-    fn ops_past(&self, from: u64) -> Result<&[Op], OpLogError> {
+    pub(super) fn ops_past(&self, from: u64) -> Result<&[Op], OpLogError> {
         match from < self.began {
             true => self.ops(),
             false => Ok(&self.ops),
@@ -101,16 +101,9 @@ impl Log {
         &mut self,
         mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
-        match self.catch_up() {
-            Err(OpLogError::CutBack) => {
-                // the caller is not told: what this handle wrote and
-                // what its sink was left stay owed an answer
-                self.read_anew()?;
-                self.owing()?;
-                self.catch_up()?;
-            }
-            caught_up => caught_up?,
-        }
+        // where frames it holds are gone the caller is not told: the
+        // ones the handle wrote stay owed an answer
+        self.read_to_end()?;
         self.check_synced()?;
         let from = self.judged.get();
         if from >= self.state.end {
@@ -248,9 +241,12 @@ impl Log {
         };
         tail.write(&self.beside(), &held)?;
         cut_reached(1)?;
-        let wrote = (self.wrote, self.owes);
         self.lay_cut(&discarded, generation)?;
-        self.cut_laid(at, wrote);
+        // the checkpoint is synced with the cut; of a frame this handle
+        // wrote that was cut, its caller is told by the look
+        self.unsynced = false;
+        self.left_to = self.left_to.min(at);
+        self.account.lock().unwrap().cut_at(at);
         if !pending {
             // with nothing left to look at, the checkpoint is covered too
             tail.judged = self.state.end;

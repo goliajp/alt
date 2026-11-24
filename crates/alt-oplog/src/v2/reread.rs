@@ -1,6 +1,7 @@
 //! Reading a version 2 log again from its first frame: for a handle
 //! whose ops were cut, and up to the place a writer cuts the log at.
 
+use std::io::ErrorKind;
 use std::sync::OnceLock;
 
 use crate::OpLogError;
@@ -8,6 +9,7 @@ use crate::v2::block::FILE_HEADER_LEN;
 use crate::v2::frame::{KIND_OP, View};
 use crate::v2::log::Log;
 use crate::v2::open::op_of;
+use crate::v2::owed::Owed;
 use crate::v2::scan::Stop;
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
@@ -44,51 +46,60 @@ impl Log {
     }
 
     /// Reads the log anew for a handle whose caller was told its ops
-    /// were cut: of what the handle wrote and never had synced, that
-    /// caller knows. What its sink was left to sync stays with the sink:
-    /// whoever waits for that sync was not told, and the sink tells it.
+    /// were cut: of the frames the handle holds itself that are gone,
+    /// that caller knows. A frame on a ticket, or left to the sink, is
+    /// told of to whoever asks with the ticket, or asks the sink.
     pub fn reopen(&mut self) -> Result<(), OpLogError> {
-        (self.told_cut, self.lost) = (true, false);
-        self.reread()
+        self.reread()?;
+        self.account.lock().unwrap().told();
+        Ok(())
     }
 
     /// Reads the log anew for whoever found the ops of this handle cut
-    /// and tells nobody: what the handle wrote and never had synced stays
-    /// owed an answer, which the next sync asked of it gives.
+    /// and tells nobody: a frame the handle wrote that is gone is told
+    /// of by the next sync its holder asks for.
     pub fn reread(&mut self) -> Result<(), OpLogError> {
         crate::lock::lock_shared(&self.file)?;
-        let read = self.read_anew().and_then(|()| self.owing());
+        let read = self.read_anew().and_then(|()| self.owed_looked());
         let _ = crate::lock::unlock(&self.file);
         read
     }
 
-    /// After the log was read anew: where the last frame this handle
-    /// wrote is no longer in it and still awaited an answer from a sync
-    /// of the handle, the next sync asked of it tells so, unless a sync
-    /// told already that frames held were cut. A frame left to the sink
-    /// is the sink's to tell of. One past where the log ends for a
-    /// reader, at a cut that was begun, is not cut yet: the cut is made,
-    /// and the handle finds its frames gone again, or it never is.
-    pub(super) fn owing(&mut self) -> Result<(), OpLogError> {
-        let told = std::mem::take(&mut self.told_cut);
-        let (end, closes) = self.wrote;
-        let waits = end > self.state.end && self.hidden.is_some();
-        if !(self.unsynced || self.owes) || waits {
-            return Ok(());
-        }
-        if end <= self.state.end && self.source().at(end - 4, 4)? == closes {
-            return Ok(());
-        }
-        self.lost |= self.owes && !told;
-        (self.unsynced, self.owes) = (false, false);
-        Ok(())
+    /// After the handle read the log, under a lock on it: looks at each
+    /// frame it wrote that no sync is recorded over. One that is not
+    /// where it was written was cut, and whoever holds it is told so
+    /// when that one asks. One past where the log ends for a reader, at
+    /// a cut that was begun, is not cut yet: the cut is made, and the
+    /// handle finds the frame gone when it reads on, or it never is.
+    pub(super) fn owed_looked(&mut self) -> Result<(), OpLogError> {
+        let (end, waits) = (self.state.end, self.hidden.is_some());
+        let source = self.source();
+        let placed = |owed: &Owed| -> Result<Option<bool>, OpLogError> {
+            if owed.end > end {
+                return Ok(if waits { None } else { Some(false) });
+            }
+            // a handle that holds frames which are gone looks past
+            // where the file ends now
+            match source.at(owed.end - 4, 4) {
+                Ok(closes) => Ok(Some(closes == owed.closes)),
+                Err(short) if short.kind() == ErrorKind::UnexpectedEof => Ok(Some(false)),
+                Err(other) => Err(other.into()),
+            }
+        };
+        self.account.lock().unwrap().look(placed)
     }
 
-    /// The frames this handle wrote up to byte `end` are answered for: a
-    /// sync covered them, or they are left to the sink.
-    pub(super) fn answered_to(&mut self, end: u64) {
-        if self.wrote.0 <= end {
-            self.owes = false;
+    /// Reads the log to its end as a writer does, for a handle that
+    /// may hold frames which are gone; the caller holds the exclusive
+    /// lock.
+    pub(super) fn read_to_end(&mut self) -> Result<(), OpLogError> {
+        match self.catch_up() {
+            Err(OpLogError::CutBack) => {
+                self.read_anew()?;
+                self.owed_looked()?;
+                self.catch_up()
+            }
+            caught_up => caught_up,
         }
     }
 

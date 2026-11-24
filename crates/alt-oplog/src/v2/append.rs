@@ -200,7 +200,10 @@ impl Log {
         let composer = self.composer();
         let mut state = self.state.clone();
         let bytes = composer.frame(&mut state, new)?;
-        self.put(&bytes, state)
+        self.put(&bytes, state)?;
+        let mut account = self.account.lock().unwrap();
+        account.wrote(self.state.end, self.closes, self.state.generation);
+        Ok(())
     }
 
     pub(super) fn composer(&self) -> Composer {
@@ -216,8 +219,7 @@ impl Log {
         self.file.write_all_at(bytes, self.state.end)?;
         self.closes.copy_from_slice(&bytes[bytes.len() - 4..]);
         self.state = state;
-        self.wrote = (self.state.end, self.closes);
-        (self.unsynced, self.owes) = (true, true);
+        self.unsynced = true;
         Ok(())
     }
 

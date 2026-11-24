@@ -24,6 +24,14 @@ pub enum OpLogError {
         unheld: u64,
         kept: u64,
     },
+    /// The op at byte `at`, past where the log is known synced, was
+    /// left by another boot, and nobody has looked since at whether
+    /// what it names is stored; a sync does not see to what it names.
+    /// The log is not recorded as synced over it: a writer looks first
+    /// ([`crate::OpLog::settle`]).
+    Unjudged {
+        at: u64,
+    },
 }
 
 impl std::fmt::Display for OpLogError {
@@ -42,6 +50,12 @@ impl std::fmt::Display for OpLogError {
                 "the operation at byte {unheld} of the operation log names content that is \
                  not stored, and an operation to keep follows it at byte {kept} in the part \
                  of the log that is not known to be synced: the log is left as it is"
+            ),
+            Self::Unjudged { at } => write!(
+                f,
+                "nobody has looked at whether what the operation at byte {at} of the \
+                 operation log names is stored, which was never synced: the log is not \
+                 recorded as synced over it"
             ),
             Self::CutBack => f.write_str(
                 "the operation log was cut back: operations that were never synced and \

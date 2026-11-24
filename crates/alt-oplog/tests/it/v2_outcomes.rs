@@ -24,10 +24,12 @@ impl Run {
         self.ledger.reconciled(told, cut);
     }
 
-    /// What a call on handle `index` came to: nothing where it was told
-    /// its ops were cut or failed as `may_fail` allows. A handle is told
-    /// so only when they were, and holds the log again once it has read
-    /// it anew.
+    /// What a call on handle `index` came to that reads the log or
+    /// appends to it: nothing where it was told that ops it holds were
+    /// cut, or failed as `may_fail` allows. A handle is told so only
+    /// when ops it holds are gone or a cut of them was begun. It reads
+    /// the log anew then, with its caller told or with nobody told, and
+    /// holds the log again.
     pub fn took<T>(
         &mut self,
         index: usize,
@@ -36,28 +38,27 @@ impl Run {
     ) -> Option<T> {
         let told = self.handles[index].log.take_discarded();
         self.cuts_told(&told, None);
-        let by_sink = std::mem::take(&mut self.by_sink);
         match did {
             Ok(value) => Some(value),
             Err(OpLogError::CutBack) => {
+                let tells = self.also.one_in(2);
                 self.trace.push(format!(
-                    "  it is told its ops were cut (by its sink: {by_sink})"
+                    "  it is told its ops were cut, and tells its caller: {tells}"
                 ));
                 let len = self.file_len();
-                // its sink tells of what it was left to sync, which is
-                // held to that where it answered; a handle is told of
-                // the ops it holds, of one it wrote and never had
-                // synced, or of what its sink still owes an answer for
-                let owed = std::mem::take(&mut self.owed_told);
-                if by_sink {
-                    self.counts.told_by_sink.fetch_add(1, Ordering::Relaxed);
-                } else if !owed {
-                    self.handle_told(index);
-                }
-                self.forget_gone(index);
+                self.handle_told(index);
                 let handle = &mut self.handles[index];
-                handle.log.reopen().expect("the log reads anew");
+                match tells {
+                    true => handle.log.reopen().expect("the log reads anew"),
+                    false => handle.log.reread().expect("the log reads anew"),
+                }
                 handle.seen.push(len);
+                if tells {
+                    self.forget_gone(index);
+                } else {
+                    self.counts.untold.fetch_add(1, Ordering::Relaxed);
+                }
+                let handle = &mut self.handles[index];
                 assert!(self.ledger.holds(handle.log.anchor()));
                 handle.log.follow().expect("it holds the log again");
                 self.counts.cut_back.fetch_add(1, Ordering::Relaxed);
@@ -68,6 +69,23 @@ impl Run {
                 None
             }
             Err(other) => panic!("{other:?}"),
+        }
+    }
+
+    /// Handle `index` is told that ops it holds were cut, by a call
+    /// that reads the log or appends to it: ops it holds are gone, or
+    /// a cut of them was begun.
+    fn handle_told(&mut self, index: usize) {
+        let handle = &self.handles[index];
+        let (last, end) = (handle.log.anchor(), handle.log.appended_len());
+        let begun = self.ledger.begun.is_some_and(|at| at < end);
+        let held = self.ledger.holds(last);
+        assert!(
+            begun || !held,
+            "handle {index} is told its ops were cut: the log holds them, up to {end}"
+        );
+        if held {
+            self.counts.cut_back_begun.fetch_add(1, Ordering::Relaxed);
         }
     }
 

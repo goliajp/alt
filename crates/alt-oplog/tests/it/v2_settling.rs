@@ -66,21 +66,12 @@ impl Run {
         let Some(cut) = self.took(index, cut, false) else {
             return false;
         };
-        let before: Vec<_> = self.ledger.ops.iter().map(|op| op.id).collect();
-        let receipts = self.handles[index].receipts.clone();
-        let had: Vec<_> = receipts
-            .into_iter()
-            .filter(|of| self.ledger.receipt_of(*of))
-            .collect();
+        let had = self.in_the_log(index);
         let cut = self.settled(&unsettled, &refused, &asked, (cut, told));
         self.counts.cuts.fetch_add(cut as u64, Ordering::Relaxed);
-        // of the ops it cut itself the handle was told by its look
-        let cut_now = &before[self.ledger.ops.len().min(before.len())..];
-        let (ledger, handle) = (&self.ledger, &mut self.handles[index]);
-        handle.own.retain(|own| !cut_now.contains(&own.op));
-        handle
-            .receipts
-            .retain(|of| !had.contains(of) || ledger.receipt_of(*of));
+        // of the frames on no ticket that it cut itself, its caller is
+        // told by the look, and of no other
+        self.forget_cut_now(index, had);
         let len = self.file_len();
         self.handles[index].seen.push(len);
         true
@@ -119,18 +110,34 @@ impl Run {
             "handle {held} comes upon the cut that died after step {step} (way {way})"
         ));
         let handle = &mut self.handles[held];
-        let did = match way {
-            0 => handle.log.follow(),
-            1 => handle.log.refresh(),
-            2 => self.sync_through(held, 0, &[]),
-            _ => self.sync_through(held, 1, &[]),
-        };
-        assert!(
-            matches!(did, Err(OpLogError::CutBack)),
-            "a handle that holds ops past where a cut died after step {step} is told {did:?}"
-        );
         let came = &self.counts.came_upon[step as usize - 1];
         came.fetch_add(1, Ordering::Relaxed);
-        self.took(held, did, false);
+        // whatever reads the log tells of the cut; a sync of a handle
+        // that wrote none of the ops reads the log again by itself
+        if way < 2 {
+            let did = match way {
+                0 => handle.log.follow(),
+                _ => handle.log.refresh(),
+            };
+            assert!(
+                matches!(did, Err(OpLogError::CutBack)),
+                "a handle that holds ops past where a cut died after step {step} is told {did:?}"
+            );
+            self.took(held, did, false);
+            return;
+        }
+        let synced = self.sync_through(held, way - 2, &[]);
+        self.by_sink = false;
+        if let Err(OpLogError::Unjudged { at }) = synced {
+            self.unjudged(held, at);
+        }
+        // one that leaves its syncs to a sink learns nothing by that
+        let handle = &self.handles[held];
+        let told = matches!(synced, Err(OpLogError::CutBack));
+        let holds = handle.sink.is_some() || self.ledger.holds(handle.log.anchor());
+        assert!(
+            !told && holds,
+            "a handle past where a cut died after step {step} syncs: {synced:?}"
+        );
     }
 }

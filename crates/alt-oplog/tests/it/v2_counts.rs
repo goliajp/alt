@@ -11,17 +11,26 @@ pub struct Counts {
     pub cut_back: AtomicU64,
     /// of them, those whose ops the log held: a cut of them was begun
     pub cut_back_begun: AtomicU64,
-    /// of them, those told by their sinks, of what the sinks were left
-    pub told_by_sink: AtomicU64,
-    /// of them, those told by a sync of an op they wrote and never had
-    /// synced, with the ops they hold in the log
-    pub lost_told: AtomicU64,
-    /// syncs left to a sink that the sink synced, and that it told of
-    /// as cut
+    /// of them, those that read the log anew with nobody told
+    pub untold: AtomicU64,
+    /// callers without a ticket told by a handle that frames were cut
+    pub own_cut: AtomicU64,
+    /// frames left to a sink, for a caller without a ticket, that the
+    /// sink synced, and that it told of a cut for
     pub left_synced: AtomicU64,
     pub left_told: AtomicU64,
-    /// syncs that were not left to a sink over what it still owed
-    pub refused_over: AtomicU64,
+    /// tickets taken; those answered as synced, as cut, and as owed an
+    /// answer by a sink still; and those answered when the sequence was
+    /// over
+    pub claims: AtomicU64,
+    pub claims_synced: AtomicU64,
+    pub claims_cut: AtomicU64,
+    pub claims_owed: AtomicU64,
+    pub claims_late: AtomicU64,
+    /// syncs refused a boundary over an op nobody looked at
+    pub unjudged: AtomicU64,
+    /// of them, over an op the driver knows nobody has to look at
+    pub unjudged_more: AtomicU64,
     /// cuts refused before a frame to keep, and within what is synced
     pub kept_refused: AtomicU64,
     pub lost_refused: AtomicU64,
@@ -53,11 +62,17 @@ impl Counts {
             cuts_died: AtomicU64::new(0),
             cut_back: AtomicU64::new(0),
             cut_back_begun: AtomicU64::new(0),
-            told_by_sink: AtomicU64::new(0),
-            lost_told: AtomicU64::new(0),
+            untold: AtomicU64::new(0),
+            own_cut: AtomicU64::new(0),
             left_synced: AtomicU64::new(0),
             left_told: AtomicU64::new(0),
-            refused_over: AtomicU64::new(0),
+            claims: AtomicU64::new(0),
+            claims_synced: AtomicU64::new(0),
+            claims_cut: AtomicU64::new(0),
+            claims_owed: AtomicU64::new(0),
+            claims_late: AtomicU64::new(0),
+            unjudged: AtomicU64::new(0),
+            unjudged_more: AtomicU64::new(0),
             kept_refused: AtomicU64::new(0),
             lost_refused: AtomicU64::new(0),
             meanwhile: AtomicU64::new(0),
@@ -86,7 +101,7 @@ impl Counts {
     pub fn named(&self) -> Vec<(&'static str, &AtomicU64)> {
         let came = |step: usize| &self.came_upon[step - 1];
         let told_begun = "of them told so of ops the log held, a cut of them begun";
-        let told_by_sink = "of them told by their sinks, of what the sinks were left";
+        let untold = "of them read the log anew with nobody told";
         vec![
             ("sequences", &self.sequences),
             ("with the note beside the log kept", &self.kept),
@@ -97,7 +112,7 @@ impl Counts {
             ("cuts of ops nobody vouched for", &self.cuts),
             ("handles told their ops were cut", &self.cut_back),
             (told_begun, &self.cut_back_begun),
-            (told_by_sink, &self.told_by_sink),
+            (untold, &self.untold),
             ("handles past a cut that died after step 1", came(1)),
             ("after step 2", came(2)),
             ("after step 3", came(3)),
@@ -134,14 +149,23 @@ impl Counts {
     fn named_of_syncs(&self) -> Vec<(&'static str, &AtomicU64)> {
         vec![
             (
-                "handles told by a sync of an op they wrote, the ops held in the log",
-                &self.lost_told,
+                "callers without a ticket told of a cut by a handle",
+                &self.own_cut,
             ),
-            ("syncs left to a sink that it synced", &self.left_synced),
-            ("that it told of as cut", &self.left_told),
+            ("frames left to a sink that it synced", &self.left_synced),
+            ("that it told of a cut for", &self.left_told),
+            ("tickets taken", &self.claims),
+            ("answered as synced", &self.claims_synced),
+            ("answered as cut", &self.claims_cut),
+            ("answered as owed by a sink still", &self.claims_owed),
+            ("answered once the sequence was over", &self.claims_late),
             (
-                "syncs not left to a sink over what it still owed",
-                &self.refused_over,
+                "syncs refused a boundary over an op nobody looked at",
+                &self.unjudged,
+            ),
+            (
+                "of them over an op the driver knows needs no look",
+                &self.unjudged_more,
             ),
             ("cuts refused before a frame to keep", &self.kept_refused),
             (

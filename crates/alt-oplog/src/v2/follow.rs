@@ -118,6 +118,10 @@ impl Log {
             let closes = self.source().at(state.end - 4, 4)?;
             self.closes.copy_from_slice(&closes);
         }
+        if state.cut != self.state.cut {
+            // what follows a cut made since was appended after it
+            self.left_to = self.left_to.min(state.cut);
+        }
         self.state = state;
         if let Some(full) = self.full.get_mut() {
             full.extend_from_slice(&added);
@@ -196,6 +200,11 @@ impl Log {
             // does not meet this write halfway
             let _held = Held::take(&self.dir)?;
             Mark::default().write(&self.file)?;
+        }
+        // a frame of this handle past where the log ended for it is
+        // found now, or is gone
+        if self.hidden.is_none() && self.account.lock().unwrap().unsure {
+            self.owed_looked()?;
         }
         Ok(())
     }

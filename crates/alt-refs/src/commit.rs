@@ -105,14 +105,17 @@ impl RefStore {
         changes: &[RefChange],
         key: Option<IdemKey>,
     ) -> Result<(), RefError> {
-        self.oplog.sync()?;
-        // our own op is durable now; fold it into the map, the cursor, and the
-        // idempotency index (so a retry with the same key is detected)
-        self.refs.apply(changes, false)?;
-        if let Some(k) = key {
-            self.by_key.insert(k, op);
+        // a log that read itself anew for the sync has the refs derived
+        // from it again, this transaction among them
+        if !self.sync_log(None)? {
+            // our own op is durable now; fold it into the map, the cursor, and
+            // the idempotency index (so a retry with the same key is detected)
+            self.refs.apply(changes, false)?;
+            if let Some(k) = key {
+                self.by_key.insert(k, op);
+            }
+            self.applied = self.oplog.recent().len();
         }
-        self.applied = self.oplog.recent().len();
         self.note_op()
     }
 }

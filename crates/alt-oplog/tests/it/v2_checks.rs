@@ -80,6 +80,12 @@ impl Run {
         self.calls();
         let log = self.log();
         self.ledger.agrees(&log);
+        // a cut the header tells of no longer once a writer has read
+        // the log to its end, as a sync does for a handle whose frames
+        // are gone
+        if super::v2_cut_told::cut_told(self.path()).0 <= log.cut.0 {
+            self.ledger.begun = None;
+        }
         if self.cut_synced {
             self.model.fsynced = self.model.fsynced.max(log.cut.1);
         }

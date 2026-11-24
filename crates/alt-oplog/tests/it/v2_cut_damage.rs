@@ -49,17 +49,12 @@ fn damage_before_where_a_cut_was_begun_is_told_as_damage_and_not_as_a_cut() {
         cut_that_dies(dir.path(), step);
         damage(dir.path(), b"kept");
         let read = format!("{:?}", (held.verify().err(), held.ops().err()));
-        let damaged = "Some(Format(\"oplog record corrupt\"))";
-        let unread = "(Some(Format(\"the oplog does not lead to where it ends\")), \
-                      Some(Format(\"the oplog does not lead to where it ends\")))";
+        let damaged = "Some(Format(\"the oplog does not lead to where it ends\"))";
+        let unread = format!("({damaged}, {damaged})");
         assert_eq!(read, unread, "step {step}");
-        // a sync finds `kept` from `left`, which the checkpoint of the
-        // cut lies over from its second step on
+        // a sync reads the ops nobody looked at, `kept` among them
         let synced = format!("{:?}", held.sync().err());
-        match step {
-            1 => assert_eq!(synced, damaged),
-            _ => assert_eq!(synced, "Some(CutBack)", "step {step}"),
-        }
+        assert_eq!(synced, damaged, "step {step}");
     }
 }
 

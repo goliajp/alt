@@ -1,7 +1,7 @@
 //! The sink of a log of either format.
 
 use super::{Inner, OpLog};
-use crate::{OpLogError, sink, v2};
+use crate::{Answer, OpLogError, Ticket, sink, v2};
 
 impl OpLog {
     /// An independent fsync handle on the log file, for the daemon's
@@ -58,10 +58,39 @@ impl OpLogSink {
         }
     }
 
+    /// Both halves. It answers for the records the handle left to this
+    /// sink that are on no [`Ticket`], as for the records of one
+    /// caller: where one of them was cut it tells so
+    /// ([`OpLogError::CutBack`]), once.
     pub fn fsync(&self) -> Result<(), OpLogError> {
         match &self.0 {
             SinkOf::V1(sink) => sink.fsync(),
             SinkOf::V2(sink) => sink.fsync_to(sink.reached()?),
+        }
+    }
+
+    /// [`Self::fsync`] for the holder of `ticket`: nothing is synced
+    /// where a sync is recorded over its records already. It tells of a
+    /// cut ([`OpLogError::CutBack`]) where a record on the ticket was
+    /// cut, and of none otherwise. [`Answer::Owed`] where the records
+    /// are in the log and the sink has nothing to sync them up to: what
+    /// the handle left was cut past them, and the handle is asked again
+    /// ([`OpLog::sync_for`]).
+    pub fn fsync_for(&self, ticket: &Ticket) -> Result<Answer, OpLogError> {
+        match &self.0 {
+            SinkOf::V1(sink) => sink.fsync().map(|()| Answer::Synced),
+            SinkOf::V2(sink) => sink.fsync_for(ticket),
+        }
+    }
+
+    /// What became of the records on `ticket`, as far as the fsyncs
+    /// made so far tell: for each of the callers whose records one
+    /// fsync was made for. One failure of that fsync that found records
+    /// cut tells every caller whose ticket holds one of them.
+    pub fn answer(&self, ticket: &Ticket) -> Result<Answer, OpLogError> {
+        match &self.0 {
+            SinkOf::V1(_) => Ok(Answer::Synced),
+            SinkOf::V2(sink) => sink.answer(ticket),
         }
     }
 }

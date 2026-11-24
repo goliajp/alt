@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use alt_oplog::{Anchor, Meta, OpLog, OpLogSink, SyncNamed};
 
+use super::v2_owed::{Claim, Wrote};
+
 use super::v2_beside::{Beside, meddled};
 use super::v2_counts::Counts;
 use super::v2_ledger::Ledger;
@@ -24,26 +26,16 @@ pub struct Handle {
     pub sink: Option<OpLogSink>,
     /// how long the file was each time the handle read it as an open does
     pub seen: Vec<u64>,
-    /// The syncs it left to its sink that the sink has given no answer
-    /// for: for each, the op that was the handle's last then, and where
-    /// its frames ended. The sink syncs them or tells of their cut,
-    /// whatever the handle holds since.
-    pub left: Vec<(Option<Anchor>, u64)>,
-    /// the ops it appended that no sync of it has answered for, and the
-    /// requests whose receipts it appended
-    pub own: Vec<Anchor>,
-    pub receipts: Vec<[u8; 16]>,
-}
-
-impl Handle {
-    /// The handle asked for what it holds to be synced, which is left
-    /// to its sink where it holds a frame.
-    pub fn leaves(&mut self) {
-        let end = self.log.appended_len();
-        if end > 64 {
-            self.left.push((self.log.anchor(), end));
-        }
-    }
+    /// The frames it wrote that are on no ticket and that its caller
+    /// without one was not answered for: by the handle, and, of those
+    /// it left to its sink, by the sink.
+    pub mine: Vec<Wrote>,
+    pub left: Vec<Wrote>,
+    /// what it held when it last left its frames to its sink: its last
+    /// op, and where its frames ended
+    pub head_left: Option<(Option<Anchor>, u64)>,
+    /// the tickets taken from it that nobody was answered for
+    pub claims: Vec<Claim>,
 }
 
 pub struct Run {
@@ -70,9 +62,8 @@ pub struct Run {
     pub died: u64,
     /// what the call taken in next came to, its sink told
     pub by_sink: bool,
-    /// the handle of the call taken in next was told of a cut for what
-    /// its sink still owed an answer for
-    pub owed_told: bool,
+    /// the next handle opened to write leaves its syncs to a sink
+    pub to_defer: bool,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -149,7 +140,7 @@ impl Run {
             cut_synced: false,
             died: 0,
             by_sink: false,
-            owed_told: false,
+            to_defer: false,
             trace: Vec::new(),
             counts,
         }
@@ -181,7 +172,7 @@ impl Run {
             self.refuses.clone(),
             Some(meanwhile),
         ));
-        let deferred = !read_only && self.rng.one_in(4);
+        let deferred = !read_only && (self.rng.one_in(4) || self.to_defer);
         log.set_defer_durability(deferred);
         let sink = deferred.then(|| log.sync_handle().unwrap());
         self.trace
@@ -191,9 +182,10 @@ impl Run {
             read_only,
             sink,
             seen: vec![self.file_len()],
+            mine: Vec::new(),
             left: Vec::new(),
-            own: Vec::new(),
-            receipts: Vec::new(),
+            head_left: None,
+            claims: Vec::new(),
         });
         self.handles.len() - 1
     }

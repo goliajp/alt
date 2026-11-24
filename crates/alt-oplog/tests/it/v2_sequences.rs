@@ -71,8 +71,10 @@ impl Run {
         }
     }
 
-    /// Has the handle sync what it holds: itself, through its sink, or
-    /// as a writer does that sets a boundary over all the log holds.
+    /// Has the handle sync what it holds for a caller without a ticket
+    /// (`how` 0), set a boundary over all the log holds as a writer
+    /// does (1), or sync for a caller that takes a ticket now (2) or
+    /// took one before (3).
     pub fn sync(&mut self, index: usize, how: u64) {
         let unsettled = self.unsettled_before(u64::MAX);
         let fails = self.rng.one_in(8);
@@ -80,13 +82,38 @@ impl Run {
             .push(format!("handle {index} syncs (way {how}), fails: {fails}"));
         self.plan_meanwhile();
         self.refuses.store(fails, Ordering::Relaxed);
-        let synced = self.sync_through(index, how, &unsettled);
-        if how != 0 && !matches!(synced, Err(OpLogError::CutBack)) {
-            // it read the log to its end under the lock first
-            self.ledger.begun = None;
-        }
+        let claims = self.handles[index].claims.len() as u64;
+        let synced = match how {
+            0 | 1 => self.sync_through(index, how, &unsettled),
+            2 => {
+                self.claim(index);
+                self.ask(index, claims as usize, &unsettled);
+                Ok(())
+            }
+            _ if claims != 0 => {
+                let claim = self.rng.below(claims) as usize;
+                self.ask(index, claim, &unsettled);
+                Ok(())
+            }
+            _ => Ok(()),
+        };
         self.refuses.store(false, Ordering::Relaxed);
-        self.took(index, synced, fails);
+        // what was planned and found nobody that gave up the lock is off
+        self.meanwhile_done(&unsettled);
+        let by_sink = std::mem::take(&mut self.by_sink);
+        match synced {
+            Ok(()) => {}
+            Err(OpLogError::CutBack) => self.trace.push(format!(
+                "  its caller is told of a cut (by the sink: {by_sink})"
+            )),
+            Err(OpLogError::Io(_)) if fails => {
+                self.trace.push("  it fails as it was made to".into())
+            }
+            Err(OpLogError::Unjudged { at }) => self.unjudged(index, at),
+            Err(other) => panic!("{other:?}"),
+        }
+        let told = self.handles[index].log.take_discarded();
+        self.cuts_told(&told, None);
     }
 
     /// Any handle looks at what was left, as a reader does.
@@ -175,9 +202,13 @@ impl Run {
             }
             10..41 => self.append(),
             41..42 => self.cut_begun(),
-            42..51 => {
-                let (index, how) = (self.writer(), self.rng.below(2));
+            42..50 => {
+                let (index, how) = (self.writer(), self.rng.below(4));
                 self.sync(index, how);
+            }
+            50..51 => {
+                let index = self.writer();
+                self.claim(index);
             }
             51..58 => {
                 let index = self.rng.below(self.handles.len() as u64) as usize;
@@ -197,6 +228,7 @@ impl Run {
             }
             88..92 => self.receipt(),
             92..95 => self.open_anchored(),
+            95..96 => self.owed_by_a_sink(),
             _ => self.grow_back(),
         }
     }
@@ -217,6 +249,11 @@ fn run(seed: u64, block_exp: u8, steps: usize, counts: &'static Counts) {
             run.step();
             run.held_to_the_model();
         }
+        // every caller asks at last, however long ago it wrote
+        for index in 0..run.handles.len() {
+            run.all_ask(index);
+        }
+        run.held_to_the_model();
     }));
     alt_oplog::v2::cut_dies_after(None);
     alt_oplog::v2::before_note_read(None);

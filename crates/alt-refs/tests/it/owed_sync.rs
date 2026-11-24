@@ -9,7 +9,7 @@ use alt_refs::{RefChange, RefError, RefStore, RefTarget};
 
 use super::v2::{boot, held, new_store, oid, point, store_with_unsynced};
 
-fn commit(store: &mut RefStore, name: &str, at: u8) -> Result<(), RefError> {
+pub fn commit(store: &mut RefStore, name: &str, at: u8) -> Result<(), RefError> {
     let change = RefChange {
         old: store.get(name).cloned(),
         new: Some(RefTarget::Oid(oid(at))),
@@ -21,7 +21,7 @@ fn commit(store: &mut RefStore, name: &str, at: u8) -> Result<(), RefError> {
 /// Has another handle, which finds no note beside the log, cut every op
 /// after the first `synced` ops of the log, which are synced and what
 /// they name with them; how many.
-fn cut_unsynced(dir: &Path, synced: u64) -> usize {
+pub fn cut_unsynced(dir: &Path, synced: u64) -> usize {
     let log = dir.join("oplog");
     let _ = std::fs::remove_file(log.join("tail"));
     let mut other = OpLog::open(&log).unwrap();
@@ -29,7 +29,7 @@ fn cut_unsynced(dir: &Path, synced: u64) -> usize {
     other.settle(held).unwrap().map_or(0, |cut| cut.ops)
 }
 
-fn cut_back<T: std::fmt::Debug>(told: Result<T, RefError>) -> bool {
+pub fn cut_back<T: std::fmt::Debug>(told: Result<T, RefError>) -> bool {
     match told {
         Err(RefError::OpLog(OpLogError::CutBack)) => true,
         Err(RefError::Recorded { cause, .. }) => {
@@ -39,7 +39,7 @@ fn cut_back<T: std::fmt::Debug>(told: Result<T, RefError>) -> bool {
     }
 }
 
-fn goes_on(store: &mut RefStore, follows: bool) {
+pub fn goes_on(store: &mut RefStore, follows: bool) {
     match follows {
         true => store.follow().unwrap(),
         false => store.refresh().unwrap(),
@@ -82,19 +82,20 @@ fn a_store_that_goes_on_past_a_cut_leaves_its_sink_to_tell_of_the_transactions_c
 }
 
 #[test]
-fn a_commit_after_a_cut_is_not_left_to_the_sink_over_the_transactions_it_still_has_to_tell_of() {
+fn a_commit_after_a_cut_is_synced_by_the_sink_that_tells_of_the_transactions_cut_before_it() {
     for follows in [false, true] {
         let dir = alt_os::temp::tempdir().unwrap();
         let (mut store, sink) = left_to_a_sink(dir.path());
         goes_on(&mut store, follows);
-        // the commit is told, and so is whoever waits for the sink
-        let committed = commit(&mut store, "refs/heads/main", 3);
-        assert!(cut_back(committed), "follows: {follows}");
+        // its transaction is in the log: the commit is told of no cut
+        commit(&mut store, "refs/heads/main", 3).unwrap();
+        // whoever waits for the sink is, once, and the commit is synced
         let told = sink.fsync();
         assert!(
             matches!(told, Err(OpLogError::CutBack)),
             "follows: {follows}, {told:?}"
         );
+        assert!(store.confirmed(), "follows: {follows}");
         commit(&mut store, "refs/heads/dev", 4).unwrap();
         sink.fsync().unwrap();
         assert!(store.confirmed());
@@ -136,17 +137,9 @@ fn held_open_over_a_cut(dir: &Path, deferred: bool) -> RefStore {
         old: Some(RefTarget::Oid(oid(2))),
         new: Some(RefTarget::Oid(oid(7))),
     };
+    // it reads the log again by itself and finds the conflict
     let refused = held_open.commit("a", 7, &[stale]).unwrap_err();
-    match deferred {
-        // it may have appended ops that were cut: it is told, and goes
-        // on once it has read the log again
-        true => {
-            assert!(cut_back(Err::<(), _>(refused)));
-            held_open.refresh().unwrap();
-        }
-        // it reads the log again by itself and finds the conflict
-        false => assert!(matches!(refused, RefError::Conflict { .. }), "{refused:?}"),
-    }
+    assert!(matches!(refused, RefError::Conflict { .. }), "{refused:?}");
     let main = held_open.get("refs/heads/main");
     assert_eq!(main, Some(&RefTarget::Oid(oid(1))));
     assert_eq!(held_open.get("refs/heads/dev"), None);
@@ -183,118 +176,53 @@ fn a_store_held_open_follows_a_cut_made_by_another_and_the_sync_that_was_to_cove
     }
 }
 
-/// Numbers that follow from a seed.
-struct Rng(u64);
-
-impl Rng {
-    fn below(&mut self, bound: u64) -> u64 {
-        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        let mut mixed = self.0;
-        mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        (mixed ^ (mixed >> 31)) % bound
-    }
-}
-
-/// The refs a store opened now holds, by the number each points at.
-fn in_the_log(dir: &Path) -> Vec<u8> {
-    let store = RefStore::open_read_only(dir).unwrap();
-    let pointed = |n: u8| {
-        store
-            .iter()
-            .any(|(_, target)| *target == RefTarget::Oid(oid(n)))
-    };
-    (1..=40).filter(|n| pointed(*n)).collect()
-}
-
-/// Holds what a sink answered to an fsync to the log in `dir`: the
-/// commits `left` to it are in the log, or it tells of a cut and one of
-/// them is gone. Either way they are answered for; how many were synced,
-/// and how many told of.
-fn answer_held(
-    dir: &Path,
-    answered: Result<(), OpLogError>,
-    left: &mut Vec<u8>,
-    case: &str,
-) -> (u64, u64) {
-    let held = in_the_log(dir);
-    let answered_for = left.len() as u64;
-    match answered {
-        Ok(()) => {
-            for n in left.drain(..) {
-                assert!(held.contains(&n), "{case}: commit {n} is told as synced");
-            }
-            (answered_for, 0)
-        }
-        Err(OpLogError::CutBack) => {
-            assert!(!left.is_empty(), "{case}: told of a cut of nothing");
-            let gone = left.iter().any(|n| !held.contains(n));
-            assert!(
-                gone,
-                "{case}: told of a cut, and the log holds what was left"
-            );
-            left.clear();
-            (0, answered_for)
-        }
-        Err(other) => panic!("{case}: {other:?}"),
-    }
-}
-
-/// One sequence of commits left to a sink, cuts by another handle, the
-/// store going on past them, and fsyncs of the sink. Each commit left to
-/// the sink is synced by it, with its transaction in the log, or told
-/// of as cut, once. Returns how many came to each end.
-fn sequence(seed: u64) -> (u64, u64) {
+#[test]
+fn a_store_whose_sync_tells_of_a_cut_follows_the_log_that_read_itself_anew_for_it() {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
     let mut store = new_store(dir.path());
-    store.set_defer_durability(true);
-    let sink = store.sync_handle().unwrap();
-    let mut rng = Rng(seed);
-    // the commits the sink was left with and has given no answer for
-    let (mut left, mut next, mut ends) = (Vec::new(), 0u8, (0, 0));
-    // how many ops the log held when the sink last synced it, and
-    // whether ops the store holds were cut since it last read the log
-    let (mut synced, mut stale) = (0, false);
-    for step in 0..30 {
-        let case = format!("seed {seed}, step {step}");
-        match rng.below(6) {
-            0 | 1 => {
-                next += 1;
-                let name = format!("refs/heads/b{next}");
-                match commit(&mut store, &name, next) {
-                    Ok(()) => left.push(next),
-                    // it holds ops that are gone, or its sink still owes
-                    // an answer for some
-                    told => assert!(cut_back(told) && (stale || !left.is_empty()), "{case}"),
-                }
-            }
-            2 => stale |= cut_unsynced(dir.path(), synced) > 0,
-            3 => {
-                goes_on(&mut store, rng.below(2) == 0);
-                stale = false;
-            }
-            _ => {
-                let answered = sink.fsync();
-                let (done, told) = answer_held(dir.path(), answered, &mut left, &case);
-                ends = (ends.0 + done, ends.1 + told);
-                if done > 0 {
-                    let log = OpLog::open_read_only(&dir.path().join("oplog"), None);
-                    synced = log.unwrap().len() as u64;
-                }
-            }
-        }
+    commit(&mut store, "refs/heads/main", 1).unwrap();
+    {
+        let _unsynced = alt_os::durability::leave_unsynced(true);
+        commit(&mut store, "refs/heads/dev", 2).unwrap();
     }
-    ends
+    assert_eq!(cut_unsynced(dir.path(), 1), 1);
+    // the store holds the transaction that is gone until the sync
+    assert!(cut_back(store.bound()));
+    assert_eq!((store.len(), store.get("refs/heads/dev")), (1, None));
+    commit(&mut store, "refs/heads/next", 3).unwrap();
+    assert_eq!(store.len(), 2);
 }
 
 #[test]
-fn whatever_a_store_does_past_cuts_each_commit_left_to_its_sink_is_synced_or_told_of_once() {
-    let (mut synced, mut told) = (0, 0);
-    for seed in 0..300 {
-        let ends = sequence(seed);
-        (synced, told) = (synced + ends.0, told + ends.1);
+fn an_op_recorded_without_a_sync_that_was_cut_is_told_of_by_the_sync_of_the_op_after_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut store = new_store(dir.path());
+    commit(&mut store, "refs/heads/main", 1).unwrap();
+    for round in 0..2 {
+        // a sync of the store tells of a cut, and is over with that
+        {
+            let _unsynced = alt_os::durability::leave_unsynced(true);
+            commit(&mut store, "refs/heads/dev", 2).unwrap();
+        }
+        assert_eq!(cut_unsynced(dir.path(), 1), 1);
+        store.refresh().unwrap();
+        assert!(cut_back(store.bound()), "round {round}");
+        // the next op that is recorded without a sync is cut, and the
+        // sync of the op after it tells so
+        store
+            .record_op_unsynced("a", 3, b"\x40 a step begun")
+            .unwrap();
+        assert_eq!(cut_unsynced(dir.path(), 1), 1);
+        store.refresh().unwrap();
+        let recorded = store.record_op("a", 4, b"\x40 a step done");
+        assert!(cut_back(recorded), "round {round}");
+        let log = OpLog::open(&dir.path().join("oplog")).unwrap();
+        assert_eq!(log.len(), 2, "round {round}");
+        assert_eq!(cut_unsynced(dir.path(), 1), 1);
+        store.refresh().unwrap();
+        assert!(cut_back(store.bound()), "round {round}");
+        store.bound().unwrap();
     }
-    eprintln!("{synced} commits synced by the sink, {told} told of as cut");
-    assert!(synced > 100 && told > 100);
 }

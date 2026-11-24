@@ -7,7 +7,6 @@ use std::path::Path;
 
 use alt_oplog::{Op, OpLog, OpLogError};
 
-use super::v2_cut_back::{but_left, held_past_left};
 use super::v2_image::linked;
 use super::v2_log::{boot, grow, new_log};
 use super::v2_named::collecting;
@@ -57,9 +56,12 @@ fn a_sync_tells_of_the_cut_of_an_op_though_the_log_is_noted_as_synced_past_where
             matches!(synced, Err(OpLogError::CutBack)),
             "deferred: {deferred}, {synced:?}"
         );
-        assert!(!held.confirmed(), "deferred: {deferred}");
         let log = OpLog::open(dir.path()).unwrap();
         assert!(log.ops().unwrap().iter().all(|op| op.payload != b"mine"));
+        // told once: the handle holds the log as it is, which is synced
+        held.sync().unwrap();
+        sink.fsync().unwrap();
+        assert_eq!(held.len(), 3, "deferred: {deferred}");
     }
 }
 
@@ -86,31 +88,26 @@ fn what_a_sink_was_left_to_sync_it_syncs_also_once_its_handle_has_read_the_log_a
 }
 
 #[test]
-fn a_sync_asked_anew_is_not_laid_over_what_the_sink_was_left_with_once_that_is_cut() {
+fn what_a_handle_leaves_to_its_sink_anew_is_synced_while_the_sink_tells_of_what_was_cut_before() {
     let dir = alt_os::temp::tempdir().unwrap();
-    let (mut held, _given) = held_past_left(dir.path(), true, false);
+    // its sink is left to sync an op of the handle, which is then cut
+    let mut held = held_past_mine(dir.path(), true, false);
     let sink = held.sync_handle().unwrap();
-    // its sink is left to sync up to the last of the forty ops
     held.sync().unwrap();
-    let mut cutter = OpLog::open(dir.path()).unwrap();
-    assert_eq!(cutter.settle(but_left).unwrap().unwrap().ops, 41);
-    drop(cutter);
     // the handle reads the log anew by itself, and nobody is told
     assert_eq!(held.settle(all).unwrap(), None);
     assert_eq!(held.len(), 2);
     held.append("a", 9, b"more").unwrap();
-    let asked = held.sync();
+    // the op it appended since is in the log: its sync is left to the
+    // sink, which syncs it and tells, once, of the op that was cut
+    held.sync().unwrap();
     let told = sink.fsync();
-    assert!(
-        matches!(asked, Err(OpLogError::CutBack)) && matches!(told, Err(OpLogError::CutBack)),
-        "the handle: {asked:?}, its sink: {told:?}"
-    );
-    // told once: what the handle holds now is synced as ever
+    assert!(matches!(told, Err(OpLogError::CutBack)), "{told:?}");
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
+    assert!(held.confirmed());
     sink.fsync().unwrap();
     held.sync().unwrap();
     sink.fsync().unwrap();
-    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
-    assert!(held.confirmed());
 }
 
 #[test]

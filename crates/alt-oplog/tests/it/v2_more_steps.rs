@@ -9,6 +9,7 @@ use alt_oplog::v2::receipt::{Outcome, Receipt};
 use alt_oplog::{Anchor, Meta, OpLog, OpLogError, ROOT};
 
 use super::v2_driver::{Run, name};
+use super::v2_owed::Wrote;
 
 impl Run {
     /// Appends `payload` through handle `index` as the op `meta` says,
@@ -45,7 +46,7 @@ impl Run {
             return false;
         }
         let head = self.handles[index].log.anchor().unwrap();
-        self.handles[index].own.push(head);
+        self.handles[index].mine.push(Wrote::Op(head));
         self.appended("driver", payload, (&meta, unsynced), head);
         // a writer that syncs appends after nothing that is not seen to
         if let Some(op) = unsettled.first().filter(|_| !unsynced && !seen_to) {
@@ -90,7 +91,9 @@ impl Run {
         if self.took(index, appended, false).is_some() {
             let after = self.ledger.ops.len();
             self.ledger.receipts.push((after, !unsynced, request));
-            self.handles[index].receipts.push(request);
+            let handle = &mut self.handles[index];
+            let end = handle.log.appended_len();
+            handle.mine.push(Wrote::Receipt(request, end));
             self.request += 1;
             self.ledger.begun = None;
             self.counts.receipts.fetch_add(1, Ordering::Relaxed);

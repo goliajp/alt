@@ -2,7 +2,7 @@
 //! appends, on a log of either format.
 
 use super::{Inner, OpLog};
-use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Unconfirmed};
+use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Ticket, Unconfirmed};
 
 impl OpLog {
     /// Sees to it, as a writer does before it appends, that the log is
@@ -14,8 +14,42 @@ impl OpLog {
     /// Durability point for everything appended so far. Group commit:
     /// fsync only if another committer has not already made our appends
     /// durable. With relaxed durability the fsync is skipped entirely.
+    ///
+    /// On a version 2 log it answers for the records this handle wrote
+    /// that are on no [`Ticket`], as for the records of one caller:
+    /// where one of them was cut off the log before a sync was recorded
+    /// over it, this tells so ([`OpLogError::CutBack`]), once. It tells
+    /// of no cut otherwise: a handle that holds records of other
+    /// writers which are gone reads the log again by itself
+    /// ([`Self::reads`] counts that) and syncs what is there. A handle
+    /// that defers leaves the answer to its sink.
     pub fn sync(&mut self) -> Result<(), OpLogError> {
         on!(mut self, log => log.sync())
+    }
+
+    /// A ticket for the records this handle wrote that are on none and
+    /// that no sync has answered for: from now on a sync answers for
+    /// them only when asked with the ticket, by [`Self::sync_for`] or
+    /// by a sink of this handle. For a caller that shares the handle
+    /// with others: it takes a ticket once it has appended, and is told
+    /// of a cut of its own records and of no other. A version 1 log
+    /// keeps no such account: its ticket is empty.
+    pub fn ticket(&mut self) -> Ticket {
+        match &mut self.0 {
+            Inner::V1(_) => Ticket::default(),
+            Inner::V2(log) => log.ticket(),
+        }
+    }
+
+    /// [`Self::sync`] for the holder of `ticket`: it tells of a cut
+    /// ([`OpLogError::CutBack`]) where a record on the ticket was cut,
+    /// and the ticket is spent with that. A handle that defers leaves
+    /// the records to its sink, which is asked with the same ticket.
+    pub fn sync_for(&mut self, ticket: &Ticket) -> Result<(), OpLogError> {
+        match &mut self.0 {
+            Inner::V1(log) => log.sync(),
+            Inner::V2(log) => log.sync_for(ticket),
+        }
     }
 
     /// Turns deferred durability on or off (the daemon turns it on so its
@@ -156,17 +190,19 @@ impl OpLog {
 
     /// Reads the log again from its first record, for a handle whose
     /// records were cut ([`OpLogError::CutBack`]) and whose caller was
-    /// told so. What a sink of the handle was left to sync is not
-    /// dropped by this: the sink tells whoever waits for it.
+    /// told so: no sync tells that caller again of the records the
+    /// handle wrote that are gone and on no ticket. What is on a ticket
+    /// or was left to a sink of the handle is told of to whoever asks
+    /// with the ticket or asks the sink.
     pub fn reopen(&mut self) -> Result<(), OpLogError> {
         on!(mut self, log => log.reopen())
     }
 
     /// [`Self::reopen`] for whoever goes on without telling its own
-    /// caller that records were cut. Where records this handle wrote and
-    /// never had synced are among them, the next sync asked of the handle
-    /// tells so ([`OpLogError::CutBack`]), once, instead of recording a
-    /// log without them as synced.
+    /// caller that records were cut. Where records this handle wrote
+    /// that no sync was recorded over are among them, the next sync
+    /// their holder asks for tells so ([`OpLogError::CutBack`]), once,
+    /// instead of recording a log without them as synced.
     pub fn reread(&mut self) -> Result<(), OpLogError> {
         match &mut self.0 {
             Inner::V1(log) => log.reopen(),

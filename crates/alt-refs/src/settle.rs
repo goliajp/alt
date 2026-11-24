@@ -74,7 +74,11 @@ impl RefStore {
     /// as it is now, what its operations name synced first, and folds in
     /// what other writers appended.
     pub fn bound(&mut self) -> Result<(), RefError> {
-        self.oplog.bound_now()?;
+        let bound = self.oplog.bound_now();
+        if self.oplog.reads() != self.reads_seen {
+            self.rebuild()?;
+        }
+        bound?;
         self.refresh()
     }
 
@@ -170,11 +174,10 @@ impl RefStore {
 
     /// Appends the op `build` makes of the refs as they are under the
     /// log's lock, the ops of other writers folded in; `linked` for a ref
-    /// transaction. When ops this store
-    /// held were cut meanwhile by another writer, the log is read again and
-    /// the op built on the refs it then tells of. A store that leaves its
-    /// fsyncs to a sink does not go on: ops it appended itself may be among
-    /// those cut.
+    /// transaction. When ops this store held were cut meanwhile by
+    /// another writer, the log is read again and the op built on the refs
+    /// it then tells of. An op this store appended itself that is among
+    /// those cut is told of by the sync its holder asks for.
     pub(crate) fn append_op(
         &mut self,
         actor: &str,
@@ -196,7 +199,12 @@ impl RefStore {
                 build(refs)
             });
             match appended {
-                Err(RefError::OpLog(OpLogError::CutBack)) if self.oplog.syncs_inline() => {
+                // a version 1 log keeps no account of the ops a store
+                // appended: one that leaves its fsyncs to a sink does
+                // not go on, ops of its own may be among those cut
+                Err(RefError::OpLog(OpLogError::CutBack))
+                    if self.framed() || self.oplog.syncs_inline() =>
+                {
                     // nobody is told here: the sync that follows tells
                     // where an op of this store was among those cut
                     self.oplog.reread()?;
