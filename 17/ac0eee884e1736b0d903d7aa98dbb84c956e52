@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: test
+summary: hold what the last rounds changed and left untested, and measure the upgrade and the index of schema 22
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_many_repos.rs
+touched: crates/alt-cli/tests/it/altd_server_relay.rs
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-hash/src/ident.rs
+touched: crates/alt-server-store/tests/it/database/expiry.rs
+touched: crates/alt-server-store/tests/it/database/schema_22.rs
+touched: crates/alt-server/src/http/expiry.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/device_exchange.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/settled_cost.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
