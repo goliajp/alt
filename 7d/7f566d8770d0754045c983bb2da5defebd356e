@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep the name the requests of config record its arguments under
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/config_cmd.rs
