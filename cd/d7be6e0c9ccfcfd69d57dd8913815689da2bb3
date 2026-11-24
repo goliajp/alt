@@ -1,0 +1,26 @@
+schema: alt-meta/1
+type: fix
+summary: settle on which ticket an oplog frame is when it is written, keep telling a ticket of its cut, and have the handle answer for good what its sink owes
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle/settled.rs
+touched: crates/alt-oplog/src/handle/sink.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/src/v2/ticket.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_asked.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_ticketed.rs
+touched: crates/alt-oplog/tests/it/v2_tickets.rs
+touched: crates/alt-refs/src/record.rs
+touched: crates/alt-refs/tests/it/owed_sync.rs
+touched: crates/alt-refs/tests/it/owed_tickets.rs
