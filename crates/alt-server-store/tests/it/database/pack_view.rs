@@ -197,3 +197,45 @@ fn the_references_are_not_read_for_an_agent_that_may_not_read_the_repository() {
     });
     assert_eq!(revoked, 0);
 }
+
+/// A Cloud instance reads for a Git request in a transaction of several
+/// statements. An account that signed in and was granted nothing on the
+/// repository has none of its references read; granted, it has.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_references_are_not_read_for_an_account_of_a_cloud_instance_that_may_not_read_the_repository()
+{
+    let mut f = super::cloud::cloud();
+    f.store
+        .create_repository(&f.credential, "repository", 100_000_000)
+        .unwrap();
+    let oid = "1".repeat(40);
+    let reference =
+        "INSERT INTO alt_refs(repository,name,oid) VALUES('repository','refs/heads/main',$1)";
+    f.client().execute(reference, &[&oid]).unwrap();
+    let token = f.token.clone();
+    let refused = reference_scans(&f, |store| {
+        assert!(
+            store
+                .git_open(&token, "repository", RefFilter::All)
+                .is_err()
+        );
+        let unknown = format!("alt1_{}", "c".repeat(64));
+        assert!(
+            store
+                .git_open(&unknown, "repository", RefFilter::All)
+                .is_err()
+        );
+    });
+    assert_eq!(refused, 0);
+    f.store
+        .set_grants(&f.credential, "repository", "owner", true, true, &grants())
+        .unwrap();
+    let read = reference_scans(&f, |store| {
+        let (_, view) = store
+            .git_open(&token, "repository", RefFilter::All)
+            .unwrap();
+        assert_eq!(view.refs.len(), 1);
+    });
+    assert!(read >= 1, "{read} scans reported");
+}
