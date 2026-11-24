@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what the ways back into a stopped command do, whom a repeated import goes by and how names are composed
+author-type: human
+author: doracawl
+touched: docs/internal-install.md
