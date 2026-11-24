@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: keep what git logged of a ref since it parted from the store, at a repeated import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-repo/src/reflog/again.rs
