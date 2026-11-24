@@ -9,8 +9,9 @@
 //!
 //! What is bounded instead is the receiving itself: how many bodies one caller has
 //! under way at once, and how many bytes of bodies the instance holds that no
-//! worker has taken yet. A caller is an account, or an address where nobody has
-//! signed in.
+//! worker has taken yet, of which the bodies of one caller have a quarter between
+//! them: more only where the caller has one body alone. A caller is an account,
+//! or an address where nobody has signed in.
 
 use super::*;
 use std::{
@@ -23,7 +24,8 @@ use std::{
 use tokio::sync::OwnedSemaphorePermit;
 
 pub(super) struct Receiving {
-    callers: Mutex<HashMap<String, usize>>,
+    /// by caller: the bodies under way, and the bytes they hold between them
+    callers: Mutex<HashMap<String, (usize, u64)>>,
     bytes: AtomicU64,
     each: usize,
     most: u64,
@@ -61,8 +63,12 @@ impl Receiving {
             return Err(Full::Instance);
         }
         let mut callers = self.callers.lock().expect("receiving callers");
-        let under_way = callers.entry(caller.to_owned()).or_insert(0);
-        if *under_way >= self.each {
+        let (under_way, held) = callers.entry(caller.to_owned()).or_insert((0, 0));
+        let beside = *under_way > 0 && held.saturating_add(declared) > self.most / 4;
+        if *under_way >= self.each || beside {
+            if *under_way == 0 {
+                callers.remove(caller);
+            }
             return Err(Full::Caller);
         }
         *under_way += 1;
@@ -79,6 +85,12 @@ impl Slot {
     pub(super) fn took(&mut self, bytes: u64) -> Result<(), Full> {
         self.bytes += bytes;
         let held = self.of.bytes.fetch_add(bytes, Ordering::AcqRel);
+        let mut callers = self.of.callers.lock().expect("receiving callers");
+        let (under_way, theirs) = callers.get_mut(&self.caller).expect("a body under way");
+        *theirs += bytes;
+        if *under_way > 1 && *theirs > self.of.most / 4 {
+            return Err(Full::Caller);
+        }
         if held.saturating_add(bytes) > self.of.most {
             return Err(Full::Instance);
         }
@@ -90,8 +102,9 @@ impl Drop for Slot {
     fn drop(&mut self) {
         self.of.bytes.fetch_sub(self.bytes, Ordering::AcqRel);
         let mut callers = self.of.callers.lock().expect("receiving callers");
-        if let Some(under_way) = callers.get_mut(&self.caller) {
+        if let Some((under_way, held)) = callers.get_mut(&self.caller) {
             *under_way -= 1;
+            *held -= self.bytes;
             if *under_way == 0 {
                 callers.remove(&self.caller);
             }
@@ -143,7 +156,7 @@ pub(super) fn unreceived(error: BodyError, key: Option<RequestKey>) -> Response<
             "Request body deadline exceeded",
             Retry::SameRequest,
         ),
-        BodyError::Full => return refusal(Full::Instance, key),
+        BodyError::Full(full) => return refusal(full, key),
     };
     failure(status, code, message, key, retry)
 }
@@ -216,20 +229,42 @@ mod tests {
     fn a_caller_has_so_many_bodies_under_way_and_the_instance_so_many_bytes() {
         let receiving = Receiving::new(2, 1000);
         let first = receiving.begin("a", 0).unwrap();
-        let mut second = receiving.begin("a", 400).unwrap();
+        let mut second = receiving.begin("a", 200).unwrap();
         assert_eq!(receiving.begin("a", 0).err(), Some(Full::Caller));
         let mut other = receiving.begin("b", 0).unwrap();
         // what a body says it has is looked at, and what comes of it is counted
-        second.took(400).unwrap();
-        assert_eq!(receiving.begin("c", 601).err(), Some(Full::Instance));
-        other.took(600).unwrap();
+        second.took(200).unwrap();
+        assert_eq!(receiving.begin("c", 801).err(), Some(Full::Instance));
+        other.took(800).unwrap();
         assert_eq!(other.took(1), Err(Full::Instance));
         drop(other);
         // a body that is over gives back its place and its bytes
         drop(first);
-        let mut third = receiving.begin("a", 600).unwrap();
-        third.took(600).unwrap();
+        let mut third = receiving.begin("a", 50).unwrap();
+        third.took(50).unwrap();
         drop((second, third));
+        assert!(receiving.callers.lock().unwrap().is_empty());
+        assert_eq!(receiving.bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn the_bodies_of_one_caller_have_a_quarter_of_the_bytes_between_them() {
+        let receiving = Receiving::new(8, 1000);
+        // one body alone may be larger than that
+        let mut alone = receiving.begin("a", 0).unwrap();
+        alone.took(300).unwrap();
+        // a second beside it is not begun for what it says, nor goes on past the quarter
+        assert_eq!(receiving.begin("a", 1).err(), Some(Full::Caller));
+        drop(alone);
+        let mut slow: Vec<Slot> = (0..4).map(|_| receiving.begin("a", 0).unwrap()).collect();
+        for slot in &mut slow[..3] {
+            slot.took(80).unwrap();
+        }
+        assert_eq!(slow[3].took(11), Err(Full::Caller));
+        // the others have what the instance holds beyond that
+        let mut other = receiving.begin("b", 700).unwrap();
+        other.took(700).unwrap();
+        drop((slow, other));
         assert!(receiving.callers.lock().unwrap().is_empty());
         assert_eq!(receiving.bytes.load(Ordering::Acquire), 0);
     }

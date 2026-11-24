@@ -50,8 +50,8 @@ pub(super) enum BodyError {
     Storage,
     /// it stalled: too little of it came in a window
     Slow,
-    /// the instance holds as many bytes of bodies as it may
-    Full,
+    /// the instance, or the caller, holds as many bytes of bodies as it may
+    Full(receiving::Full),
 }
 impl From<std::io::Error> for BodyError {
     fn from(_: std::io::Error) -> Self {
@@ -80,7 +80,7 @@ pub(super) async fn spool(
         guard.finish(match &result {
             Ok(_) => Outcome::Ok,
             Err(BodyError::Limit) => Outcome::Limit,
-            Err(BodyError::Storage | BodyError::Slow | BodyError::Full) => Outcome::Unavailable,
+            Err(BodyError::Storage | BodyError::Slow | BodyError::Full(_)) => Outcome::Unavailable,
             Err(BodyError::Malformed) => Outcome::Invalid,
         });
     }
@@ -117,7 +117,7 @@ async fn spool_inner(
             .checked_sub(data.len() as u64)
             .ok_or(BodyError::Limit)?;
         if let Some(slot) = &mut receipt.slot {
-            slot.took(data.len() as u64).map_err(|_| BodyError::Full)?;
+            slot.took(data.len() as u64).map_err(BodyError::Full)?;
         }
         file.write_all(&data).await?;
     }
