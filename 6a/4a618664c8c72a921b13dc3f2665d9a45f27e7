@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: look at every receipt and op past an op refused before the oplog is cut there
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/kept.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_kept.rs
+touched: crates/alt-oplog/tests/it/v2_kept_past.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
