@@ -117,7 +117,10 @@ fn a_pack_takes_its_memory_out_of_what_all_have_and_waits_for_it_no_longer_than_
     // given back while the pack waits
     let waited = std::thread::scope(|scope| {
         let waiting = scope.spawn(|| index(&pack, &limits(None), u64::MAX));
-        std::thread::sleep(Duration::from_millis(100));
+        while all.waiting().0 == 0 {
+            assert!(began.elapsed() < Duration::from_secs(120), "no pack waits");
+            std::thread::sleep(Duration::from_millis(2));
+        }
         assert!(!waiting.is_finished());
         drop(others);
         waiting.join().unwrap()
