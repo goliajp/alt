@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: the records are asked for a git object only where no ref leads to it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/transport/git_content.rs
