@@ -223,6 +223,13 @@ impl ServeMode {
                 ));
             }
         }
+        // a users file that does not read is told now, not to each request
+        let users_path = root.join("users");
+        if users_path.is_file()
+            && let Err(why) = auth::users_read(&users_path)
+        {
+            die(&format!("{}: {why}", users_path.display()));
+        }
         let cache = Opened::of(told::told().repos);
         ServeMode::Multi { root, cache }
     }

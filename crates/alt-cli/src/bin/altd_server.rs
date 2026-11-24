@@ -282,6 +282,12 @@ fn dispatch(
                     respond_logged(req, resp, log)?;
                     return Ok(());
                 }
+                AuthOutcome::Unread => {
+                    let unread = "the users file of the server does not read";
+                    let resp = Response::from_string(unread).with_status_code(StatusCode(500));
+                    respond_logged(req, resp, log)?;
+                    return Ok(());
+                }
             }
         }
     }

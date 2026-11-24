@@ -18,6 +18,9 @@ pub(super) enum AuthOutcome {
         acl: Option<Vec<AclRule>>,
     },
     Reject(String),
+    /// the users file does not read: nobody is let in by it, and nobody
+    /// is asked for another credential
+    Unread,
 }
 
 /// One entry in a user's per-repo permission table. `repo == "*"` is the
@@ -71,26 +74,35 @@ pub(super) fn acl_allows(acl: &[AclRule], repo: &str, action: Action) -> bool {
     }
 }
 
-fn parse_acl(field: &str) -> Vec<AclRule> {
-    let mut out = Vec::new();
-    for token in field.split_whitespace() {
-        let Some((repo, perm)) = token.split_once(':') else {
-            continue;
-        };
+/// The rules of `field`, or the first of its words that is none. A word
+/// that does not read is not left out: the rule it was meant for would
+/// then not be there, and `*` would decide for the repository it names.
+fn parse_acl(field: &str) -> Result<Vec<AclRule>, String> {
+    let rule = |token: &str| {
+        let (repo, perm) = token.split_once(':').filter(|(repo, _)| !repo.is_empty())?;
         let (can_read, can_write) = match perm {
             "r" => (true, false),
             "w" => (false, true),
             "rw" | "wr" => (true, true),
             "n" | "" => (false, false),
-            _ => continue,
+            _ => return None,
         };
-        out.push(AclRule {
+        Some(AclRule {
             repo: repo.to_owned(),
             can_read,
             can_write,
-        });
-    }
-    out
+        })
+    };
+    let unread = |token: &str| format!("{token:?} is no rule: <repository>:<r|w|rw|n> is expected");
+    let rules = field.split_whitespace();
+    rules
+        .map(|token| rule(token).ok_or_else(|| unread(token)))
+        .collect()
+}
+
+/// Whether the users file at `path` reads, and why it does not.
+pub(super) fn users_read(path: &Path) -> Result<(), String> {
+    read_users(path).map(drop)
 }
 
 /// constant-time, ASCII-case-insensitive byte comparison.
@@ -145,7 +157,10 @@ pub(super) fn check_auth(req: &super::http::Request, users_path: &Path) -> AuthO
     let token_hex = token_hash.to_hex();
     let table = match read_users(users_path) {
         Ok(t) => t,
-        Err(e) => return AuthOutcome::Reject(format!("server users file unreadable: {e}")),
+        Err(why) => {
+            eprintln!("altd-server: {}: {why}", users_path.display());
+            return AuthOutcome::Unread;
+        }
     };
     // one answer for a user that is not known and for a token that is not
     // theirs: which names there are is not told
@@ -173,10 +188,10 @@ struct UserEntry {
     acl: Option<Vec<AclRule>>,
 }
 
-fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
-    let text = std::fs::read_to_string(path)?;
+fn read_users(path: &Path) -> Result<HashMap<String, UserEntry>, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut out = HashMap::new();
-    for line in text.lines() {
+    for (at, line) in text.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -184,7 +199,8 @@ fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
         let mut parts = trimmed.splitn(3, '\t');
         let Some(user) = parts.next() else { continue };
         let Some(hash) = parts.next() else { continue };
-        let acl = parts.next().map(parse_acl);
+        let acl = parts.next().map(parse_acl).transpose();
+        let acl = acl.map_err(|why| format!("line {}: {why}", at + 1))?;
         out.insert(
             user.trim().to_owned(),
             UserEntry {
@@ -203,7 +219,7 @@ mod tests {
     #[test]
     fn the_rules_that_name_a_repository_decide_for_it_and_the_star_for_the_rest() {
         let may = |acl: &str, repo: &str| {
-            let acl = parse_acl(acl);
+            let acl = parse_acl(acl).unwrap();
             (
                 acl_allows(&acl, repo, Action::Read),
                 acl_allows(&acl, repo, Action::Write),
@@ -225,10 +241,38 @@ mod tests {
         assert_eq!(may("*:r docs:rw", "docs"), (true, true));
         // two rules of one name allow what either does
         assert_eq!(may("docs:r docs:w *:n", "docs"), (true, true));
-        // a rule that does not read is no rule
-        assert_eq!(may("docs:x *:r", "docs"), (true, false));
-        assert_eq!(may("docs", "docs"), (false, false));
         assert_eq!(may("", "docs"), (false, false));
+        // a word that does not read is told, and the rules beside it are not taken
+        for field in [
+            "docs:x *:r",
+            "*:r docs:x",
+            "docs",
+            ":rw",
+            "docs:rwx",
+            "docs:r:w",
+        ] {
+            let why = parse_acl(field).unwrap_err();
+            assert!(why.contains("is no rule"), "{field}: {why}");
+        }
+        assert!(
+            parse_acl("*:r docs:x")
+                .unwrap_err()
+                .starts_with("\"docs:x\"")
+        );
+    }
+
+    #[test]
+    fn a_users_file_with_a_rule_that_does_not_read_is_not_read_for_anybody() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("users");
+        std::fs::write(&path, "# who\nalice\t00\nbob\t11\tdocs:r *:n\n").unwrap();
+        let read = read_users(&path).unwrap();
+        assert!(read["alice"].acl.is_none());
+        assert_eq!(read["bob"].acl.as_ref().unwrap().len(), 2);
+        std::fs::write(&path, "alice\t00\n\nbob\t11\tdocs:x *:rw\n").unwrap();
+        let why = users_read(&path).unwrap_err();
+        assert!(why.starts_with("line 3: \"docs:x\" is no rule"), "{why}");
+        assert!(users_read(&dir.path().join("none")).is_err());
     }
 
     /// The service a request for refs is held to is the one it is
