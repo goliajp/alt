@@ -191,7 +191,28 @@ fn every_name_is_tracked_with_the_bytes_git_tracks_it_with() {
 
 #[test]
 fn a_directory_whose_file_is_listed_decomposed_gives_way_to_a_file() {
-    let pair = Pair::new();
+    gives_way_to_a_file(Pair::new());
+}
+
+/// The same where a file is known by its name alone: on a volume that
+/// tells case apart, and still takes a name composed or not for one.
+#[test]
+#[ignore = "needs ALT_CASE_APART_DIR: a directory on a case-sensitive APFS volume"]
+fn a_directory_listed_decomposed_gives_way_to_a_file_where_case_is_told_apart() {
+    let named = std::env::var_os("ALT_CASE_APART_DIR")
+        .expect("ALT_CASE_APART_DIR names a directory on a case-sensitive APFS volume");
+    let place = std::path::PathBuf::from(named);
+    let probe = alt_os::temp::tempdir_in(&place).unwrap();
+    std::fs::write(probe.path().join(DECOMPOSED), "").unwrap();
+    assert!(
+        probe.path().join(COMPOSED).exists() && !probe.path().join("CAFE\u{301}").exists(),
+        "{} tells composed names apart, or does not tell case apart",
+        place.display()
+    );
+    gives_way_to_a_file(Pair::new_in(&place));
+}
+
+fn gives_way_to_a_file(pair: Pair) {
     pair.write("keep", "base\n");
     pair.commit_all("base");
     pair.both(&["switch", "-c", "file"]);
