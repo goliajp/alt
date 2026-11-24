@@ -23,6 +23,7 @@ mod provision;
 mod receiving;
 mod respond;
 mod routes;
+mod sources;
 mod web;
 mod work;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
@@ -131,6 +132,8 @@ pub struct HttpOptions {
     /// the reverse proxies whose `X-Forwarded-For` is read for the address a
     /// request came from; with none the address is the peer's
     pub trusted_proxies: Vec<Network>,
+    /// the connections one address may have in use at once
+    pub connections_each: usize,
     /// the bodies one caller may have being received at once
     pub receiving_each: usize,
     /// the bytes of bodies that are being received, or wait for a worker
@@ -150,6 +153,7 @@ struct App {
     options: HttpOptions,
     workers: Arc<Semaphore>,
     receiving: Arc<receiving::Receiving>,
+    sources: Arc<sources::Sources>,
     browser: Option<WebOptions>,
     passwords: hashers::Hashers,
 }
@@ -218,6 +222,7 @@ pub async fn serve_with_browser(
             )
         })?;
     if options.connections == 0
+        || options.connections_each == 0
         || options.receiving_each == 0
         || options.workers == 0
         || options.header_bytes < 8192
@@ -248,6 +253,7 @@ pub async fn serve_with_browser(
         factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
         receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
+        sources: sources::Sources::new(options.connections_each, &options.trusted_proxies),
         passwords: hashers::Hashers::new(options.password_places),
         options,
         browser,
@@ -273,6 +279,10 @@ pub async fn serve_with_browser(
             drop(socket);
             continue;
         };
+        // an address that has as many as it may is not listened to
+        let Ok(place) = state.sources.connected(peer) else {
+            continue;
+        };
         // File bodies can become ready after the response headers are sent.
         // Do not hold their final small frame until the peer's delayed ACK.
         if socket.set_nodelay(true).is_err() {
@@ -280,8 +290,8 @@ pub async fn serve_with_browser(
         }
         let (state, router) = (state.clone(), router.clone());
         tokio::spawn(async move {
-            let _permit = permit;
-            connection::serve(socket, peer, router, &state.options).await;
+            let _permit = (permit, place);
+            connection::serve(socket, peer, router, &state).await;
         });
     }
 }

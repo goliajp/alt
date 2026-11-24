@@ -198,6 +198,7 @@ impl Server {
             work_timeout: Duration::from_secs(30),
             connection_timeout: Duration::from_secs(60),
             trusted_proxies: vec![],
+            connections_each: 16,
             receiving_each: 4,
             receiving_bytes: 1 << 30,
             expiry_interval: Duration::from_secs(30),

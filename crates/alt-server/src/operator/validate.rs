@@ -111,6 +111,7 @@ impl Config {
             || h.database_statement_timeout_ms > 300_000
             || h.database_connect_timeout_ms > 300_000
             || h.worker_lease_ms < h.work_timeout_ms
+            || h.connections_each == Some(0)
             || h.receiving_each == Some(0)
             || h.receiving_megabytes == Some(0)
             || h.indexing_megabytes.is_some_and(|megabytes| {
@@ -162,6 +163,7 @@ impl Config {
                 .collect(),
             expiry_interval: Duration::from_secs(30),
             password_places: 2,
+            connections_each: h.connections_each.unwrap_or((h.connections / 4).max(1)),
             receiving_each: h.receiving_each.unwrap_or((h.connections / 8).max(1)),
             receiving_bytes: match h.receiving_megabytes {
                 Some(megabytes) => megabytes.saturating_mul(1 << 20),

@@ -84,6 +84,7 @@ impl OperatorDb {
                 approval_ttl_ms: 60000,
                 trusted_proxies: vec![],
                 receiving_each: None,
+                connections_each: None,
                 receiving_megabytes: None,
                 indexing_megabytes: None,
             },

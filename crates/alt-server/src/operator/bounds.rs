@@ -21,6 +21,10 @@ pub struct HttpBounds {
     /// the address of a caller; with none named the header is not read.
     #[json(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_proxies: Vec<String>,
+    /// How many connections one address may have in use at once; a quarter of
+    /// `connections` where it is not given.
+    #[json(default, skip_serializing_if = "Option::is_none")]
+    pub connections_each: Option<usize>,
     /// How many request bodies one caller may have being received at once; an
     /// eighth of `connections` where it is not given.
     #[json(default, skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,5 @@
 //! One accepted connection: bounded HTTP/1 framing around the router.
-use super::HttpOptions;
+use super::{App, sources::Place};
 use axum::{
     Router,
     body::Body,
@@ -68,12 +68,9 @@ impl Drop for Asked {
     }
 }
 
-pub(super) async fn serve(
-    socket: TcpStream,
-    peer: SocketAddr,
-    router: Router,
-    options: &HttpOptions,
-) {
+pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, state: &Arc<App>) {
+    let options = &state.options;
+    let sources = state.sources.clone();
     let life = Arc::new(Life {
         each: options.connection_timeout,
         until: Mutex::new(tokio::time::Instant::now() + options.connection_timeout),
@@ -88,24 +85,30 @@ pub(super) async fn serve(
         .max_buf_size(options.header_bytes);
     let router = TowerToHyperService::new(router);
     let service = service_fn(move |request: Request<Incoming>| {
-        let (parts, body) = request.into_parts();
-        let ended = Arc::new(AtomicBool::new(body.is_end_stream()));
-        let life = lives.clone();
-        let received = Received {
-            body,
-            ended: ended.clone(),
-            life: life.clone(),
-        };
-        let mut request = Request::from_parts(parts, received);
-        request.extensions_mut().insert(ConnectInfo(peer));
-        let head = request.method() == Method::HEAD;
-        let asked = Asked::of(&life);
-        let response = router.call(request);
+        // of the address the request is from, where a proxy says whose it is
+        let asked = sources.asked(peer, request.headers()).map(|place| {
+            let (parts, body) = request.into_parts();
+            let ended = Arc::new(AtomicBool::new(body.is_end_stream()));
+            let life = lives.clone();
+            let received = Received {
+                body,
+                ended: ended.clone(),
+                life: life.clone(),
+            };
+            let mut request = Request::from_parts(parts, received);
+            request.extensions_mut().insert(ConnectInfo(peer));
+            let head = request.method() == Method::HEAD;
+            (router.call(request), Asked::of(&life), (head, ended), place)
+        });
         async move {
+            let Ok((response, asked, (head, ended), place)) = asked else {
+                let refused = super::respond::crowded().map(Body::new);
+                return Ok(outgoing(false, false, refused, None));
+            };
             let response = response.await?;
             drop(asked);
             let ended = ended.load(Ordering::Acquire);
-            Ok::<_, std::convert::Infallible>(outgoing(head, ended, response))
+            Ok::<_, std::convert::Infallible>(outgoing(head, ended, response, place))
         }
     });
     let socket = super::paced::Paced::new(socket, life.clone(), options.body_timeout);
@@ -165,7 +168,12 @@ impl hyper::body::Body for Received {
 /// A response to a request whose body was not read to its end is the last one on
 /// its connection: the unread rest cannot be told apart from a next request. The
 /// response says so, or the client sends its next request into a closed connection.
-fn outgoing(head: bool, ended: bool, response: Response<Body>) -> Response<Outgoing> {
+fn outgoing(
+    head: bool,
+    ended: bool,
+    response: Response<Body>,
+    place: Option<Place>,
+) -> Response<Outgoing> {
     let (mut parts, body) = response.into_parts();
     if !ended {
         parts
@@ -179,13 +187,20 @@ fn outgoing(head: bool, ended: bool, response: Response<Body>) -> Response<Outgo
             length = written.and_then(|value| value.to_str().ok()?.parse().ok());
         }
     }
-    Response::from_parts(parts, Outgoing { body, length })
+    let body = Outgoing {
+        body,
+        length,
+        _place: place,
+    };
+    Response::from_parts(parts, body)
 }
 
 struct Outgoing {
     body: Body,
     /// the length of the body a HEAD request did not get
     length: Option<u64>,
+    /// what the request has of its address's, to the end of its response
+    _place: Option<Place>,
 }
 impl hyper::body::Body for Outgoing {
     type Data = Bytes;

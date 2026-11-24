@@ -58,6 +58,16 @@ fn file(content_type: &str, file: std::fs::File, bytes: u64) -> Response<Respons
     output.extensions_mut().insert(connection::DeclaredLength);
     output
 }
+/// the answer to a request of an address that has as many under way as one may
+pub(super) fn crowded() -> Response<ResponseBody> {
+    failure(
+        429,
+        ErrorCode::TemporarilyUnavailable,
+        "Too many requests of this address are under way",
+        None,
+        Retry::SameRequest,
+    )
+}
 pub(super) fn unknown() -> Response<ResponseBody> {
     failure(
         404,
