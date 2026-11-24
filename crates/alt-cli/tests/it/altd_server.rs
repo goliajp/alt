@@ -2864,7 +2864,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    // 1) info/refs must carry an `alt-nonce=` cap of 32 hex chars.
+    // 1) info/refs must carry an `alt-nonce=` cap of 64 hex chars.
     let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
     conn.write_all(
         b"GET /info/refs?service=git-receive-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
@@ -2884,8 +2884,8 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
         .unwrap_or_default();
     assert_eq!(
         nonce.len(),
-        32,
-        "server must advertise a 32-hex-char alt-nonce in receive-pack info/refs: {advert}"
+        64,
+        "server must advertise a 64-hex-char alt-nonce in receive-pack info/refs: {advert}"
     );
 
     // 2) a signed alt push succeeds end-to-end (the client picked up

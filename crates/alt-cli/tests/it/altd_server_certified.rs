@@ -103,7 +103,7 @@ fn a_signed_push_is_taken_over_the_nonce_and_the_repository_it_is_for_and_once()
 
     // over the nonce and this repository: taken
     let (nonce, main) = told(&url, dir);
-    assert_eq!(nonce.len(), 32);
+    assert_eq!(nonce.len(), 64);
     let caps = certified("one", &main, &nonce, &here);
     let report = pushed(&url, dir, "one", &main, &caps);
     assert!(report.contains("ok refs/heads/one"), "{report}");

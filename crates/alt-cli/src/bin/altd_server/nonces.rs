@@ -1,6 +1,6 @@
-//! The nonces of signed pushes: issued with the advertisement, good once.
+//! The nonces of signed pushes: given with the advertisement, good once.
 
-use std::net::IpAddr;
+use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use super::*;
@@ -10,24 +10,29 @@ use super::*;
 /// coming.
 const LIFE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// the nonces a table holds, and those of them one asker has
-const MOST: usize = 1024;
-const EACH: usize = 64;
+/// The nonces kept as used at once: those of the signed pushes of a day.
+/// A push more is refused, not taken with a nonce forgotten.
+const MOST: usize = 1 << 20;
 
-/// In-memory single-use nonce table, of [`MOST`] nonces. One asker, an
-/// address as connections are counted for it, has [`EACH`] of them: a
-/// nonce more replaces the oldest of its own, so that whoever asks for
-/// many drops none that another asked for. Past the cap of the table the
-/// oldest of all is dropped, which takes more askers than a quarter of
-/// the cap divided among them: an honest client whose nonce went that
-/// way is refused and asks again. The bound makes the table O(1) memory
-/// regardless of traffic.
+/// What tells a nonce from the others of its table: when it was given, in
+/// milliseconds since the table was made, and eight bytes of chance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Given(u64, [u8; 8]);
+
+/// The nonces of one repository. A nonce says when it was given and is
+/// sealed with a key only this table has, so that giving one keeps
+/// nothing: whoever asks for many drops none that another was given. What
+/// is kept is the nonces that were used, for as long as they would still
+/// be good, and one is used when a signature over it verified: asking for
+/// advertisements and sending pushes that do not verify fills nothing.
 ///
 /// The table of a repository is kept apart from what is open of the
 /// repository: a nonce is good after the repository was closed and
 /// opened again between the advertisement and the push.
 pub(super) struct NonceTable {
-    pub(super) inner: Held<NonceInner>,
+    key: [u8; 32],
+    born: Instant,
+    inner: Held<NonceInner>,
 }
 
 impl Default for NonceTable {
@@ -36,60 +41,85 @@ impl Default for NonceTable {
     }
 }
 
-pub(super) struct NonceInner {
-    pub(super) queue: std::collections::VecDeque<(String, Instant, Option<IpAddr>)>,
-    pub(super) set: std::collections::HashSet<String>,
+#[derive(Default)]
+struct NonceInner {
+    used: BTreeSet<Given>,
+    /// when the last nonce was given, as nonces say it
+    last: Option<u64>,
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl NonceTable {
     pub(super) fn new() -> Self {
+        let mut key = [0u8; 32];
+        alt_os::random::fill(&mut key);
         NonceTable {
-            inner: Held::new(NonceInner {
-                queue: std::collections::VecDeque::new(),
-                set: std::collections::HashSet::new(),
-            }),
+            key,
+            born: Instant::now(),
+            inner: Held::new(NonceInner::default()),
         }
     }
 
-    /// Issue a fresh 32-char-hex nonce (128 bits — collision negligible
-    /// against any realistic traffic + 1024-entry table) to the asker
-    /// counted under `from`, and insert it into the table.
-    pub(super) fn issue(&self, from: Option<IpAddr>) -> String {
-        let mut buf = [0u8; 16];
-        alt_os::random::fill(&mut buf);
-        let nonce: String = buf.iter().map(|b| format!("{b:02x}")).collect();
-        let mut g = self.inner.take();
-        let theirs = |held: &(String, Instant, Option<IpAddr>)| held.2 == from;
-        let dropped = match g.queue.iter().filter(|held| theirs(held)).count() >= EACH {
-            true => g.queue.iter().position(theirs),
-            false => (g.queue.len() >= MOST).then_some(0),
-        };
-        if let Some((old, ..)) = dropped.and_then(|at| g.queue.remove(at)) {
-            g.set.remove(&old);
-        }
-        g.queue.push_back((nonce.clone(), Instant::now(), from));
-        g.set.insert(nonce.clone());
-        nonce
+    fn at(&self, now: Instant) -> u64 {
+        now.saturating_duration_since(self.born).as_millis() as u64
     }
 
-    /// Atomically check + consume a nonce. Returns true iff it was in
-    /// the table at the time of call and is not older than a nonce may
-    /// be; subsequent calls return false.
-    pub(super) fn consume(&self, nonce: &str) -> bool {
-        self.consume_at(nonce, Instant::now())
+    fn seal(&self, given: &Given) -> [u8; 16] {
+        let said = [&given.0.to_be_bytes()[..], &given.1].concat();
+        let sealed = alt_hash::blake3::keyed_hash(&self.key, &said);
+        sealed.as_bytes()[..16].try_into().expect("sixteen of them")
     }
 
-    fn consume_at(&self, nonce: &str, now: Instant) -> bool {
-        let mut g = self.inner.take();
-        if !g.set.remove(nonce) {
-            return false;
+    /// A nonce of sixty-four hex digits that was not given before.
+    pub(super) fn issue(&self) -> String {
+        let mut chance = [0u8; 8];
+        alt_os::random::fill(&mut chance);
+        let given = Given(self.at(Instant::now()), chance);
+        self.inner.take().last = Some(given.0);
+        let seal = self.seal(&given);
+        hex(&[&given.0.to_be_bytes()[..], &given.1, &seal].concat())
+    }
+
+    /// What `nonce` is, where this table gave it, it is no older than a
+    /// nonce may be and it was not used.
+    pub(super) fn good(&self, nonce: &str) -> Option<Given> {
+        self.good_at(nonce, Instant::now())
+    }
+
+    fn good_at(&self, nonce: &str, now: Instant) -> Option<Given> {
+        let digit = |at: usize| u8::from_str_radix(nonce.get(at..at + 2)?, 16).ok();
+        let bytes: Vec<u8> = (0..64).step_by(2).map(digit).collect::<Option<_>>()?;
+        if nonce.len() != 64 {
+            return None;
         }
-        // also drop it from the queue so the LRU bookkeeping stays
-        // accurate; we accept the O(N) here because consumes are
-        // rare relative to issues.
-        let at = g.queue.iter().position(|(held, ..)| held == nonce);
-        let issued = at.and_then(|at| g.queue.remove(at));
-        issued.is_some_and(|(_, issued, _)| now.saturating_duration_since(issued) <= LIFE)
+        let given = Given(
+            u64::from_be_bytes(bytes[..8].try_into().expect("eight of them")),
+            bytes[8..16].try_into().expect("eight of them"),
+        );
+        // every byte is looked at, whichever is the first that differs
+        let differ =
+            (self.seal(&given).iter().zip(&bytes[16..])).fold(0, |all, (a, b)| all | (a ^ b));
+        let age = self.at(now).checked_sub(given.0)?;
+        let good = differ == 0 && u128::from(age) <= LIFE.as_millis();
+        (good && !self.inner.take().used.contains(&given)).then_some(given)
+    }
+
+    /// Has the nonce `given` be used from now on. False where it was used
+    /// meanwhile, or the table keeps as many as it may: the push that is
+    /// signed over it is not taken.
+    pub(super) fn spend(&self, given: Given) -> bool {
+        self.spend_at(given, Instant::now())
+    }
+
+    fn spend_at(&self, given: Given, now: Instant) -> bool {
+        let mut inner = self.inner.take();
+        // those that are good no longer are told from the used by their age
+        let oldest = self.at(now).saturating_sub(LIFE.as_millis() as u64);
+        inner.used = inner.used.split_off(&Given(oldest, [0; 8]));
+        inner.used.len() < MOST && inner.used.insert(given)
     }
 
     /// Whether no nonce of the table is good any more: the table may be
@@ -99,8 +129,8 @@ impl NonceTable {
     }
 
     fn spent_at(&self, now: Instant) -> bool {
-        let newest = self.inner.take().queue.back().map(|(_, issued, _)| *issued);
-        newest.is_none_or(|issued| now.saturating_duration_since(issued) > LIFE)
+        let last = self.inner.take().last;
+        last.is_none_or(|last| u128::from(self.at(now) - last) > LIFE.as_millis())
     }
 }
 
@@ -108,69 +138,96 @@ impl NonceTable {
 mod tests {
     use super::*;
 
-    /// the table issues a nonce that consumes exactly once;
-    /// the second consume on the same value returns false. That's
-    /// the single-use anti-replay primitive.
     #[test]
-    fn nonce_table_consume_is_single_use() {
+    fn a_nonce_is_good_until_it_is_used_and_not_again() {
         let t = NonceTable::new();
-        let n = t.issue(None);
-        assert_eq!(n.len(), 32, "issued nonce should be 32 hex chars");
-        assert!(t.consume(&n), "first consume must succeed");
-        assert!(!t.consume(&n), "second consume on the same nonce must fail");
+        let n = t.issue();
+        assert_eq!(n.len(), 64);
+        let given = t.good(&n).unwrap();
+        // good for as long as no signature over it verified
+        assert_eq!(t.good(&n), Some(given));
+        assert!(t.spend(given));
+        assert_eq!(t.good(&n), None);
+        // two pushes that found it good: one of them has it
+        assert!(!t.spend(given));
     }
 
-    /// A nonce that was never issued can't be consumed. Stops a
-    /// confused-deputy that tries to pass off a guessed value as
-    /// if it had been negotiated.
+    /// What the table did not give is no nonce of it: a guess, one of
+    /// another table, and one of its own with a digit changed, in its time,
+    /// its chance or its seal.
     #[test]
-    fn nonce_table_rejects_never_issued_value() {
-        let t = NonceTable::new();
-        assert!(
-            !t.consume("00000000000000000000000000000000"),
-            "consuming a never-issued nonce must fail"
-        );
-    }
-
-    /// An asker has so many nonces in the table: one more drops the oldest
-    /// of its own and none of another's, however many it asks for. With
-    /// the table full of the nonces of many askers the oldest of all goes.
-    #[test]
-    fn an_asker_drops_its_own_nonces_and_a_full_table_the_oldest() {
-        let t = NonceTable::new();
-        let asker = |n: u8| Some(IpAddr::from([198, 51, 100, n]));
-        let (theirs, here) = (t.issue(asker(1)), t.issue(None));
-        let first = t.issue(asker(2));
-        let kept: Vec<String> = (1..EACH).map(|_| t.issue(asker(2))).collect();
-        for _ in 0..4 * MOST {
-            let _ = t.issue(asker(2));
+    fn a_nonce_the_table_did_not_give_is_not_good() {
+        let (t, other) = (NonceTable::new(), NonceTable::new());
+        assert_eq!(t.good(&"0".repeat(64)), None);
+        assert_eq!(t.good(&other.issue()), None);
+        let n = t.issue();
+        for at in [0, 15, 16, 31, 32, 63] {
+            let mut changed = n.clone().into_bytes();
+            changed[at] = if changed[at] == b'0' { b'1' } else { b'0' };
+            assert_eq!(t.good(&String::from_utf8(changed).unwrap()), None, "{at}");
         }
-        assert!(!t.consume(&first));
-        assert!(kept.iter().all(|nonce| !t.consume(nonce)));
-        assert!(t.consume(&theirs) && t.consume(&here));
-        assert_eq!(t.inner.take().queue.len(), EACH);
-
-        let t = NonceTable::new();
-        let first = t.issue(asker(0));
-        for n in 0..MOST {
-            let _ = t.issue(asker((n / (EACH - 1)) as u8 + 1));
+        for odd in [
+            "",
+            &n[..63],
+            &format!("{n}0"),
+            &n.to_uppercase().replace('0', "g"),
+        ] {
+            assert_eq!(t.good(odd), None, "{odd}");
         }
-        assert_eq!(t.inner.take().queue.len(), MOST);
-        assert!(!t.consume(&first));
+        assert!(t.good(&n).is_some());
     }
 
-    /// A nonce is good for a day, and a table whose nonces are all older
-    /// or used has nothing to keep it for.
+    /// Giving a nonce keeps nothing. One given before a hundred thousand
+    /// others, to whomever, is as good as it was, and so is every one of
+    /// them.
     #[test]
-    fn a_nonce_is_good_for_a_day_and_a_table_of_none_that_are_is_spent() {
+    fn however_many_nonces_are_asked_for_one_given_before_them_is_good() {
+        let t = NonceTable::new();
+        let first = t.issue();
+        let later: Vec<String> = (0..100_000).map(|_| t.issue()).collect();
+        assert!(t.good(&first).is_some());
+        assert!(later.iter().all(|nonce| t.good(nonce).is_some()));
+        assert!(t.inner.take().used.is_empty());
+    }
+
+    /// A nonce is good for a day. One that was used is kept for as long, and
+    /// a table that gave none for a day has nothing to be kept for.
+    #[test]
+    fn a_nonce_is_good_for_a_day_and_a_used_one_is_kept_as_long() {
         let t = NonceTable::new();
         assert!(t.spent());
-        let (old, new) = (t.issue(None), t.issue(None));
+        let (old, new) = (t.issue(), t.issue());
         let now = Instant::now();
-        assert!(!t.spent_at(now + LIFE - Duration::from_secs(60)));
-        assert!(t.spent_at(now + LIFE + Duration::from_secs(60)));
-        assert!(!t.consume_at(&old, now + LIFE + Duration::from_secs(60)));
-        assert!(t.consume_at(&new, now + LIFE - Duration::from_secs(60)));
-        assert!(t.spent());
+        let (before, after) = (
+            now + LIFE - Duration::from_secs(60),
+            now + LIFE + Duration::from_secs(60),
+        );
+        assert!(!t.spent_at(before) && t.spent_at(after));
+        assert!(t.good_at(&old, after).is_none());
+        let given = t.good_at(&new, before).unwrap();
+        assert!(t.spend_at(given, before));
+        assert_eq!(t.inner.take().used.len(), 1);
+        assert!(t.good_at(&new, before).is_none());
+        // past its day it is told by its age, and kept no more
+        let other = Given(t.at(after), [7; 8]);
+        assert!(t.spend_at(other, after));
+        assert_eq!(t.inner.take().used.iter().collect::<Vec<_>>(), [&other]);
+    }
+
+    /// The used nonces of a day are kept, as many as the table may: with
+    /// that many a push more is refused, and none of them is forgotten.
+    #[test]
+    fn a_table_that_keeps_as_many_used_nonces_as_it_may_takes_no_more() {
+        let t = NonceTable::new();
+        let now = Instant::now();
+        t.inner.take().used = (0..MOST as u64)
+            .map(|n| Given(1, n.to_be_bytes()))
+            .collect();
+        let more = Given(2, [0xff; 8]);
+        assert!(!t.spend_at(more, now + Duration::from_secs(1)));
+        assert_eq!(t.inner.take().used.len(), MOST);
+        // a day on, those are no longer good and there is room
+        assert!(t.spend_at(more, now + LIFE + Duration::from_secs(1)));
+        assert_eq!(t.inner.take().used.len(), 1);
     }
 }

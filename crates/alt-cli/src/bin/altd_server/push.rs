@@ -242,13 +242,16 @@ pub(super) fn verify_push_signature(
     if !this {
         return bad("the signature is for another repository than this one");
     }
-    if !writer.nonces.consume(nonce) {
-        return bad("alt-nonce echoed in push not active on this server (replay or expired)");
-    }
+    let inactive = "alt-nonce echoed in push not active on this server (replay or expired)";
+    let Some(given) = writer.nonces.good(nonce) else {
+        return bad(inactive);
+    };
     let payload =
         alt_wire::push_certificate(&principal_id, pushee, nonce, &head.updates, HashAlgo::Sha1);
     match pubkey.verify(&payload, &sig) {
-        Ok(()) => Ok(SigOutcome::Verified { principal_id }),
+        // used from here on: by this push, unless another had it meanwhile
+        Ok(()) if writer.nonces.spend(given) => Ok(SigOutcome::Verified { principal_id }),
+        Ok(()) => bad(inactive),
         Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
     }
 }
