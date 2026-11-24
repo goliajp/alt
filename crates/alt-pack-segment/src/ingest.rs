@@ -4,7 +4,7 @@ use crate::{
     Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Limits, Oid, Record, SegmentSet,
     carried::Carried,
     descend::{self, Root, Shared},
-    format::{self, CommitRow, Delta, NO_BASE},
+    format::{self, CommitRow, Delta},
     object_id, plain, room,
     scan::{self, Form},
     told::Told,
@@ -32,9 +32,9 @@ pub(crate) struct Meta {
     pub blake3: [u8; 32],
     pub kind: Kind,
     pub size: u64,
-    /// scan index of the base inside this pack
+    /// scan index of the entry of this pack the delta was resolved on, where
+    /// it was resolved on one
     pub base: Option<usize>,
-    pub outside: bool,
 }
 
 impl Meta {
@@ -45,7 +45,6 @@ impl Meta {
             kind,
             size,
             base: None,
-            outside: false,
         }
     }
 }
@@ -209,9 +208,10 @@ fn verified(
     // thin pack: bases that live in earlier segments, numbered behind the entries
     let mut outside = Vec::new();
     let mut outer = Vec::new();
+    let mut earlier = Vec::new();
     for named in deltas.by_object() {
         let base = named[0].0;
-        if let Some(record) = existing.record(&base)? {
+        if let Some(record) = existing.base_record(&base)? {
             let entry = u32::try_from(entries.len() + outside.len());
             outer.push(Root {
                 entry: entry.map_err(|_| Error::Limit("objects"))?,
@@ -221,6 +221,7 @@ fn verified(
                 depth: record.depth,
             });
             outside.push(base);
+            earlier.push((base, record.depth));
             scanned.largest = scanned.largest.max(record.size);
         }
     }
@@ -266,9 +267,10 @@ fn verified(
         })
     });
     let metas: Vec<Meta> = resolved.collect::<Result<_, Error>>()?;
+    earlier.sort_unstable();
 
-    let chosen = crate::chosen::choose(&metas, entries, existing, limits.delta_depth)?;
-    let (kept, position) = (&chosen.kept, &chosen.position);
+    let chosen = crate::chosen::choose(&metas, entries, &earlier, limits.delta_depth)?;
+    let kept = &chosen.kept;
     let mut flags = if chosen.duplicates {
         FLAG_DUPLICATES
     } else {
@@ -293,8 +295,8 @@ fn verified(
     crate::generation::assign(&mut commits, existing)?;
     let records = kept
         .iter()
-        .zip(&chosen.depth)
-        .map(|(index, depth)| {
+        .enumerate()
+        .map(|(at, index)| {
             let (meta, raw) = (&metas[*index], &entries[*index]);
             Record {
                 oid: meta.oid,
@@ -303,14 +305,14 @@ fn verified(
                 size: meta.size,
                 crc: raw.crc,
                 len: raw.len,
-                base: meta.base.map_or(NO_BASE, |base| position[base]),
+                base: chosen.base[at],
                 kind: meta.kind,
-                delta: match (raw.form, meta.outside) {
+                delta: match (raw.form, chosen.outside[at]) {
                     (Form::Plain(_), _) => Delta::Plain,
                     (_, true) => Delta::Outside,
                     (_, false) => Delta::Inside,
                 },
-                depth: *depth,
+                depth: chosen.depth[at],
             }
         })
         .collect();

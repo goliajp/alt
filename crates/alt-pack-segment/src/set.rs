@@ -42,6 +42,40 @@ impl SegmentSet {
         self.segments.iter().enumerate().rev().find_map(found)
     }
 
+    /// What a delta is made of where its base is no entry of its own pack: the
+    /// newest record of `oid` in the segments published before the one the delta
+    /// is in, which is the segment at `behind`. A pack is verified against that
+    /// record when it comes in behind those segments, and each read of the delta
+    /// since goes by it: a later segment, or the delta's own, may hold the object
+    /// again, made of the very delta.
+    pub(crate) fn base(&self, behind: usize, oid: &Oid) -> Option<(usize, usize)> {
+        let found = |(at, segment): (usize, &Arc<Segment>)| Some((at, segment.find(oid)?));
+        (self.segments[..behind].iter().enumerate().rev()).find_map(found)
+    }
+
+    /// [`Self::base`] for a pack that comes in behind every segment of the set,
+    /// as its record.
+    pub(crate) fn base_record(&self, oid: &Oid) -> Result<Option<Record>, Error> {
+        self.base(self.segments.len(), oid)
+            .map(|(at, index)| self.segments[at].record(index))
+            .transpose()
+    }
+
+    /// The bytes of [`Self::base`] for a pack that comes in behind every segment
+    /// of the set.
+    pub(crate) fn read_base(&self, oid: &Oid) -> Result<(Kind, Vec<u8>), Error> {
+        let at = self.base(self.segments.len(), oid);
+        self.read_at(at.ok_or(Error::MissingBase(*oid))?)
+    }
+
+    /// The record an object is sent by: its oldest. A delta is sent as it is
+    /// stored, and what it is made of is then older than it or before it in its
+    /// own pack, so that no two objects are sent as deltas of each other.
+    pub(crate) fn oldest(&self, oid: &Oid) -> Option<(usize, usize)> {
+        let found = |(at, segment): (usize, &Arc<Segment>)| Some((at, segment.find(oid)?));
+        self.segments.iter().enumerate().find_map(found)
+    }
+
     /// whether any segment holds the object
     pub fn locate_any(&self, oid: &Oid) -> bool {
         self.locate(oid).is_some()
@@ -80,10 +114,18 @@ impl SegmentSet {
 
     /// the canonical bytes of an object, resolving its delta chain
     pub fn read(&self, oid: &Oid) -> Result<(Kind, Vec<u8>), Error> {
+        self.read_at(self.place(oid).ok_or(Error::NotFound(*oid))?)
+    }
+
+    /// the canonical bytes of the object of a record, by its segment and its place there
+    pub(crate) fn read_at(
+        &self,
+        (mut at, mut index): (usize, usize),
+    ) -> Result<(Kind, Vec<u8>), Error> {
         let mut deltas = Vec::new();
-        let (mut segment, mut index) = self.locate(oid).ok_or(Error::NotFound(*oid))?;
-        let kind = segment.record(index)?.kind;
+        let kind = self.segments[at].record(index)?.kind;
         let mut data = loop {
+            let segment = &self.segments[at];
             let record = segment.record(index)?;
             let entry = segment.entry(&record)?;
             let (form, size, head) = scan::header(entry, 0)?;
@@ -96,7 +138,7 @@ impl SegmentSet {
                 }
                 (Delta::Outside, Form::Reference(base)) => {
                     deltas.push(payload);
-                    (segment, index) = self.locate(&base).ok_or(Error::MissingBase(base))?;
+                    (at, index) = self.base(at, &base).ok_or(Error::MissingBase(base))?;
                 }
                 _ => return Err(Error::Corrupt("record and entry disagree")),
             }

@@ -62,7 +62,7 @@ impl Objects for Verified<'_> {
         let shared = self.shared;
         let Some(raw) = shared.entries.get(entry as usize) else {
             let base = &shared.outside[entry as usize - shared.entries.len()];
-            let read = shared.existing.read(base);
+            let read = shared.existing.read_base(base);
             *scratch = read.map_err(|_| Error::MissingBase(*base))?.1;
             return Ok(scratch);
         };
@@ -90,7 +90,6 @@ impl Objects for Verified<'_> {
             kind,
             size: object.len() as u64,
             base,
-            outside: base.is_none(),
         };
         self.made.metas.push((delta as usize, meta));
         Ok(oid)

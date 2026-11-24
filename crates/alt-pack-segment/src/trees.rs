@@ -240,7 +240,7 @@ impl<'a> Trees<'a> {
                 }
                 (Delta::Outside, Form::Reference(base)) => {
                     deltas.push((at, payload));
-                    at = self.set.place(&base).ok_or(Error::MissingBase(base))?;
+                    at = self.set.base(at.0, &base).ok_or(Error::MissingBase(base))?;
                 }
                 _ => return Err(Error::Corrupt("record and entry disagree")),
             }

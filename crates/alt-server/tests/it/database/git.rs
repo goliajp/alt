@@ -2,6 +2,7 @@ use super::*;
 mod given_up;
 mod many_refs;
 mod raw_push;
+mod reverted;
 mod said;
 mod settled_cost;
 mod verifying;

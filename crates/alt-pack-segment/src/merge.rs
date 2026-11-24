@@ -123,7 +123,11 @@ fn copy(
     };
     let below = match written.get(&base) {
         Some((_, depth)) => *depth,
-        None => older.record(&base)?.ok_or(Error::MissingBase(base))?.depth,
+        None => {
+            (older.base_record(&base)?)
+                .ok_or(Error::MissingBase(base))?
+                .depth
+        }
     };
     if below >= DEPTH {
         let (kind, data) = all.read(&record.oid)?;
