@@ -128,8 +128,11 @@ your own Git configuration to open it. `altd-server` refuses to serve such a
 repository to a fetch or a push alike, as `git daemon` does, and so does
 `alt intake` to read one: where the server runs as another user than the one
 the repositories belong to, name them in `safe.directory` of the configuration
-that user reads (the working tree, also where Git itself wants the `.git`
-directory named).
+that user reads: the working tree, or the control directory (`.alt`), as Git's
+own servers want the `.git` directory named. The server opens the directory
+it is asked for and no repository above it, a repository whose name begins
+with a dot is not served, and an error it answers with names no path of the
+server.
 
 A repeated `alt import` goes by what the Git repository had when the store
 last met it (the last import from it, or export to it), kept in
@@ -137,15 +140,33 @@ last met it (the last import from it, or export to it), kept in
 as they were then stay as the store has them, so commits made in the store
 and not exported are no longer taken off their branch; where Git moved the
 ref as well, Git's value is taken and the log of the ref leads back to the
-store's. A stash made in the store stays on top of the stashes Git has, and
-one Git has dropped since goes. A store imported by an older build has no
-such record until its next import: that import takes every ref Git has, as
-before, and drops no stash.
+store's, and the import names each branch it took off commits of the store,
+with the commit it was at. A stash made in the store stays on top of the
+stashes Git has, and one Git has dropped since goes. The record counts only
+between the store and the Git repository it was made of: another store at the
+same path, the store brought back from an older copy, or another repository
+at the path of the first are told apart, and the import then takes every ref
+Git has and drops no stash, as a first import does. So does the first import
+after an upgrade from a build that kept the record without naming the two.
 
 On macOS `alt init` and `alt import` set `core.precomposeUnicode` as
 `git init` does, and file names are then recorded in their composed form.
 A tree an older build committed there with decomposed names shows those files
-as untracked afterwards, as it does to Git.
+as untracked afterwards, as it does to Git. A store an older build made has
+no such setting: run `alt config core.precomposeUnicode true` in it once. The
+names are composed as Git composes them, which is not Normalization Form C: a
+name an earlier build of this release recorded in that form may differ in a
+few code points and then shows as deleted beside an untracked file.
+
+`alt revert`, `alt cherry-pick` and `alt merge` take `--continue`, `--skip`
+(not `merge`), `--abort` and `--quit` as Git does, and refuse what Git
+refuses: a revert gone on with after a commit of your own stops where the
+index holds more than `HEAD`, and a change that is not staged is not written
+over. `alt rebase --abort` now resets hard, as Git does: a change that is not
+committed is gone with the rebase, and `alt undo` brings it back.
+`alt rebase --skip` still refuses to drop a change that is not staged, and
+`alt rebase --quit` puts `HEAD` back on the branch, since a store has no
+`HEAD` off a branch.
 
 If installation stops, inspect `status` before retrying. A complete staged
 release with no active pointer can be activated by rerunning installation of
