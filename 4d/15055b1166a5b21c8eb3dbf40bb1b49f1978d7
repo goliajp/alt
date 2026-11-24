@@ -1,0 +1,22 @@
+schema: alt-meta/1
+type: fix
+summary: a native publication is given what the refs lead to and brings any other object
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/chunks.rs
+touched: crates/alt-server-store/src/pack_native.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/publication/acquire.rs
+touched: crates/alt-server-store/src/publication/fence.rs
+touched: crates/alt-server-store/src/publication/reached.rs
+touched: crates/alt-server-store/src/publication/source.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/src/review.rs
+touched: crates/alt-server-store/src/tasks.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/led.rs
+touched: crates/alt-server-store/tests/it/database/tasks/named.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/native_led.rs
