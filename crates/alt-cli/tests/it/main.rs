@@ -145,6 +145,7 @@ mod read_json;
 mod readers;
 mod rebase;
 mod rebase_merges;
+mod rebase_merges_base;
 mod recovery_checked;
 mod reflog;
 mod remote;

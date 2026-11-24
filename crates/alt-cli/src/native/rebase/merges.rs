@@ -92,17 +92,18 @@ impl NativeRepo<'_> {
                 base = Some((at, found));
             }
         }
-        let base = base.map(|(_, commit)| commit);
         let starts: HashSet<ObjectId> = lines.iter().map(|line| line.0).collect();
         let mut taken = HashSet::from(["onto".to_owned()]);
-        let mut names: std::collections::HashMap<ObjectId, String> = Default::default();
+        // the base is the new base wherever it is named: where a line
+        // starts on it, and where a merge brought it in
+        let mut names: std::collections::HashMap<ObjectId, String> = base
+            .map(|(_, commit)| (commit, "onto".to_owned()))
+            .into_iter()
+            .collect();
         let mut steps = vec![Step::Label("onto".to_owned())];
         for (start, line) in lines {
-            steps.push(Step::Reset(match names.get(&start) {
-                Some(name) => name.clone(),
-                None if base == Some(start) => "onto".to_owned(),
-                None => start.to_string(),
-            }));
+            let named = names.get(&start).cloned();
+            steps.push(Step::Reset(named.unwrap_or_else(|| start.to_string())));
             for commit in line {
                 steps.push(match mine[&commit][..] {
                     [_, brought] => {
