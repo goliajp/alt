@@ -158,9 +158,9 @@ fn reused_http_connections_recheck_current_state_and_discard_closed_backends() {
         thread.join().unwrap();
     }
     assert_eq!(health(), 200);
-    let count = backends(&mut client, &f.database)
-        .difference(&existing)
-        .count();
+    let live = backends(&mut client, &f.database);
+    let idle = live.difference(&existing).filter(|pid| !held.contains(pid));
+    let count = idle.count();
     assert!((1..=4).contains(&count), "idle connection count {count}");
     drop(server);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
