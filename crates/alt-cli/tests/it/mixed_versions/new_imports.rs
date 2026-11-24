@@ -151,3 +151,31 @@ fn an_older_program_works_in_a_sha256_store_imported_since() {
 fn an_older_program_works_in_a_sha1_store_imported_since() {
     an_older_program_works_in_a_store_imported_since("sha1", 40);
 }
+
+#[test]
+fn a_variable_of_the_format_is_not_set_by_hand() {
+    let new = new_bin();
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (source, store) = (source(dir.path(), "sha256"), dir.path().join("alt"));
+    ok(alt(
+        &new,
+        false,
+        &source,
+        &["import", store.to_str().unwrap()],
+    ));
+    let own = store.join(".alt/git-import/config");
+    let before = std::fs::read(&own).unwrap();
+    for args in [
+        &["config", "extensions.objectformat", "sha1"][..],
+        &["config", "--unset", "extensions.objectformat"],
+        &["config", "core.repositoryformatversion", "0"],
+    ] {
+        let refused = alt(&new, false, &store, args);
+        assert!(!refused.status.success(), "{args:?}");
+        let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+        assert!(said.contains("tells the format of the store"), "{said}");
+    }
+    assert_eq!(std::fs::read(&own).unwrap(), before);
+    let list = ok(alt(&new, false, &store, &["config", "--list"]));
+    assert_eq!(list, git(&source, &["config", "--local", "--list"]));
+}

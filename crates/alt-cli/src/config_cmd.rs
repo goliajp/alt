@@ -51,7 +51,20 @@ pub fn run(
     Ok(())
 }
 
+/// Refuses a variable that tells how the store is laid out: the hash of
+/// its objects, the version of the format, an extension. The store has
+/// it from where it was made, and what reads the store goes by it.
+fn ensure_settable(key: &str) -> Res<()> {
+    let (section, subsection, name) = split_key(key)?;
+    let version = section == "core" && name == "repositoryformatversion";
+    if subsection.is_none() && (section == "extensions" || version) {
+        return Err(format!("'{key}' tells the format of the store and is not set by hand").into());
+    }
+    Ok(())
+}
+
 fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> Res<()> {
+    ensure_settable(key)?;
     set(repo, key, value)?;
     writeln!(out, "set {key} = {value}")?;
     Ok(())
@@ -119,6 +132,7 @@ pub(crate) fn rename_section(repo: &Repository, section: &str, from: &str, to: &
 }
 
 fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
+    ensure_settable(key)?;
     let (section, subsection, name) = split_key(key)?;
     let path = config_path(repo);
     let mut entries = current_entries(&path)?;
