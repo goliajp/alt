@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: have a handle the oplog ended short for read it to its end before it syncs
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
+touched: crates/alt-oplog/tests/it/v2_ended_short.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
