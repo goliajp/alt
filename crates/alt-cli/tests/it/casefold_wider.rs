@@ -107,7 +107,7 @@ fn the_daemon_and_a_parallel_workspace_respell_and_switch_alike() {
     clean(&pair.alt, false);
 }
 
-fn cut(repo: &Path, args: &[&str], crash: &str) -> Output {
+pub(crate) fn cut(repo: &Path, args: &[&str], crash: &str) -> Output {
     crate::alt_command()
         .current_dir(repo)
         .env("ALT_NO_DAEMON", "1")
