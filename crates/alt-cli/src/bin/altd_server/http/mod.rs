@@ -20,11 +20,12 @@ mod head;
 mod paced;
 mod request;
 mod response;
+mod shares;
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -33,6 +34,7 @@ pub(crate) use head::{Header, Method};
 pub(crate) use paced::Limits;
 pub(crate) use request::Request;
 pub(crate) use response::{Response, StatusCode};
+pub(crate) use shares::{Share, Shares};
 
 #[derive(Default)]
 struct Waiting {
@@ -47,8 +49,8 @@ struct Shared {
     open: AtomicUsize,
     /// the connections open from each address that has a limit
     from: Mutex<HashMap<IpAddr, usize>>,
-    /// the bytes of the bodies received and still held
-    held: Arc<AtomicU64>,
+    /// the bytes of the bodies received and still held, by the address they came from
+    held: Arc<Shares>,
     limits: Limits,
 }
 
@@ -132,7 +134,7 @@ impl Server {
             arrived: Condvar::new(),
             open: AtomicUsize::new(0),
             from: Mutex::default(),
-            held: Arc::default(),
+            held: Shares::of(limits.spool),
             limits,
         });
         let server = Server {
@@ -202,7 +204,7 @@ fn connection(open: Open, stream: TcpStream) {
         return;
     }
     let shared = &open.0;
-    let mut source = paced::Source::new(stream, shared.limits);
+    let mut source = paced::Source::new(stream, shared.limits, open.1);
     loop {
         let head = match head::Head::read(&mut source) {
             Ok(Some(head)) => head,
@@ -226,10 +228,7 @@ fn connection(open: Open, stream: TcpStream) {
                 Ok(request::Back::Receive(mut request, most)) => {
                     // one whose body has no file to go to is let go of,
                     // and answers itself
-                    if request
-                        .spool(most, &shared.held, shared.limits.spool)
-                        .is_ok()
-                    {
+                    if request.spool(most, &shared.held).is_ok() {
                         shared.enqueue(*request);
                     }
                 }

@@ -12,12 +12,12 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
 use super::head::{Framing, Head, Header, Method};
 use super::paced::{Sent, Source};
 use super::response::{Outgoing, Response};
+use super::shares::{Share, Shares};
 
 /// Where the reading of a chunked body is.
 enum Chunks {
@@ -29,20 +29,14 @@ enum Chunks {
 }
 
 /// A body taken off the wire, and what ended the taking where it did
-/// not come whole. Its bytes count against what bodies may take between
-/// them for as long as this is there.
+/// not come whole. What it took on the wire, the lines around its chunks
+/// with it, counts against what bodies may take between them for as long
+/// as this is there.
 struct Spool {
     file: File,
     _dir: alt_os::temp::TempDir,
     failed: Option<io::Error>,
-    bytes: u64,
-    of: Arc<AtomicU64>,
-}
-
-impl Drop for Spool {
-    fn drop(&mut self) {
-        self.of.fetch_sub(self.bytes, Ordering::AcqRel);
-    }
+    _share: Share,
 }
 
 /// What a request hands to the thread of its connection.
@@ -145,9 +139,8 @@ impl Read for Body {
 
 impl Body {
     /// Takes the body off the wire, `most` bytes of it at most, into a
-    /// file. `held` is what the bodies received take between them, of
-    /// which there may be `room`.
-    fn receive(&mut self, most: u64, held: &Arc<AtomicU64>, room: u64) -> io::Result<()> {
+    /// file. `held` is what the bodies received take between them.
+    fn receive(&mut self, most: u64, held: &Arc<Shares>) -> io::Result<()> {
         self.most = self.most.min(most);
         let dir = alt_os::temp::tempdir()?;
         let mut file = File::options()
@@ -155,22 +148,18 @@ impl Body {
             .write(true)
             .create_new(true)
             .open(dir.path().join("body"))?;
-        let mut spool = Spool {
-            file: file.try_clone()?,
-            _dir: dir,
-            failed: None,
-            bytes: 0,
-            of: Arc::clone(held),
-        };
+        let mut share = held.share(self.source.from());
         let mut piece = vec![0u8; 64 * 1024];
-        spool.failed = loop {
-            match self.wire(&mut piece) {
+        let failed = loop {
+            let read = self.wire(&mut piece);
+            // the body is not begun, and nothing spent, before the first of it is asked for
+            let came = self.source.spent().saturating_sub(share.bytes());
+            if !self.untouched && share.take(came).is_err() {
+                break Some(io::ErrorKind::StorageFull.into());
+            }
+            match read {
                 Ok(0) => break None,
                 Ok(read) => {
-                    spool.bytes += read as u64;
-                    if held.fetch_add(read as u64, Ordering::AcqRel) + read as u64 > room {
-                        break Some(io::ErrorKind::StorageFull.into());
-                    }
                     if let Err(error) = file.write_all(&piece[..read]) {
                         break Some(error);
                     }
@@ -178,8 +167,13 @@ impl Body {
                 Err(error) => break Some(error),
             }
         };
-        spool.file.rewind()?;
-        self.spool = Some(spool);
+        file.rewind()?;
+        self.spool = Some(Spool {
+            file,
+            _dir: dir,
+            failed,
+            _share: share,
+        });
         Ok(())
     }
 
@@ -283,9 +277,9 @@ impl Request {
     }
 
     /// Receives the body: see [`Self::receive`].
-    pub(super) fn spool(&mut self, most: u64, held: &Arc<AtomicU64>, room: u64) -> io::Result<()> {
+    pub(super) fn spool(&mut self, most: u64, held: &Arc<Shares>) -> io::Result<()> {
         let body = self.body.as_mut().expect("a request not yet answered");
-        body.receive(most, held, room)
+        body.receive(most, held)
     }
 
     /// The body. Where it was not received it is read off the wire, and

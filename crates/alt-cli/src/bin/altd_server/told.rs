@@ -33,7 +33,7 @@ ALT_SERVER_WORKERS                      requests handled at once (4)
   ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
   ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in (3 pushes and 1 GiB)
   ALT_SERVER_MAX_INDEX_WAIT_MS            how long a push waits for that memory before a 503 (600000)
-  ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes)
+  ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes); a quarter for one address
   ALT_SERVER_MAX_SENDING_BYTES            bytes of responses to fetches written and not yet sent (half of what is free for temporary files)
   ALT_SERVER_MAX_OPEN_REPOS               repositories of a root kept open (16)
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)

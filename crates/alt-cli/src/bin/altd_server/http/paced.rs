@@ -10,6 +10,10 @@
 //!   line and is not let go of for it; one that stalls, or lets through a
 //!   byte now and then, is, within two windows of when it began to.
 //!
+//! What moves of a body is what the body has: the lines around the chunks
+//! of one sent in chunks are not it, and a peer that sends much of those
+//! around little else has moved little.
+//!
 //! What a slow peer keeps is its connection and the thread of it, never
 //! a worker: see [`super`] for what bounds those.
 
@@ -93,10 +97,13 @@ pub(crate) struct Source {
     pace: Pace,
     /// the bytes that may still be taken of the body being read
     budget: u64,
+    /// the bytes taken of it, the lines around its chunks among them
+    spent: u64,
+    from: Option<std::net::IpAddr>,
 }
 
 impl Source {
-    pub(super) fn new(stream: TcpStream, limits: Limits) -> Self {
+    pub(super) fn new(stream: TcpStream, limits: Limits, from: Option<std::net::IpAddr>) -> Self {
         Source {
             stream,
             held: Vec::new(),
@@ -104,6 +111,8 @@ impl Source {
             limits,
             pace: Pace::new(true),
             budget: u64::MAX,
+            spent: 0,
+            from,
         }
     }
 
@@ -118,12 +127,20 @@ impl Source {
     pub(super) fn begin_body(&mut self, most: u64) {
         self.pace = Pace::new(false);
         self.budget = most;
+        self.spent = 0;
+    }
+    pub(super) fn spent(&self) -> u64 {
+        self.spent
+    }
+    pub(super) fn from(&self) -> Option<std::net::IpAddr> {
+        self.from
     }
 
     /// Takes `count` bytes off what the body may still have.
     fn spend(&mut self, count: usize) -> io::Result<()> {
         let left = self.budget.checked_sub(count as u64);
         self.budget = left.ok_or(io::ErrorKind::FileTooLarge)?;
+        self.spent += count as u64;
         Ok(())
     }
 
@@ -154,12 +171,8 @@ impl Source {
             let read = self.stream.read(&mut self.held[had..]);
             self.held.truncate(had + *read.as_ref().unwrap_or(&0));
             match read {
-                Ok(read) => {
-                    self.pace.moved += read as u64;
-                    return Ok(read);
-                }
                 Err(error) if waited_out(&error) => {}
-                Err(error) => return Err(error),
+                read => return read,
             }
         }
     }
@@ -221,6 +234,7 @@ impl Read for Source {
         }
         let count = buf.len().min(self.ahead().len());
         self.spend(count)?;
+        self.pace.moved += count as u64;
         buf[..count].copy_from_slice(&self.ahead()[..count]);
         self.at += count;
         Ok(count)

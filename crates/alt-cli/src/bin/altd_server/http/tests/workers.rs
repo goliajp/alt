@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
+mod sources;
+
 /// The time a request waits for the worker is none of its peer's: its
 /// body, sent at once, is read when the worker comes to it.
 #[test]

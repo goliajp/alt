@@ -280,7 +280,7 @@ fn an_address_has_so_many_connections_open_and_no_more() {
         arrived: Condvar::new(),
         open: AtomicUsize::new(0),
         from: Mutex::default(),
-        held: Arc::default(),
+        held: Shares::of(u64::MAX),
         limits: within(GRACE),
     });
     let open = |address: &str| shared.open(address.parse().unwrap(), 8);
