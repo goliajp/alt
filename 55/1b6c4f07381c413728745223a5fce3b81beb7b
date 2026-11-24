@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: feat
+summary: a directory is listed a page at a time, and the workbench turns the pages
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/browse/json_tests.rs
+touched: crates/alt-server/src/browse/tests.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/web_route.rs
+touched: crates/alt-server/src/web_route/browse.rs
+touched: crates/alt-server/tests/fixtures/json/browse-responses.txt
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/migration.rs
+touched: crates/alt-server/tests/it/database/browser/tree_pages.rs
+touched: workbench/src/api.ts
+touched: workbench/src/views.tsx
