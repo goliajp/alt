@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a nonce is good as it was given and in no other spelling of its digits
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
