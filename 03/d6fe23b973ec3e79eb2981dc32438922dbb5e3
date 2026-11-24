@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: feat
+summary: read merge.ff, merge.log and merge.suppressDest as git reads them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/src/native/merge/named.rs
+touched: crates/alt-cli/src/native/merge/run.rs
+touched: crates/alt-cli/src/sequence_args.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/merge_settings.rs
+touched: crates/alt-cli/tests/it/sync_order.rs
