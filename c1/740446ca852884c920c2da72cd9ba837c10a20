@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: hold a cut told in the oplog header to the boundary a handle reads on with
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/tests/it/v2_cut_ends_told.rs
