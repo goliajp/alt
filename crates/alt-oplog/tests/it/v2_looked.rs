@@ -117,9 +117,12 @@ fn a_handle_given_nobody_to_sync_what_ops_name_sets_no_boundary_over_what_anothe
     let starts = left_by_boot_1(dir.path(), &[(b"tx", linked())]);
     let (told, _, mut log) = synced_in_boot_2(dir.path(), false);
     assert!(matches!(told, Err(OpLogError::Unjudged { at }) if at == starts[0]));
+    // looked at, the op is in a log that is fsynced: nobody saw to what
+    // it names, and no boundary says so
     assert_eq!(log.settle(all).unwrap(), None);
     log.sync().unwrap();
-    assert!(log.confirmed());
+    assert!(!log.confirmed());
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(starts[0]));
 }
 
 #[test]

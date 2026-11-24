@@ -23,11 +23,14 @@ pub fn point(store: &mut RefStore, name: &str, at: u8) {
     store.commit("a", at as u64, &[change]).unwrap();
 }
 
-/// A store over a new version 2 log with blocks of 4 KiB.
+/// A store over a new version 2 log with blocks of 4 KiB, given
+/// somebody to sync the objects its transactions name who finds them
+/// stored.
 pub fn new_store(dir: &Path) -> RefStore {
     alt_oplog::v2::create_with(&dir.join("oplog"), 12).unwrap();
-    let store = RefStore::open(dir).unwrap();
+    let mut store = RefStore::open(dir).unwrap();
     assert_eq!(store.oplog().format(), 2);
+    store.sync_objects_with(std::sync::Arc::new(|_| Ok(())));
     store
 }
 
@@ -241,6 +244,7 @@ fn the_refs_follow_a_log_cut_at_the_first_dangling_transaction_another_boot_left
     drop(reader);
 
     let mut store = RefStore::open(dir.path()).unwrap();
+    store.sync_objects_with(std::sync::Arc::new(|_| Ok(())));
     assert!(store.unsettled());
     assert_eq!(store.settle(held).unwrap().unwrap().ops, 3);
     assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(1))));

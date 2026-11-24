@@ -14,7 +14,7 @@ use super::v2_log::{boot, file_len, grow, new_log};
 fn a_receipt_a_sync_covered_is_kept_from_a_cut_wherever_past_the_op_refused_it_lies() {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
-    let mut log = new_log(dir.path());
+    let mut log = super::v2_unseen::seeing(new_log(dir.path()));
     let mut asked = Vec::new();
     for request in [1, 2] {
         let of_request = Meta {
@@ -185,7 +185,7 @@ fn a_frame_is_kept_past_an_op_that_took_its_workspace_away_and_names_what_is_not
 fn a_commit_between_a_change_of_an_index_and_the_op_that_replaced_it_is_kept_from_a_cut() {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
-    let mut log = new_log(dir.path());
+    let mut log = super::v2_unseen::seeing(new_log(dir.path()));
     grow(&mut log, "a", 2);
     log.append_with("a", 3, b"left", &staged(1)).unwrap();
     let left = log.anchor().unwrap().start;

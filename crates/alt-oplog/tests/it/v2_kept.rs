@@ -59,7 +59,7 @@ fn a_transaction_another_handle_synced_is_not_cut_with_an_op_before_it_whatever_
         boot(2);
         let mut looking = OpLog::open(dir.path()).unwrap();
         // another handle looks, finds what both name stored, and syncs
-        let mut syncing = OpLog::open(dir.path()).unwrap();
+        let mut syncing = super::v2_unseen::seeing(OpLog::open(dir.path()).unwrap());
         let all = |_: &alt_oplog::Op| Ok::<_, OpLogError>(true);
         assert_eq!(syncing.settle(all).unwrap(), None);
         syncing.sync().unwrap();
@@ -92,7 +92,7 @@ fn a_commit_that_was_answered_before_the_power_went_is_not_cut_with_an_op_refuse
 fn answered_before_the_power_went(noted_since: bool) {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
-    let mut log = new_log(dir.path());
+    let mut log = super::v2_unseen::seeing(new_log(dir.path()));
     grow(&mut log, "a", 2);
     {
         let _unsynced = alt_os::durability::leave_unsynced(true);

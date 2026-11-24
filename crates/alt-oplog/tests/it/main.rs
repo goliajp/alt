@@ -65,4 +65,5 @@ mod v2_synced;
 mod v2_tables;
 mod v2_tickets;
 mod v2_unconfirmed;
+mod v2_unseen;
 mod v2_untrusted;

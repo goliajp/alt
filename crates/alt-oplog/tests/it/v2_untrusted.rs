@@ -21,7 +21,7 @@ use super::v2_log::{boot, file_len, frames, grow, new_log};
 pub fn varied(dir: &Path) {
     boot(1);
     alt_oplog::v2::create_with(dir, 10).unwrap();
-    let mut log = OpLog::open(dir).unwrap();
+    let mut log = super::v2_unseen::seeing(OpLog::open(dir).unwrap());
     // op `n`: of a workspace or none, and every few a ref transaction
     // that a request made
     let of = |n: u8, requested: bool| Meta {
@@ -62,7 +62,7 @@ pub fn varied(dir: &Path) {
     log.append("a", 10, b"gone").unwrap();
     drop(log);
     boot(2);
-    let mut log = OpLog::open(dir).unwrap();
+    let mut log = super::v2_unseen::seeing(OpLog::open(dir).unwrap());
     let held = |op: &Op| Ok::<_, OpLogError>(op.payload != b"gone");
     assert!(log.settle(held).unwrap().is_some());
     for n in 11..17u8 {

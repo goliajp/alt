@@ -193,6 +193,13 @@ impl Account {
         self.owed.retain(|owed| owed.end > target);
     }
 
+    /// The log is fsynced up to byte `target`, over frames that are in
+    /// their place, with no sync recorded: nobody saw to what the ops
+    /// up to there name.
+    pub fn fsynced(&mut self, target: u64) {
+        self.owed.retain(|owed| owed.end > target);
+    }
+
     fn found_cut(&mut self, holder: Holder) {
         if !self.cut.contains(&holder) {
             self.cut.push(holder);

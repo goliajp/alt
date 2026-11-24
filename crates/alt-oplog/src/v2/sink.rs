@@ -209,6 +209,13 @@ impl Sink {
             account.look(|owed| placed(&self.file, told, synced, frame(owed)))?;
             return Ok(());
         }
+        // with nobody to see to what ops name, no sync is recorded over
+        // an op that names something
+        if self.named.is_none() && said < reached.target && !reached.pending.is_empty() {
+            self.file.sync_all()?;
+            self.account.lock().unwrap().fsynced(reached.target);
+            return Ok(());
+        }
         record(&of, &held, noted, &reached)?;
         self.account.lock().unwrap().covered(reached.target);
         Ok(())

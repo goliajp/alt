@@ -230,9 +230,12 @@ impl Log {
         }
         self.may_write()?;
         self.looked_to(target)?;
-        if let Some(sync) = &self.named {
-            sync(&self.named_unlocked(self.synced)?)?;
-        }
+        // with nobody to see to what ops name, no sync is recorded over
+        // an op that names something
+        let seen = match &self.named {
+            Some(sync) => sync(&self.named_unlocked(self.synced)?).map(|()| true)?,
+            None => self.named_unlocked(self.synced)?.is_empty(),
+        };
         let held = Held::take(&self.dir)?;
         let noted = Tail::noted_held(&self.beside(), &held);
         self.synced = self.synced.max(self.said_synced(noted.says()));
@@ -242,6 +245,11 @@ impl Log {
         let cut = self.told()?.cuts(generation, self.synced, target);
         if cut || !self.holds_head(self.file.metadata()?.len())? {
             return Err(OpLogError::CutBack);
+        }
+        if !seen {
+            self.file.sync_all()?;
+            self.account.lock().unwrap().fsynced(target);
+            return Ok(());
         }
         record(
             &self.beside(),

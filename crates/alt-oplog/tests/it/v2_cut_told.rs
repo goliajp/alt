@@ -54,7 +54,7 @@ fn held_where_no_boot_is_told(dir: &Path) -> OpLog {
     log.append_with("a", 3, b"left", &linked()).unwrap();
     stage(&mut log, 40);
     drop(log);
-    let held = OpLog::open(dir).unwrap();
+    let held = super::v2_unseen::seeing(OpLog::open(dir).unwrap());
     assert_eq!(held.len(), 43);
     held
 }

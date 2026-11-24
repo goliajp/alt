@@ -84,7 +84,7 @@ fn what_a_writer_laid_is_what_a_new_handle_reads_whatever_the_table_and_the_bloc
 /// staged once, unsynced, and where it ends then.
 fn staged_by(dir: &Path, workspaces: u64) -> (OpLog, u64) {
     alt_oplog::v2::create_with(dir, 12).unwrap();
-    let mut log = OpLog::open(dir).unwrap();
+    let mut log = super::v2_unseen::seeing(OpLog::open(dir).unwrap());
     let _unsynced = alt_os::durability::leave_unsynced(true);
     for workspace in 1..=workspaces {
         let meta = Meta {
