@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a request refused for what other pushes hold is told when to come again
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/respond.rs
