@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the responses of an address are told by what a proxy says, and the push that waits is seen in what the server holds
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_index_memory.rs
+touched: crates/alt-cli/tests/it/altd_server_sending.rs
