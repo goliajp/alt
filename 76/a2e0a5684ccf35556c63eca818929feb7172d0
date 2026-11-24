@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: test
+summary: keep account of every sync left to a sink and of the frames a handle wrote
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_meanwhile.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
+touched: crates/alt-refs/tests/it/owed_sync.rs
