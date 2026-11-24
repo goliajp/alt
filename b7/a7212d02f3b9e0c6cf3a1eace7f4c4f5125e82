@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say whom the server serves, what a repeated import leaves and how names are composed on macos
+author-type: human
+author: doracawl
+touched: docs/internal-install.md
