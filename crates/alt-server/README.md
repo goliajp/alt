@@ -133,11 +133,26 @@ The packs of pushes are verified in `http.indexing_megabytes` of memory between
 them: 4096 by default, or what one pack that holds an object of
 `limits.object_bytes` takes where that is more, which is also the least the key
 may be set to. A pack takes what it needs before it allocates: what its entries
-inflate to while it is scanned, up to 256 MiB; the objects further deltas wait
-for, up to 96 MiB, beyond which they are kept in files of their own up to
-1536 MiB and beyond those made again; and four times its largest object for each
-thread that resolves its deltas. Where others leave less than that, a pack is
-resolved by fewer threads, down to one. A push that finds the memory taken waits
+inflate to while it is scanned, up to 256 MiB; 268 bytes for each entry it says
+it has and 88 more for each delta; the objects further deltas wait for, up to
+96 MiB, beyond which they are kept in files of their own up to 1536 MiB and
+beyond those made again; and four times its largest object for each thread that
+resolves its deltas. Where others leave less than that, a pack is resolved by
+fewer threads, down to one. A pack of ten million small objects takes 2.5 GiB
+for its entries alone, and is refused (`index memory`) where the key is set
+lower than what it needs.
+
+What the serving process writes for a time is under `temporary` in
+`bytes_directory`, on the disk of the stored bytes and not among the temporary
+files of the host, which a container often keeps in memory: request bodies while
+they are received, responses to fetches while they are sent, and the files of
+the bases above under `temporary/bases`. The directory is the server's alone
+(mode 0700) and is emptied whenever the server starts. The files of bases of
+all the packs verified at once take no more than `http.indexing_megabytes`
+between them; a base that has no room there, or cannot be written, is made
+again instead, which counts against what its pack may inflate to. A pack that
+is verified when the caller is gone or its answer has been given up
+(`http.work_timeout_ms`) is verified no further. A push that finds the memory taken waits
 for half as long as a request may run (`http.work_timeout_ms`) and is then refused
 with nothing applied: Git shows `the packs of other pushes are being verified;
 push again`, and a client that reads no report is answered `503` with

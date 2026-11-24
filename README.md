@@ -269,7 +269,13 @@ taken it, and those files together take no more than
 `ALT_SERVER_MAX_SENDING_BYTES`, half of what is free for temporary files
 when the server starts unless it is set: a fetch whose response has no room
 is answered `503` with `Retry-After`, and one that is alone is answered
-whatever its size. Of that room, and of the room for request bodies being
+whatever its size. What the server writes for a time (request bodies, the packs
+of pushes and the bases of their deltas, responses to fetches) is in a directory
+it makes for itself when it starts, its owner's alone, under
+`ALT_SERVER_TEMP_DIR` or among the temporary files of the host where that is
+not set; point it at a disk where those are kept in memory. A server that was
+ended where it stood leaves its directory behind, and the next one to start
+under the same parent removes it. Of that room, and of the room for request bodies being
 received, the peers of one address that is not the host itself have a
 quarter between them; a single response or body of an address may pass the
 quarter as far as the room goes. These numbers, and those for the size of a push and the
