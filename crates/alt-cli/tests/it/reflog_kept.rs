@@ -79,12 +79,16 @@ fn a_second_import_keeps_the_moves_git_never_saw() {
     assert_eq!(at("main@{1}"), made[2]);
     assert_eq!(at("main@{2}"), made[1]);
     assert_eq!(at("main@{3}"), made[0]);
-    assert_eq!(at("main@{4}"), theirs);
+    // behind them what git logged since the two parted, and before
+    // that what both had
+    assert_eq!(at("main@{4}"), at("main"));
+    assert_eq!(at("main@{5}"), theirs);
     assert_eq!(at("HEAD@{1}"), made[2]);
     let log = ok(alt(&to, &["reflog", "main"]));
     let first = log.lines().next().unwrap_or_default();
     assert!(first.contains("main@{0}: import: moving to "), "{log}");
     assert!(log.contains("main@{1}: commit: c\n"), "{log}");
+    assert!(log.contains("main@{4}: commit: three\n"), "{log}");
     // what was made here is found again, and a third import changes nothing
     ok(alt(&source, &["import", to.to_str().unwrap()]));
     assert_eq!(ok(alt(&to, &["reflog", "main"])), log);

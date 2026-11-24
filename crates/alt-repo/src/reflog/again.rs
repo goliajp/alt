@@ -82,8 +82,9 @@ pub fn carried<'a>(
 }
 
 /// Writes over the logs just kept under `alt_dir` each log of `ours`
-/// that git's does not begin with. The import is its last line where
-/// the import moves the ref.
+/// that git's does not begin with: the lines git has, then those of
+/// the store from where the two part. The import is its last line
+/// where the import moves the ref.
 pub(super) fn keep_ours(alt_dir: &Path, ours: Carried, algo: HashAlgo) -> Result<(), RepoError> {
     let kept = alt_dir.join(KEPT);
     for (name, mut lines, by_import) in ours {
@@ -92,13 +93,20 @@ pub(super) fn keep_ours(alt_dir: &Path, ours: Carried, algo: HashAlgo) -> Result
             .map(|log| parse(&log))
             .unwrap_or_default();
         let moved = |line: &Line| (line.old, line.new);
-        let begins = theirs.len() >= lines.len()
-            && lines.iter().zip(&theirs).all(|(a, b)| moved(a) == moved(b));
-        if begins {
+        let alike = lines
+            .iter()
+            .zip(&theirs)
+            .take_while(|(a, b)| moved(a) == moved(b));
+        let alike = alike.count();
+        if alike == lines.len() {
             continue;
         }
+        // what git logged since the two parted stays, behind what the
+        // store logged: a commit git left for another is found by it
         let here = lines.last().and_then(|line| line.new);
-        if let Some(last) = theirs.last().filter(|last| by_import && last.new != here)
+        let last = theirs.last().cloned();
+        let mut lines: Vec<Line> = theirs.into_iter().chain(lines.drain(alike..)).collect();
+        if let Some(last) = last.filter(|last| by_import && last.new != here)
             && let Some(new) = last.new
         {
             lines.push(Line {
