@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: keep from a cut of the oplog the frames a sync may have covered, and no other
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/kept.rs
+touched: crates/alt-oplog/tests/it/v2_checks.rs
+touched: crates/alt-oplog/tests/it/v2_kept_past.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
