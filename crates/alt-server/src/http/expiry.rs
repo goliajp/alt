@@ -39,8 +39,7 @@ impl Rounds {
     fn removes(&self) -> bool {
         self.0 == 0
     }
-    /// The round is over; `more` where it removed and left some behind. A round
-    /// that failed left what it found.
+    /// The round is over; `more` where it removed and left some behind.
     fn over(&mut self, more: bool) {
         self.0 = if more {
             0
@@ -65,7 +64,10 @@ pub(super) async fn run(state: Arc<App>) {
             let mut store = factory.open()?;
             let mut one =
                 |repository: &str, error| told.failed("request expiry", repository, &error);
-            store.expire_requests(BATCH, &mut one)?;
+            // the rest of the round does not wait for the requests to be ended
+            if let Err(error) = store.expire_requests(BATCH, &mut one) {
+                told.failed("request expiry", "", &error);
+            }
             let owed = owed
                 && match store.give_earlier_requests_their_moment(GIVEN, GIVINGS) {
                     Ok((_, more)) => more,
@@ -81,13 +83,15 @@ pub(super) async fn run(state: Arc<App>) {
             let removed = store.remove_what_is_over(REMOVED, &mut passed, &mut rule);
             Ok::<_, alt_server_store::Error>((passed, removed.more, owed))
         });
-        let mut more = false;
         match ended.await {
-            Ok(Ok((passed, left, still))) => (seen, more, owed) = (passed, left, still),
+            Ok(Ok((passed, left, still))) => {
+                (seen, owed) = (passed, still);
+                rounds.over(left);
+            }
+            // a round that could not begin removed nothing: the next one is as it was
             Ok(Err(error)) => log.failed("request expiry", "", &error),
             Err(_) => {}
         }
-        rounds.over(more);
     }
 }
 
