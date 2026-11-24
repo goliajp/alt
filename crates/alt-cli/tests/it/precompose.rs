@@ -188,3 +188,26 @@ fn every_name_is_tracked_with_the_bytes_git_tracks_it_with() {
     pair.assert_same_state();
     clean(&pair);
 }
+
+#[test]
+fn a_directory_whose_file_is_listed_decomposed_gives_way_to_a_file() {
+    let pair = Pair::new();
+    pair.write("keep", "base\n");
+    pair.commit_all("base");
+    pair.both(&["switch", "-c", "file"]);
+    pair.write("d", "f\n");
+    pair.commit_all("file");
+    pair.both(&["switch", "-c", "dir", "main"]);
+    // listed as it was made here, and tracked composed
+    pair.write(&format!("d/{DECOMPOSED}"), "x\n");
+    pair.commit_all("dir");
+    let listed: Vec<_> = std::fs::read_dir(pair.alt.join("d")).unwrap().collect();
+    let name = listed[0].as_ref().unwrap().file_name();
+    assert_eq!(name.to_str(), Some(DECOMPOSED));
+    pair.both(&["switch", "file"]);
+    pair.assert_same_state();
+    clean(&pair);
+    pair.both(&["switch", "dir"]);
+    pair.assert_same_state();
+    clean(&pair);
+}

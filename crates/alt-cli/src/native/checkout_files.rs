@@ -215,7 +215,7 @@ impl NativeRepo<'_> {
                 let rel = inner
                     .strip_prefix(&self.root)
                     .map_err(|_| "path outside root")?;
-                found.push(BString::from(rel.as_os_str().as_encoded_bytes()));
+                found.push(self.as_tracked(rel.as_os_str().as_encoded_bytes())?);
             }
         }
         Ok(found)

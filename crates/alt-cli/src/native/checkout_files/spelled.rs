@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use super::asked::Asked;
 use super::*;
@@ -18,6 +18,8 @@ use super::*;
 pub(in crate::native) struct Listed {
     names: HashMap<PathBuf, HashSet<OsString>>,
     missed: HashSet<PathBuf>,
+    /// names are taken as `core.precomposeUnicode` has them taken
+    composed: bool,
 }
 
 impl Listed {
@@ -31,7 +33,9 @@ impl Listed {
         }
         let mut names = HashSet::new();
         for entry in std::fs::read_dir(dir)? {
-            names.insert(entry?.file_name());
+            let listed = entry?.file_name();
+            let composed = alt_worktree::composed(listed.as_bytes()).filter(|_| self.composed);
+            names.insert(composed.map_or(listed, OsString::from_vec));
         }
         let found = names.contains(name);
         self.names.insert(dir.to_owned(), names);
@@ -58,6 +62,7 @@ impl NativeRepo<'_> {
         if !self.folds()? || self.steps_above(path)?.is_err() {
             return Ok(false);
         }
+        listed.composed = self.composes()?;
         let mut at = self.root.clone();
         for step in steps(path) {
             let name = OsStr::from_bytes(step);
@@ -70,6 +75,19 @@ impl NativeRepo<'_> {
             at.push(name);
         }
         Ok(false)
+    }
+
+    /// Whether a name a directory lists is taken composed, as the scan
+    /// of the working tree takes it.
+    fn composes(&self) -> Res<bool> {
+        crate::git_settings::precompose(&self.settings()?)
+    }
+
+    /// The path `listed`, put together of names read from directories,
+    /// as the index would have it.
+    pub(super) fn as_tracked(&self, listed: &[u8]) -> Res<BString> {
+        let composed = alt_worktree::composed(listed).filter(|_| self.composes().unwrap_or(false));
+        Ok(BString::from(composed.as_deref().unwrap_or(listed)))
     }
 
     /// Takes away, before the first of `written` is written, each file
