@@ -88,3 +88,28 @@ fn a_sync_with_nobody_to_see_to_what_ops_name_sets_its_boundary_over_ops_that_na
         assert!(log.confirmed(), "deferred: {deferred}");
     }
 }
+
+#[test]
+fn a_sink_made_before_its_handle_was_given_somebody_to_sync_what_ops_name_has_that_one_too() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (mut log, sink, synced) = unseen(dir.path(), true);
+    let given = collecting(&mut log);
+    log.append_with("a", 3, b"a ref transaction", &linked())
+        .unwrap();
+    log.sync().unwrap();
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(synced));
+    // the fsync has what the op names seen to, and records the sync
+    sink.fsync().unwrap();
+    let given: Vec<Vec<u8>> = given
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|op| op.payload.clone())
+        .collect();
+    assert_eq!(given, [b"a ref transaction".to_vec()]);
+    assert_eq!(
+        alt_oplog::bounded_in(dir.path()),
+        Some(file_len(dir.path()))
+    );
+    assert!(log.confirmed());
+}

@@ -151,7 +151,6 @@ pub(crate) struct Sink {
     pub(super) boot: Option<[u8; 16]>,
     pub(super) id: [u8; 16],
     pub(super) account: Shared,
-    pub(super) named: Option<SyncNamed>,
 }
 
 impl Sink {
@@ -164,6 +163,11 @@ impl Sink {
         }
     }
 
+    /// Who syncs what ops name, as the handle was last given one.
+    fn named(&self) -> Option<SyncNamed> {
+        self.account.lock().unwrap().named.clone()
+    }
+
     fn covered(&self, reached: &Reached) -> bool {
         let noted = Tail::read(&self.beside());
         noted.is_some_and(|tail| tail.synced_of(reached.generation) >= reached.target)
@@ -174,7 +178,7 @@ impl Sink {
         // what was cut names nothing to see to: the fsync finds it gone
         if reached.target != 0
             && !self.covered(&reached)
-            && let Some(sync) = &self.named
+            && let Some(sync) = self.named()
             && reached.in_place(&self.file, Mark::read_unlocked(&self.file)?)?
         {
             sync(&reached.pending)?;
@@ -212,7 +216,7 @@ impl Sink {
         }
         // with nobody to see to what ops name, no sync is recorded over
         // an op that names something
-        if self.named.is_none() && said < reached.target && !reached.pending.is_empty() {
+        if self.named().is_none() && said < reached.target && !reached.pending.is_empty() {
             crate::v2::fsync(&self.file)?;
             self.account.lock().unwrap().fsynced(reached.target);
             return Ok(());

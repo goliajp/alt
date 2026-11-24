@@ -175,6 +175,7 @@ impl Log {
     }
 
     pub fn sync_named_with(&mut self, sync: SyncNamed) {
+        self.account.lock().unwrap().named = Some(sync.clone());
         self.named = Some(sync);
     }
 
@@ -185,7 +186,6 @@ impl Log {
             boot: self.boot,
             id: self.layout.id,
             account: self.account.clone(),
-            named: self.named.clone(),
         })
     }
 

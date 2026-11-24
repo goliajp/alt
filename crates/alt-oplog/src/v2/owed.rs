@@ -26,8 +26,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::OpLogError;
 use crate::v2::sink::Reached;
+use crate::{OpLogError, SyncNamed};
 
 /// Who is answered for a frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -64,7 +64,7 @@ pub(crate) struct Owed {
     holder: Holder,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct Account {
     /// the frames owed an answer, in the order they were written
     owed: Vec<Owed>,
@@ -74,6 +74,9 @@ pub(crate) struct Account {
     tickets: u64,
     /// who holds what the handle writes now
     writing: Holder,
+    /// Who syncs what ops name, for the handle and for its sinks: a
+    /// sink made before the handle was given one has it all the same.
+    pub named: Option<SyncNamed>,
     /// what the handle last left for its sink to sync
     pub left: Reached,
     /// the furthest boundary the handle or its sink saw recorded
