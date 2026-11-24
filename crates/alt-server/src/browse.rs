@@ -1,4 +1,5 @@
 mod history;
+mod reached;
 #[cfg(test)]
 use history::CommitSummary;
 pub use history::history;
@@ -10,6 +11,8 @@ use std::io::Read;
 const STRUCTURED: usize = 8 * 1024 * 1024;
 const PREVIEW: usize = 512 * 1024;
 const WORK: u64 = 64 * 1024 * 1024;
+/// what an object is refused with that is larger than is left to read
+const READ: &str = "structured preview bytes";
 /// the entries of a directory in one page
 const ENTRIES: usize = 500;
 struct Reader<'a> {
@@ -24,7 +27,7 @@ impl Reader<'_> {
             self.store
                 .open_published_object(self.credential, self.repository, oid)?;
         if size > STRUCTURED as u64 || size > self.remaining {
-            return Err(Error::Limit("structured preview bytes"));
+            return Err(Error::Limit(READ));
         }
         self.remaining -= size;
         let mut raw = Vec::new();
@@ -193,6 +196,7 @@ pub fn tree(
     after: usize,
 ) -> Result<TreePage> {
     let raw_path = path_bytes(path)?;
+    reached::led_to(store, credential, repository, commit)?;
     let mut reader = Reader {
         store,
         credential,

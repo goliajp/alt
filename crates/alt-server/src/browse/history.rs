@@ -1,5 +1,5 @@
 //! First-parent history, a page at a time.
-use super::{Reader, STRUCTURED, WORK, display};
+use super::{READ, Reader, STRUCTURED, WORK, display};
 use alt_git_codec::{Commit, ObjectId};
 use alt_server_store::{Credential, Error, Page, Result, Store};
 
@@ -25,7 +25,10 @@ pub fn history(
     }
     let info = store.repository_info(credential, repository)?;
     let start = match after {
-        Some(oid) => Some(oid),
+        Some(oid) => {
+            super::reached::led_to(store, credential, repository, oid)?;
+            Some(oid)
+        }
         None => info
             .refs
             .get(&info.default_branch)
@@ -50,7 +53,8 @@ pub fn history(
 /// The page that begins at `start`, each commit as `read` gives it. A message is
 /// written whole, and written it can be several times what the commit is: the
 /// page ends before the commit that would take what is written of it past
-/// `bound`, and that commit begins the next. The first commit of a page is
+/// `bound`, and that commit begins the next. So does a commit there is nothing
+/// left to read with of what a page may read. The first commit of a page is
 /// written whatever its size, so every page goes on.
 fn page(
     start: ObjectId,
@@ -69,7 +73,11 @@ fn page(
         if !seen.insert(asked) {
             return Err(Error::Integrity("commit cycle"));
         }
-        let (oid, commit) = read(asked)?;
+        let (oid, commit) = match read(asked) {
+            // what a page may read is used up: this commit begins the next
+            Err(Error::Limit(READ)) if !items.is_empty() => break,
+            other => other?,
+        };
         let parents = commit.parents().collect::<Vec<_>>();
         let summary = CommitSummary {
             oid: oid.to_string(),
@@ -142,5 +150,21 @@ mod tests {
         let one = page(tip, 100, 100, read).unwrap();
         assert_eq!(one.items.len(), 1);
         assert_eq!(one.next, Some(commits[3].0.to_string()));
+
+        // what a page may read runs out at its third commit: it begins the next
+        let mut reads = 0;
+        let within = |oid: ObjectId| {
+            reads += 1;
+            if reads == 3 {
+                return Err(Error::Limit(READ));
+            }
+            read(oid)
+        };
+        let short = page(tip, 100, usize::MAX, within).unwrap();
+        assert_eq!(short.items.len(), 2);
+        assert_eq!(short.next, Some(commits[2].0.to_string()));
+        // a first commit that cannot be read is a page that fails
+        let none = page(tip, 100, usize::MAX, |_| Err(Error::Limit(READ)));
+        assert!(matches!(none, Err(Error::Limit(_))));
     }
 }

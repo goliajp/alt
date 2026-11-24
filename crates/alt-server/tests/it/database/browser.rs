@@ -3,6 +3,7 @@ use alt_browser_auth::PublicOrigin;
 use alt_json::{Value, json};
 
 mod downloads;
+mod led_to;
 mod migration;
 mod tree_pages;
 const ORIGIN: &str = "https://workbench.example.test";
