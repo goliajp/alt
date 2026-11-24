@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: a cloud instance reads no references for an account without a grant and keeps no worker for a sign-in whose body does not come
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/pack_view.rs
+touched: crates/alt-server/tests/it/database/cloud.rs
+touched: crates/alt-server/tests/it/database/cloud/held_bodies.rs
+touched: crates/alt-server/tests/it/database/cloud/platform.rs
