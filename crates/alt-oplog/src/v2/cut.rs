@@ -268,8 +268,6 @@ impl Log {
         };
         self.tell_cut(Mark { generation, at }, &tail, &held)?;
         self.lay_cut(&discarded, (generation, of_the_log))?;
-        // the checkpoint is synced with the cut; of a frame this handle
-        // wrote that was cut, its caller is told by the look
         (self.unsynced, self.cut_on_disk) = (false, self.state.end);
         (self.left_to, self.generation_known) = (self.left_to.min(at), self.state.generation);
         self.account.lock().unwrap().cut_at(at);
