@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a peer that sends no more is taken for one that is gone
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/socket.rs
+touched: crates/alt-os/tests/it/sys.rs
