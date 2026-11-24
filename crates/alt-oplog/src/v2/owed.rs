@@ -51,27 +51,29 @@ pub(crate) struct Owed {
     pub closes: [u8; 4],
     /// the generation the log was of when it was written
     pub generation: u32,
-    holder: Holder,
+    pub(super) holder: Holder,
     /// its writer was told to leave what it writes unsynced
-    unpromised: bool,
+    pub(super) unpromised: bool,
     /// the last look could not tell whether it is cut
-    unsure: bool,
+    pub(super) unsure: bool,
     /// Its holder was told of a cut while that could not be told: found
     /// cut after, it is told of to nobody again.
-    told: bool,
+    pub(super) told: bool,
 }
 
 #[derive(Default)]
 pub(crate) struct Account {
     /// the frames owed an answer, in the order they were written
-    owed: Vec<Owed>,
+    pub(super) owed: Vec<Owed>,
     /// who holds frames that were found cut and was not told yet, and
     /// whether those were written to be left unsynced
-    cut: Vec<(Holder, bool)>,
+    pub(super) cut: Vec<(Holder, bool)>,
     /// how many tickets frames were written on
     tickets: u64,
-    /// who holds what the handle writes now
-    writing: Holder,
+    /// The tickets the handle was told to write on that it has not
+    /// been told to write on no longer, in the order it was told so:
+    /// what it writes now is on the last, or with none, held by itself.
+    writing: Vec<u64>,
     /// Who syncs what ops name, for the handle and for its sinks: a
     /// sink made before the handle was given one has it all the same.
     pub named: Option<SyncNamed>,
@@ -97,7 +99,10 @@ impl Account {
             end,
             closes,
             generation,
-            holder: self.writing,
+            holder: self
+                .writing
+                .last()
+                .map_or(Holder::Own, |on| Holder::Ticket(*on)),
             unpromised,
             unsure: false,
             told: false,
@@ -105,20 +110,22 @@ impl Account {
     }
 
     /// Has what the handle writes from now on be on a new ticket; gives
-    /// its number, and who held what the handle wrote before.
-    pub fn writes_on_a_ticket(&mut self) -> (u64, Holder) {
+    /// its number.
+    pub fn writes_on_a_ticket(&mut self) -> u64 {
         self.tickets += 1;
-        let before = std::mem::replace(&mut self.writing, Holder::Ticket(self.tickets));
-        (self.tickets, before)
+        self.writing.push(self.tickets);
+        self.tickets
     }
 
-    pub fn writes_for(&mut self, holder: Holder) {
-        self.writing = holder;
+    /// The handle writes on ticket `number` no longer: on the one it
+    /// was told to write on before that has not ended, or on none.
+    pub fn writes_no_longer_on(&mut self, number: u64) {
+        self.writing.retain(|on| *on != number);
     }
 
     /// Whether what the handle writes now is on a ticket.
     pub fn on_a_ticket(&self) -> bool {
-        matches!(self.writing, Holder::Ticket(_))
+        !self.writing.is_empty()
     }
 
     /// The tickets of `numbers` are dropped: what they held, the handle
@@ -238,65 +245,5 @@ impl Account {
     /// up to there name.
     pub fn fsynced(&mut self, target: u64) {
         self.owed.retain(|owed| owed.end > target);
-    }
-
-    fn found_cut(&mut self, holder: Holder, unpromised: bool) {
-        if !self.cut.contains(&(holder, unpromised)) {
-            self.cut.push((holder, unpromised));
-        }
-    }
-
-    /// The handle cut the log at byte `at` itself: of a frame it holds
-    /// itself its caller is told by that cut.
-    pub fn cut_at(&mut self, at: u64) {
-        let owed = self.owed.iter().copied();
-        let (kept, gone): (Vec<Owed>, Vec<Owed>) = owed.partition(|owed| owed.end <= at);
-        self.owed = kept;
-        let others = |owed: &&Owed| owed.holder != Holder::Own && !owed.told;
-        for owed in gone.iter().filter(others) {
-            self.found_cut(owed.holder, owed.unpromised);
-        }
-    }
-
-    /// Whoever asks the handle with no ticket was told that frames were
-    /// cut: the ones found cut, and the ones the last look could not
-    /// tell of, which are owed a sync still where they are in the log.
-    pub fn told(&mut self) {
-        self.cut.retain(|(holder, _)| *holder != Holder::Own);
-        for owed in &mut self.owed {
-            owed.told |= owed.unsure && owed.holder == Holder::Own;
-        }
-    }
-
-    /// Looks at every frame owed with `placed`, which says whether the
-    /// frame is where it was written, or `None` where it cannot tell.
-    /// One that is not was cut.
-    pub fn look<E>(
-        &mut self,
-        mut placed: impl FnMut(&Owed) -> Result<Option<bool>, E>,
-    ) -> Result<(), E> {
-        let mut looked = Ok(());
-        self.unsure = false;
-        for mut owed in std::mem::take(&mut self.owed) {
-            // what is not looked at stays owed
-            let placed = match looked {
-                Ok(()) => placed(&owed),
-                Err(_) => Ok(None),
-            };
-            match placed {
-                Ok(Some(false)) if owed.told => {}
-                Ok(Some(false)) => self.found_cut(owed.holder, owed.unpromised),
-                Ok(sure) => {
-                    owed.unsure = sure.is_none();
-                    self.unsure |= owed.unsure;
-                    self.owed.push(owed);
-                }
-                Err(error) => {
-                    self.owed.push(owed);
-                    looked = Err(error);
-                }
-            }
-        }
-        looked
     }
 }

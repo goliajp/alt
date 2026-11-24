@@ -2,7 +2,8 @@
 //! appends, on a log of either format.
 
 use super::{Inner, OpLog};
-use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Ticket, Unconfirmed, Writing};
+use crate::v2::Writing;
+use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Ticket, Unconfirmed};
 
 impl OpLog {
     /// Sees to it, as a writer does before it appends, that the log is
@@ -42,20 +43,24 @@ impl OpLog {
         &mut self,
         write: impl FnOnce(&mut Self) -> Result<T, E>,
     ) -> Result<(T, Ticket), E> {
-        let writing = self.writing_on_a_ticket();
-        let wrote = write(self)?;
-        Ok((wrote, writing.ticket()))
+        Self::ticketed_within(self, |log| log, write)
     }
 
-    /// [`Self::ticketed`] for whoever cannot hand the handle to what
-    /// writes: the records appended through this handle while what is
-    /// given lives are on one ticket, which it gives at last
-    /// ([`Writing::ticket`]).
-    pub fn writing_on_a_ticket(&mut self) -> Writing {
-        match &mut self.0 {
+    /// [`Self::ticketed`] for whoever keeps the handle within what
+    /// `write` is to have whole: `log` gives the handle of `holder`.
+    /// The writes of two callers do not overlap otherwise than one
+    /// within the other, so the records of each are on its own ticket.
+    pub fn ticketed_within<H, T, E>(
+        holder: &mut H,
+        log: impl Fn(&mut H) -> &mut Self,
+        write: impl FnOnce(&mut H) -> Result<T, E>,
+    ) -> Result<(T, Ticket), E> {
+        let writing = match &mut log(holder).0 {
             Inner::V1(_) => Writing::default(),
             Inner::V2(log) => log.writing_on_a_ticket(),
-        }
+        };
+        let wrote = write(holder)?;
+        Ok((wrote, writing.ticket()))
     }
 
     /// [`Self::sync`] for the holder of `ticket`. It tells of a cut

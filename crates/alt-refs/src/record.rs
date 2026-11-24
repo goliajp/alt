@@ -57,9 +57,7 @@ impl RefStore {
         &mut self,
         write: impl FnOnce(&mut Self) -> Result<T, E>,
     ) -> Result<(T, Ticket), E> {
-        let writing = self.oplog.writing_on_a_ticket();
-        let wrote = write(self)?;
-        Ok((wrote, writing.ticket()))
+        OpLog::ticketed_within(self, |store| &mut store.oplog, write)
     }
 
     /// Syncs the log for the holder of `ticket`, or leaves that to the

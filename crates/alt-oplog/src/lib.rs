@@ -38,7 +38,7 @@ pub use settle::{Unconfirmed, end_reads_at, passed_damage, reading_past_damage};
 pub use sync::relaxed_durability;
 pub use synced::SyncNamed;
 pub use tail::Discarded;
-pub use v2::{Answer, Meta, Ticket, Writing};
+pub use v2::{Answer, Meta, Ticket};
 
 /// A place in the log to start reading from instead of its first record:
 /// the op whose record occupies bytes `start..end`, being op number `count`

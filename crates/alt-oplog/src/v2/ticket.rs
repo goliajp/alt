@@ -120,30 +120,31 @@ impl Drop for Ticket {
 
 /// While it lives, what the handle it was begun on writes is on one
 /// ticket, which it gives at last ([`Self::ticket`]). Dropped without
-/// that, it leaves what was written to the handle.
+/// that, it leaves what was written to the handle. The last one begun
+/// is the first to end: only what runs a write for a caller from its
+/// beginning to its end holds one.
 #[derive(Default)]
-pub struct Writing {
+pub(crate) struct Writing {
     ticket: Option<Ticket>,
     account: Option<Shared>,
-    before: Holder,
 }
 
 impl Writing {
     /// Has the frames written through the handle of `account` from now
     /// on be on a new ticket.
     pub(crate) fn begin(account: &Shared) -> Writing {
-        let (number, before) = account.lock().unwrap().writes_on_a_ticket();
+        let number = account.lock().unwrap().writes_on_a_ticket();
         Writing {
             ticket: Some(Ticket::of(account, number)),
             account: Some(account.clone()),
-            before,
         }
     }
 
     fn end(&mut self) -> Option<Shared> {
         let account = self.account.take()?;
+        let numbers = self.ticket.iter().flat_map(|ticket| &ticket.numbers);
         if let Ok(mut held) = account.lock() {
-            held.writes_for(self.before);
+            numbers.for_each(|number| held.writes_no_longer_on(*number));
         }
         Some(account)
     }
@@ -151,8 +152,9 @@ impl Writing {
     /// The ticket of what was written, with which the handle writes on
     /// it no longer: one that holds nothing where nothing was written.
     pub fn ticket(mut self) -> Ticket {
+        let account = self.end();
         let ticket = self.ticket.take().unwrap_or_default();
-        let written = self.end().is_some_and(|account| {
+        let written = account.is_some_and(|account| {
             let account = account.lock().unwrap();
             account.holds(&|holder| ticket.holds(holder))
         });
@@ -166,5 +168,38 @@ impl Writing {
 impl Drop for Writing {
     fn drop(&mut self) {
         self.end();
+    }
+}
+
+#[cfg(all(test, feature = "hooks"))]
+mod tests {
+    use crate::v2::log::Log;
+    use crate::v2::owed::Holder;
+    use crate::{Meta, Op, OpLogError};
+
+    fn append(log: &mut Log) {
+        let payload = |_: &[Op]| Ok::<_, OpLogError>(b"x".to_vec());
+        log.append_checked("a", 1, &Meta::default(), payload)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_frame_is_on_the_ticket_begun_last_that_has_not_ended_in_whatever_order_they_end() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        crate::v2::in_boot(Some([1; 16]));
+        crate::v2::create_with(dir.path(), 12).unwrap();
+        let mut log = Log::open_at(dir.path(), None).unwrap();
+        let first = log.writing_on_a_ticket();
+        let second = log.writing_on_a_ticket();
+        // the one begun first ends first
+        let first = first.ticket();
+        append(&mut log);
+        let second = second.ticket();
+        append(&mut log);
+        assert!(first.is_empty() && !second.is_empty());
+        let account = log.account.lock().unwrap();
+        assert_eq!(account.len(), (2, 0));
+        assert!(account.owes(&|holder| second.holds(holder)));
+        assert!(account.owes(&|holder| holder == Holder::Own));
     }
 }

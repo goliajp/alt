@@ -209,3 +209,38 @@ fn a_sync_asked_while_a_handle_writes_on_a_ticket_tells_of_no_cut_of_what_anothe
         assert!(log.confirmed(), "{case}");
     }
 }
+
+#[test]
+fn of_a_write_within_another_each_has_its_ops_on_its_own_ticket_and_what_follows_is_on_none() {
+    for (deferred, gives_up) in [(false, false), (false, true), (true, false), (true, true)] {
+        let case = format!("deferred: {deferred}, the inner gives up: {gives_up}");
+        let dir = alt_os::temp::tempdir().unwrap();
+        let (mut log, sink) = shared(dir.path(), deferred);
+        let written = log.ticketed(|log| {
+            log.append("a", 1, b"outer")?;
+            let inner = log.ticketed(|log| {
+                log.append("b", 2, b"inner")?;
+                match gives_up {
+                    true => Err(OpLogError::TooLarge(0)),
+                    false => Ok(()),
+                }
+            });
+            log.append("a", 3, b"outer too")?;
+            Ok::<_, OpLogError>(inner.ok().map(|((), ticket)| ticket))
+        });
+        let (inner, outer) = written.unwrap();
+        log.append("c", 4, b"after both").unwrap();
+        assert_eq!(cut_from(dir.path(), b"after both"), 1, "{case}");
+        // neither ticket holds the op that was cut
+        told(&mut log, &sink, deferred, &outer).unwrap();
+        if let Some(inner) = &inner {
+            told(&mut log, &sink, deferred, inner).unwrap();
+        }
+        let of_handle = log.sync().and_then(|()| sink.fsync());
+        assert!(cut_back(&of_handle), "{case}: {of_handle:?}");
+        log.sync().unwrap();
+        sink.fsync().unwrap();
+        assert!(log.confirmed(), "{case}");
+        assert_eq!(payloads(dir.path()).len(), 5, "{case}");
+    }
+}

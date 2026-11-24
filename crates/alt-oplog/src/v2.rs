@@ -16,6 +16,7 @@ mod cut;
 mod cuts;
 mod ext;
 mod follow;
+mod found;
 pub mod frame;
 mod held;
 mod hooks;
@@ -59,7 +60,8 @@ pub(crate) use hooks::{cut_asked, cut_reached, cut_taken_back, fsync, note_read}
 pub(crate) use log::Log;
 pub use sink::Reached;
 pub(crate) use sink::Sink;
-pub use ticket::{Answer, Ticket, Writing};
+pub(crate) use ticket::Writing;
+pub use ticket::{Answer, Ticket};
 
 use crate::lock::{lock_exclusive, unlock};
 use crate::v2::frame::{OdbBounds, Step};
