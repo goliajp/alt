@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a directory listed decomposed gives way where case is told apart
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/precompose.rs
