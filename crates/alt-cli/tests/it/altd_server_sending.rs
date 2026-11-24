@@ -129,3 +129,34 @@ fn the_responses_one_address_lets_wait_leave_the_room_of_the_others() {
         std::thread::sleep(Duration::from_millis(200));
     }
 }
+
+/// The same room, and a server told that its proxy is at another address:
+/// this host is no proxy then. What a peer of it says its requests are of
+/// is not read, so the response it lets wait takes nothing of what the
+/// address it names has, and a second one is answered whole beside it.
+#[test]
+fn what_a_peer_that_is_no_proxy_says_its_requests_are_of_is_not_read() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    repository(&origin);
+    const BYTES: usize = 16 << 20;
+    std::fs::write(origin.join("noise"), noise(BYTES)).unwrap();
+    let alt = crate::altd_server::alt;
+    crate::altd_server::ok(alt(&origin, &["add", "."]));
+    crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
+    let server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", origin.to_str().unwrap()),
+        ("ALT_SERVER_MAX_SENDING_BYTES", "80000000"),
+        ("ALT_SERVER_TRUSTED_PROXIES", "192.0.2.1"),
+    ]);
+    let refs = listed(&format!("http://{}/", server.addr)).unwrap();
+    let head = refs.split_whitespace().next().unwrap();
+    let named = || asked_for(&server.addr, head, Some("203.0.113.9"));
+
+    let mut first = named();
+    let mut begun = [0u8; 12];
+    first.read_exact(&mut begun).unwrap();
+    assert_eq!(&begun, b"HTTP/1.1 200");
+    let second = answer(named());
+    assert!(second.starts_with(b"HTTP/1.1 200") && second.len() > BYTES);
+}

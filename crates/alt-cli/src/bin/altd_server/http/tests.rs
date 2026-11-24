@@ -29,7 +29,7 @@ struct Told {
 /// received first; one for `/refuse` without its body, one for `/large`
 /// with 64 MiB.
 fn told(limits: Limits, told: Told) -> std::net::SocketAddr {
-    let server = Server::listen("127.0.0.1:0", limits, 4, &LOOPBACK).unwrap();
+    let server = Server::listen("127.0.0.1:0", limits, 4, &LOOPBACK, &LOOPBACK).unwrap();
     let address = server.server_addr();
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {

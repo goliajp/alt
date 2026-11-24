@@ -2,24 +2,29 @@
 //! and as it comes on the wire, and a body moves by what it has.
 
 use super::*;
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
-/// An address of this host that is not the loopback one: a peer that
-/// connects to it is seen coming from it.
-fn outward() -> IpAddr {
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    // nothing is sent: connecting only has the route chosen
-    socket.connect("192.0.2.1:9").unwrap();
-    let address = socket.local_addr().unwrap().ip();
-    assert!(!address.is_loopback() && !address.is_unspecified());
-    address
+/// Where a peer connects to that is of this host for the servers here: they
+/// are told that the IPv6 loopback address is, and no other.
+fn near(port: u16) -> SocketAddr {
+    SocketAddr::from((Ipv6Addr::LOCALHOST, port))
+}
+
+/// Where a peer connects to that is an address like any other for them: it
+/// is seen coming from the IPv4 loopback address, which they are not told.
+fn far(port: u16) -> SocketAddr {
+    SocketAddr::from((Ipv4Addr::LOCALHOST, port))
+}
+
+fn told_of(here: &str) -> &'static [Network] {
+    Vec::leak(networks(here).unwrap())
 }
 
 /// A server at every address of this host with one worker, which answers a
 /// request once its body is received: 200, or 503 where it had no room. Its
 /// port, and what it counts the bodies it holds in.
 fn receiving(limits: Limits) -> (u16, Arc<Shares>) {
-    receiving_here(limits, &LOOPBACK)
+    receiving_here(limits, told_of("::1"), told_of("::1"))
 }
 
 /// Returns once the server holds `bytes` of bodies: what was sent to it before
@@ -32,9 +37,14 @@ fn holds(held: &Shares, bytes: u64) {
     }
 }
 
-/// [`receiving`], with the peers of the networks `here` counted for nothing.
-fn receiving_here(limits: Limits, here: &'static [Network]) -> (u16, Arc<Shares>) {
-    let server = Server::listen("0.0.0.0:0", limits, 16, here).unwrap();
+/// [`receiving`], with the peers of the networks `here` counted for nothing
+/// and those of `proxies` saying whose their requests are.
+fn receiving_here(
+    limits: Limits,
+    here: &'static [Network],
+    proxies: &'static [Network],
+) -> (u16, Arc<Shares>) {
+    let server = Server::listen("[::]:0", limits, 16, here, proxies).unwrap();
     let port = (server.server_addr().port(), Arc::clone(&server.shared.held));
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
@@ -79,10 +89,7 @@ fn the_bodies_of_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
         ..within(LONG)
     };
     let (port, held) = receiving(limits);
-    let (far, near) = (
-        SocketAddr::new(outward(), port),
-        SocketAddr::from(([127, 0, 0, 1], port)),
-    );
+    let (far, near) = (far(port), near(port));
     let (mut slow, mut slow_reader) = posted(far, 900, 800);
     // the body of the first is being received before the second comes
     holds(&held, 800);
@@ -124,7 +131,7 @@ fn the_bodies_a_proxy_of_this_host_brings_are_counted_for_whom_it_says_they_are_
         ..within(LONG)
     };
     let (port, held) = receiving(limits);
-    let near = SocketAddr::from(([127, 0, 0, 1], port));
+    let near = near(port);
     let (mut slow, mut slow_reader) = forwarded(near, "198.51.100.1", 900, 800);
     holds(&held, 800);
     let (_second, mut reader) = forwarded(near, "10.1.1.1, 198.51.100.1", 400, 400);
@@ -134,6 +141,24 @@ fn the_bodies_a_proxy_of_this_host_brings_are_counted_for_whom_it_says_they_are_
     slow.write_all(&[b'x'; 100]).unwrap();
     assert_eq!(status(&mut slow_reader), "HTTP/1.1 200 OK");
     let (_third, mut reader) = forwarded(near, "198.51.100.1", 400, 400);
+    assert_eq!(status(&mut reader), "HTTP/1.1 200 OK");
+}
+
+/// A peer that is of this host and no proxy says for nobody whose its
+/// request is. It holds eight hundred bytes in a body it says is of an
+/// address: they are counted for nobody, and the address has all of its
+/// thousand when the proxy brings a body of it.
+#[test]
+fn what_a_peer_of_this_host_that_is_no_proxy_holds_is_counted_for_no_address_it_names() {
+    let limits = Limits {
+        spool: 4000,
+        each: 8,
+        ..within(LONG)
+    };
+    let (port, held) = receiving_here(limits, told_of("::1,127.0.0.1"), told_of("::1"));
+    let (_named, _reader) = forwarded(far(port), "198.51.100.1", 900, 800);
+    holds(&held, 800);
+    let (_theirs, mut reader) = forwarded(near(port), "198.51.100.1", 400, 400);
     assert_eq!(status(&mut reader), "HTTP/1.1 200 OK");
 }
 
@@ -147,7 +172,7 @@ fn the_lines_around_the_chunks_take_of_the_room_as_the_chunks_do() {
         ..within(LONG)
     };
     let (port, held) = receiving(limits);
-    let near = SocketAddr::from(([127, 0, 0, 1], port));
+    let near = near(port);
     let (mut chunked, _chunked_reader) = connected(near);
     let head = b"POST /c HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
     chunked.write_all(head).unwrap();
@@ -167,7 +192,7 @@ fn the_lines_around_the_chunks_take_of_the_room_as_the_chunks_do() {
 /// go of while it still sends, and is not answered with what it sent.
 #[test]
 fn a_body_moves_by_what_it_has_and_not_by_the_lines_around_its_chunks() {
-    let near = SocketAddr::from(([127, 0, 0, 1], receiving(within(SHORT)).0));
+    let near = near(receiving(within(SHORT)).0);
     let (mut chunked, mut reader) = connected(near);
     let head = b"POST /c HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
     chunked.write_all(head).unwrap();
@@ -184,11 +209,11 @@ fn a_body_moves_by_what_it_has_and_not_by_the_lines_around_its_chunks() {
     assert!(status.starts_with("HTTP/1.1 408"), "{status}");
 }
 
-/// An address may have one connection, and the outward address of this host is
-/// one like any other: its second connection is not taken. A server told that
-/// the address is of this host, as the address a container's network gives the
-/// proxy in front of it is, takes as many as come from it, and holds what they
-/// send to the room alone.
+/// An address may have one connection, and one the server is not told to be of
+/// this host is one like any other: its second connection is not taken. A
+/// server told that the address is of this host, as the address a container's
+/// network gives the proxy in front of it is, takes as many as come from it,
+/// and holds what they send to the room alone.
 #[test]
 fn the_peers_of_a_network_told_to_be_of_this_host_are_held_to_no_part() {
     let limits = Limits {
@@ -196,9 +221,9 @@ fn the_peers_of_a_network_told_to_be_of_this_host_are_held_to_no_part() {
         each: 1,
         ..within(LONG)
     };
-    // whether a second connection from the outward address is answered
+    // whether a second connection from the address is answered
     let second = |(port, held): (u16, Arc<Shares>)| {
-        let far = SocketAddr::new(outward(), port);
+        let far = far(port);
         let (_first, _reader) = posted(far, 2000, 1900);
         holds(&held, 1900);
         let mut stream = TcpStream::connect(far).unwrap();
@@ -210,8 +235,8 @@ fn the_peers_of_a_network_told_to_be_of_this_host_are_held_to_no_part() {
         read.ok().filter(|read| *read > 0).map(|_| line)
     };
     assert_eq!(second(receiving(limits)), None);
-    let here = networks(&format!("127.0.0.0/8,{}", outward())).unwrap();
-    let told = second(receiving_here(limits, Vec::leak(here)));
+    let here = told_of("::1,127.0.0.1");
+    let told = second(receiving_here(limits, here, here));
     // more than a quarter of the room beside the first, which has as much
     assert_eq!(told.as_deref(), Some("HTTP/1.1 200 OK\r\n"));
 }
@@ -228,6 +253,7 @@ fn an_address_has_so_many_connections_open_and_no_more() {
         held: Shares::of(u64::MAX),
         limits: within(GRACE),
         here: &LOOPBACK,
+        proxies: &LOOPBACK,
     });
     let open = |address: &str| shared.open(address.parse().unwrap(), 8);
     let two = [open("203.0.113.7"), open("::ffff:203.0.113.7")];

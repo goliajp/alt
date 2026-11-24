@@ -26,13 +26,14 @@ const INFLATED_TIMES: u64 = 128;
 const LINGER: Duration = Duration::from_secs(2);
 
 /// What else the environment may give, as `--help` tells it. Each but the
-/// first and `ALT_SERVER_LOCAL_PEERS` is a whole number above zero.
+/// first and those that are lists is a whole number above zero.
 pub(super) const HELP: &str = "  \
 ALT_SERVER_TEMP_DIR                     a directory on a disk for what is written for a time (the temporary files of the host)
   ALT_SERVER_WORKERS                      requests handled at once (4)
   ALT_SERVER_MAX_CONNECTIONS              connections open at once (256)
   ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not of this host (a quarter)
   ALT_SERVER_LOCAL_PEERS                  the addresses and networks that are of this host, with commas between (127.0.0.0/8,::1)
+  ALT_SERVER_TRUSTED_PROXIES              the addresses of the proxies in front of this server, as such a list: what they write in X-Forwarded-For is whose a request is, and they are of this host (127.0.0.0/8,::1)
   ALT_SERVER_ORIGINS                      the addresses clients reach this server at, as https://host or http://host:port, with commas between: a signed push is taken for these only (unset: for the Host header of its request)
   ALT_SERVER_MAX_PUSH_BYTES               bytes of the body of a push (1 GiB)
   ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
@@ -86,9 +87,12 @@ pub(super) struct Told {
     /// four bodies of the largest size unless it is set
     pub(super) io: Limits,
     /// `ALT_SERVER_LOCAL_PEERS`: the networks whose peers are of this host
-    /// and counted for no address, a proxy in front of the server among
-    /// them; the loopback addresses unless it is set
+    /// and counted for no address, the loopback addresses unless it is
+    /// set; and the proxies, which have the connections of everybody
     pub(super) here: &'static [super::http::Network],
+    /// `ALT_SERVER_TRUSTED_PROXIES`: the peers that say whose a request
+    /// is; the loopback addresses unless it is set
+    pub(super) proxies: &'static [super::http::Network],
     /// `ALT_SERVER_ORIGINS`: the addresses the server is reached at, as
     /// certificates of pushes are compared with them; none unless it is set
     pub(super) origins: Vec<String>,
@@ -127,14 +131,21 @@ impl Told {
         let spool = push_bytes.saturating_mul(4);
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
-        let here: &[super::http::Network] = match lookup("ALT_SERVER_LOCAL_PEERS") {
-            None => &super::http::LOOPBACK,
+        let networks = |name: &str| match lookup(name) {
+            None => Ok(super::http::LOOPBACK.to_vec()),
             Some(told) => {
                 let read = told.to_str().ok_or("no text".to_owned());
                 let read = read.and_then(super::http::networks);
-                Vec::leak(read.map_err(|why| format!("ALT_SERVER_LOCAL_PEERS={told:?}: {why}"))?)
+                read.map_err(|why| format!("{name}={told:?}: {why}"))
             }
         };
+        let proxies = networks("ALT_SERVER_TRUSTED_PROXIES")?;
+        let mut here = networks("ALT_SERVER_LOCAL_PEERS")?;
+        let beside: Vec<_> = proxies
+            .iter()
+            .filter(|proxy| !here.contains(proxy))
+            .collect();
+        here.extend(beside);
         let origins = match lookup("ALT_SERVER_ORIGINS") {
             None => Vec::new(),
             Some(told) => {
@@ -163,7 +174,8 @@ impl Told {
                 each: number(lookup, "ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS", each)?,
                 spool: number(lookup, "ALT_SERVER_MAX_RECEIVING_BYTES", spool)?,
             },
-            here,
+            here: Vec::leak(here),
+            proxies: Vec::leak(proxies),
             origins,
             shutdown: Duration::from_millis(shutdown),
         })
@@ -251,7 +263,23 @@ mod tests {
         // the networks that are of this host: the loopback ones, or those told
         assert_eq!(unset.here, super::super::http::LOOPBACK);
         let told = with(&[("ALT_SERVER_LOCAL_PEERS", "172.30.90.1,10.0.0.0/8")]).unwrap();
-        assert_eq!(told.here.len(), 2);
+        assert_eq!((told.here.len(), told.proxies), (4, unset.proxies));
+        // the proxies, which are of this host too: the loopback ones, or those told
+        assert_eq!(unset.proxies, super::super::http::LOOPBACK);
+        let told = with(&[
+            ("ALT_SERVER_LOCAL_PEERS", "127.0.0.0/8,10.0.0.0/8"),
+            ("ALT_SERVER_TRUSTED_PROXIES", "10.0.0.5,127.0.0.0/8"),
+        ]);
+        let told = told.unwrap();
+        assert_eq!((told.here.len(), told.proxies.len()), (3, 2));
+        assert_eq!(told.here[2], told.proxies[0]);
+        let why = with(&[("ALT_SERVER_TRUSTED_PROXIES", "proxy")])
+            .err()
+            .unwrap();
+        assert!(
+            why.starts_with("ALT_SERVER_TRUSTED_PROXIES=\"proxy\": "),
+            "{why}"
+        );
         for value in ["", "10.0.0.0/33", "localhost"] {
             let why = with(&[("ALT_SERVER_LOCAL_PEERS", value)])
                 .err()

@@ -55,6 +55,8 @@ struct Shared {
     limits: Limits,
     /// the networks whose peers are of this host, and counted for nothing
     here: &'static [Network],
+    /// those of them whose peers say whose a request is
+    proxies: &'static [Network],
 }
 
 pub(crate) struct Server {
@@ -62,9 +64,9 @@ pub(crate) struct Server {
     shared: Arc<Shared>,
 }
 
-/// One of the connections that are open, for as long as it is, and the
-/// address it counts for.
-struct Open(Arc<Shared>, Option<IpAddr>);
+/// One of the connections that are open, for as long as it is, the
+/// address it counts for and the one it comes from.
+struct Open(Arc<Shared>, Option<IpAddr>, IpAddr);
 
 impl Drop for Open {
     fn drop(&mut self) {
@@ -86,7 +88,7 @@ impl Shared {
     /// address have room for one more.
     fn open(self: &Arc<Self>, peer: IpAddr, most: usize) -> Option<Open> {
         if self.open.fetch_add(1, Ordering::AcqRel) >= most {
-            drop(Open(Arc::clone(self), None));
+            drop(Open(Arc::clone(self), None, peer));
             return None;
         }
         let address = peers::counted(peer, self.here);
@@ -95,12 +97,12 @@ impl Shared {
             let open = from.entry(address).or_insert(0);
             if *open >= self.limits.each {
                 drop(from);
-                drop(Open(Arc::clone(self), None));
+                drop(Open(Arc::clone(self), None, peer));
                 return None;
             }
             *open += 1;
         }
-        Some(Open(Arc::clone(self), address))
+        Some(Open(Arc::clone(self), address, peer))
     }
 
     fn enqueue(&self, request: Request) {
@@ -112,12 +114,14 @@ impl Shared {
 
 impl Server {
     /// Listens at `address` for `most` connections at once, whose peers are
-    /// given `limits`; those of the networks `here` are of this host.
+    /// given `limits`; those of the networks `here` are of this host, and
+    /// those of `proxies` among them say whose their requests are.
     pub(crate) fn listen(
         address: &str,
         limits: Limits,
         most: usize,
         here: &'static [Network],
+        proxies: &'static [Network],
     ) -> io::Result<Server> {
         let listener = TcpListener::bind(address)?;
         let shared = Arc::new(Shared {
@@ -128,6 +132,7 @@ impl Server {
             held: Shares::of(limits.spool),
             limits,
             here,
+            proxies,
         });
         let server = Server {
             address: listener.local_addr()?,
@@ -215,13 +220,13 @@ fn connection(open: Open, stream: TcpStream) {
                 return source.close();
             }
         };
-        // a proxy of this host says whose the request is
+        // a proxy says whose the request is
         let forwarded = head
             .headers
             .iter()
             .filter(|h| h.field.equiv("X-Forwarded-For"));
         let forwarded = forwarded.map(|h| h.value.as_str());
-        source.from = peers::asked_from(open.1, forwarded, shared.here);
+        source.from = peers::asked_from(open.2, forwarded, shared.proxies, shared.here);
         let (way, returned) = back::Way::new();
         shared.enqueue(Request::new(head, source, way.clone()));
         let (back, answer) = loop {

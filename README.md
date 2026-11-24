@@ -267,14 +267,17 @@ connection comes from the host, and the proxy is where the connections of one
 client are limited. What the
 requests hold, the bodies received and the responses to fetches, is counted
 for the address the proxy names in `X-Forwarded-For`: the last name there
-that is not of the host itself, as Caddy's `reverse_proxy` writes it without
-being told to. Which peers are of the host, and trusted to name whose a
-request is, is what `ALT_SERVER_LOCAL_PEERS`
-says, a list of addresses and networks, the loopback ones unless it is set: a
-server in a container sees the proxy on its host under the address the
-container's network gives the host, and has to be told that address, or all
-clients together are held to what one address may have. What any other peer
-writes in that header is not read. Of what all hold between them one address
+that is not a proxy itself, as Caddy's `reverse_proxy` writes it without
+being told to. Which peers are proxies, trusted to name whose a request is,
+is what `ALT_SERVER_TRUSTED_PROXIES` says, a list of addresses and networks,
+the loopback ones unless it is set: a server in a container sees the proxy on
+its host under the address the container's network gives the host, and has
+to be told that address, or all clients together are held to what one address
+may have. What any other peer writes in that header is not read. The proxies
+are of the host; `ALT_SERVER_LOCAL_PEERS` names what else is, such a list
+too, for peers that are to be held to no part of the connections and of the
+room: naming a network there lets none of its hosts say whose a request is.
+Of what all hold between them one address
 has a quarter; a single body or response may pass the quarter as far as half,
 one such at a time, so that one slow client with one large thing leaves half
 to the others.

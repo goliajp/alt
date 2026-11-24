@@ -9,10 +9,12 @@
 //! the container up knows. So the networks that are of this host are told
 //! to the server, the loopback ones where nothing is told.
 //!
-//! A proxy says in `X-Forwarded-For` whose each request is. What a peer of
-//! this host says there is taken, as far back as peers of this host vouch
-//! for it, and what the request holds is counted for that address; what any
-//! other peer says there is not read.
+//! A proxy says in `X-Forwarded-For` whose each request is. Which peers are
+//! proxies is told apart from which are of this host: a network of an
+//! office may be of this host, and every host of it could then say whose
+//! its requests are. What a proxy says there is taken, as far back as
+//! proxies vouch for it, and what the request holds is counted for that
+//! address; what any other peer says there is not read.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -108,27 +110,33 @@ fn written(text: &str) -> Option<IpAddr> {
     text.strip_prefix('[')?.strip_suffix(']')?.parse().ok()
 }
 
-/// What a request is counted under that came over a connection counted
-/// under `peer` with `forwarded`, the values of its `X-Forwarded-For`
-/// headers in the order they came. The last name is the one the nearest
-/// proxy wrote; the names are gone through from there for as long as each
-/// is of this host, and what does not read as an address was written by
-/// nobody that is.
+/// What a request is counted under that came from `peer` with `forwarded`,
+/// the values of its `X-Forwarded-For` headers in the order they came. Each
+/// proxy appends the address it took the request from and leaves standing
+/// what its sender wrote, so the names are gone through from the last, and
+/// only for as long as the one who wrote a name is one of `proxies`: the
+/// first address that is not is whose the request is, and nothing before
+/// it is looked at. What does not read as an address was written by no
+/// proxy. The address is then counted as a peer is, for nothing where it
+/// is of the networks `here`.
 pub(crate) fn asked_from<'a>(
-    peer: Option<IpAddr>,
+    peer: IpAddr,
     forwarded: impl DoubleEndedIterator<Item = &'a str>,
+    proxies: &[Network],
     here: &[Network],
 ) -> Option<IpAddr> {
-    if peer.is_some() {
-        return peer;
-    }
+    let proxy = |address: IpAddr| proxies.iter().any(|network| network.contains(address));
+    let mut from = plain(peer);
     for name in forwarded.rev().flat_map(|field| field.rsplit(',')) {
-        match counted(written(name)?, here) {
-            None => continue,
-            from => return from,
+        if !proxy(from) {
+            break;
         }
+        let Some(address) = written(name) else {
+            break;
+        };
+        from = plain(address);
     }
-    None
+    counted(from, here)
 }
 
 #[cfg(test)]
@@ -196,8 +204,8 @@ mod tests {
     fn a_request_a_peer_of_this_host_brings_is_counted_for_whom_it_says_it_is_of() {
         let here = networks("127.0.0.0/8,::1,172.30.90.1").unwrap();
         let from = |peer: &str, forwarded: &[&str]| {
-            let peer = counted(peer.parse().unwrap(), &here);
-            let asked = asked_from(peer, forwarded.iter().copied(), &here);
+            let names = forwarded.iter().copied();
+            let asked = asked_from(peer.parse().unwrap(), names, &here, &here);
             asked.map(|address| address.to_string())
         };
         let some = |text: &str| Some(text.to_owned());
@@ -228,5 +236,33 @@ mod tests {
         assert_eq!(from("127.0.0.1", &[]), None);
         assert_eq!(from("127.0.0.1", &["198.51.100.1, unknown"]), None);
         assert_eq!(from("127.0.0.1", &["127.0.0.1"]), None);
+    }
+
+    /// A network of many hosts is of this host, and one address in it is the
+    /// proxy. A host of the network is counted for nothing, as it was told
+    /// to be, and says for nobody else whose its requests are: not when it
+    /// comes itself, and not through the proxy.
+    #[test]
+    fn a_peer_of_this_host_that_is_no_proxy_says_for_nobody_whose_its_request_is() {
+        let here = networks("127.0.0.0/8,10.0.0.0/8").unwrap();
+        let proxies = networks("10.0.0.5").unwrap();
+        let from = |peer: &str, forwarded: &[&str]| {
+            let names = forwarded.iter().copied();
+            let asked = asked_from(peer.parse().unwrap(), names, &proxies, &here);
+            asked.map(|address| address.to_string())
+        };
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(from("10.3.3.3", &["198.51.100.1"]), None);
+        assert_eq!(from("10.0.0.5", &["198.51.100.1, 10.3.3.3"]), None);
+        assert_eq!(from("127.0.0.1", &["198.51.100.1"]), None);
+        // what the proxy says of a peer from elsewhere is taken, and no
+        // more of what that peer wrote before it
+        assert_eq!(from("10.0.0.5", &["203.0.113.9"]), some("203.0.113.9"));
+        assert_eq!(
+            from("10.0.0.5", &["198.51.100.1, 203.0.113.9"]),
+            some("203.0.113.9")
+        );
+        // a peer from elsewhere is itself, whatever it says
+        assert_eq!(from("203.0.113.7", &["10.0.0.5"]), some("203.0.113.7"));
     }
 }

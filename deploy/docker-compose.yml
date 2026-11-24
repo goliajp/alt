@@ -26,10 +26,11 @@ services:
     environment:
       # Caddy on the host reaches the published port from the gateway of
       # the network below, so every client's connection comes from that
-      # one address. It is named as one of this host: the server then
-      # holds it to no part of the connections and of the room for bodies
-      # and responses, as it holds a proxy that reaches it over loopback.
-      ALT_SERVER_LOCAL_PEERS: "127.0.0.0/8,::1,172.30.90.1"
+      # one address. It is named as the proxy: the server then holds it to
+      # no part of the connections and of the room for bodies and
+      # responses, and counts each request for the address it says the
+      # request is of.
+      ALT_SERVER_TRUSTED_PROXIES: "172.30.90.1"
       # Where clients reach the server: a signed push is taken for this
       # address and for no other.
       ALT_SERVER_ORIGINS: "https://alt.golia.jp"
