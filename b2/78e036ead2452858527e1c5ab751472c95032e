@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: an object is given by its id under a commit a ref leads to, at the path it is shown at
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/web_route.rs
+touched: crates/alt-server/src/web_route/browse.rs
+touched: crates/alt-server/src/web_route/repository.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/downloads.rs
+touched: crates/alt-server/tests/it/database/browser/led_to.rs
+touched: workbench/scripts/acceptance.mjs
+touched: workbench/src/documents.test.ts
+touched: workbench/src/documents.ts
+touched: workbench/src/views.tsx
