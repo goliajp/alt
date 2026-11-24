@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: feat
+summary: give one address a part of the connections in use and no more
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/src/http/sources.rs
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/sources.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/running.rs
+touched: self-hosted/README.md
