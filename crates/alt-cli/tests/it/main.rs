@@ -46,6 +46,7 @@ mod cherry_pick_resume;
 mod ci_validate;
 mod clone;
 mod closed_fds;
+mod commit_author;
 mod commit_batch;
 mod commit_ids;
 mod commit_loop;

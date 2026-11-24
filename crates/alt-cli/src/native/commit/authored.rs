@@ -86,18 +86,28 @@ impl NativeRepo<'_> {
 
     /// The name and the address `--author` gives: written out as
     /// `Name <email>`, or those of the latest commit HEAD has whose
-    /// author holds the text.
+    /// author holds the text. Each is written as any name or address
+    /// is: without what cannot stand in the line of a commit that names
+    /// its author.
     fn author_named(&self, text: &str) -> Res<(String, String)> {
-        let trimmed = |part: &str| part.trim().to_owned();
-        if let Some((name, rest)) = text.split_once('<')
-            && let Some((email, _)) = rest.split_once('>')
-        {
-            if name.trim().is_empty() {
-                let empty = format!("empty ident name (for <{}>) not allowed", email.trim());
-                return Err(settings::fatal(empty));
-            }
-            return Ok((trimmed(name), trimmed(email)));
+        let parts = |written: &str| {
+            let (name, rest) = written.split_once('<')?;
+            Some((name.to_owned(), rest.split_once('>')?.0.to_owned()))
+        };
+        let (name, email) = match parts(text) {
+            Some(written) => written,
+            None => self.author_holding(text)?,
+        };
+        let email = signature::clean(&email).unwrap_or_default();
+        match signature::clean(&name) {
+            Some(name) => Ok((name, email)),
+            None => Err(settings::fatal(format!(
+                "empty ident name (for <{email}>) not allowed"
+            ))),
         }
+    }
+
+    fn author_holding(&self, text: &str) -> Res<(String, String)> {
         let wanted = text.to_lowercase();
         let mut latest: Option<(i64, String, String)> = None;
         let head = self.store.refs.resolve(&self.head_branch()?)?;

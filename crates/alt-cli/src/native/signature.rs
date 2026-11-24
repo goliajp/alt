@@ -121,7 +121,7 @@ fn crud(c: char) -> bool {
 /// `value` as git writes a name or an address: without what [`crud`] is
 /// at its ends, and without any `<`, `>` or newline. One that has nothing
 /// left names nobody.
-fn clean(value: &str) -> Option<String> {
+pub(super) fn clean(value: &str) -> Option<String> {
     let kept = value.trim_matches(crud);
     let kept: String = kept
         .chars()
