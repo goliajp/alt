@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: have a reader take a cut of the oplog whose checkpoint does not read for one of ops
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cuts.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/tests/it/v2_kept_ends.rs
