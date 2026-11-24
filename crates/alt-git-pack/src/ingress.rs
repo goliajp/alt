@@ -214,44 +214,14 @@ pub fn ingest_pack_with_representations(
     let mut steps = limits.steps;
     let mut inflated = limits.inflated_bytes;
     let mut canonical = limits.resolved_bytes;
-    let mut entries = Vec::new();
-    let mut retained_bytes = 0usize;
-    let mut retained_objects = 0usize;
-    let mut pos = 12;
-    for _ in 0..count {
-        step(&mut steps)?;
-        let offset = pos;
-        let (kind, size) = header(&bytes[..end], &mut pos, algo)?;
-        if size > limits.object_bytes {
-            return Err(PackError::Limit("pack entry size limit"));
-        }
-        spend(&mut inflated, size)?;
-        let (payload, used) = inflate(&bytes[pos..end], size)?;
-        let encoded = if matches!(kind, Kind::Plain(_))
-            && size <= retention.object_bytes as u64
-            && used <= retention.object_bytes
-            && retained_objects < retention.objects
-            && used <= retention.bytes.saturating_sub(retained_bytes)
-        {
-            retained_bytes += used;
-            retained_objects += 1;
-            Some(bytes[pos..pos + used].to_vec())
-        } else {
-            None
-        };
-        pos = pos
-            .checked_add(used)
-            .ok_or_else(|| fail("pack offset overflow"))?;
-        entries.push(Raw {
-            offset,
-            kind,
-            payload,
-            encoded,
-        });
-    }
-    if pos != end {
-        return Err(fail("pack count or trailing bytes"));
-    }
+    let mut entries = scan(
+        &bytes[..end],
+        count,
+        algo,
+        &limits,
+        &retention,
+        (&mut steps, &mut inflated),
+    )?;
     let by_offset: BTreeMap<_, _> = entries
         .iter()
         .enumerate()
@@ -293,37 +263,9 @@ pub fn ingest_pack_with_representations(
                 Kind::Ref(oid) => {
                     if !by_oid.contains_key(&oid) && attempted.insert(oid) {
                         step(&mut steps)?;
-                        if let Some(mut base) = bases.open(oid)? {
-                            external = external
-                                .checked_add(1)
-                                .ok_or_else(|| fail("pack external base count"))?;
-                            if count.saturating_add(external) > limits.objects
-                                || base.bytes > limits.object_bytes
-                            {
-                                return Err(PackError::Limit("pack external base limit"));
-                            }
-                            spend(&mut canonical, base.bytes)?;
-                            let mut data = Vec::new();
-                            base.reader
-                                .by_ref()
-                                .take(base.bytes.saturating_add(1))
-                                .read_to_end(&mut data)?;
-                            if data.len() as u64 != base.bytes
-                                || ObjectId::hash_object(algo, base.kind, &data) != oid
-                            {
-                                return Err(fail("pack external base identity"));
-                            }
-                            insert(
-                                &mut by_oid,
-                                Resolved {
-                                    object: IngressObject {
-                                        oid,
-                                        kind: base.kind,
-                                        data: Arc::new(data),
-                                    },
-                                    depth: 0,
-                                },
-                            )?;
+                        let spent = (count, &mut external, &mut canonical);
+                        if let Some(base) = outside(bases, oid, algo, &limits, spent)? {
+                            insert(&mut by_oid, base)?;
                         }
                     }
                     by_oid.get(&oid).cloned()
@@ -388,6 +330,94 @@ pub fn ingest_pack_with_representations(
         wire_bytes: bytes.len() as u64,
         representations,
     })
+}
+/// The entries of a pack, each inflated, from `bytes` that end where its
+/// trailer begins.
+fn scan(
+    bytes: &[u8],
+    count: usize,
+    algo: HashAlgo,
+    limits: &IngressLimits,
+    retention: &RepresentationLimits,
+    (steps, inflated): (&mut usize, &mut u64),
+) -> Result<Vec<Raw>, PackError> {
+    let mut entries = Vec::new();
+    let mut retained_bytes = 0usize;
+    let mut retained_objects = 0usize;
+    let mut pos = 12;
+    for _ in 0..count {
+        step(steps)?;
+        let offset = pos;
+        let (kind, size) = header(bytes, &mut pos, algo)?;
+        if size > limits.object_bytes {
+            return Err(PackError::Limit("pack entry size limit"));
+        }
+        spend(inflated, size)?;
+        let (payload, used) = inflate(&bytes[pos..], size)?;
+        let encoded = if matches!(kind, Kind::Plain(_))
+            && size <= retention.object_bytes as u64
+            && used <= retention.object_bytes
+            && retained_objects < retention.objects
+            && used <= retention.bytes.saturating_sub(retained_bytes)
+        {
+            retained_bytes += used;
+            retained_objects += 1;
+            Some(bytes[pos..pos + used].to_vec())
+        } else {
+            None
+        };
+        pos = pos
+            .checked_add(used)
+            .ok_or_else(|| fail("pack offset overflow"))?;
+        entries.push(Raw {
+            offset,
+            kind,
+            payload,
+            encoded,
+        });
+    }
+    if pos != bytes.len() {
+        return Err(fail("pack count or trailing bytes"));
+    }
+    Ok(entries)
+}
+/// A base that is not of the pack, read whole and checked against its id;
+/// `None` when `bases` have none of that id. It is counted beside the
+/// `count` entries of the pack and the bases before it, and its bytes
+/// are taken from what is left for resolved objects.
+fn outside(
+    bases: &mut impl BaseSource,
+    oid: ObjectId,
+    algo: HashAlgo,
+    limits: &IngressLimits,
+    (count, external, canonical): (usize, &mut usize, &mut u64),
+) -> Result<Option<Resolved>, PackError> {
+    let Some(mut base) = bases.open(oid)? else {
+        return Ok(None);
+    };
+    *external = external
+        .checked_add(1)
+        .ok_or_else(|| fail("pack external base count"))?;
+    if count.saturating_add(*external) > limits.objects || base.bytes > limits.object_bytes {
+        return Err(PackError::Limit("pack external base limit"));
+    }
+    spend(canonical, base.bytes)?;
+    let mut data = Vec::new();
+    base.reader
+        .by_ref()
+        .take(base.bytes.saturating_add(1))
+        .read_to_end(&mut data)?;
+    if data.len() as u64 != base.bytes || ObjectId::hash_object(algo, base.kind, &data) != oid {
+        return Err(fail("pack external base identity"));
+    }
+    Ok(Some(Resolved {
+        object: IngressObject {
+            oid,
+            kind: base.kind,
+            data: Arc::new(data),
+        },
+        depth: 0,
+    }))
 }
 fn insert(map: &mut BTreeMap<ObjectId, Resolved>, value: Resolved) -> Result<(), PackError> {
     if let Some(old) = map.get(&value.object.oid) {
