@@ -662,7 +662,7 @@ fn interrupted_tool(
             return (child, StoppedTool(pid));
         }
         if let Some(status) = child.0.try_wait().unwrap() {
-            let mut error = String::new();
+            let mut error = db.tools() + "\n";
             if let Some(mut pipe) = child.0.stderr.take() {
                 std::io::Read::read_to_string(&mut pipe, &mut error).unwrap();
             }

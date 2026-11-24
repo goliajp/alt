@@ -110,3 +110,30 @@ fn a_repository_that_cannot_be_gone_into_keeps_no_other_from_its_round() {
         .expire_requests(100, &mut |repository, _| failed.push(repository.to_owned()));
     assert_eq!((ended.unwrap(), failed), (0, Vec::new()));
 }
+
+/// More repositories have a request to end than are asked for at a time: one
+/// round ends them all.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn a_round_goes_through_more_repositories_than_it_asks_for_at_a_time() {
+    let mut f = Fixture::new();
+    begun(&mut f, "late");
+    let mut client = f.client();
+    // 299 more repositories, each with the same request
+    client
+        .batch_execute(
+            "INSERT INTO alt_repositories SELECT (jsonb_populate_record(r, jsonb_build_object('id', 'r-' || lpad(n::text, 3, '0')))).* FROM alt_repositories r, generate_series(0, 298) n WHERE r.id='repository';
+             INSERT INTO alt_requests SELECT (jsonb_populate_record(q, jsonb_build_object('repository', 'r-' || lpad(n::text, 3, '0')))).* FROM alt_requests q, generate_series(0, 298) n WHERE q.repository='repository';
+             UPDATE alt_requests SET expires_at=0",
+        )
+        .unwrap();
+    let mut failed = Vec::new();
+    let ended = f
+        .store
+        .expire_requests(100, &mut |repository, _| failed.push(repository.to_owned()));
+    assert_eq!((ended.unwrap(), failed), (300, Vec::new()));
+    let left = "SELECT count(*) FROM alt_requests WHERE state<>'expired'";
+    assert_eq!(client.query_one(left, &[]).unwrap().get::<_, i64>(0), 0);
+    let reserved = "SELECT count(*) FROM alt_repositories WHERE reserved_bytes<>0";
+    assert_eq!(client.query_one(reserved, &[]).unwrap().get::<_, i64>(0), 0);
+}

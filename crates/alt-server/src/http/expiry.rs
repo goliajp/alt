@@ -22,14 +22,33 @@ const REMOVED: u32 = 1000;
 /// in the next round as well while a round left some behind.
 const ROUNDS_TO_REMOVAL: u32 = 120;
 
+/// Which rounds remove what is over: the first, each one after a round that left
+/// some behind, and otherwise one in [`ROUNDS_TO_REMOVAL`].
+#[derive(Default)]
+struct Rounds(u32);
+impl Rounds {
+    fn removes(&self) -> bool {
+        self.0 == 0
+    }
+    /// The round is over; `more` where it removed and left some behind. A round
+    /// that failed left what it found.
+    fn over(&mut self, more: bool) {
+        self.0 = if more {
+            0
+        } else {
+            (self.0 + 1) % ROUNDS_TO_REMOVAL
+        };
+    }
+}
+
 pub(super) async fn run(state: Arc<App>) {
     let log = BackgroundLog::current();
-    let (mut seen, mut rounds) = (RequestsSeen::default(), 0);
+    let (mut seen, mut rounds) = (RequestsSeen::default(), Rounds::default());
     loop {
         tokio::time::sleep(state.options.expiry_interval).await;
         let factory = (*state.factory).clone();
         let told = log.clone();
-        let removing = rounds == 0;
+        let removing = rounds.removes();
         let mut passed = seen.clone();
         let ended = spawn_blocking(move || {
             let mut store = factory.open()?;
@@ -43,16 +62,35 @@ pub(super) async fn run(state: Arc<App>) {
             let removed = store.remove_what_is_over(REMOVED, &mut passed, &mut rule);
             Ok::<_, alt_server_store::Error>((passed, removed.more))
         });
-        rounds = (rounds + 1) % ROUNDS_TO_REMOVAL;
+        let mut more = false;
         match ended.await {
-            Ok(Ok((passed, more))) => {
-                seen = passed;
-                if more {
-                    rounds = 0;
-                }
-            }
+            Ok(Ok((passed, left))) => (seen, more) = (passed, left),
             Ok(Err(error)) => log.failed("request expiry", "", &error),
             Err(_) => {}
         }
+        rounds.over(more);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_is_over_is_removed_in_the_first_round_and_again_at_once_while_some_is_left() {
+        let mut rounds = Rounds::default();
+        // the first round after a start removes; it left some, and so does the next
+        assert!(rounds.removes());
+        rounds.over(true);
+        assert!(rounds.removes());
+        rounds.over(true);
+        assert!(rounds.removes());
+        // nothing left: not again until so many rounds have passed
+        rounds.over(false);
+        for round in 1..ROUNDS_TO_REMOVAL {
+            assert!(!rounds.removes(), "round {round}");
+            rounds.over(false);
+        }
+        assert!(rounds.removes());
     }
 }

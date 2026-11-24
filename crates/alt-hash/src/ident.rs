@@ -139,13 +139,24 @@ mod tests {
     /// they are folded bare: keyed, each pair has a hash of its own.
     #[test]
     fn pairs_of_ids_chosen_to_fold_alike_are_told_apart_by_the_key() {
-        let pair = |change: u64| {
-            let (mut first, mut second) = ([0x5au8; 20], [0xa5u8; 20]);
-            first[..8].copy_from_slice(&(0x1234_5678_9abc_def0u64 ^ change).to_le_bytes());
-            second[..8]
-                .copy_from_slice(&(0x0fed_cba9_8765_4321u64 ^ change.rotate_left(5)).to_le_bytes());
+        // a pair is taken in as the length of each id and its first word
+        let words = |change: u64| {
+            let first = 0x1234_5678_9abc_def0u64 ^ change;
+            // what the fold turns the first by before the second is taken in
+            let second = 0x0fed_cba9_8765_4321u64 ^ change.rotate_left(10);
             (first, second)
         };
+        let pair = |change: u64| {
+            let (mut first, mut second) = ([0x5au8; 20], [0xa5u8; 20]);
+            first[..8].copy_from_slice(&words(change).0.to_le_bytes());
+            second[..8].copy_from_slice(&words(change).1.to_le_bytes());
+            (first, second)
+        };
+        let bare = |change: u64| {
+            let taken = [20, words(change).0, 20, words(change).1];
+            (taken.iter()).fold(0u64, |state, word| state.rotate_left(5) ^ word)
+        };
+        assert!((1u64..=4096).all(|n| bare(n << 13) == bare(0)));
         let keyed = KeyedIdBuildHasher::default();
         let mut hashes: Vec<u64> = (1u64..=4096)
             .map(|n| keyed.hash_one(pair(n << 13)))

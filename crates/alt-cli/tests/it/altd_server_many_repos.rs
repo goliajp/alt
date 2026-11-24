@@ -172,12 +172,14 @@ fn a_server_that_can_take_no_more_connections_waits_for_one_to_end() {
 }
 
 /// A signed push is signed over a nonce the server gave it with the refs,
-/// and comes with it a request later. The repository is closed between
-/// the two, for another that is asked for all the while and the one
-/// repository the server keeps open: the nonce is good all the same.
+/// and comes with it a request later. Between the two the repository is
+/// closed: a relay asks for another, the one repository the server keeps
+/// open, when the push comes and before it passes it on. The nonce is good
+/// all the same.
 #[test]
 fn the_nonce_of_a_signed_push_is_good_though_its_repository_was_closed_meanwhile() {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let tmp = alt_os::temp::tempdir().unwrap();
     let root = tmp.path().join("root");
     repository(&root.join("pushed"));
@@ -186,37 +188,33 @@ fn the_nonce_of_a_signed_push_is_good_though_its_repository_was_closed_meanwhile
         ("ALT_SERVER_ROOT", root.to_str().unwrap()),
         ("ALT_SERVER_MAX_OPEN_REPOS", "1"),
     ]);
-    let url = format!("http://{}/pushed/", server.addr);
     let other = format!("http://{}/other/", server.addr);
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = asked.clone();
+    let between = move || {
+        assert!(listed(&other).contains("refs/heads/main"));
+        counted.fetch_add(1, Ordering::SeqCst);
+    };
+    let relayed = crate::altd_server_relay::Relayed {
+        before_push: Some(Arc::new(between)),
+        ..Default::default()
+    };
+    let through = crate::altd_server_relay::relay(&server.addr, relayed);
+    let url = format!("http://{through}/pushed/");
     let client = tmp.path().join("client");
     ok(alt(tmp.path(), &["clone", &url, client.to_str().unwrap()]));
     crate::altd_server::enable_signed_push(&client, &root.join("pushed"), "alice");
     // a push whose signature does not hold is one of nobody, and refused
     let policy = root.join("pushed/.alt/policy");
     fs::write(policy, "human:anonymous -> require-signed\n").unwrap();
-    let over = AtomicBool::new(false);
-    let pushes = std::thread::scope(|scope| {
-        scope.spawn(|| {
-            while !over.load(Ordering::Acquire) {
-                listed(&other);
-            }
-        });
-        let pushes: Vec<_> = (0..8)
-            .map(|n| {
-                fs::write(client.join("file"), n.to_string()).unwrap();
-                ok(alt(&client, &["add", "."]));
-                ok(alt(&client, &["commit", "-m", "more"]));
-                alt(
-                    &client,
-                    &["push", "origin", "refs/heads/main:refs/heads/main"],
-                )
-            })
-            .collect();
-        over.store(true, Ordering::Release);
-        pushes
-    });
-    for push in pushes {
-        let told = String::from_utf8_lossy(&push.stderr).into_owned();
-        assert!(push.status.success(), "{told}");
-    }
+    fs::write(client.join("file"), "more").unwrap();
+    ok(alt(&client, &["add", "."]));
+    ok(alt(&client, &["commit", "-m", "more"]));
+    let push = alt(
+        &client,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    let told = String::from_utf8_lossy(&push.stderr).into_owned();
+    assert!(push.status.success(), "{told}");
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "{told}");
 }

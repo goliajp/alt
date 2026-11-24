@@ -104,3 +104,31 @@ fn an_older_instance_is_given_the_moments_its_requests_and_credentials_ended() {
         Err(alt_server_store::Error::Precondition(_))
     ));
 }
+
+#[test]
+#[ignore = "a measurement of the upgrade to schema 22, for --nocapture and with ALT_MEASURE_REQUESTS; requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_time_of_the_upgrade_by_how_many_requests_there_are() {
+    let told = std::env::var("ALT_MEASURE_REQUESTS").ok();
+    let copies: i64 = told.and_then(|told| told.parse().ok()).unwrap_or(1000);
+    let mut f = Fixture::new();
+    Payload::new("committed", None).publish_new(&mut f.store, &f.credential);
+    // as many requests as that, each as the one that was committed left its row
+    let copy = format!(
+        "INSERT INTO alt_requests SELECT (jsonb_populate_record(q, jsonb_build_object('request_id', 'copy-' || n))).* FROM alt_requests q, generate_series(1, {copies}) n"
+    );
+    f.client().batch_execute(&copy).unwrap();
+    let size = "SELECT pg_total_relation_size('alt_requests')";
+    let bytes: i64 = f.client().query_one(size, &[]).unwrap().get(0);
+    as_schema_21(&f);
+    let began = std::time::Instant::now();
+    super::schema_20::migrate(&mut f, 21).unwrap();
+    let taken = began.elapsed();
+    let after: i64 = f.client().query_one(size, &[]).unwrap().get(0);
+    println!(
+        "{} requests in {bytes} bytes: upgraded in {taken:?}, {after} bytes after",
+        copies + 1
+    );
+    let settled = "SELECT count(*) FROM alt_requests WHERE settled_at IS NOT NULL";
+    let settled: i64 = f.client().query_one(settled, &[]).unwrap().get(0);
+    assert_eq!(settled, copies + 1);
+}

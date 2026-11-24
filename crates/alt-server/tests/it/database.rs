@@ -7,6 +7,7 @@ mod change_links;
 mod chunks;
 mod cloud;
 mod connections;
+mod device_exchange;
 mod dispatch;
 mod git;
 mod json;

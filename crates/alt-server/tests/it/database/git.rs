@@ -1,6 +1,7 @@
 use super::*;
 mod many_refs;
 mod raw_push;
+mod settled_cost;
 mod verifying;
 use std::{
     path::Path,
