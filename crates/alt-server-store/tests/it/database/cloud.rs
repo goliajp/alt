@@ -1,6 +1,7 @@
 use super::*;
 mod lease_over;
 mod scrubbed;
+mod started;
 use golia_platform_contract::{
     AccountAuthorization, AltLimits, AltServiceAuthorization, Audience, Capability, Counter, Lease,
     Product,

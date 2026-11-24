@@ -8,7 +8,7 @@ use alt_browser_auth::{PublicOrigin, password_hash};
 use alt_remote_protocol::DeploymentMode;
 mod budget;
 mod login;
-pub(crate) use budget::{code_budget, login_budget};
+pub(crate) use budget::{code_budget, login_budget, start_budget};
 pub use login::{PasswordAttempt, PasswordProof};
 
 #[derive(Clone, alt_json::ToJson)]

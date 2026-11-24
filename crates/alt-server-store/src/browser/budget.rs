@@ -117,11 +117,25 @@ pub(crate) fn login_budget(
 /// so those asked for make nobody busy, and take nothing from what an address
 /// may attempt of sign-ins. The caller lets go of its transaction as above.
 pub(crate) fn code_budget(tx: &mut Transaction<'_>, network: std::net::IpAddr) -> Result<()> {
+    apart(tx, "code", network)
+}
+
+/// The sign-ins through the platform an address and the network around it may
+/// begin in a minute. One is begun without a credential and has no password
+/// checked here either: they are counted as the codes are, apart from each other.
+pub(crate) fn start_budget(tx: &mut Transaction<'_>, network: std::net::IpAddr) -> Result<()> {
+    apart(tx, "start", network)
+}
+
+fn apart(tx: &mut Transaction<'_>, kind: &str, network: std::net::IpAddr) -> Result<()> {
     let time = integer(now(tx)?)?;
     let [address, wider] = networks(network);
     let rows = [
-        (key("code", &address.to_string()), ADDRESS_ATTEMPTS),
-        (key("code-wider", &wider.to_string()), NETWORK_ATTEMPTS),
+        (key(kind, &address.to_string()), ADDRESS_ATTEMPTS),
+        (
+            key(&format!("{kind}-wider"), &wider.to_string()),
+            NETWORK_ATTEMPTS,
+        ),
     ];
     for (key, max) in rows {
         let (attempts, left) = counted(tx, &key, time)?;
