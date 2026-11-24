@@ -154,8 +154,8 @@ fn a_look_over_a_note_that_does_not_read_beside_a_log_that_was_cut_leaves_the_op
         fs::write(&path, torn).unwrap();
         let mut log = OpLog::open(dir.path()).unwrap();
         // a ref transaction: a sync has to see to what it names
-        log.append_with("a", 3, b"left", &super::v2_image::linked())
-            .unwrap();
+        let linked = super::v2_image::linked();
+        log.append_with("a", 3, b"left", &linked).unwrap();
         assert_eq!(log.state().unwrap().generation, 1);
         drop(log);
         boot(2);
@@ -180,11 +180,8 @@ fn a_look_over_a_note_that_does_not_read_beside_a_log_that_was_cut_leaves_the_op
         // a writer that syncs appends nothing before it has looked, and
         // gives `left` to whoever sees to what ops name
         let given = collecting(&mut writer);
-        let appended = writer.append("a", 5, b"more");
-        assert!(
-            matches!(appended, Err(OpLogError::Unjudged { .. })),
-            "{how}"
-        );
+        let unjudged = |did| matches!(did, Err(OpLogError::Unjudged { .. }));
+        assert!(unjudged(writer.append("a", 5, b"more")), "{how}");
         assert_eq!(writer.settle(|_| Ok::<_, OpLogError>(true)).unwrap(), None);
         writer.append("a", 5, b"more").unwrap();
         writer.sync().unwrap();
