@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refuse to export a ref that lies beneath another, and to make such a branch
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/branch.rs
+touched: crates/alt-cli/tests/it/capability_gate.rs
+touched: crates/alt-cli/tests/it/import_met.rs
+touched: crates/alt-export/src/lib.rs
