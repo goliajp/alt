@@ -16,19 +16,18 @@ fn the_note_of_another_log_put_beside_a_log_says_nothing_of_it() {
         alt_os::temp::tempdir().unwrap(),
     );
     boot(1);
-    // another log of this boot, synced further than this one is long
+    // another log of this boot, synced further than this one is and no
+    // further than this one is long
     let mut far = new_log(other.path());
-    grow(&mut far, "b", 2);
-    far.append("b", 3, &[7; 600]).unwrap();
-    far.sync().unwrap();
+    grow(&mut far, "b", 3);
     let mut log = new_log(dir.path());
     grow(&mut log, "a", 2);
     let synced = log.appended_len();
     let given = collecting(&mut log);
-    log.append_with("a", 3, b"tx", &super::v2_image::linked())
+    log.append_with("a", 3, &[7; 600], &super::v2_image::linked())
         .unwrap();
     let end = log.appended_len();
-    assert!(end < far.appended_len());
+    assert!(synced < far.appended_len() && far.appended_len() < end);
     fs::copy(other.path().join("tail"), dir.path().join("tail")).unwrap();
     assert_eq!(alt_oplog::bounded_in(dir.path()), None);
     assert_eq!(log.bounded_to(), Some(synced));
