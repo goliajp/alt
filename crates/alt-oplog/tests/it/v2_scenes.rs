@@ -90,6 +90,13 @@ impl Run {
         }
         self.reboot(true);
         let (index, how) = (self.open(false), self.also.below(2));
+        if self.also.one_in(3) {
+            // a writer reads the log to its end, and the handle, for
+            // which it ended where the cut was begun, looks at its own
+            let len = 1 + self.rng.below(120);
+            self.tear_of(len);
+            self.look_by(index, false);
+        }
         self.sync(index, how);
         let writer = self.open(false);
         if self.lay(writer, plain(), false).is_some() {
@@ -164,9 +171,15 @@ impl Run {
             return;
         };
         self.reboot_as(Loss::Within(at));
+        let lost = self.lose(&before);
+        if lost && self.also.one_in(2) {
+            // a reader looks before the cut is made again
+            let reader = self.open(true);
+            self.look_by(reader, false);
+        }
         let next = self.open(false);
         self.read_on(next, true, None);
-        if self.lose(&before) {
+        if lost {
             self.settle(next, None, false);
         }
         self.counts.scenes[2].fetch_add(1, Ordering::Relaxed);
@@ -233,10 +246,12 @@ impl Run {
         let _ = self.beside != super::v2_beside::Beside::Kept
             && std::fs::remove_file(self.path().join("tail")).is_ok();
         let (cutter, died) = (self.open(false), self.died);
-        if self.also.one_in(2) {
-            self.lose(&before);
+        // what the op before that cut names is gone, or is not found
+        // by this look alone
+        match self.also.one_in(2) {
+            true => _ = self.lose(&before) && self.settle(cutter, Some(1), false),
+            false => _ = self.refused_while(&before, |run| _ = run.settle(cutter, Some(1), false)),
         }
-        self.settle(cutter, Some(1), true);
         if self.died == died {
             return;
         }

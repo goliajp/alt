@@ -80,7 +80,7 @@ pub struct Counts {
 }
 
 impl Counts {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Counts {
             sequences: AtomicU64::new(0),
             real: AtomicU64::new(0),

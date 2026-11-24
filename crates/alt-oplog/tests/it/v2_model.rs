@@ -193,18 +193,32 @@ impl Model {
 
     /// Takes the log for synced up to `claimed`, as the note beside it
     /// says it is: that holds only where every op before it that names
-    /// something was given to whoever syncs what ops name.
+    /// something was given to whoever syncs what ops name, and none of
+    /// the others is one another boot left that nobody has looked at.
     pub fn synced_to(&mut self, log: &Reference, claimed: u64) {
         if claimed <= self.synced {
             return;
         }
         assert!(claimed <= log.end, "synced to {claimed}, past the log");
-        for op in log.naming(self.synced, claimed) {
+        let naming = log.naming(self.synced, claimed);
+        for op in &naming {
             let name = String::from_utf8_lossy(&op.payload);
             assert!(
                 self.seen_to.contains(&op.payload),
                 "the log is recorded as synced up to {claimed}, over {name} at {}, \
                  which nobody was given to see to",
+                op.at
+            );
+        }
+        // one that a sync saw to before an op after it replaced it was
+        // seen to all the same
+        let seen_to = |op: &&Laid| self.seen_to.contains(&op.payload);
+        let left = self.unsettled(log).into_iter();
+        if let Some(op) = left.filter(|op| op.end <= claimed).find(|op| !seen_to(op)) {
+            panic!(
+                "the log is recorded as synced up to {claimed}, over {} at {}, which another \
+                 boot left, no sync sees to and nobody looked at",
+                String::from_utf8_lossy(&op.payload).trim_end_matches('.'),
                 op.at
             );
         }

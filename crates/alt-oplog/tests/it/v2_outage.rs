@@ -79,7 +79,7 @@ impl Ledger {
         let was = std::mem::take(&mut self.was);
         let was = if lost.is_empty() { was } else { lost };
         self.was = was.into_iter().filter(|op| !kept(op)).collect();
-        (self.receipts_of(log), self.hides.clear());
+        self.receipts_of(log);
         back
     }
 }
@@ -170,6 +170,7 @@ impl Run {
             .ledger
             .after_power(&log, &then, same, self.model.synced);
         self.power.hold(after);
+        self.ledger.hides.clear();
         // a cut the header tells of that the log does not hold
         let (generation, at) = cut_told(self.path());
         let begun = generation > log.cut.0 && at >= log.said_synced.max(64) && at < log.end;

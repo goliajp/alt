@@ -127,6 +127,11 @@ impl Run {
     /// Any handle looks at what was left, as a reader does.
     fn look(&mut self, surely: bool) {
         let index = self.rng.below(self.handles.len() as u64) as usize;
+        self.look_by(index, surely);
+    }
+
+    /// Handle `index` looks at what was left, as a reader does.
+    pub fn look_by(&mut self, index: usize, surely: bool) {
         if !self.ledger.holds(self.handles[index].log.anchor()) {
             return;
         }
@@ -150,20 +155,37 @@ impl Run {
             return;
         }
         if let Some(found) = self.took(index, found, false) {
-            // it ends at the op it was told is not held, and nowhere else
-            let unheld = refused_of(&asked);
-            let ends = unheld.map(|payload| self.ledger.place_of(&payload));
-            assert_eq!(
-                found.map(|found| found.at),
-                ends,
-                "a reader's look ends elsewhere than at the op it was told is not held"
-            );
+            let ends = self.reader_ends(&asked, found.map(|found| found.at), end);
             self.looked(&unsettled, &asked, ends);
             // it may note that the log ends there in the file it read
             let seen = self.handles[index].seen.iter();
             let hides = seen.filter_map(|len| Some((*len, ends?)));
             self.ledger.hides.extend(hides);
         }
+    }
+
+    /// Where the log ends for a reader that holds it up to `end`, was
+    /// told what `asked` holds, and found it to end at `found`: at the
+    /// op it was told is not held, and nowhere else. One that holds all
+    /// of the log is refused where a writer would be refused the cut.
+    fn reader_ends(&self, asked: &[(Vec<u8>, bool)], found: Option<u64>, end: u64) -> Option<u64> {
+        let unheld = refused_of(asked);
+        let ops = &self.ledger.ops;
+        let op = unheld.and_then(|unheld| ops.iter().position(|op| op.payload == unheld));
+        let ends = op.map(|op| ops[op].at);
+        assert_eq!(
+            found, ends,
+            "a reader's look ends elsewhere than at the op it was told is not held"
+        );
+        if let Some(op) = op.filter(|_| end == self.log().end) {
+            assert!(
+                self.to_keep(op, &self.cuts_seen) == (None, None),
+                "a reader is told that the log ends at op {}: a writer would be refused the \
+                 cut there",
+                ops[op].n
+            );
+        }
+        ends
     }
 
     /// Handle `index` reads what was appended since it last read, as a
