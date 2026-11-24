@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: have an export leave what it exported in the repository it made and write nothing into the store
+author-type: human
+author: doracawl
+touched: crates/alt-export/src/met.rs
+touched: crates/alt-repo/src/met.rs
