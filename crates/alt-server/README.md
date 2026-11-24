@@ -153,6 +153,21 @@ memory wait in the order they came, and so do those that find no room for a
 base among the files while they have none there; a pack that has room is let
 in before one that waits for more, eight times at the most for each that waits.
 
+One process serves an instance at a time. `serve` takes a lock of the database
+(a session advisory lock, held by a connection of its own) and a lock on
+`temporary` in `bytes_directory`; a second `serve` that reaches the same
+database, on the same host or on another, waits two seconds for the first to
+be gone and then ends with `another server serves this database`, and one that
+reaches the same directory ends with `another server serves these bytes`. The
+server looks at its session every five seconds. Where the database ended it (a
+restart of the database, a failover), the server begins another and takes the
+lock again; where another process has the lock by then, the server stops and
+its exit says so. Between the end of a session and that look two processes may
+serve for some seconds: a second `serve` is not to be started against a
+database whose server may still run. A pooler between the server and the
+database that hands one session to several clients (transaction pooling) does
+not keep such a lock; the server needs sessions of its own.
+
 What the serving process writes for a time is under `temporary` in
 `bytes_directory`, on the disk of the stored bytes and not among the temporary
 files of the host, which a container often keeps in memory: request bodies while
@@ -460,9 +475,23 @@ the command ends with status 1 (75 where the outcome of a replacement is not
 known). A name that is no repository of the instance fails so, and is not told
 of as a repository without unread objects. A pack is indexed anew within
 `http.indexing_megabytes`; a segment whose pack takes more stays, with
-`kept_because`. `backup` reads the instance through in the same way before it
-copies anything and refuses an instance with unread objects, and `restore`
-does so with what it restored before it activates it.
+`kept_because`. A segment is read through with each delta applied to its base
+once, whatever the length of its chains; the objects kept for the deltas made of
+them take 256 MiB at the most.
+
+`backup` reads the instance through in the same way before it copies anything.
+Where a segment does not give all of its objects back it makes no backup, ends
+with status 1 and tells under `unread` which repository, which segment, how
+many objects and the first of them: run `scrub --mend` and back up again. A
+segment that stays unread after that (`kept_because`) does not keep the rest of
+the instance from being backed up: `backup --with-unread` makes the backup as
+the instance is, and its manifest names those segments under `unread`.
+`restore` reads what it restored before it activates it. Segments the manifest
+names are restored as they are and told of again in the answer. Where it finds
+unread objects the manifest does not name (a backup made by a version that did
+not read the objects), it restores nothing, unless `--with-unread` is given: the
+instance is then restored as it is, the segments are told of, and `scrub --mend`
+is run on the restored instance.
 
 From schema 19 the transaction changes how a committed publication is stored.
 That version kept the whole publication four times: in the request, in the
@@ -532,13 +561,19 @@ preserves committed receipts. An old request that was unfinished at the backup
 watermark remains **unknown**, even after GC; the source might have committed
 it after the snapshot. Do not automatically replay it under a fresh request ID.
 
-An interrupted restore reports its failed stage and an unknown outcome. Keep
+A restore that fails before it activates the instance takes away what it
+wrote (the data directory, the receipt key, what the archive made in the
+database), ends with status 1 and `restoration failed at <stage>; nothing is
+left of it in the destination`, and can be run again against the same
+destination. A restore that fails at the activation or after it, or that could
+not take away what it wrote, reports its failed stage and an unknown outcome
+(status 75), and so does one whose process was killed: keep
 that isolated destination for inspection. `health` with the new config refuses
 the database until activation commits. If `health` succeeds after a lost
 response, inspect the retained `instance.restore` audit and verify the refs and
 objects before admitting traffic. Do not overwrite the target or restore an
-older snapshot over newly accepted writes. To retry an incomplete pre-activation
-restore, use another empty database and new absent volume/key paths.
+older snapshot over newly accepted writes. To retry after an unknown outcome,
+use another empty database and new absent volume/key paths.
 
 For a pre-browser backup or lost administrator token, the physical operator
 can recover an **existing local human administrator** using a new private token
