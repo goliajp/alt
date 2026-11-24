@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the page of a review is read while its request is leased to a worker
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-cli/tests/it/task_remote/browser.rs
