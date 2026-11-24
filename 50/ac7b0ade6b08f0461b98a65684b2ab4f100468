@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a second server of the same bytes does not empty what the first writes for a time, nor is a link emptied
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/temp.rs
+touched: crates/alt-server/src/operator/validate.rs
