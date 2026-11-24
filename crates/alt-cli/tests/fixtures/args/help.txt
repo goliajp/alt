@@ -1808,6 +1808,7 @@ Options:
       --skip                   Drop the stopped step and go on
       --abort                  Put the branch back as it was before the rebase
   -x, --exec <COMMAND>         Run a shell command after each commit replayed; the rebase stops where one fails
+  -r, --rebase-merges          Replay the merge commits too, each made again of the commits replayed, instead of leaving them out
       --reset-author-date      Give each commit replayed the moment of the rebase as its author's date
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one

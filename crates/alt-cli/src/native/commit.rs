@@ -59,9 +59,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         self.ensure_writable("commit")?;
         self.ensure_topic_branch_or_unborn("commit")?;
-        if self.bisect_in_progress() {
-            return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
-        }
+        self.ensure_committable()?;
         if opts.by.reset {
             let said = "--reset-author can be used only with -C, -c or --amend.";
             return Err(settings::fatal(said.to_owned()));

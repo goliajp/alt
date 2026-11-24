@@ -69,6 +69,24 @@ impl NativeRepo<'_> {
         })
     }
 
+    /// Refuses `alt commit` where what is under way takes no commit of
+    /// its own: a bisect, and a rebase that stopped while it made a merge
+    /// commit again, which `rebase --continue` records with both parents.
+    pub(super) fn ensure_committable(&self) -> Res<()> {
+        if self.bisect_in_progress() {
+            return Err("commit: a bisect is in progress; end it with `alt bisect reset`".into());
+        }
+        if self
+            .rebase_state()?
+            .is_some_and(|state| state.merging.is_some())
+        {
+            let said = "commit: a rebase stopped while making a merge commit again; resolve \
+                        the conflicts, `alt add` them and run `alt rebase --continue`";
+            return Err(said.into());
+        }
+        Ok(())
+    }
+
     /// The operation under way with how far it has come.
     pub(super) fn operation(&self) -> Res<Option<Operation>> {
         let Some(kind) = self.operation_kind()? else {
@@ -83,7 +101,7 @@ impl NativeRepo<'_> {
             OperationKind::Rebase => {
                 let state = self.rebase_state()?.ok_or("corrupt REBASE_STATE")?;
                 let done = self.commits_since(self.rebase_head()?, state.onto)?;
-                let stopped = usize::from(state.current.is_some());
+                let stopped = usize::from(state.stopped());
                 operation.step = Some((done + stopped, done + stopped + state.replays_left()));
                 operation.branch = Some(state.branch);
             }

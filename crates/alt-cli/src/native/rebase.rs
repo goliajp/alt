@@ -1,6 +1,6 @@
 //! `alt rebase`: replay a branch's own commits onto another base, as git does,
 //! optionally through an edited todo list (pick / reword / squash / fixup /
-//! drop).
+//! drop), with its merges made again where `-r` asks.
 //!
 //! While it runs, the workspace HEAD points at a scratch ref that carries the
 //! commits made so far; the branch itself only moves when the rebase finishes,
@@ -13,9 +13,11 @@ use super::sequence_editor::Action;
 use super::*;
 
 mod leave;
+mod merges;
 mod plan;
 mod run;
 mod state;
+mod steps;
 pub(super) use state::RebaseState;
 use state::Step;
 
@@ -29,10 +31,8 @@ impl NativeRepo<'_> {
     /// stopped on a conflict.
     pub fn rebase(&mut self, args: &crate::commit_args::Rebase, out: &mut impl Write) -> Res<bool> {
         let upstream = args.upstream.as_deref().unwrap_or_default();
-        let (interactive, json) = (args.interactive, args.json);
+        let json = args.json;
         run::ensure_commands(&args.exec)?;
-        // each commit is replayed anew where a command follows it or its date changes
-        let anew = !args.exec.is_empty() || args.reset_author_date;
         self.ensure_topic_branch_or_unborn("rebase")?;
         self.ensure_no_merge_in_progress("rebase")?;
         self.ensure_clean("rebase")?;
@@ -51,25 +51,13 @@ impl NativeRepo<'_> {
             .resolve(&branch)?
             .ok_or("rebase: the branch has no commits yet")?;
 
-        let commits = self.commits_to_replay(orig, onto)?;
-        let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
-        if !interactive && !anew && self.merge_bases(&[orig], &[onto])? == [onto] {
-            writeln!(out, "Current branch {short} is up to date.")?;
+        let Some(todo) = self.planned(args, &branch, orig, onto, out)? else {
             return Ok(false);
-        }
-        let mut todo: Vec<(Action, ObjectId)> =
-            commits.iter().map(|&c| (Action::Pick, c)).collect();
-        if interactive {
-            todo = self.edit_todo(&todo, onto, orig)?;
-            if todo.is_empty() {
-                writeln!(out, "Nothing to do")?;
-                return Ok(false);
-            }
-        }
+        };
 
         self.ensure_rebase_may_end(orig, onto, &todo)?;
-        let picked = todo.iter().filter(|step| step.0 != Action::Drop);
-        let (old, target) = self.replay_trees(orig, onto, picked.map(|step| step.1))?;
+        let made = todo.iter().filter_map(Step::made);
+        let (old, target) = self.replay_trees(orig, onto, made)?;
         let recovery = Some(self.snapshot_workspace()?);
 
         // hand HEAD to the scratch ref, sitting on the new base: the state
@@ -93,9 +81,11 @@ impl NativeRepo<'_> {
             orig,
             onto,
             current: None,
-            todo: run::steps(&todo, &args.exec),
+            todo,
             fresh_dates: args.reset_author_date,
             ran: false,
+            labels: Vec::new(),
+            merging: None,
         };
         self.save_rebase_state(&state)?;
         self.commit_refs_checkout("rebase", &moved, &old, &target)?;
@@ -126,6 +116,17 @@ impl NativeRepo<'_> {
             state.current = None;
             self.save_rebase_state(&state)?;
             self.apply_step(action, commit, tree, state.fresh_dates)?;
+        } else if let Some((commit, theirs)) = state.merging {
+            if self.index()?.entries.iter().any(|e| e.stage() > 0) {
+                return Err(
+                    "rebase --continue: resolve the conflicts and `alt add` them first".into(),
+                );
+            }
+            let head_tree = self.commit_tree(self.rebase_head()?)?;
+            let tree = self.staged_tree(Some(head_tree))?;
+            state.merging = None;
+            self.save_rebase_state(&state)?;
+            self.record_merge_again(commit, theirs, tree, state.fresh_dates)?;
         } else if state.ran {
             self.ensure_left_clean()?;
         }
@@ -140,44 +141,9 @@ impl NativeRepo<'_> {
         out: &mut impl Write,
     ) -> Res<bool> {
         while !state.todo.is_empty() {
-            let (action, commit) = match state.todo.remove(0) {
-                Step::Replay(action, commit) => (action, commit),
-                Step::Run(command) => {
-                    // whoever gave this command runs that one, once what
-                    // was done so far holds and nothing is held
-                    state.ran = true;
-                    self.save_rebase_state(&state)?;
-                    self.settle_state()?;
-                    crate::exec_step::ask(command, self.root.clone());
-                    return Ok(false);
-                }
-            };
-            if action == Action::Drop {
-                continue;
-            }
-            let head = self.rebase_head()?;
-            if action == Action::Pick && !state.fresh_dates && self.stands_on(commit, head)? {
-                self.save_rebase_state(&state)?;
-                self.step_onto(head, commit)?;
-                continue;
-            }
-            // that it stopped at this step holds with the conflict it writes
-            state.current = Some((action, commit));
-            let stopped = state.text();
-            state.current = None;
-            match self.pick(head, commit, stopped)? {
-                Picked::Conflicted(conflicts) => {
-                    self.report_rebase_stop(commit, &conflicts, json, out)?;
-                    return Ok(true);
-                }
-                Picked::Clean(tree) if tree == self.commit_tree(head)? && !action.melds() => {
-                    // its changes are already in the new base: nothing left to replay
-                }
-                Picked::Clean(tree) => {
-                    // that the step is done holds with its commit
-                    self.save_rebase_state(&state)?;
-                    self.apply_step(action, commit, tree, state.fresh_dates)?;
-                }
+            let step = state.todo.remove(0);
+            if let Some(stopped) = self.run_step(&mut state, step, json, out)? {
+                return Ok(stopped);
             }
         }
         // HEAD goes back to the branch and the branch to the commits made,
@@ -261,8 +227,26 @@ impl NativeRepo<'_> {
             };
             (vec![head], theirs.author, message)
         };
+        let from = if action.melds() { head } else { commit };
+        self.record_replayed(tree, &parents, &author_line, &message, from, fresh_date)
+    }
+
+    /// Records a commit the rebase makes on the scratch ref: by the
+    /// author of `author_line`, as of now with `fresh_date`, committed by
+    /// whoever rebases. The note of `from`, the commit it stands for,
+    /// goes with it.
+    fn record_replayed(
+        &mut self,
+        tree: ObjectId,
+        parents: &[ObjectId],
+        author_line: &str,
+        message: &str,
+        from: ObjectId,
+        fresh_date: bool,
+    ) -> Res<()> {
+        let head = self.rebase_head()?;
         let moment = self.moment();
-        let mut author = parse_sig(&author_line)?;
+        let mut author = parse_sig(author_line)?;
         if fresh_date && let Some((when, tz)) = moment.split_once(' ') {
             (author.when, author.tz) = (when.parse()?, tz);
         }
@@ -272,27 +256,26 @@ impl NativeRepo<'_> {
             NewCommit {
                 effects: recovery::RefEffects::Unknown,
                 tree,
-                parents: &parents,
+                parents,
                 author: &author,
                 committer: &me.sig(),
-                message: &message,
+                message,
             },
             &scratch,
             Some(head),
             "rebase",
-            // the note follows the commit it replaces: the replayed one, or
-            // for squash and fixup the one it melds into
             &MetaInput {
-                carry_from: Some(if action.melds() { head } else { commit }),
+                carry_from: Some(from),
                 ..Default::default()
             },
         )?;
         Ok(())
     }
 
+    /// Says that the rebase stopped on `conflicts` at the step `what`.
     fn report_rebase_stop(
         &self,
-        commit: ObjectId,
+        what: &str,
         conflicts: &[BString],
         json: bool,
         out: &mut impl Write,
@@ -301,12 +284,10 @@ impl NativeRepo<'_> {
             return self.report_merge(true, out, "conflicted", None, conflicts, "");
         }
         cherry_pick::say_conflicts(out, "Merge", conflicts)?;
-        let subject = self.read_commit_parts(commit)?.subject();
         writeln!(
             out,
-            "error: could not apply {} {subject}\nResolve the conflicts, `alt add` them and run \
-             `alt rebase --continue` (or `--skip`, `--abort`).",
-            &commit.to_string()[..7]
+            "error: could not apply {what}\nResolve the conflicts, `alt add` them and run \
+             `alt rebase --continue` (or `--skip`, `--abort`)."
         )?;
         Ok(())
     }
@@ -351,51 +332,5 @@ impl NativeRepo<'_> {
             new: Some(RefTarget::Oid(new)),
         }));
         Ok(changes)
-    }
-
-    pub(super) fn committer_time(&self, commit: ObjectId) -> Res<i64> {
-        let obj = self
-            .store
-            .odb
-            .get(&commit)?
-            .ok_or("commit missing from store")?;
-        Ok(alt_git_codec::Commit::parse(&obj.data)?
-            .committer_date()
-            .unwrap_or(0))
-    }
-
-    pub(super) fn read_commit_parts(&self, commit: ObjectId) -> Res<CommitParts> {
-        let obj = self
-            .store
-            .odb
-            .get(&commit)?
-            .ok_or("commit missing from store")?;
-        let c = alt_git_codec::Commit::parse(&obj.data)?;
-        Ok(CommitParts {
-            parents: c.parents().collect(),
-            author: c
-                .author()
-                .ok_or("commit has no author")?
-                .to_str()
-                .map_err(|_| "rebase: an author is not UTF-8")?
-                .to_owned(),
-            message: c
-                .message()
-                .to_str()
-                .map_err(|_| "rebase: a commit message is not UTF-8")?
-                .to_owned(),
-        })
-    }
-}
-
-pub(super) struct CommitParts {
-    pub(super) parents: Vec<ObjectId>,
-    pub(super) author: String,
-    pub(super) message: String,
-}
-
-impl CommitParts {
-    pub(super) fn subject(&self) -> String {
-        self.message.lines().next().unwrap_or("").to_owned()
     }
 }

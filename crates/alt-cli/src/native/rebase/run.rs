@@ -20,19 +20,22 @@ pub(super) fn ensure_commands(commands: &[String]) -> Res<()> {
     Ok(())
 }
 
-/// The steps of a rebase: the commits of `todo`, and `commands` after
-/// each commit that is made, as git lists them.
-pub(super) fn steps(todo: &[(Action, ObjectId)], commands: &[String]) -> Vec<Step> {
+/// The steps of `todo` with `commands` after each commit that is made,
+/// as git lists them.
+pub(super) fn steps(todo: Vec<Step>, commands: &[String]) -> Vec<Step> {
     let run = || commands.iter().cloned().map(Step::Run);
     let mut steps = Vec::new();
     let mut made = false;
-    for &(action, commit) in todo {
+    for step in todo {
         // a commit that melds into the one before is part of it
-        if made && !action.melds() && action != Action::Drop {
+        let joins =
+            matches!(step, Step::Replay(action, _) if action.melds() || action == Action::Drop);
+        if made && !joins {
             steps.extend(run());
+            made = false;
         }
-        made |= action != Action::Drop;
-        steps.push(Step::Replay(action, commit));
+        made |= step.made().is_some();
+        steps.push(step);
     }
     if made {
         steps.extend(run());
@@ -47,8 +50,9 @@ impl NativeRepo<'_> {
         Ok(self.commit_parents(commit)? == [head])
     }
 
-    /// Replays `commit` onto its own parent `head`: the rebase steps
-    /// onto the commit itself, as git fast-forwards to it.
+    /// Has the rebase stand on `commit` in place of `head`, with its
+    /// files: a commit replayed onto its own parent is the commit itself,
+    /// as git fast-forwards to it, and a reset goes where it names.
     pub(super) fn step_onto(&mut self, head: ObjectId, commit: ObjectId) -> Res<()> {
         let onto = RefChange {
             name: self.scratch_ref(),

@@ -74,6 +74,10 @@ pub struct Rebase {
     /// where one fails
     #[arg(short = 'x', long = "exec", value_name = "COMMAND", requires = "upstream", hint = none)]
     pub exec: Vec<String>,
+    /// Replay the merge commits too, each made again of the commits
+    /// replayed, instead of leaving them out
+    #[arg(short = 'r', long = "rebase-merges", requires = "upstream")]
+    pub rebase_merges: bool,
     /// Give each commit replayed the moment of the rebase as its
     /// author's date
     #[arg(long = "reset-author-date", requires = "upstream")]

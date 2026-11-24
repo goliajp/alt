@@ -44,6 +44,7 @@ const LATER: &[&str] = &[
     "reset_author",
     "exec",
     "reset_author_date",
+    "rebase_merges",
     "force_move",
     "rename",
     "rename_over",

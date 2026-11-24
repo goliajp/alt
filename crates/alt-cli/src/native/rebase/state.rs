@@ -4,13 +4,7 @@
 use super::super::sequence_editor::Action;
 use super::super::*;
 
-/// One step of a rebase still to run.
-pub(in crate::native) enum Step {
-    /// a commit to replay
-    Replay(Action, ObjectId),
-    /// a shell command to run
-    Run(String),
-}
+pub(in crate::native) use super::super::sequence_editor::Step;
 
 /// What a stopped or running rebase remembers.
 pub(in crate::native) struct RebaseState {
@@ -29,6 +23,11 @@ pub(in crate::native) struct RebaseState {
     pub(super) fresh_dates: bool,
     /// It stopped for a shell command to be run, and has not gone on.
     pub(super) ran: bool,
+    /// Where the rebase stood at each label set so far.
+    pub(super) labels: Vec<(String, ObjectId)>,
+    /// The merge commit being made again that stopped on a conflict,
+    /// and the commit it brings in.
+    pub(in crate::native) merging: Option<(ObjectId, ObjectId)>,
 }
 
 impl RebaseState {
@@ -50,19 +49,35 @@ impl RebaseState {
         if self.ran {
             text.push_str("ran exec\n");
         }
+        for (name, at) in &self.labels {
+            text.push_str(&format!("label {at} {name}\n"));
+        }
+        if let Some((commit, brought)) = self.merging {
+            text.push_str(&format!("merging {commit} {brought}\n"));
+        }
         for step in &self.todo {
-            match step {
-                Step::Replay(a, c) => text.push_str(&format!("todo {} {c}\n", a.word())),
-                Step::Run(command) => text.push_str(&format!("todo exec {command}\n")),
-            }
+            text.push_str(&match step {
+                Step::Replay(a, c) => format!("todo {} {c}\n", a.word()),
+                Step::Run(command) => format!("todo exec {command}\n"),
+                Step::Label(name) => format!("todo label {name}\n"),
+                Step::Reset(to) => format!("todo reset {to}\n"),
+                Step::Merge(c, brought) => format!("todo merge {c} {}\n", brought.join(" ")),
+            });
         }
         text
+    }
+
+    /// Whether it stopped on a conflict that is not committed yet.
+    pub(in crate::native) fn stopped(&self) -> bool {
+        self.current.is_some() || self.merging.is_some()
     }
 
     /// How many commits are still to replay.
     pub(in crate::native) fn replays_left(&self) -> usize {
         let replays = self.todo.iter();
-        replays.filter(|s| matches!(s, Step::Replay(..))).count()
+        replays
+            .filter(|s| matches!(s, Step::Replay(..) | Step::Merge(..)))
+            .count()
     }
 }
 
@@ -80,9 +95,9 @@ impl NativeRepo<'_> {
         &self,
         orig: ObjectId,
         onto: ObjectId,
-        todo: &[(Action, ObjectId)],
+        todo: &[Step],
     ) -> Res<()> {
-        let replays = todo.iter().any(|step| step.0 != Action::Drop);
+        let replays = todo.iter().any(|step| step.made().is_some());
         if self.caps.forbid_force && (replays || !self.is_ancestor(orig, onto)?) {
             let why = "capability denied: forbid_force is set and a rebase would not leave \
                        the branch a fast-forward";
@@ -106,6 +121,7 @@ impl NativeRepo<'_> {
         let (mut branch, mut orig, mut onto, mut current) = (None, None, None, None);
         let mut todo = Vec::new();
         let (mut recovery, mut fresh_dates, mut ran) = (None, false, false);
+        let (mut labels, mut merging) = (Vec::new(), None);
         for line in text.lines() {
             let (key, value) = line.split_once(' ').ok_or_else(corrupt)?;
             match key {
@@ -116,13 +132,15 @@ impl NativeRepo<'_> {
                 "current" => current = Some(parse_step_line(value, &oid)?),
                 "dates" => fresh_dates = true,
                 "ran" => ran = true,
-                "todo" => todo.push(match value.strip_prefix("exec ") {
-                    Some(command) => Step::Run(command.to_owned()),
-                    None => {
-                        let (action, commit) = parse_step_line(value, &oid)?;
-                        Step::Replay(action, commit)
-                    }
-                }),
+                "label" => {
+                    let (at, name) = value.split_once(' ').ok_or_else(corrupt)?;
+                    labels.push((name.to_owned(), oid(at)?));
+                }
+                "merging" => {
+                    let (commit, brought) = value.split_once(' ').ok_or_else(corrupt)?;
+                    merging = Some((oid(commit)?, oid(brought)?));
+                }
+                "todo" => todo.push(parse_todo_line(value, &oid)?),
                 _ => return Err(corrupt().into()),
             }
         }
@@ -135,6 +153,8 @@ impl NativeRepo<'_> {
             todo,
             fresh_dates,
             ran,
+            labels,
+            merging,
         }))
     }
 
@@ -155,6 +175,38 @@ impl NativeRepo<'_> {
             self.save_rebase_state(&state)?;
         }
         Ok(())
+    }
+}
+
+/// A step still to run from the state file, trusted as written.
+fn parse_todo_line(value: &str, oid: &dyn Fn(&str) -> Result<ObjectId, &'static str>) -> Res<Step> {
+    let (word, rest) = value.split_once(' ').ok_or("corrupt REBASE_STATE")?;
+    Ok(match word {
+        "exec" => Step::Run(rest.to_owned()),
+        "label" => Step::Label(rest.to_owned()),
+        "reset" => Step::Reset(rest.to_owned()),
+        "merge" => {
+            let (commit, brought) = rest.split_once(' ').ok_or("corrupt REBASE_STATE")?;
+            Step::Merge(
+                oid(commit)?,
+                brought.split(' ').map(str::to_owned).collect(),
+            )
+        }
+        _ => {
+            let (action, commit) = parse_step_line(value, oid)?;
+            Step::Replay(action, commit)
+        }
+    })
+}
+
+impl Step {
+    /// The commit this step makes anew, where it makes one.
+    pub(super) fn made(&self) -> Option<ObjectId> {
+        match self {
+            Step::Replay(action, commit) if *action != Action::Drop => Some(*commit),
+            Step::Merge(commit, _) => Some(*commit),
+            _ => None,
+        }
     }
 }
 

@@ -11,7 +11,7 @@ impl NativeRepo<'_> {
         // the steps that follow are committed by whoever skips this one
         self.committer()?;
         let head = self.rebase_head()?;
-        (state.current, state.ran) = (None, false);
+        (state.current, state.merging, state.ran) = (None, None, false);
         self.save_rebase_state(&state)?;
         self.reset_worktree_to(head)?;
         self.settle_state()?;

@@ -41,6 +41,22 @@ impl Action {
     }
 }
 
+/// One line of a todo list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::native) enum Step {
+    /// a commit to replay
+    Replay(Action, ObjectId),
+    /// a shell command to run
+    Run(String),
+    /// a name for where the rebase stands
+    Label(String),
+    /// stand where a label, or else a revision, names
+    Reset(String),
+    /// make this merge commit again, of where the rebase stands with what
+    /// each word names as a label or else as a revision
+    Merge(ObjectId, Vec<String>),
+}
+
 pub(super) const TODO_HELP: &str = "\
 #
 # Commands:
@@ -49,6 +65,11 @@ pub(super) const TODO_HELP: &str = "\
 # s, squash <commit> = use commit, but meld into previous commit
 # f, fixup <commit> = like \"squash\" but keep only the previous commit's message
 # d, drop <commit> = remove commit
+# x, exec <command> = run command (the rest of the line) using shell
+# l, label <label> = label current HEAD with a name
+# t, reset <label> = reset HEAD to a label
+# m, merge -C <commit> <label> = make the merge commit again, with its
+#                                 message, of HEAD and the label
 #
 # These lines can be re-ordered; they are executed from top to bottom.
 #
@@ -59,28 +80,46 @@ pub(super) const TODO_HELP: &str = "\
 ";
 
 /// Parses an edited todo list; `resolve` turns the abbreviated oid into a
-/// commit. Blank lines and `#` comments are skipped; the subject after the
-/// oid is only a label.
-pub(super) fn parse_todo(
-    text: &str,
-    resolve: impl Fn(&str) -> Res<ObjectId>,
-) -> Res<Vec<(Action, ObjectId)>> {
+/// commit. Blank lines and `#` comments are skipped; what follows the
+/// words a line needs is only a note.
+pub(super) fn parse_todo(text: &str, resolve: impl Fn(&str) -> Res<ObjectId>) -> Res<Vec<Step>> {
     let mut steps = Vec::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let mut words = line.split_whitespace();
-        let word = words.next().unwrap_or_default();
-        let action = Action::parse(word)
-            .ok_or_else(|| format!("rebase: unknown command '{word}' on todo line {}", n + 1))?;
-        let rev = words
+        let (word, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        let missing = |what: &str| format!("rebase: missing {what} on todo line {}", n + 1);
+        let mut words = rest
+            .split('#')
             .next()
-            .ok_or_else(|| format!("rebase: missing commit on todo line {}", n + 1))?;
-        steps.push((action, resolve(rev)?));
+            .unwrap_or_default()
+            .split_whitespace();
+        let mut next = |what: &str| words.next().ok_or_else(|| missing(what));
+        steps.push(match word {
+            "exec" | "x" => Step::Run(rest.trim().to_owned()),
+            "label" | "l" => Step::Label(next("label")?.to_owned()),
+            "reset" | "t" => Step::Reset(next("label")?.to_owned()),
+            "merge" | "m" => {
+                if next("-C")? != "-C" {
+                    let said = "rebase: a merge in the todo list takes its message with -C";
+                    return Err(format!("{said} (line {})", n + 1).into());
+                }
+                let commit = resolve(next("commit")?)?;
+                let first = next("label")?.to_owned();
+                let more = words.map(str::to_owned);
+                Step::Merge(commit, std::iter::once(first).chain(more).collect())
+            }
+            _ => {
+                let unknown = || format!("rebase: unknown command '{word}' on todo line {}", n + 1);
+                let action = Action::parse(word).ok_or_else(unknown)?;
+                Step::Replay(action, resolve(next("commit")?)?)
+            }
+        });
     }
-    if let Some((first, _)) = steps.first()
+    let made = |step: &&Step| matches!(step, Step::Replay(..) | Step::Merge(..));
+    if let Some(Step::Replay(first, _)) = steps.iter().find(made)
         && first.melds()
     {
         return Err(format!(
@@ -168,9 +207,35 @@ mod tests {
         let oid =
             |s: &str| -> Res<ObjectId> { Ok(format!("{s:0<40}").parse::<ObjectId>().unwrap()) };
         let steps = parse_todo("# x\npick a1 one\n\nf b2 two\nd c3\n", oid).unwrap();
-        let actions: Vec<Action> = steps.iter().map(|s| s.0).collect();
+        let actions = steps.iter().map(|s| match s {
+            Step::Replay(action, _) => *action,
+            other => panic!("{other:?}"),
+        });
+        let actions: Vec<Action> = actions.collect();
         assert_eq!(actions, [Action::Pick, Action::Fixup, Action::Drop]);
         assert!(parse_todo("squash a1 x\n", oid).is_err());
         assert!(parse_todo("edit a1 x\n", oid).is_err());
+    }
+
+    #[test]
+    fn the_lines_of_a_rebase_that_keeps_merges_are_read() {
+        let oid =
+            |s: &str| -> Res<ObjectId> { Ok(format!("{s:0<40}").parse::<ObjectId>().unwrap()) };
+        let text = "label onto\nreset onto\npick a1 # one\nx make test\nl side\n\
+                    t 0b # base\nmerge -C c3 side # Merge branch 'side'\n";
+        let steps = parse_todo(text, oid).unwrap();
+        let (a1, c3) = (oid("a1").unwrap(), oid("c3").unwrap());
+        let expected = [
+            Step::Label("onto".into()),
+            Step::Reset("onto".into()),
+            Step::Replay(Action::Pick, a1),
+            Step::Run("make test".into()),
+            Step::Label("side".into()),
+            Step::Reset("0b".into()),
+            Step::Merge(c3, vec!["side".into()]),
+        ];
+        assert_eq!(steps, expected);
+        assert!(parse_todo("merge side\n", oid).is_err());
+        assert!(parse_todo("label\n", oid).is_err());
     }
 }

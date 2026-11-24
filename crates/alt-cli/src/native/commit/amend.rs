@@ -8,7 +8,7 @@ impl NativeRepo<'_> {
     /// it made last is amended, as by git.
     fn ensure_amendable(&self) -> Res<()> {
         match self.rebase_state()? {
-            Some(state) if state.current.is_none() => Ok(()),
+            Some(state) if !state.stopped() => Ok(()),
             _ => self.ensure_no_merge_in_progress("commit --amend"),
         }
     }
