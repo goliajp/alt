@@ -148,3 +148,44 @@ fn a_write_gives_up_where_another_writer_holds_the_lock() {
     let left: Vec<_> = left.map(|e| e.unwrap().file_name()).collect();
     assert_eq!(left, ["config"], "{left:?}");
 }
+
+#[test]
+fn a_variable_with_several_values_is_changed_as_git_changes_it() {
+    let dir = repo();
+    let root = dir.path();
+    let twin = root.join("twin");
+    let several = "[a]\n\tb = 1\n\tb = 2\n\tc = x\n";
+    std::fs::write(own(root), several).unwrap();
+    std::fs::write(&twin, several).unwrap();
+    let steps: [(&[&str], i32); 10] = [
+        // one value does not take the place of several
+        (&["a.b", "3"], 5),
+        (&["--unset", "a.b"], 5),
+        (&["--add", "a.b", "3"], 0),
+        (&["a.b", "4"], 5),
+        (&["--replace-all", "a.b", "5"], 0),
+        (&["a.b", "6"], 0),
+        (&["--add", "a.c", "y"], 0),
+        (&["--unset-all", "a.c"], 0),
+        (&["--replace-all", "a.d", "new"], 0),
+        (&["--unset-all", "a.b"], 0),
+    ];
+    for (args, code) in steps {
+        let ours = alt(root, &[&["config"], args].concat());
+        let theirs = Command::new("git")
+            .args(["config", "--file", twin.to_str().unwrap()])
+            .args(args)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&ours.stderr).into_owned();
+        assert_eq!(theirs.status.code(), Some(code), "git {args:?}");
+        assert_eq!(ours.status.code(), Some(code), "{args:?}: {said}");
+        let git_said = String::from_utf8_lossy(&theirs.stderr).into_owned();
+        assert!(said.starts_with(&git_said), "{args:?}: {said}");
+        assert_eq!(
+            text(root),
+            std::fs::read_to_string(&twin).unwrap(),
+            "{args:?}"
+        );
+    }
+}

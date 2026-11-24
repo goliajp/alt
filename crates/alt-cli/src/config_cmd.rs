@@ -17,17 +17,71 @@ use alt_repo::Repository;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-pub fn run(
-    repo: &Repository,
-    key: Option<&str>,
-    value: Option<&str>,
-    list: bool,
-    unset: Option<&str>,
-    out: &mut impl Write,
-) -> Res<()> {
-    if let Some(unset_key) = unset {
-        return unset_one(repo, unset_key, out);
+/// The arguments of `alt config`.
+#[derive(alt_args::Args)]
+pub struct Args {
+    /// Dotted key (e.g. `user.name`). Omit when `--list` or
+    /// `--unset` is set.
+    #[arg(hint = "config-key")]
+    pub key: Option<String>,
+    /// New value. When supplied, the key is set (overwriting any
+    /// existing value); when omitted, the key is read.
+    #[arg(hint = none)]
+    pub value: Option<String>,
+    /// List every entry as `section.key=value` (git's default
+    /// `--list` shape).
+    #[arg(long)]
+    pub list: bool,
+    /// Remove a key from the config file.
+    #[arg(long, hint = "config-key")]
+    pub unset: Option<String>,
+    /// Remove every value of a key that has several
+    #[arg(long = "unset-all", hint = "config-key", conflicts_with = "unset")]
+    pub unset_all: Option<String>,
+    /// Leave the value given as the only one of a key that has several
+    #[arg(long = "replace-all", conflicts_with_all = ["add", "unset", "unset_all", "list"])]
+    pub replace_all: bool,
+    /// Add the value to those the key has
+    #[arg(long, conflicts_with_all = ["unset", "unset_all", "list"])]
+    pub add: bool,
+}
+
+/// What is done about a variable the file sets more than once.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Several {
+    /// nothing: the command is refused, as by git
+    Refused,
+    /// all of its values go, for the one given where one is
+    Replaced,
+    /// the value given is one more
+    Added,
+}
+
+/// git's refusal to change a variable with several values by one.
+fn several(key: &str, set: bool) -> Box<dyn std::error::Error> {
+    let mut said = format!("warning: {key} has multiple values\n");
+    if set {
+        said.push_str(&format!(
+            "error: cannot overwrite multiple values with a single value\n       \
+             Use a regexp, --add or --replace-all to change {key}.\n"
+        ));
     }
+    crate::native::said::refused(&said, 5)
+}
+
+pub fn run(repo: &Repository, args: &Args, out: &mut impl Write) -> Res<()> {
+    let how = match (args.replace_all, args.add) {
+        (true, _) => Several::Replaced,
+        (_, true) => Several::Added,
+        _ => Several::Refused,
+    };
+    if let Some(key) = &args.unset {
+        return unset_one(repo, key, Several::Refused, out);
+    }
+    if let Some(key) = &args.unset_all {
+        return unset_one(repo, key, Several::Replaced, out);
+    }
+    let (key, value, list) = (args.key.as_deref(), args.value.as_deref(), args.list);
     if list {
         return list_all(&*crate::git_settings::repository(repo)?, out);
     }
@@ -35,7 +89,7 @@ pub fn run(
         return Err("usage: alt config <key> [<value>] | --list | --unset <key>".into());
     };
     if let Some(new_value) = value {
-        return set_one(repo, key, new_value, out);
+        return set_one(repo, key, new_value, how, out);
     }
     let cfg = crate::git_settings::repository(repo)?;
     let (section, subsection, name) = split_key(key)?;
@@ -59,9 +113,15 @@ fn ensure_settable(key: &str) -> Res<()> {
     Ok(())
 }
 
-fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> Res<()> {
+fn set_one(
+    repo: &Repository,
+    key: &str,
+    value: &str,
+    how: Several,
+    out: &mut impl Write,
+) -> Res<()> {
     ensure_settable(key)?;
-    set(repo, key, value)?;
+    set_as(repo, key, value, how)?;
     writeln!(out, "set {key} = {value}")?;
     Ok(())
 }
@@ -78,6 +138,12 @@ fn rewrite(repo: &Repository, edit: impl FnOnce(&[u8]) -> Res<Option<Vec<u8>>>) 
 /// Sets `key` to `value` in the store's own file; of several values
 /// the file has for it, the one given is left.
 pub(crate) fn set(repo: &Repository, key: &str, value: &str) -> Res<()> {
+    set_as(repo, key, value, Several::Replaced)
+}
+
+/// Sets `key` to `value` in the store's own file, where the file has
+/// several values for it as `how` says.
+fn set_as(repo: &Repository, key: &str, value: &str, how: Several) -> Res<()> {
     let (section, subsection, name) = split_key(key)?;
     let named = Name {
         section: &section,
@@ -86,10 +152,14 @@ pub(crate) fn set(repo: &Repository, key: &str, value: &str) -> Res<()> {
     };
     rewrite(repo, |file| {
         let entries = alt_git_config::parse_file(file)?;
-        let several = entries.iter().filter(|e| Name::of(e) == named).count() > 1;
-        let cleared = match several {
-            true => alt_git_config::unset(file, named)?,
-            false => None,
+        if how == Several::Added {
+            return Ok(Some(alt_git_config::add(file, named, value.as_bytes())?));
+        }
+        let many = entries.iter().filter(|e| Name::of(e) == named).count() > 1;
+        let cleared = match (many, how) {
+            (true, Several::Refused) => return Err(several(key, true)),
+            (true, _) => alt_git_config::unset(file, named)?,
+            (false, _) => None,
         };
         let file = cleared.as_deref().unwrap_or(file);
         Ok(Some(alt_git_config::set(file, named, value.as_bytes())?))
@@ -130,7 +200,7 @@ pub(crate) fn rename_section(repo: &Repository, section: &str, from: &str, to: &
     })
 }
 
-fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
+fn unset_one(repo: &Repository, key: &str, how: Several, out: &mut impl Write) -> Res<()> {
     ensure_settable(key)?;
     let (section, subsection, name) = split_key(key)?;
     let named = Name {
@@ -138,7 +208,15 @@ fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
         subsection: subsection.as_deref(),
         key: &name,
     };
-    if !rewrite(repo, |file| Ok(alt_git_config::unset(file, named)?))? {
+    let unset = |file: &[u8]| -> Res<Option<Vec<u8>>> {
+        let entries = alt_git_config::parse_file(file)?;
+        let many = entries.iter().filter(|e| Name::of(e) == named).count() > 1;
+        match many && how == Several::Refused {
+            true => Err(several(key, false)),
+            false => Ok(alt_git_config::unset(file, named)?),
+        }
+    };
+    if !rewrite(repo, unset)? {
         let applies = crate::git_settings::repository(repo)?;
         if applies
             .get(&section, subsection.as_deref(), &name)

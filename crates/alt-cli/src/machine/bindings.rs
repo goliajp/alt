@@ -58,6 +58,9 @@ const LATER: &[&str] = &[
     "quit_rebase",
     "skip_revert",
     "quit_revert",
+    "unset_all",
+    "replace_all",
+    "add",
 ];
 
 /// The argument values a durable request is bound to. Stored bindings are

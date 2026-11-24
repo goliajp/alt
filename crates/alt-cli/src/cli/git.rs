@@ -74,21 +74,7 @@ pub fn run_git<W: Write>(repo: &Repository, cmd: &Command, at: &Place, out: &mut
             let options = crate::blame::Options::of(&args.moves, &args.copies);
             at.blame(out, repo, &args.path, args.rev.as_deref(), options)?;
         }
-        Command::Config {
-            key,
-            value,
-            list,
-            unset,
-        } => {
-            crate::config_cmd::run(
-                repo,
-                key.as_deref(),
-                value.as_deref(),
-                *list,
-                unset.as_deref(),
-                out,
-            )?;
-        }
+        Command::Config { args } => crate::config_cmd::run(repo, args, out)?,
         Command::Export { target } => {
             if !repo.is_native() {
                 return Err("export needs a .alt store; run inside one (see 'alt import')".into());

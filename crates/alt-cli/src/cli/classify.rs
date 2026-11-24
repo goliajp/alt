@@ -109,8 +109,8 @@ pub fn mutates_command(cmd: &Command) -> bool {
     ) {
         return true;
     }
-    if let Command::Config { value, unset, .. } = cmd {
-        return value.is_some() || unset.is_some();
+    if let Command::Config { args } = cmd {
+        return args.value.is_some() || args.unset.is_some() || args.unset_all.is_some();
     }
     if !is_native(cmd) {
         return matches!(

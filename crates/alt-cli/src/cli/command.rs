@@ -163,21 +163,8 @@ pub enum Command {
     },
     /// Read or update git-style config keys (`user.name`, …)
     Config {
-        /// Dotted key (e.g. `user.name`). Omit when `--list` or
-        /// `--unset` is set.
-        #[arg(hint = "config-key")]
-        key: Option<String>,
-        /// New value. When supplied, the key is set (overwriting any
-        /// existing value); when omitted, the key is read.
-        #[arg(hint = none)]
-        value: Option<String>,
-        /// List every entry as `section.key=value` (git's default
-        /// `--list` shape).
-        #[arg(long)]
-        list: bool,
-        /// Remove a key from the config file.
-        #[arg(long, hint = "config-key")]
-        unset: Option<String>,
+        #[command(flatten)]
+        args: crate::config_cmd::Args,
     },
     /// List, create (lightweight or annotated), or delete tags
     Tag(sequence_args::Tag),
