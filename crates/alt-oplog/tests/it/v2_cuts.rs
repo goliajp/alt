@@ -54,6 +54,18 @@ pub fn told(dir: &Path) -> Vec<Cut> {
     all.iter().filter_map(|frame| frame.3).collect()
 }
 
+/// The log `before` with the first `part` bytes of `note` laid at `at`
+/// and no more of it: where the bytes that were there before happen to
+/// be the rest of the note, the last one is another.
+fn torn(before: &[u8], at: usize, note: &[u8], part: usize) -> Vec<u8> {
+    let mut torn = before.to_vec();
+    torn[at..at + part].copy_from_slice(&note[..part]);
+    if torn[at..at + note.len()] == *note {
+        torn[at + note.len() - 1] ^= 1;
+    }
+    torn
+}
+
 #[test]
 fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says_what_was() {
     let (before, after, at) = before_and_after();
@@ -69,9 +81,7 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
     // a part of the note did: the frames it lies over do not read, the
     // ones after them do and are told when they are cut
     for part in [1, 47, 48, note.len() / 2, note.len() - 1] {
-        let mut torn = before.clone();
-        torn[at..at + part].copy_from_slice(&note[..part]);
-        let said = told_after_a_writer_came(&torn);
+        let said = told_after_a_writer_came(&torn(&before, at, note, part));
         assert_eq!(said.len(), 1, "{part} bytes of the note");
         assert_eq!(said[0].bytes, all);
         assert!((38..=40).contains(&said[0].ops), "{:?}", said[0]);
