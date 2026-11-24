@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the repeated object of a pack is first the delta of itself, where an index lists it first
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/pack_repeated.rs
