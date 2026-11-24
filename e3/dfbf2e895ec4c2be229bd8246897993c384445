@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a read of an indexed pack looks at each entry once and holds no list for each delta
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/idx.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/src/read.rs
+touched: crates/alt-git-pack/tests/it/held.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/read_again.rs
+touched: crates/alt-git-pack/tests/it/read_bounds.rs
