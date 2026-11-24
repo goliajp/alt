@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: integrating a task and what is settled of it have files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/task/delivery.rs
+touched: crates/alt-cli/src/native/task/delivery/integrate.rs
+touched: crates/alt-cli/src/native/task/delivery/settled.rs
