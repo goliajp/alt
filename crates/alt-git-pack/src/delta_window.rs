@@ -33,6 +33,9 @@ impl Default for DeltaOptions {
     }
 }
 
+/// A delta this many times smaller than its object ends the search for one.
+const SMALL: usize = 16;
+
 struct Base {
     oid: ObjectId,
     kind: ObjectKind,
@@ -108,11 +111,17 @@ impl Window {
             }
             if let Some(delta) = base.index.encode(data, limit, &mut work) {
                 limit = delta.len().saturating_sub(1);
+                // Small enough: another candidate costs a pass over the whole
+                // object and can gain a fraction of this at the most.
+                let small = delta.len() <= data.len() / SMALL;
                 best = Some(Choice {
                     base: base.oid,
                     depth: base.depth + 1,
                     delta,
                 });
+                if small {
+                    break;
+                }
             }
             if work == 0 {
                 break;
@@ -158,6 +167,38 @@ impl Window {
 mod tests {
     use super::*;
     use alt_git_codec::HashAlgo;
+
+    #[test]
+    fn a_small_delta_ends_the_search_and_a_large_one_does_not() {
+        let noise = |seed: u64, count: usize| -> Vec<u8> {
+            let mut state = seed;
+            let mut next = || {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 24) as u8
+            };
+            (0..count).map(|_| next()).collect()
+        };
+        let id = |data: &[u8]| ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data);
+        let target = noise(1, 64_000);
+        // the older base is the target but for a byte, the newer but for a
+        // stretch of it, a fortieth or a quarter
+        let mut near = target.clone();
+        near[32_000] ^= 1;
+        for (changed, taken_from_the_newer) in [(1_600, true), (16_000, false)] {
+            let mut far = target.clone();
+            far[8_000..8_000 + changed].copy_from_slice(&noise(2, changed));
+            let mut window = Window::new(DeltaOptions::default()).unwrap();
+            window.remember(id(&near), ObjectKind::Blob, &near, 0);
+            window.remember(id(&far), ObjectKind::Blob, &far, 0);
+            let choice = window
+                .choose(id(&target), ObjectKind::Blob, &target)
+                .unwrap();
+            assert_eq!(choice.base == id(&far), taken_from_the_newer, "{changed}");
+            assert_eq!(choice.delta.len() < 100, !taken_from_the_newer, "{changed}");
+        }
+    }
 
     #[test]
     fn retention_respects_global_memory_and_per_kind_window() {
