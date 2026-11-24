@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: take a second link to a file for another name, not for another spelling
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/tests/it/casefold_links.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/mv_rename.rs
