@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: write a repository that was closed or put aside through the one writer it has
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/mode/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/mode/writer.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
