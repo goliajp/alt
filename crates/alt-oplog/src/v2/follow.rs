@@ -198,7 +198,7 @@ impl Log {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "hooks"))]
 mod tests {
     use crate::v2::log::Log;
     use crate::{Meta, Op, OpLogError};

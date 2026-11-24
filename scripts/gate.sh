@@ -93,12 +93,32 @@ fi
 [ -z "$exact" ] || [ -n "$filter" ] || die "--exact requires --filter"
 [ -z "$help" ] || { usage; exit 0; }
 
+# Packages whose tests make the code under test do what no machine does on
+# its own, through a feature `hooks` that no manifest asks for. A workspace
+# build therefore has none of it, and the binaries the other tests run are
+# the ones that ship. A run of one of these packages names the feature; a
+# run of the workspace runs them once more by themselves with it, which
+# builds nothing but the package and what it depends on.
+HOOKED='alt-oplog alt-refs'
+hooked() { case " $HOOKED " in *" $1 "*) return 0 ;; esac; return 1; }
+
+# Runs "$@" for each hooked package after a run of the whole workspace.
+with_hooks() {
+    [ -z "$package" ] || return 0
+    for package in $HOOKED; do
+        case " $excluded " in *" $package "*) continue ;; esac
+        "$@"
+    done
+    package=''
+}
+
 # Build argv without eval or unquoted user input. Keep the scope in one place
 # so every class uses the same package selection.
 scoped_cargo() {
     command=$1
     shift
     if [ -n "$package" ]; then
+        [ "$command" = fmt ] || ! hooked "$package" || set -- --features hooks "$@"
         set -- "$command" --package "$package" "$@"
     elif [ "$command" = fmt ]; then
         set -- "$command" --all "$@"
@@ -174,15 +194,25 @@ run_isolation() {
     [ "$fail" = 0 ]
 }
 
-run_lint() {
-    scoped_cargo fmt --check
+run_clippy() {
     set -- --all-targets
     [ -z "$release" ] || set -- "$@" --release
     scoped_cargo clippy "$@" -- -D warnings
+}
+
+run_lint() {
+    scoped_cargo fmt --check
+    run_clippy
+    with_hooks run_clippy
     run_isolation
 }
 
 run_tests() {
+    tests_of "$1"
+    with_hooks tests_of "$1"
+}
+
+tests_of() {
     kind=$1
     if [ "$kind" = unit ]; then
         set -- --lib
@@ -192,7 +222,7 @@ run_tests() {
         set -- --tests
     fi
     [ -z "$release" ] || set -- "$@" --release
-    for skipped in $excluded; do set -- "$@" --exclude "$skipped"; done
+    [ -n "$package" ] || for skipped in $excluded; do set -- "$@" --exclude "$skipped"; done
     set -- "$@" --
     [ "$kind" != corpus ] || set -- "$@" --ignored
     [ -z "$exact" ] || set -- "$@" --exact

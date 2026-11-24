@@ -12,5 +12,11 @@ alt-hash.workspace = true
 alt-oplog.workspace = true
 alt-os.workspace = true
 
-[dev-dependencies]
-alt-oplog = { workspace = true, features = ["hooks"] }
+[features]
+# the hooks of the log for the tests of this package (see `alt-oplog`)
+hooks = ["alt-oplog/hooks"]
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+required-features = ["hooks"]
