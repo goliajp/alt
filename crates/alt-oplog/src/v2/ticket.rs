@@ -60,7 +60,10 @@ impl Ticket {
     }
 
     /// Takes the frames of `other` onto this ticket: they are answered
-    /// for together from now on.
+    /// for together from now on. Where either was told of a cut, the
+    /// one ticket is told so whenever it asks, also for frames that
+    /// are in the log: callers to be answered apart keep their tickets
+    /// apart.
     pub fn join(&mut self, mut other: Ticket) {
         if self.numbers.is_empty() {
             self.account = other.account.clone();
