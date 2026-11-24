@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the requests that stay are looked at again once every request that is over was passed
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/retention.rs
+touched: crates/alt-server-store/tests/it/database/retention.rs
