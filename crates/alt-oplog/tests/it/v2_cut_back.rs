@@ -3,15 +3,18 @@
 //! of a cut to whoever holds frames that were cut, and reads the log
 //! again for a handle that holds none of its own.
 
+use std::fs;
 use std::path::Path;
 use std::sync::mpsc::channel;
 
 use alt_oplog::{Meta, Op, OpLog, OpLogError};
 
 use super::v2_bounds::stage;
+use super::v2_image::linked;
 use super::v2_log::{boot, file_len, grow, new_log};
 use super::v2_named::{Given, collecting};
 use super::v2_reread::cut_from;
+use super::v2_unseen::seeing;
 
 pub fn but_left(op: &Op) -> Result<bool, OpLogError> {
     Ok(op.payload != b"left")
@@ -186,4 +189,61 @@ fn a_sink_tells_once_of_the_cut_of_what_it_was_left_with_though_its_handle_was_t
     held.sync().unwrap();
     sink.fsync().unwrap();
     assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
+}
+
+#[test]
+fn a_sync_that_reads_an_op_from_before_a_cut_whose_checkpoint_a_cut_lays_its_own_over_tells_of_no_damage()
+ {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = dir.path().join("log");
+    boot(1);
+    alt_oplog::v2::create_with(dir.path(), 10).unwrap();
+    let mut log = seeing(OpLog::open(dir.path()).unwrap());
+    grow(&mut log, "a", 2);
+    let last = {
+        // a ref transaction, ops over blocks after it, and two short ones
+        let _unsynced = alt_os::durability::leave_unsynced(true);
+        log.append_with("a", 3, b"tx", &linked()).unwrap();
+        for n in 0..10 {
+            log.append("pad", n, &[n as u8; 150]).unwrap();
+        }
+        log.append("a", 5, b"p").unwrap();
+        log.append("a", 6, b"last").unwrap();
+        log.anchor().unwrap().start as usize
+    };
+    drop(log);
+    // the last op is cut: the checkpoint of that cut tells under which
+    // generation the ops before it read. A handle opened then begins
+    // where the log ends, past the ref transaction
+    boot(2);
+    let but =
+        |gone: &'static [u8]| move |op: &alt_oplog::Op| Ok::<_, OpLogError>(op.payload != gone);
+    let mut first = OpLog::open(dir.path()).unwrap();
+    assert_eq!(first.settle(but(b"last")).unwrap().unwrap().ops, 1);
+    drop(first);
+    let mut held = seeing(OpLog::open(dir.path()).unwrap());
+    assert!(!held.unsettled() && held.recent().len() < held.len());
+    held.set_defer_durability(true);
+    let sink = held.sync_handle().unwrap();
+    // a writer that finds no note cuts the op before, and dies with its
+    // checkpoint laid: it lies over the one of the cut before
+    fs::remove_file(dir.path().join("tail")).unwrap();
+    let before = fs::read(&path).unwrap();
+    let mut cutter = OpLog::open(dir.path()).unwrap();
+    alt_oplog::v2::cut_dies_after(Some(3));
+    let died = cutter.settle(but(b"p"));
+    alt_oplog::v2::cut_dies_after(None);
+    assert!(matches!(died, Err(OpLogError::Io(_))), "{died:?}");
+    std::mem::forget(cutter);
+    let after = fs::read(&path).unwrap();
+    assert_ne!(before[last..last + 48], after[last..last + 48]);
+    // the handle leaves what it holds to its sink: the ref transaction,
+    // which it reads from the file, is whole. The sink finds the place
+    // cut, and the handle reads the log again for its next sync
+    for _ in 0..2 {
+        held.sync().unwrap();
+        sink.fsync().unwrap();
+    }
+    assert_eq!(held.len(), 13);
+    assert!(held.confirmed());
 }

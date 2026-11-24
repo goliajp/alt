@@ -16,7 +16,11 @@ use crate::{Anchor, Op, OpLogError};
 impl Log {
     /// The op whose frame starts at `at`, with the frame it names as the
     /// ref transaction before it: `None` where no op frame reads there. A
-    /// frame from before a cut reads under an earlier generation.
+    /// frame from before a cut reads under an earlier generation: the
+    /// one the checkpoints of the cuts tell, or, where the last of them
+    /// does not read, whichever the frame reads under. A cut that is
+    /// being made lays its checkpoint over that one, and the frames
+    /// before it are whole all the same.
     pub(super) fn op_at(&self, at: u64) -> Result<Option<(Op, Option<u64>)>, OpLogError> {
         let limit = self.state.end;
         let left = limit
@@ -42,10 +46,13 @@ impl Log {
             return Ok(None);
         };
         let mut view = read_frame(&self.layout, &bytes, self.state.generation);
-        if view.is_none()
-            && let Some(earlier) = self.generation_before_cut(at)?
-        {
-            view = read_frame(&self.layout, &bytes, earlier);
+        if view.is_none() && at < self.state.cut {
+            let earlier = match self.generation_before_cut(at)? {
+                Some(told) => told..told + 1,
+                None => 0..self.state.generation,
+            };
+            let mut earlier = earlier.rev();
+            view = earlier.find_map(|earlier| read_frame(&self.layout, &bytes, earlier));
         }
         let Some(view) = view.filter(|view| view.head.kind == KIND_OP) else {
             return Ok(None);
