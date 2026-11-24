@@ -243,7 +243,9 @@ run_corpus() {
                 die "corpus: set ALT_CASEFOLD_DIR to a directory on a file system that takes names differing in case for one (the casefold tests of alt-cli run there and do not run without it); on Linux: mkfs.ext4 -O casefold,^has_journal -E encoding=utf8 <image>, mount it with -o loop, mkdir <mount>/t, chattr +F <mount>/t, and name <mount>/t; on macOS any directory of a default APFS volume"
             fi
             probe=$ALT_CASEFOLD_DIR/.gate-case-probe.$$
-            : > "$probe" || die "corpus: cannot write in ALT_CASEFOLD_DIR ($ALT_CASEFOLD_DIR)"
+            # in a subshell: a redirection that fails ends some shells
+            ( : > "$probe" ) 2>/dev/null ||
+                die "corpus: cannot write in ALT_CASEFOLD_DIR ($ALT_CASEFOLD_DIR)"
             if [ -e "$ALT_CASEFOLD_DIR/.GATE-CASE-PROBE.$$" ]; then
                 rm -f "$probe"
             else

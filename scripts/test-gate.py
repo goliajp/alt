@@ -17,7 +17,9 @@ from pathlib import Path
 args = sys.argv[1:]
 with open(os.environ["GATE_CALLS"], "a") as log:
     log.write(json.dumps({"args": args, "cwd": os.getcwd(),
-                          "corpus": os.environ.get("ALT_CORPUS")}) + "\n")
+                          "corpus": os.environ.get("ALT_CORPUS"),
+                          "old_bin": os.environ.get("ALT_OLD_BIN"),
+                          "casefold": os.environ.get("ALT_CASEFOLD_DIR")}) + "\n")
 if args[0] == os.environ.get("GATE_FAIL"):
     sys.exit(17)
 if args[:3] == ["tree", "-i", "ureq"]:
@@ -54,8 +56,19 @@ class GateTests(unittest.TestCase):
         self.log = self.root / "calls.jsonl"
         self.env = dict(os.environ, PATH=f"{cargo.parent}:{os.environ['PATH']}",
                         GATE_CALLS=str(self.log))
-        for name in ("ALT_CORPUS", "GATE_FAIL", "GATE_PACKAGE_EXIT", "GATE_HTTP_OWNER", "GATE_LLM_OWNER"):
+        for name in ("ALT_CORPUS", "GATE_FAIL", "GATE_PACKAGE_EXIT", "GATE_HTTP_OWNER", "GATE_LLM_OWNER",
+                     "ALT_OLD_BIN", "ALT_CASEFOLD_DIR"):
             self.env.pop(name, None)
+        # whether names that differ in case are one name where the tests run
+        (self.root / "folds").mkdir()
+        self.folds = (self.root / "FOLDS").exists()
+
+    def older_build(self):
+        """What the corpus class of alt-cli asks for beside a corpus."""
+        self.env["ALT_OLD_BIN"] = str(self.root / "bin/cargo")
+        if not self.folds:
+            self.skipTest("the tests run where names that differ in case are two names")
+        self.env["ALT_CASEFOLD_DIR"] = str(self.root / "folds")
 
     def run_gate(self, *args):
         self.log.unlink(missing_ok=True)
@@ -178,6 +191,7 @@ class GateTests(unittest.TestCase):
         self.assertIn("alt-server pulls in", result.stderr)
 
     def test_all_default_and_explicit_scopes(self):
+        self.older_build()
         for options, scope, fmt_scope in [
             ([], ["--workspace"], ["--all"]),
             (["--workspace"], ["--workspace"], ["--all"]),
@@ -198,9 +212,49 @@ class GateTests(unittest.TestCase):
     def test_relative_corpus_override(self):
         (self.root / "custom corpus").mkdir()
         self.env["ALT_CORPUS"] = "custom corpus"
+        self.older_build()
         result, calls = self.run_gate("corpus", "-p", "alt-cli", "--test", "it")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls[0]["corpus"], str(self.root.resolve() / "custom corpus"))
+
+    def test_corpus_of_the_cli_asks_for_an_older_build_and_a_directory_that_folds_case(self):
+        cli = ("corpus", "-p", "alt-cli", "--test", "it")
+        # neither is asked for where the run reaches no test that needs it
+        for reach in (("corpus", "-p", "alt-refs"), cli + ("--filter", "safe_directory")):
+            result, calls = self.run_gate(*reach)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((calls[0]["old_bin"], calls[0]["casefold"]), (None, None))
+        result, calls = self.run_gate(*cli, "--filter", "mixed_versions")
+        self.assertEqual((result.returncode, calls), (2, []))
+        self.assertIn("set ALT_OLD_BIN", result.stderr)
+        self.env["ALT_OLD_BIN"] = "bin/missing"
+        result, calls = self.run_gate(*cli, "--filter", "mixed_versions")
+        self.assertEqual((result.returncode, calls), (2, []))
+        self.env["ALT_OLD_BIN"] = str(self.root / "bin/cargo")
+        result, calls = self.run_gate(*cli, "--filter", "mixed_versions")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls[0]["old_bin"], str(self.root.resolve() / "bin/cargo"))
+        # the directory: not named, named where it cannot be written in,
+        # and named where the file system tells case apart or does not
+        for reach in (cli, cli + ("--filter", "casefold")):
+            result, calls = self.run_gate(*reach)
+            self.assertEqual((result.returncode, calls), (2, []))
+            self.assertIn("set ALT_CASEFOLD_DIR to a directory", result.stderr)
+            self.assertIn("mkfs.ext4 -O casefold", result.stderr)
+        self.env["ALT_CASEFOLD_DIR"] = str(self.root / "missing")
+        result, calls = self.run_gate(*cli, "--filter", "casefold")
+        self.assertEqual((result.returncode, calls), (2, []))
+        self.assertIn("cannot write in ALT_CASEFOLD_DIR", result.stderr)
+        self.env["ALT_CASEFOLD_DIR"] = str(self.root / "folds")
+        result, calls = self.run_gate(*cli, "--filter", "casefold")
+        self.assertEqual(list((self.root / "folds").iterdir()), [])
+        if self.folds:
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # the directory, under whichever spelling the system gives back
+            self.assertEqual(calls[0]["casefold"].lower(), str(self.root.resolve() / "folds").lower())
+        else:
+            self.assertEqual((result.returncode, calls), (2, []))
+            self.assertIn("is on a file system that tells case apart", result.stderr)
 
     def test_corpus_filter_covers_ignored_library_tests_without_target(self):
         result, calls = self.run_gate("corpus", "-p", "alt-server-store",
