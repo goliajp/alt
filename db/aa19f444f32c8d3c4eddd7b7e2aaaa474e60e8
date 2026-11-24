@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: run half of the driven oplog sequences in a gate, and the rest where the environment asks for them
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_properties.rs
