@@ -215,3 +215,31 @@ fn a_code_not_known_to_be_spent_has_its_token_taken_back() {
         .unwrap();
     assert_eq!(polled(&server, &code), (400, "access_denied".into()));
 }
+
+/// As above, and the token cannot be taken back either: the database refuses
+/// the revocation. The device is told to ask again, the token stays good with
+/// nobody holding it, and the code stays: asking again once the database is
+/// well is given the token.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_code_not_known_to_be_spent_whose_token_is_not_taken_back_is_asked_for_again() {
+    let mut f = Fixture::new();
+    let server = sign_in_deadline::start(&mut f, |_, _| ());
+    let code = approved(&server);
+    assert_eq!(left(&f), (1, 1));
+    f.client().batch_execute("CREATE FUNCTION fail_as_committed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure of a commit'; END $$; CREATE CONSTRAINT TRIGGER fail_as_committed AFTER DELETE ON alt_device_authorizations DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fail_as_committed(); CREATE FUNCTION fail_revoked() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure of a revocation'; END $$; CREATE TRIGGER fail_revoked BEFORE UPDATE ON alt_credentials FOR EACH ROW WHEN (NEW.revoked AND NOT OLD.revoked) EXECUTE FUNCTION fail_revoked()").unwrap();
+    let (status, error) = polled(&server, &code);
+    assert_eq!((status, error), (503, "temporarily_unavailable".into()));
+    assert_eq!(left(&f), (1, 1));
+    f.client()
+        .batch_execute("DROP TRIGGER fail_as_committed ON alt_device_authorizations; DROP TRIGGER fail_revoked ON alt_credentials")
+        .unwrap();
+    let (status, told) = polled(&server, &code);
+    assert_eq!(status, 200, "{told}");
+    assert!(
+        told["access_token"]
+            .as_str()
+            .is_some_and(|token| token.starts_with("alt1_"))
+    );
+    assert_eq!(left(&f), (1, 0));
+}
