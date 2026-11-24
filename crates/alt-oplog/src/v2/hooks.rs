@@ -3,11 +3,11 @@
 //! one of its steps, and have something done to `tail` before each read
 //! of it.
 //!
-//! All of it is built with the feature `hooks` alone, which the tests of
-//! this crate turn on for themselves through its dev-dependencies, as a
-//! crate does whose tests need it. Without the feature a handle runs in
-//! the boot the kernel tells, a cut runs through, and none of what is
-//! kept here per thread is in the build.
+//! All of it is built with the feature `hooks` alone, which no manifest
+//! turns on: the tests of this crate need it, and are built with it
+//! named on the command line. Without the feature a handle runs in the
+//! boot the kernel tells, a cut runs through, and none of what is kept
+//! here per thread is in the build.
 
 #[cfg(feature = "hooks")]
 mod told {
