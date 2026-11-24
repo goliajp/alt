@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: tell no caller twice of an oplog frame its handle could not look at when it was told
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/reread.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_reread.rs
+touched: crates/alt-oplog/tests/it/v2_told.rs
