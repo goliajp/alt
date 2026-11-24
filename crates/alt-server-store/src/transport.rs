@@ -211,8 +211,9 @@ impl Store {
         Ok(())
     }
     /// Download a permanently published raw payload, never a digest guessed
-    /// from another request's temporary upload. Open the descriptor under the
-    /// same repository lock used by GC; later unlink cannot invalidate it.
+    /// from another request's temporary upload. The file is opened where the
+    /// view of this read places the payload, with no lock against the segment
+    /// being removed meanwhile: a file that is gone has the read begun again.
     pub(crate) fn open_published_content_once(
         &mut self,
         credential: &Credential,

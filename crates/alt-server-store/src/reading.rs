@@ -32,12 +32,19 @@ fn overtaken(error: &Error) -> bool {
     matches!(error, Error::Database(error) if error.code() == Some("40001"))
 }
 
-/// Runs `read`, and once more where it was overtaken: begun again, it sees the
-/// change that overtook it. This is how a transaction under one view is meant to
-/// be used; a read that is overtaken a second time fails with that.
+/// Whether `error` is that of a read whose bytes were moved after it began: its
+/// view places them in a file that was since put together with others and
+/// removed. No lock holds that off, as none holds off the read.
+fn moved(error: &Error) -> bool {
+    matches!(error, Error::Io(error) if error.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// Runs `read`, and once more where it was overtaken or its bytes were moved:
+/// begun again, it sees the change. This is how a transaction under one view is
+/// meant to be used; a read that fails so a second time fails with that.
 pub(crate) fn twice<T>(mut read: impl FnMut() -> Result<T>) -> Result<T> {
     match read() {
-        Err(error) if overtaken(&error) => read(),
+        Err(error) if overtaken(&error) || moved(&error) => read(),
         other => other,
     }
 }
@@ -131,4 +138,34 @@ pub(crate) fn upload_request(
     key: &alt_remote_protocol::RequestKey,
 ) -> Result<Option<alt_pg::Row>> {
     Ok(tx.query_opt("SELECT state,expires_at,publication,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4", &[&key.scope.repository_instance_id,&crate::store::integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_read_whose_file_is_gone_is_begun_again_once_and_no_other_is() {
+        let gone = || Error::Io(std::io::ErrorKind::NotFound.into());
+        let mut reads = 0;
+        let read = twice(|| {
+            reads += 1;
+            if reads == 1 { Err(gone()) } else { Ok(reads) }
+        });
+        assert_eq!(read.unwrap(), 2);
+        let mut reads = 0;
+        let read: Result<()> = twice(|| {
+            reads += 1;
+            Err(gone())
+        });
+        assert!(matches!(read, Err(Error::Io(_))));
+        assert_eq!(reads, 2);
+        let mut reads = 0;
+        let read: Result<()> = twice(|| {
+            reads += 1;
+            Err(Error::Io(std::io::ErrorKind::PermissionDenied.into()))
+        });
+        assert!(read.is_err());
+        assert_eq!(reads, 1);
+    }
 }
