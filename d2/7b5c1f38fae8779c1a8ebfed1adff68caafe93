@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: a scrub tells of the repositories it read beside one it could not, refuses a name that is none, and indexes anew in the memory packs are verified in
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/mend.rs
+touched: crates/alt-pack-segment/tests/it/mend.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/tests/it/database/cloud/scrubbed.rs
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
+touched: crates/alt-server/src/administered.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator/bounds/memory.rs
+touched: crates/alt-server/src/operator/error.rs
+touched: crates/alt-server/src/operator/scrub.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-server/tests/it/database/git/reverted.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance.rs
+touched: crates/alt-server/tests/it/database/operator/scrubbed.rs
