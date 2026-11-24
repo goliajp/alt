@@ -92,10 +92,12 @@ impl Run {
         let (index, how) = (self.open(false), self.also.below(2));
         if self.also.one_in(3) {
             // a writer reads the log to its end, and the handle, for
-            // which it ended where the cut was begun, looks at its own
-            let len = 1 + self.rng.below(120);
-            self.tear_of(len);
+            // which it ended where the cut was begun, looks at its own:
+            // whoever opens the log then has the rest to look at
+            let other = self.open(false);
+            self.read_on(other, true, None);
             self.look_by(index, false);
+            self.held_to_the_model();
         }
         self.sync(index, how);
         let writer = self.open(false);
@@ -108,12 +110,15 @@ impl Run {
     /// A cut of what an append left dies with its checkpoint written
     /// and not synced; another writer appends after it; the power goes
     /// and takes a stretch of the checkpoint, where that is not on
-    /// disk; the next writer reads the log to its end.
+    /// disk; the next writer reads the log to its end, and the cut it
+    /// makes again may die before the file is made shorter.
     pub fn appended_past_a_cut_unsynced(&mut self) {
         self.room_for(2);
-        let len = match self.also.one_in(2) {
-            true => 1 + self.rng.below(120),
-            false => 600 + self.rng.below(900),
+        // mostly less than the checkpoint lies over: the file ends
+        // with it
+        let len = match self.also.one_in(4) {
+            false => 1 + self.rng.below(120),
+            true => 600 + self.rng.below(900),
         };
         self.tear_of(len);
         let (at, died) = (self.log().end, self.died);
@@ -127,8 +132,13 @@ impl Run {
             return;
         }
         self.reboot_as(Loss::Within(at));
-        let next = self.open(false);
-        self.read_on(next, true, None);
+        let (next, died) = (self.open(false), self.died);
+        let dies = [None, Some(2), Some(3)][self.also.below(3) as usize];
+        self.read_on(next, true, dies);
+        if self.died != died {
+            let next = self.open(false);
+            self.read_on(next, true, None);
+        }
         self.counts.scenes[1].fetch_add(1, Ordering::Relaxed);
     }
 
