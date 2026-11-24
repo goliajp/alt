@@ -43,6 +43,8 @@ pub use schema::{LZ4_REQUIRED, OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_b
 mod schema_v19;
 mod schema_v20;
 mod segments;
+mod serving;
+pub use serving::{SERVED, Serving};
 mod store;
 mod tasks;
 pub use bytes::*;

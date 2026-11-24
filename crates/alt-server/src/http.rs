@@ -1,4 +1,5 @@
 mod body;
+mod bounded;
 mod caller;
 mod connection;
 mod device;
@@ -17,6 +18,7 @@ mod provision;
 mod receiving;
 mod respond;
 mod routes;
+mod serving;
 mod sources;
 mod web;
 mod work;
@@ -221,23 +223,13 @@ pub async fn serve_with_browser(
                 "the browser origin recorded in the database differs from the configured one",
             )
         })?;
-    if options.connections == 0
-        || options.connections_each == 0
-        || options.receiving_each == 0
-        || options.workers == 0
-        || options.header_bytes < 8192
-        || options.headers == 0
-        || [
-            options.header_timeout,
-            options.body_timeout,
-            options.work_timeout,
-            options.connection_timeout,
-            options.expiry_interval,
-        ]
-        .contains(&Duration::ZERO)
-    {
+    if !options.bounded() {
         return Err(std::io::Error::other("invalid HTTP limits"));
     }
+    let serves = factory.clone();
+    let mut alone = spawn_blocking(move || serving::alone(serves))
+        .await
+        .map_err(|_| std::io::Error::other("serving session unavailable"))??;
     if options.trusted_proxies.is_empty() {
         // in the log like everything the instance says: a line of its own
         // kind would be no line of the log to whoever reads it
@@ -272,7 +264,11 @@ pub async fn serve_with_browser(
         let (socket, peer) = tokio::select! {
             _ = &mut shutdown => {
                 state.factory.shutdown().await?;
-                return Ok(());
+                return alone.ended().await;
+            },
+            _ = &mut alone.lost => {
+                state.factory.shutdown().await?;
+                return Err(std::io::Error::other(alt_server_store::SERVED));
             },
             accepted = listener.accept() => accepted?,
         };
