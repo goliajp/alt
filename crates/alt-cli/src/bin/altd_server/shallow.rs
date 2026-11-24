@@ -163,7 +163,11 @@ impl History<'_> {
 
 /// The one ref `name` is short for, as Git expands a name, peeled to its
 /// commit. `None` where it is short for none or for more than one.
-fn named(history: &mut History, name: &str) -> Res<Option<ObjectId>> {
+fn named(
+    history: &mut History,
+    refs: &[(String, ObjectId, Option<String>)],
+    name: &str,
+) -> Res<Option<ObjectId>> {
     let full = [
         name.to_owned(),
         format!("refs/{name}"),
@@ -172,7 +176,6 @@ fn named(history: &mut History, name: &str) -> Res<Option<ObjectId>> {
         format!("refs/remotes/{name}"),
         format!("refs/remotes/{name}/HEAD"),
     ];
-    let refs = history.repo.list_refs()?;
     let mut found = refs.iter().filter(|(of, ..)| full.contains(of));
     match (found.next(), found.next()) {
         (Some((_, oid, _)), None) => history.commit(*oid),
@@ -217,8 +220,14 @@ pub(super) fn ends(repo: &Repository, req: &FetchRequest) -> Res<Result<Shallow,
         Some(count) => history.down(tips, count)?,
         None => {
             let mut not = Vec::new();
+            // read once for all the names a request gives
+            let refs = if depth.not.is_empty() {
+                Vec::new()
+            } else {
+                repo.list_refs()?
+            };
             for name in &depth.not {
-                match named(&mut history, name)? {
+                match named(&mut history, &refs, name)? {
                     Some(oid) => not.push(oid),
                     None => return Ok(Err(format!("ambiguous deepen-not: {name}"))),
                 }
