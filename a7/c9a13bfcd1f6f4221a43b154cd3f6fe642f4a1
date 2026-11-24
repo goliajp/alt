@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the connections of an address are waited for, not slept for
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections/sources.rs
