@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: half of the workers verify reviews at once, and what is written out for a browser takes of the room responses have
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/native.rs
+touched: crates/alt-server/src/native/request.rs
+touched: crates/alt-server/src/portable/mod.rs
+touched: crates/alt-server/src/web_review.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/downloads.rs
