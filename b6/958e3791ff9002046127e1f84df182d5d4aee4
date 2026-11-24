@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: a cloud instance writes the authority it has recorded only when that went on
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/cloud/held.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/cloud_binding.rs
