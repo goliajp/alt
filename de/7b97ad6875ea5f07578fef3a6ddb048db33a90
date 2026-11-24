@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: tell whether the peer of a socket has closed its side
+author-type: human
+author: doracawl
+touched: crates/alt-os/src/socket.rs
+touched: crates/alt-os/src/sys.rs
+touched: crates/alt-os/src/sys/linux.rs
+touched: crates/alt-os/src/sys/macos.rs
+touched: crates/alt-os/tests/it/sys.rs
