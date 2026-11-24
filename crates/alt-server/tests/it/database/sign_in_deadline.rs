@@ -22,6 +22,18 @@ pub(super) fn start(
         "<!doctype html><title>alt</title>",
     )
     .unwrap();
+    served(f, adjust)
+}
+
+/// A service of what [`start`] served before, after `adjust` changed its
+/// bounds: what a test brings about beforehand has a service with the bounds
+/// every test has, and only what it is about the bounds it sets.
+pub(super) fn served(
+    f: &Fixture,
+    adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions),
+) -> Running {
+    let origin = PublicOrigin::parse(ORIGIN).unwrap();
+    let assets = f.root.path().join("assets");
     let (mut factory, mut options) = Running::parts(f, None, vec![]);
     adjust(&mut factory, &mut options);
     Running::serve(

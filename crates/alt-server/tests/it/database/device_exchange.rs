@@ -27,11 +27,18 @@ fn approved(server: &Running) -> String {
         "login_name": "reader",
         "password": "a private browser acceptance password",
     });
-    let signed_in = ureq::post(&format!("{}/web/login", server.url))
+    let signing_in = ureq::post(&format!("{}/web/login", server.url))
         .set("Origin", ORIGIN)
         .set("Content-Type", "application/json")
-        .send_bytes(&alt_json::to_vec(&credentials).unwrap())
-        .unwrap();
+        .send_bytes(&alt_json::to_vec(&credentials).unwrap());
+    let signed_in = match signing_in {
+        Ok(signed_in) => signed_in,
+        // which refusal it was is in what it says
+        Err(ureq::Error::Status(status, told)) => {
+            panic!("sign-in: {status} {}", told.into_string().unwrap())
+        }
+        Err(error) => panic!("sign-in: {error}"),
+    };
     let cookie = signed_in.header("Set-Cookie").unwrap();
     let cookie = cookie.split(';').next().unwrap().to_owned();
     let session: alt_json::Value = json::body(signed_in);
@@ -113,11 +120,13 @@ fn a_code_exchanged_for_a_token_that_was_not_handed_over_says_to_begin_again() {
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
 fn a_code_exchanged_past_the_time_of_its_request_leaves_no_token_behind() {
     let mut f = Fixture::new();
-    let server = sign_in_deadline::start(&mut f, |factory, options| {
+    // the code is approved where a request has the time every test gives one:
+    // the two seconds are for the exchange alone
+    let code = approved(&sign_in_deadline::start(&mut f, |_, _| ()));
+    let server = sign_in_deadline::served(&f, |factory, options| {
         factory.statement_timeout = Duration::from_secs(60);
         options.work_timeout = Duration::from_secs(2);
     });
-    let code = approved(&server);
     let mut holder = f.client();
     let mut held = holder.transaction().unwrap();
     held.query_one(
@@ -140,11 +149,13 @@ fn a_code_exchanged_past_the_time_of_its_request_leaves_no_token_behind() {
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
 fn a_code_whose_request_left_before_it_was_spent_is_good_for_its_token_still() {
     let mut f = Fixture::new();
-    let server = sign_in_deadline::start(&mut f, |factory, options| {
+    // the code is approved where a request has the time every test gives one:
+    // the two seconds are for the exchange alone
+    let code = approved(&sign_in_deadline::start(&mut f, |_, _| ()));
+    let server = sign_in_deadline::served(&f, |factory, options| {
         factory.statement_timeout = Duration::from_secs(60);
         options.work_timeout = Duration::from_secs(2);
     });
-    let code = approved(&server);
     // the code is held: the exchange waits to look at it
     let mut holder = f.client();
     let mut held = holder.transaction().unwrap();
