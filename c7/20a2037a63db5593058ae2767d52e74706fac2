@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the lease that is to end inside a publication is given last and has the time to be good when the publication begins
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/cloud.rs
