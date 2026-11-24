@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a repository that belongs to another user unless safe.directory names it, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/main.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/coord.rs
+touched: crates/alt-cli/src/native/coord/owned.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/safe_directory.rs
