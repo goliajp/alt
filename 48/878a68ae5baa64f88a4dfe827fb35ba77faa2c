@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a repository of a root is opened under the name the root lists it by
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/mode/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
