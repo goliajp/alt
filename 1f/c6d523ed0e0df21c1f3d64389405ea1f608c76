@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: test
+summary: refuse the driven oplog sequences a look that is asked for twice, and have them replace a change of an index past a commit
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_asked.rs
+touched: crates/alt-oplog/tests/it/v2_beside.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_replaced.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
