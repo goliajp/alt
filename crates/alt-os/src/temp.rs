@@ -134,11 +134,16 @@ impl Drop for TempDir {
 /// Makes `directory` where it is not there, has it its owner's alone (mode
 /// 0700), and removes whatever is in it: the place of a process for what
 /// it writes for a time, in which nothing an earlier process left is of use.
+/// A link that stands where the directory is to be is an error: what it
+/// points to is not this process's to empty.
 pub fn emptied(directory: &Path) -> io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     match std::fs::DirBuilder::new().mode(0o700).create(directory) {
         Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
         _ => {}
+    }
+    if !std::fs::symlink_metadata(directory)?.file_type().is_dir() {
+        return Err(io::ErrorKind::NotADirectory.into());
     }
     std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
     for entry in std::fs::read_dir(directory)? {

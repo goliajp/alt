@@ -5,6 +5,26 @@ use super::*;
 /// under the directory of the stored bytes: what the serving process writes for a time
 const TEMPORARY: &str = "temporary";
 
+/// Makes `directory` the place of this process for what it writes for a time:
+/// its owner's alone and empty. The process holds a lock on it for as long as it
+/// is, so that a second server of the same bytes does not empty what this one
+/// writes; a link in its place is not followed.
+fn temporary(directory: &Path) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    match std::fs::DirBuilder::new().mode(0o700).create(directory) {
+        Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => return Err(Error::File),
+        _ => {}
+    }
+    let mut lock = std::fs::OpenOptions::new();
+    lock.read(true).custom_flags(alt_os::sys::O_NOFOLLOW);
+    let lock = lock.open(directory).map_err(|_| Error::File)?;
+    if lock.try_lock().is_err() {
+        return Err(Error::Config("another server serves these bytes"));
+    }
+    std::mem::forget(lock);
+    alt_os::temp::emptied(directory).map_err(|_| Error::File)
+}
+
 impl Config {
     pub fn validate(&self) -> Result<()> {
         use alt_remote_protocol::DeploymentMode;
@@ -157,13 +177,14 @@ impl Config {
     /// directory of the stored bytes from here on, on the disk the bytes are on
     /// and not among the temporary files of the host, which may be kept in
     /// memory. The directory is its owner's alone, and what the process before
-    /// this one left in it is removed.
+    /// this one left in it is removed; a process that still serves holds
+    /// a lock on it, and a second one ends here.
     pub fn serving_options(&self) -> Result<HttpOptions> {
         if self.instance.installation_id == TEMPORARY {
             return Err(Error::Config("installation id"));
         }
         let directory = self.bytes_directory.join(TEMPORARY);
-        alt_os::temp::emptied(&directory).map_err(|_| Error::File)?;
+        temporary(&directory)?;
         // SAFETY: the caller is the one thread there is: nothing else reads or
         // writes the environment
         unsafe { std::env::set_var("TMPDIR", &directory) };
@@ -226,5 +247,34 @@ impl Config {
                 approval_ttl_ms: h.approval_ttl_ms,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_place_for_what_is_written_for_a_time_is_one_server_s_and_no_link() {
+        let work = alt_os::temp::tempdir().unwrap();
+        let directory = work.path().join("temporary");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("left"), b"by the process before").unwrap();
+        temporary(&directory).unwrap();
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        // a second server of the same bytes leaves what the first writes
+        std::fs::write(directory.join("held"), b"by the one that serves").unwrap();
+        let second = temporary(&directory);
+        assert!(matches!(second, Err(Error::Config(_))), "{second:?}");
+        assert!(directory.join("held").exists());
+        // a link where the directory is to be: what it points to is left as it is
+        let elsewhere = work.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("kept"), b"not of the server").unwrap();
+        let link = work.path().join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(matches!(temporary(&link), Err(Error::File)));
+        assert!(alt_os::temp::emptied(&link).is_err());
+        assert!(elsewhere.join("kept").exists());
     }
 }
