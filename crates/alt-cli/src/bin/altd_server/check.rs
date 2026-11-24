@@ -30,21 +30,36 @@ fn said(read: bool, write: bool) -> &'static str {
     }
 }
 
-/// The lines of the users file `text` to look at, each with why; an error
-/// for a line the server does not read.
-pub(super) fn looked_at(text: &str) -> Result<Vec<String>, String> {
-    let mut told = Vec::new();
+/// The lines of the users file `text` to look at, each with why; and the
+/// lines the server does not read, with which it does not start.
+pub(super) fn looked_at(text: &str) -> (Vec<String>, Vec<String>) {
+    let (mut told, mut unread) = (Vec::new(), Vec::new());
+    if text.starts_with('\u{feff}') {
+        let mark = "begins with a byte order mark, which the server takes for the name";
+        told.push(format!("line 1: {mark}"));
+    }
     for (at, line) in text.lines().enumerate() {
+        let at = at + 1;
         let Some((user, _, rules)) = fields(line) else {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with('#') {
+                let passed = "no tab after the name: the server passes the line over";
+                told.push(format!("line {at}: {passed}"));
+            }
             continue;
         };
-        let at = at + 1;
         let Some(rules) = rules else {
             let all = "no rules: every repository is read and written";
             told.push(format!("line {at}: {user}: {all}"));
             continue;
         };
-        let acl = parse_acl(rules).map_err(|why| format!("line {at}: {why}"))?;
+        let acl = match parse_acl(rules) {
+            Ok(acl) => acl,
+            Err(why) => {
+                unread.push(format!("line {at}: {why}"));
+                continue;
+            }
+        };
         let mut seen = Vec::new();
         for rule in acl.iter().filter(|rule| rule.repo != "*") {
             if seen.contains(&&rule.repo) {
@@ -68,23 +83,23 @@ pub(super) fn looked_at(text: &str) -> Result<Vec<String>, String> {
             }
         }
     }
-    Ok(told)
+    (told, unread)
 }
 
 /// Prints what is to be looked at in the file at `path` and ends the process:
 /// with 0 where there is nothing, 1 where there is, 2 where it does not read.
+/// Every line the server does not read is told, not the first alone.
 pub(super) fn run(path: &str) -> ! {
     let text = std::fs::read_to_string(path);
-    let told = text
-        .map_err(|error| error.to_string())
-        .and_then(|text| looked_at(&text));
-    match told {
-        Err(why) => super::die(&format!("{path}: {why}")),
-        Ok(told) => {
-            told.iter().for_each(|line| println!("{line}"));
-            std::process::exit(i32::from(!told.is_empty()));
-        }
-    }
+    let text = text.unwrap_or_else(|error| super::die(&format!("{path}: {error}")));
+    let (told, unread) = looked_at(&text);
+    told.iter().for_each(|line| println!("{line}"));
+    unread.iter().for_each(|line| eprintln!("{path}: {line}"));
+    std::process::exit(match (unread.is_empty(), told.is_empty()) {
+        (false, _) => 2,
+        (true, false) => 1,
+        (true, true) => 0,
+    });
 }
 
 #[cfg(test)]
@@ -107,9 +122,12 @@ mod tests {
             "\theidi\t77\t*:rw docs:r",
             "ivan\t88\t*:r\u{a0}docs:w\u{3000}more:rw",
             "judy\t99\tdocs:r docs:w *:n",
+            // blanks where the tabs belong: no hash, and the server passes it over
+            "kate 11 *:rw",
         ]
         .join("\n");
-        let told = looked_at(&file).unwrap();
+        let (told, unread) = looked_at(&file);
+        assert!(unread.is_empty());
         let expected = [
             "line 2: alice: no rules: every repository is read and written",
             "line 3: bob: docs was read and written and is written",
@@ -118,10 +136,16 @@ mod tests {
             "line 8: grace: docs was read and written and is written",
             "line 9: heidi: docs was read and written and is read",
             "line 10: ivan: docs was read and written and is written",
+            "line 12: no tab after the name: the server passes the line over",
         ];
         assert_eq!(told, expected);
-        let why = looked_at("bob\t11\tdocs:x *:rw").unwrap_err();
-        assert!(why.starts_with("line 1: \"docs:x\" is no rule"), "{why}");
-        assert!(looked_at("").unwrap().is_empty());
+        // every line that does not read is told, and the others beside them
+        let (told, unread) = looked_at("\u{feff}al\t1\nbob\t11\tdocs:x *:rw\ncy\t2\t:rw\n");
+        assert_eq!(told.len(), 2, "{told:?}");
+        assert!(told[0].starts_with("line 1: begins with a byte order mark"));
+        assert_eq!(unread.len(), 2, "{unread:?}");
+        assert!(unread[0].starts_with("line 2: \"docs:x\" is no rule"));
+        assert!(unread[1].starts_with("line 3: "));
+        assert_eq!(looked_at(""), (Vec::new(), Vec::new()));
     }
 }
