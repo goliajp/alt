@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: docs
+summary: say what the room for bases in files is for, and have the example tell what a pack held
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-pack-segment/examples/ingest.rs
