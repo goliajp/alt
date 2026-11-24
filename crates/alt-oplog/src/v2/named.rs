@@ -36,18 +36,24 @@ impl Log {
     /// see to, in the order of the log: the ref transactions and the op
     /// of each workspace that last changed its index.
     pub(super) fn named_from(&self, from: u64) -> Result<Vec<Op>, OpLogError> {
+        self.named_before(from, u64::MAX)
+    }
+
+    /// [`Self::named_from`], with the frames that start at or after
+    /// `cut` passed over where they do not read, and the ones only they
+    /// lead to with them.
+    fn named_before(&self, from: u64, cut: u64) -> Result<Vec<Op>, OpLogError> {
         let linked = |op: &&Op| op.frame.is_some_and(|frame| frame.linked);
         let held = self.ops.iter().filter(|op| at_of(op) >= from);
         let mut ops: Vec<Op> = held.filter(linked).cloned().collect();
         // the ref transactions before the ops held
         let mut at = self.began_linked;
         while at >= from && at != 0 && from < self.began {
-            let Some((op, Some(earlier))) = self.op_at(at)? else {
-                return Err(UNREAD);
+            let (op, earlier) = match self.op_at(at) {
+                Ok(Some((op, Some(earlier)))) if earlier < at => (op, earlier),
+                _ if at >= cut => break,
+                read => return Err(read.err().unwrap_or(UNREAD)),
             };
-            if earlier >= at {
-                return Err(UNREAD);
-            }
             if self.held_at(at).is_none() {
                 ops.push(op);
             }
@@ -58,11 +64,12 @@ impl Log {
             if at == 0 || at < from || ops.iter().any(|op| at_of(op) == at) {
                 continue;
             }
-            match self.held_at(at) {
-                Some(op) => ops.push(op.clone()),
-                None => match self.op_at(at)? {
-                    Some((op, _)) => ops.push(op),
-                    None => return Err(UNREAD),
+            match (self.held_at(at), at >= cut) {
+                (Some(op), _) => ops.push(op.clone()),
+                (None, passed) => match self.op_at(at) {
+                    Ok(Some((op, _))) => ops.push(op),
+                    _ if passed => {}
+                    read => return Err(read.err().unwrap_or(UNREAD)),
                 },
             }
         }
@@ -73,10 +80,14 @@ impl Log {
     /// [`Self::named_from`] for a handle that holds no lock on the log.
     /// An op that does not read where the frames held say it is, because
     /// the log was cut since the handle read it or is being cut, is no
-    /// damage: the handle is told that its ops were cut.
+    /// damage: the handle is told that its ops were cut. One that lies
+    /// before where the log is cut is damage as ever.
     pub(super) fn named_unlocked(&self, from: u64) -> Result<Vec<Op>, OpLogError> {
         let named = self.named_from(from);
-        if named.is_err() && self.cut_away()? {
+        if named.is_err()
+            && let Some(cut) = self.cut_from()?
+            && self.named_before(from, cut).is_ok()
+        {
             return Err(OpLogError::CutBack);
         }
         named

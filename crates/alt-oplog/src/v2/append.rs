@@ -56,8 +56,10 @@ impl Log {
     pub(super) fn knows_all_unlocked(&self) -> Result<bool, OpLogError> {
         match self.knows_all() {
             Ok(true) => Ok(true),
-            _ if self.cut_away()? => Err(OpLogError::CutBack),
-            known => Ok(known?),
+            known => match self.cut_from()? {
+                Some(cut) if self.state.required >= cut => Err(OpLogError::CutBack),
+                _ => Ok(known?),
+            },
         }
     }
 

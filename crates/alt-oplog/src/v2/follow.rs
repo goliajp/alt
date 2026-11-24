@@ -56,19 +56,25 @@ impl Log {
         }
     }
 
-    /// Whether frames this handle holds are cut off the log, or told in
-    /// its header as being cut off it. What a handle that holds no lock
-    /// on the log does not find where those frames say it is, is then no
-    /// damage: once the header tells it, a cut writes over them before it
-    /// makes the file shorter. The header is read first: a cut that is
-    /// told there stays told until it is made, and one that is made
-    /// between the two looks has taken the last frame away.
-    pub(super) fn cut_away(&self) -> Result<bool, OpLogError> {
+    /// From which byte on frames this handle holds are cut off the log,
+    /// or told in its header as being cut off it: `None` where none are.
+    /// What a handle that holds no lock on the log does not find from
+    /// there on where those frames say it is, is no damage: once the
+    /// header tells it, a cut writes over them before it makes the file
+    /// shorter. What does not read before that place no cut explains.
+    /// With the last frame held gone, cuts were made that the header
+    /// tells only the last of: the place is the first byte. The header
+    /// is read first: a cut that is told there stays told until it is
+    /// made, and one that is made between the two looks has taken the
+    /// last frame away.
+    pub(super) fn cut_from(&self) -> Result<Option<u64>, OpLogError> {
         let told = Mark::read_unlocked(&self.file)?;
         crate::v2::cut_asked();
-        let (generation, end) = (self.state.generation, self.state.end);
-        let cut = told.cuts(generation, self.synced, end);
-        Ok(cut || !self.holds_head(self.file.metadata()?.len())?)
+        if !self.holds_head(self.file.metadata()?.len())? {
+            return Ok(Some(0));
+        }
+        let begun = told.begun_at(self.state.generation, self.synced);
+        Ok(begun.filter(|at| *at < self.state.end))
     }
 
     /// The log through the frames that follow the ones held in a file of

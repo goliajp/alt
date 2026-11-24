@@ -18,6 +18,7 @@ mod v2_checks;
 mod v2_claims;
 mod v2_cut_back;
 mod v2_cut_chain;
+mod v2_cut_damage;
 mod v2_cut_ends;
 mod v2_cut_ends_told;
 mod v2_cut_notes;

@@ -131,7 +131,8 @@ impl Log {
             &mut each,
         );
         let led = matches!(walked, Ok(Stop::End)) && state == self.state;
-        if !led && self.cut_away()? {
+        // what does not read before where the log is cut is damage
+        if !led && self.cut_from()?.is_some_and(|cut| state.end >= cut) {
             return Err(OpLogError::CutBack);
         }
         walked?;

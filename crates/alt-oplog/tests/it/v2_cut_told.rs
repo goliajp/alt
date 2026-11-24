@@ -59,7 +59,7 @@ fn held_where_no_boot_is_told(dir: &Path) -> OpLog {
 
 /// Has a writer cut the log in `dir` at `left`, the cut ending after
 /// `step` of its steps as if its process had died.
-fn cut_that_dies(dir: &Path, step: u8) {
+pub fn cut_that_dies(dir: &Path, step: u8) {
     let mut cutter = OpLog::open(dir).unwrap();
     alt_oplog::v2::cut_dies_after(Some(step));
     let cut = cutter.settle(but_left);
