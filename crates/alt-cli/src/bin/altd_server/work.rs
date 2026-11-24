@@ -100,7 +100,7 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert!(name.starts_with(PREFIX));
-        assert_eq!(names(parent.path()), [name.clone()]);
+        assert_eq!(names(parent.path()), [name.as_str()]);
         let lock = File::open(directory.join("lock")).unwrap();
         assert!(lock.try_lock().is_err());
 
