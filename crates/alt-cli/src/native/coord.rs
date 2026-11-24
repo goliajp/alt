@@ -3,6 +3,10 @@
 use super::workspace::parse_workspace_marker;
 use super::*;
 
+mod owned;
+
+pub use owned::ensure_repository_owned;
+
 /// The per-workspace coordinates within a repo: the working-tree root, the
 /// workspace name, the ref naming its HEAD, and its index file. Resolved per
 /// request and cheap to carry by value.
@@ -86,12 +90,14 @@ pub fn resolve_workspace(start: &Path, workspace: Option<&str>) -> Res<(PathBuf,
     loop {
         let marker = dir.join(".alt");
         if marker.is_dir() {
+            owned::ensure_owned(dir, &[dir, &marker])?;
             let coord = Coord::for_name(&marker, workspace.unwrap_or(DEFAULT_WORKSPACE))?;
             return Ok((marker, coord.run_from(dir, start, DEFAULT_WORKSPACE)));
         }
         if marker.is_file() {
             let (repo_root, name) = parse_workspace_marker(&marker)?;
             let alt_dir = repo_root.join(".alt");
+            owned::ensure_owned(dir, &[dir, &marker, &alt_dir])?;
             let coord = Coord::for_name(&alt_dir, workspace.unwrap_or(&name))?;
             return Ok((alt_dir, coord.run_from(dir, start, &name)));
         }

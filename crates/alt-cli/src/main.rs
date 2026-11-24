@@ -213,7 +213,11 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
                 json,
             } => native::task_intake(source, target, git, *json, &mut out)?,
             Command::Import { target } => native::import(
-                &Repository::discover(&cwd)?,
+                &{
+                    let source = Repository::discover(&cwd)?;
+                    native::ensure_repository_owned(&source)?;
+                    source
+                },
                 target,
                 &cwd,
                 execution.identity.clone(),
@@ -233,6 +237,7 @@ fn attempt(mut args: Vec<OsString>, mut parsed: machine::Parsed) -> Response {
                     Err(error) if named.is_some() => return Err(error),
                     Err(_) => {
                         let repo = Repository::discover(&cwd)?;
+                        native::ensure_repository_owned(&repo)?;
                         let at = Place::in_git(&repo, &cwd)?;
                         (repo, at)
                     }

@@ -164,6 +164,7 @@ mod rev_parse;
 mod revert;
 mod rewrite_authors;
 mod rm;
+mod safe_directory;
 mod scan_cache;
 mod scan_daemon;
 #[cfg(target_os = "linux")]

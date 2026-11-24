@@ -32,7 +32,7 @@ pub mod commit;
 mod complete;
 mod convert;
 mod coord;
-pub use coord::{Coord, branch_at, resolve_workspace};
+pub use coord::{Coord, branch_at, ensure_repository_owned, resolve_workspace};
 mod diff;
 pub use diff::{DiffRequest, Summary};
 mod flow;
