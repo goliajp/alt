@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: leave the sink of a handle nothing to sync once the handle was told that its ops were cut and has read the log anew
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/reread.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
