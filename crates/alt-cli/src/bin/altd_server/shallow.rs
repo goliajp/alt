@@ -68,6 +68,7 @@ impl History<'_> {
     /// The commit `oid` is or, through tags, names.
     fn commit(&mut self, mut oid: ObjectId) -> Res<Option<ObjectId>> {
         loop {
+            self.until.go_on()?;
             match self.repo.read_object(&oid)? {
                 Some(object) if object.kind == ObjectKind::Tag => {
                     match Tag::parse(&object.data)?.object() {
@@ -338,5 +339,38 @@ mod tests {
         });
         assert!(ends.unwrap().unwrap().told.is_none());
         assert_eq!(read, 0);
+    }
+
+    /// A request for an end to its history names what it wants and what it
+    /// leaves out, a million ids and a thousand names at the most: each is
+    /// read to find the commit it is. A fetch whose time is over reads none
+    /// of them, though none is a commit whose history would be gone down.
+    #[test]
+    fn what_a_request_names_is_read_for_as_long_as_the_fetch_is_gone_on_with() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        alt_testutil::make_repo(dir.path(), "sha1");
+        let repo = Repository::discover(dir.path()).unwrap();
+        // ids of nothing in the store: no history is gone down for them
+        let wants: Vec<ObjectId> = (1..=4u8)
+            .map(|n| ObjectId::from_bytes(repo.algo().unwrap(), &[n; 20]).unwrap())
+            .collect();
+        let depth = Depth {
+            deepen: Some(1),
+            ..Depth::default()
+        };
+        let req = FetchRequest {
+            wants,
+            depth,
+            ..FetchRequest::default()
+        };
+        let asked = |until: &Until| ends_of(&repo, &req, until, &mut || Ok(repo.list_refs()?));
+        assert!(asked(&Until::whenever()).is_ok());
+        let over = Until {
+            by: Some(std::time::Instant::now()),
+            gone: None,
+        };
+        let stopped = asked(&over).map(drop).unwrap_err();
+        let late = super::super::until::Stopped::Late;
+        assert_eq!(stopped.downcast_ref(), Some(&late), "{stopped}");
     }
 }

@@ -150,13 +150,12 @@ fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<Obje
     reached.extend(req.haves.iter().filter(|have| seen.contains(have)));
     sought.retain(|have| !seen.contains(have));
     // one the store lacks is found under no ref: it is not looked for
-    let mut held = KeyedIdSet::default();
-    for have in &sought {
-        if repo.read_object(have)?.is_some() {
-            held.insert(*have);
-        }
+    let mut held = Vec::new();
+    for have in sought {
+        until.go_on()?;
+        held.extend(repo.read_object(&have)?.map(|_| have));
     }
-    let mut sought = held;
+    let mut sought: KeyedIdSet<ObjectId> = held.into_iter().collect();
     let mut ahead = tips;
     while let Some(oid) = ahead.pop() {
         if sought.is_empty() {
@@ -297,4 +296,35 @@ fn pack(
     // the file is this request's own and is not written to again
     let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
     Ok(encode_fetch_response_packfile(framed, &pack)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fetch names the commits its sender has, a quarter of a million at
+    /// the most, and each is looked for in the store before the refs are gone
+    /// down for it. A fetch whose time is over looks for none: with none of
+    /// them in the store there is nothing else it would have stopped at.
+    #[test]
+    fn what_a_fetch_says_it_has_is_looked_for_as_long_as_it_is_gone_on_with() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        alt_testutil::make_repo(dir.path(), "sha1");
+        let repo = Repository::discover(dir.path()).unwrap();
+        let haves: Vec<ObjectId> = (1..=4u8)
+            .map(|n| ObjectId::from_bytes(repo.algo().unwrap(), &[n; 20]).unwrap())
+            .collect();
+        let req = FetchRequest {
+            haves,
+            ..FetchRequest::default()
+        };
+        assert_eq!(reached(&repo, &req, &Until::whenever()).unwrap(), []);
+        let over = Until {
+            by: Some(std::time::Instant::now()),
+            gone: None,
+        };
+        let stopped = reached(&repo, &req, &over).unwrap_err();
+        let late = super::super::until::Stopped::Late;
+        assert_eq!(stopped.downcast_ref(), Some(&late), "{stopped}");
+    }
 }
