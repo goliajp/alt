@@ -5,6 +5,7 @@ use crate::{
     Output,
     git::Command,
     git_packs::{id, raw, segment_error},
+    git_response::Spill,
 };
 use alt_git_codec::{HashAlgo, ObjectKind};
 use alt_hash::KeyedIdSet;
@@ -35,7 +36,7 @@ fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<
 /// refs the caller reads lead to. One that is in the segments and that none of
 /// them leads to, of a branch that was deleted or history that was replaced, is
 /// not acknowledged, and nothing is left out of a pack on the strength of it.
-fn held(
+pub(crate) fn held(
     set: &SegmentSet,
     tips: &KeyedIdSet<Oid>,
     said: &[alt_git_codec::ObjectId],
@@ -53,63 +54,80 @@ fn held(
     set.reached(&heads, &said, steps).map_err(segment_error)
 }
 
-pub(crate) fn read(
-    limits: alt_remote_protocol::Limits,
-    receive: bool,
-    command: &Command,
-    view: PackView,
+/// What lists references, written as the pack of a fetch is: the references are
+/// as many as were pushed, and a long list of them is a file of the room for
+/// responses, not memory of the request.
+fn listed(
     sending: Option<alt_shares::Share>,
-    gone: Option<&std::sync::atomic::AtomicBool>,
+    content_type: &'static str,
+    write: impl FnOnce(&mut Spill) -> Result<()>,
 ) -> Result<Output> {
-    let bytes = |content_type, bytes| {
-        Ok(Output::Bytes {
-            content_type,
-            bytes,
-        })
-    };
-    let mut output = Vec::new();
-    if matches!(command, Command::Advertisement) {
-        if receive {
-            let refs: Vec<_> = view
-                .refs
-                .iter()
-                .map(|(name, oid)| (name.to_owned(), oid))
-                .collect();
-            alt_wire::push::encode_v1_ref_advertisement(
-                &mut output,
+    let mut body = Spill::within(sending);
+    let written = write(&mut body);
+    body.into_output(content_type, written)
+}
+
+fn advertisement(
+    receive: bool,
+    view: &PackView,
+    sending: Option<alt_shares::Share>,
+) -> Result<Output> {
+    if receive {
+        let refs: Vec<_> = view
+            .refs
+            .iter()
+            .map(|(name, oid)| (name.to_owned(), oid))
+            .collect();
+        let capabilities = [
+            "report-status",
+            "atomic",
+            "delete-refs",
+            "ofs-delta",
+            "side-band-64k",
+            "object-format=sha1",
+            "agent=alt-server",
+        ];
+        let content_type = "application/x-git-receive-pack-advertisement";
+        return listed(sending, content_type, |body| {
+            let algo = HashAlgo::Sha1;
+            Ok(alt_wire::push::encode_v1_ref_advertisement(
+                body,
                 &refs,
-                &[
-                    "report-status",
-                    "atomic",
-                    "delete-refs",
-                    "ofs-delta",
-                    "side-band-64k",
-                    "object-format=sha1",
-                    "agent=alt-server",
-                ],
-                HashAlgo::Sha1,
-            )?;
-            return bytes("application/x-git-receive-pack-advertisement", output);
-        }
-        pkt::write_data(&mut output, b"# service=git-upload-pack\n")?;
-        pkt::write_flush(&mut output)?;
-        for line in [
-            "version 2\n",
-            "agent=alt-server\n",
-            "ls-refs=unborn\n",
-            "fetch=wait-for-done\n",
-            "object-format=sha1\n",
-        ] {
-            pkt::write_data(&mut output, line.as_bytes())?;
-        }
-        pkt::write_flush(&mut output)?;
-        return bytes("application/x-git-upload-pack-advertisement", output);
+                &capabilities,
+                algo,
+            )?)
+        });
     }
-    let mut remaining = limits.walk_steps;
-    if let Command::Refs(request, unborn) = command {
-        let prefixes = request.prefixes();
-        let wanted = |name: &str| alt_wire::ls_refs::LsRefsRequest::listed(&prefixes, name);
-        let head = view.refs.get(&view.default_branch);
+    let mut output = Vec::new();
+    pkt::write_data(&mut output, b"# service=git-upload-pack\n")?;
+    pkt::write_flush(&mut output)?;
+    for line in [
+        "version 2\n",
+        "agent=alt-server\n",
+        "ls-refs=unborn\n",
+        "fetch=wait-for-done\n",
+        "object-format=sha1\n",
+    ] {
+        pkt::write_data(&mut output, line.as_bytes())?;
+    }
+    pkt::write_flush(&mut output)?;
+    Ok(Output::Bytes {
+        content_type: "application/x-git-upload-pack-advertisement",
+        bytes: output,
+    })
+}
+
+fn references(
+    request: &alt_wire::ls_refs::LsRefsRequest,
+    unborn: bool,
+    view: &PackView,
+    sending: Option<alt_shares::Share>,
+    mut remaining: usize,
+) -> Result<Output> {
+    let prefixes = request.prefixes();
+    let wanted = |name: &str| alt_wire::ls_refs::LsRefsRequest::listed(&prefixes, name);
+    let head = view.refs.get(&view.default_branch);
+    listed(sending, UPLOAD_RESULT, |body| {
         // HEAD sorts before every name under refs/
         for (name, oid) in head
             .map(|oid| ("HEAD", oid))
@@ -129,16 +147,38 @@ pub(crate) fn read(
                 line.push_str(&format!(" peeled:{}", id(&target)));
             }
             line.push('\n');
-            pkt::write_data(&mut output, line.as_bytes())?;
+            pkt::write_data(body, line.as_bytes())?;
         }
-        if head.is_none() && *unborn && wanted("HEAD") {
-            pkt::write_data(
-                &mut output,
-                format!("unborn HEAD symref-target:{}\n", view.default_branch).as_bytes(),
-            )?;
+        if head.is_none() && unborn && wanted("HEAD") {
+            let line = format!("unborn HEAD symref-target:{}\n", view.default_branch);
+            pkt::write_data(body, line.as_bytes())?;
         }
-        pkt::write_flush(&mut output)?;
-        return bytes(UPLOAD_RESULT, output);
+        Ok(pkt::write_flush(body)?)
+    })
+}
+
+pub(crate) fn read(
+    limits: alt_remote_protocol::Limits,
+    receive: bool,
+    command: &Command,
+    view: PackView,
+    sending: Option<alt_shares::Share>,
+    gone: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Output> {
+    let bytes = |content_type, bytes| {
+        Ok(Output::Bytes {
+            content_type,
+            bytes,
+        })
+    };
+    let mut output = Vec::new();
+    let mut remaining = limits.walk_steps;
+    match command {
+        Command::Advertisement => return advertisement(receive, &view, sending),
+        Command::Refs(request, unborn) => {
+            return references(request, *unborn, &view, sending, remaining);
+        }
+        Command::Fetch(_) => {}
     }
     let Command::Fetch(request) = command else {
         return Err(Error::Integrity("Git command dispatch"));
@@ -205,7 +245,7 @@ pub(crate) fn read(
         }
     }
     // the pack is framed as it is written; a large one is not kept in memory
-    let mut body = crate::git_response::Spill::within(sending);
+    let mut body = Spill::within(sending);
     let written = (|| {
         pkt::write_data(&mut body, b"packfile\n")?;
         let mut band = crate::git_response::Band::new(&mut body);
