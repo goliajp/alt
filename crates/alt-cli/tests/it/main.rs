@@ -55,6 +55,7 @@ mod config;
 mod config_layers;
 #[cfg(target_os = "linux")]
 mod config_paths;
+mod config_written;
 // the points to be killed at are in a debug build only
 #[cfg(debug_assertions)]
 mod conflict_killed;

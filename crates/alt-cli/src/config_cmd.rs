@@ -5,18 +5,14 @@
 //! written here: a value set here stands over it, and the next import
 //! leaves it standing.
 //!
-//! Write caveat: the on-disk file is rewritten from the parsed Entry
-//! list, which **does not preserve comments, blank lines, or include
-//! directives** — git's own implementation does sub-line edits to keep
-//! those, which is a much heavier piece. For a dogfood first pass we
-//! accept the lossiness; users who care about preserving comments
-//! can edit the file by hand or stay on `git config`.
+//! A write changes the lines of the one variable or section it is about,
+//! as `git config` does: comments, blank lines and every other line of
+//! the file stay, and a value is quoted and escaped so that it reads
+//! back as it was given.
 
 use std::io::Write;
-use std::path::PathBuf;
 
-use alt_bytes::BString;
-use alt_git_config::Entry;
+use alt_git_config::Name;
 use alt_repo::Repository;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -70,79 +66,71 @@ fn set_one(repo: &Repository, key: &str, value: &str, out: &mut impl Write) -> R
     Ok(())
 }
 
-/// Sets `key` to `value` in the store's own file.
+/// Rewrites the store's own file as `edit` makes it of its text, under
+/// the lock of the file; whether it was written.
+fn rewrite(repo: &Repository, edit: impl FnOnce(&[u8]) -> Res<Option<Vec<u8>>>) -> Res<bool> {
+    // for an alt-backed repo, git_dir() is the `.alt` dir
+    let written = alt_repo::kept_config::rewrite_own(repo.git_dir(), edit)?;
+    crate::git_settings::forget();
+    Ok(written)
+}
+
+/// Sets `key` to `value` in the store's own file; of several values
+/// the file has for it, the one given is left.
 pub(crate) fn set(repo: &Repository, key: &str, value: &str) -> Res<()> {
     let (section, subsection, name) = split_key(key)?;
-    let path = config_path(repo);
-    let mut entries = current_entries(&path)?;
-
-    let mut replaced = false;
-    for e in entries.iter_mut() {
-        if e.section == section
-            && entry_subsection_bytes(e) == subsection.as_deref()
-            && e.key == name
-        {
-            e.value = Some(BString::from(value.as_bytes()));
-            replaced = true;
-        }
-    }
-    if !replaced {
-        entries.push(Entry {
-            section: section.clone(),
-            subsection: subsection.as_ref().map(|s| BString::from(s.clone())),
-            key: name.clone(),
-            value: Some(BString::from(value.as_bytes())),
-            origin: None,
-        });
-    }
-    write_entries(&path, &entries)
+    let named = Name {
+        section: &section,
+        subsection: subsection.as_deref(),
+        key: &name,
+    };
+    rewrite(repo, |file| {
+        let entries = alt_git_config::parse_file(file)?;
+        let several = entries.iter().filter(|e| Name::of(e) == named).count() > 1;
+        let cleared = match several {
+            true => alt_git_config::unset(file, named)?,
+            false => None,
+        };
+        let file = cleared.as_deref().unwrap_or(file);
+        Ok(Some(alt_git_config::set(file, named, value.as_bytes())?))
+    })?;
+    Ok(())
 }
 
 /// Takes what the store's own file sets in `[<section> "<subsection>"]`
 /// out of it.
 pub(crate) fn drop_section(repo: &Repository, section: &str, subsection: &str) -> Res<()> {
-    let path = config_path(repo);
-    let mut entries = current_entries(&path)?;
-    let before = entries.len();
-    let within = |e: &Entry| {
-        e.section == section && entry_subsection_bytes(e) == Some(subsection.as_bytes())
-    };
-    entries.retain(|e| !within(e));
-    if entries.len() == before {
-        return Ok(());
-    }
-    write_entries(&path, &entries)
+    rewrite(repo, |file| {
+        let removed = alt_git_config::remove_section(file, section, subsection.as_bytes());
+        Ok(removed?)
+    })?;
+    Ok(())
 }
 
 /// Has what the store's own file sets in `[<section> "<from>"]` set in
 /// `[<section> "<to>"]` instead.
 pub(crate) fn rename_section(repo: &Repository, section: &str, from: &str, to: &str) -> Res<()> {
-    let path = config_path(repo);
-    let mut entries = current_entries(&path)?;
-    let within =
-        |e: &Entry| e.section == section && entry_subsection_bytes(e) == Some(from.as_bytes());
-    if !entries.iter().any(within) {
-        return Ok(());
-    }
-    entries.retain(|e| !(e.section == section && entry_subsection_bytes(e) == Some(to.as_bytes())));
-    for entry in entries.iter_mut().filter(|e| within(e)) {
-        entry.subsection = Some(BString::from(to));
-    }
-    write_entries(&path, &entries)
+    rewrite(repo, |file| {
+        let (from, to) = (from.as_bytes(), to.as_bytes());
+        if alt_git_config::rename_section(file, section, from, to)?.is_none() {
+            return Ok(None);
+        }
+        let cleared = alt_git_config::remove_section(file, section, to)?;
+        let file = cleared.as_deref().unwrap_or(file);
+        Ok(alt_git_config::rename_section(file, section, from, to)?)
+    })?;
+    Ok(())
 }
 
 fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
     ensure_settable(key)?;
     let (section, subsection, name) = split_key(key)?;
-    let path = config_path(repo);
-    let mut entries = current_entries(&path)?;
-    let before = entries.len();
-    entries.retain(|e| {
-        !(e.section == section
-            && entry_subsection_bytes(e) == subsection.as_deref()
-            && e.key == name)
-    });
-    if entries.len() == before {
+    let named = Name {
+        section: &section,
+        subsection: subsection.as_deref(),
+        key: &name,
+    };
+    if !rewrite(repo, |file| Ok(alt_git_config::unset(file, named)?))? {
         let applies = crate::git_settings::repository(repo)?;
         if applies
             .get(&section, subsection.as_deref(), &name)
@@ -153,77 +141,8 @@ fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
         }
         return Err(format!("'{key}' not set").into());
     }
-    write_entries(&path, &entries)?;
     writeln!(out, "unset {key}")?;
     Ok(())
-}
-
-fn entry_subsection_bytes(e: &Entry) -> Option<&[u8]> {
-    e.subsection.as_ref().map(|b| b.as_slice())
-}
-
-fn config_path(repo: &Repository) -> PathBuf {
-    // for an alt-backed repo, git_dir() is the `.alt` dir
-    repo.git_dir().join("git-import").join("config")
-}
-
-fn current_entries(path: &PathBuf) -> Res<Vec<Entry>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let data = std::fs::read(path)?;
-    Ok(alt_git_config::parse_file(&data)?)
-}
-
-fn write_entries(path: &PathBuf, entries: &[Entry]) -> Res<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let bytes = serialize_entries(entries);
-    let tmp = path.with_extension("config.tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)?;
-    crate::git_settings::forget();
-    Ok(())
-}
-
-fn serialize_entries(entries: &[Entry]) -> Vec<u8> {
-    use std::io::Write as _;
-    let mut out = Vec::new();
-    let mut last_section: Option<(String, Option<BString>)> = None;
-    for e in entries {
-        let section_key = (e.section.clone(), e.subsection.clone());
-        if last_section.as_ref() != Some(&section_key) {
-            match &e.subsection {
-                Some(sub) => {
-                    writeln!(out, "[{} \"{}\"]", e.section, escape_subsection(sub)).unwrap()
-                }
-                None => writeln!(out, "[{}]", e.section).unwrap(),
-            }
-            last_section = Some(section_key);
-        }
-        match &e.value {
-            Some(v) => {
-                out.extend_from_slice(b"\t");
-                out.extend_from_slice(e.key.as_bytes());
-                out.extend_from_slice(b" = ");
-                out.extend_from_slice(v.as_ref());
-                out.extend_from_slice(b"\n");
-            }
-            None => writeln!(out, "\t{}", e.key).unwrap(),
-        }
-    }
-    out
-}
-
-/// Escape a subsection name for the `[section "<sub>"]` header form.
-/// git rules: backslashes and double-quotes are escaped; everything
-/// else is verbatim. Subsection names in practice are ASCII paths
-/// (branch / remote / submodule names), so a lossy utf-8 view is fine
-/// for the escape pass.
-fn escape_subsection(sub: &BString) -> String {
-    let s = String::from_utf8_lossy(sub);
-    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn list_all(cfg: &alt_git_config::Config, out: &mut impl Write) -> Res<()> {
@@ -246,7 +165,10 @@ fn list_all(cfg: &alt_git_config::Config, out: &mut impl Write) -> Res<()> {
 /// - `section.subsection.name` (the middle part is the subsection,
 ///   case-preserved)
 ///
-/// A leading or trailing dot, or fewer than two segments, is an error.
+/// A leading or trailing dot, or fewer than two segments, is an error,
+/// and so is what git takes for no key: a section or a name with
+/// anything but letters, digits and `-` in it, a name that begins with
+/// no letter, a subsection with a newline in it.
 fn split_key(key: &str) -> Res<(String, Option<Vec<u8>>, String)> {
     let parts: Vec<&str> = key.split('.').collect();
     if parts.len() < 2 || parts.iter().any(|p| p.is_empty()) {
@@ -262,5 +184,13 @@ fn split_key(key: &str) -> Res<(String, Option<Vec<u8>>, String)> {
     } else {
         None
     };
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
+    let named = section.bytes().all(word)
+        && name.bytes().all(word)
+        && name.as_bytes()[0].is_ascii_alphabetic();
+    let breaks = |sub: &Vec<u8>| sub.iter().any(|b| matches!(b, b'\n' | 0));
+    if !named || subsection.as_ref().is_some_and(breaks) {
+        return Err(format!("bad config key '{}'", key.escape_default()).into());
+    }
     Ok((section, subsection, name))
 }

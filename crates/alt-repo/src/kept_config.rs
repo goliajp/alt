@@ -23,6 +23,10 @@ use alt_git_config::{Config, Entry, IncludeContext, Moved, Name, Place};
 
 use crate::RepoError;
 
+mod own;
+
+pub use own::rewrite_own;
+
 const OWN: &str = "git-import/config";
 const SOURCE: &str = "git-import/source";
 /// the copy, from the directory of the store's own file
@@ -246,28 +250,24 @@ fn lead(alt_dir: &Path) -> Result<(), RepoError> {
     let Some(kept) = read_file(&alt_dir.join(SOURCE).join("config"))? else {
         return Ok(());
     };
-    let own = alt_dir.join(OWN);
-    let was = read_file(&own)?;
-    let has = parsed(&was)?;
-    let mut bytes = Vec::new();
-    if !has.iter().any(leads_to_copy) {
-        bytes.extend_from_slice(format!("[include]\n\tpath = {THROUGH}\n").as_bytes());
-    }
-    bytes.extend_from_slice(was.as_deref().unwrap_or_default());
-    for entry in parsed(&Some(kept))?.iter().filter(|e| tells_format(e)) {
-        let name = || Name::of(entry);
-        let there = has.iter().filter(|h| Name::of(h) == name());
-        if there.map(|h| &h.value).eq([&entry.value]) {
-            continue;
+    rewrite_own(alt_dir, |was| -> Result<Option<Vec<u8>>, RepoError> {
+        let has = alt_git_config::parse_file(was)?;
+        let mut bytes = Vec::new();
+        if !has.iter().any(leads_to_copy) {
+            bytes.extend_from_slice(format!("[include]\n\tpath = {THROUGH}\n").as_bytes());
         }
-        let value = entry.value.as_ref().map_or(&b"true"[..], |v| v.as_slice());
-        bytes = alt_git_config::set(&bytes, name(), value)?;
-    }
-    if Some(&bytes) != was.as_ref() {
-        let fresh = alt_dir.join("git-import/config.new");
-        fs::write(&fresh, bytes)?;
-        fs::rename(fresh, own)?;
-    }
+        bytes.extend_from_slice(was);
+        for entry in parsed(&Some(kept))?.iter().filter(|e| tells_format(e)) {
+            let name = || Name::of(entry);
+            let there = has.iter().filter(|h| Name::of(h) == name());
+            if there.map(|h| &h.value).eq([&entry.value]) {
+                continue;
+            }
+            let value = entry.value.as_ref().map_or(&b"true"[..], |v| v.as_slice());
+            bytes = alt_git_config::set(&bytes, name(), value)?;
+        }
+        Ok((bytes != was).then_some(bytes))
+    })?;
     Ok(())
 }
 
