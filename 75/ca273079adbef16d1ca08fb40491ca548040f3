@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: have the gate ask for the directory its case-folding tests run in, and say how to make one
+author-type: human
+author: doracawl
+touched: scripts/gate.sh
