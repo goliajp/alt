@@ -9,6 +9,7 @@
 mod alt_backend;
 mod error;
 pub mod kept_config;
+pub mod met;
 mod object_format;
 mod odb;
 pub mod reflog;

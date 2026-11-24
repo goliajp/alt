@@ -44,9 +44,11 @@ fn a_second_import_keeps_the_moves_git_never_saw() {
         ok(alt(&to, &["commit", "-m", text]));
         made.push(at("main"));
     }
-    // not exported: git has the branch where it was
+    // not exported, and git moves the branch its own way
+    std::fs::write(source.join("f"), "three").unwrap();
+    ok(git(&source, &["commit", "-q", "-a", "-m", "three"]));
     ok(alt(&source, &["import", to.to_str().unwrap()]));
-    assert_eq!(at("main"), theirs);
+    assert_eq!(at("main"), ok(git(&source, &["rev-parse", "main"])));
     assert_eq!(at("main@{1}"), made[2]);
     assert_eq!(at("main@{2}"), made[1]);
     assert_eq!(at("main@{3}"), made[0]);

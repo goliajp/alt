@@ -105,6 +105,7 @@ mod ignore_sources;
 mod import_again;
 mod import_config;
 mod import_materialize;
+mod import_met;
 mod index_blobs;
 mod index_link;
 mod index_seen;

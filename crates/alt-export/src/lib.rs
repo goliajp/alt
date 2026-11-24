@@ -23,6 +23,7 @@ use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
 
 mod config;
 mod logs;
+mod met;
 pub mod stash;
 
 #[derive(Debug)]
@@ -265,6 +266,7 @@ fn write_git(
     }
     alt_git_refs::write_loose(git_dir, head.as_ref(), &loose)?;
     stash::write_log(&odb, git_dir, &refs, &unstored, algo)?;
+    met::keep(alt_dir, git_dir, &refs, head.as_ref(), &loose, &unstored)?;
     let names = loose
         .iter()
         .filter_map(|(name, _)| std::str::from_utf8(name).ok());

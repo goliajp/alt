@@ -13,8 +13,9 @@ use alt_git_refs::reflog::{Line, parse, write};
 use super::{Entry, KEPT};
 use crate::{RepoError, Repository};
 
-/// The log of a ref by its full name.
-pub type Carried = Vec<(String, Vec<Line>)>;
+/// The log of a ref by its full name, and whether the import moves the
+/// ref.
+pub type Carried = Vec<(String, Vec<Line>, bool)>;
 
 impl Repository {
     /// Who git would say moved a ref at `entry`: as git logged it where
@@ -65,17 +66,18 @@ pub fn carried<'a>(
     for name in names.filter(logged) {
         let lines = repo.log_lines(name)?;
         if !lines.is_empty() {
-            found.push((name.to_owned(), lines));
+            found.push((name.to_owned(), lines, true));
         }
     }
     Ok(found)
 }
 
 /// Writes over the logs just kept under `alt_dir` each log of `ours`
-/// that git's does not begin with.
+/// that git's does not begin with. The import is its last line where
+/// the import moves the ref.
 pub(super) fn keep_ours(alt_dir: &Path, ours: Carried, algo: HashAlgo) -> Result<(), RepoError> {
     let kept = alt_dir.join(KEPT);
-    for (name, mut lines) in ours {
+    for (name, mut lines, by_import) in ours {
         let path = kept.join(&name);
         let theirs = super::read(&path)?
             .map(|log| parse(&log))
@@ -87,7 +89,7 @@ pub(super) fn keep_ours(alt_dir: &Path, ours: Carried, algo: HashAlgo) -> Result
             continue;
         }
         let here = lines.last().and_then(|line| line.new);
-        if let Some(last) = theirs.last().filter(|last| last.new != here)
+        if let Some(last) = theirs.last().filter(|last| by_import && last.new != here)
             && let Some(new) = last.new
         {
             lines.push(Line {
