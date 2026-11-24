@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: export HEAD as the commit a rebase or a bisect stands on, and keep them standing over an import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/export_under_way.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-import/src/refs.rs
