@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::*;
 
+mod made;
+
 /// The entry at each path of `entries`.
 fn by_path(entries: &[WorkEntry]) -> BTreeMap<&BString, &WorkEntry> {
     entries.iter().map(|e| (&e.path, e)).collect()
@@ -90,6 +92,8 @@ fn local_changes(
 pub struct Create<'a> {
     /// where the branch starts, the current commit where nothing is named
     pub start: Option<&'a str>,
+    /// a branch of the name is put there, as by `-C`
+    pub over: bool,
 }
 
 impl NativeRepo<'_> {
@@ -127,7 +131,19 @@ impl NativeRepo<'_> {
         let full = format!("refs/heads/{name}");
         let current = self.head_branch()?;
         let mut follows = None;
-        let (result, human) = if let Some(create) = create {
+        let there = self.store.refs.get(&full).is_some();
+        let (result, human) = if let Some(create) = create.filter(|c| c.over && there) {
+            let changes = self.switch_reset(name, &full, &current, create.start)?;
+            if !json {
+                for (letter, path) in changes {
+                    writeln!(out, "{letter}\t{path}")?;
+                }
+            }
+            match full == current {
+                true => ("reset", format!("Reset branch '{name}'")),
+                false => ("reset", format!("Switched to and reset branch '{name}'")),
+            }
+        } else if let Some(create) = create {
             match create.start {
                 None => self.switch_create(name, &full, &current)?,
                 Some(start) => {
@@ -177,50 +193,11 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    /// Creates the branch `full` at the commit `start` names and moves
-    /// HEAD to it as a switch to a branch there would, in one operation;
-    /// what is left that differs from that commit.
-    fn switch_create_at(
-        &mut self,
-        name: &str,
-        full: &str,
-        current: &str,
-        start: &str,
-    ) -> Res<Vec<(char, BString)>> {
-        check_branch_name(name)?;
-        self.ensure_no_branch(name)?;
-        let commit = self
-            .commit_named(start)?
-            .ok_or_else(|| settings::fatal(format!("invalid reference: {start}")))?;
-        self.switch_to(full, current, Some(commit))
-    }
-
-    /// Creates the branch `full` at the current commit and moves HEAD to
-    /// it. The working tree and the index carry over unchanged, so no
-    /// checkout is needed.
-    fn switch_create(&mut self, name: &str, full: &str, current: &str) -> Res<()> {
-        check_branch_name(name)?;
-        self.ensure_no_branch(name)?;
-        if let Some(commit) = self.store.refs.resolve(current)? {
-            // non-terminal tx of switch-with-create: the move_head below
-            // is the one that carries this command's idempotency key.
-            self.commit_refs(
-                "branch",
-                &[RefChange {
-                    name: full.to_owned(),
-                    old: None,
-                    new: Some(RefTarget::Oid(commit)),
-                }],
-            )?;
-        }
-        self.move_head(current, full)
-    }
-
     /// Moves HEAD from the branch `current` to the branch `full`, which
-    /// is made at `new` where that is given, and checks out what differs
-    /// between their commits; what is left that differs from the commit
-    /// switched to.
-    fn switch_to(
+    /// is made at `new` or put there where that is given, and checks
+    /// out what differs between their commits; what is left that differs
+    /// from the commit switched to.
+    pub(super) fn switch_to(
         &mut self,
         full: &str,
         current: &str,
@@ -280,17 +257,20 @@ impl NativeRepo<'_> {
         drop(state);
         let head_ref = self.head_ref.clone();
         let head_old = self.store.refs.get(&head_ref).cloned();
+        let was = self.store.refs.get(full).cloned();
         let made = new.map(|commit| RefChange {
             name: full.to_owned(),
-            old: None,
+            old: was.clone(),
             new: Some(RefTarget::Oid(commit)),
         });
+        let made = made.filter(|change| change.new != was);
         let moved = RefChange {
             name: head_ref,
             old: head_old,
             new: Some(RefTarget::Symbolic(full.to_owned())),
         };
-        let refs: Vec<RefChange> = made.into_iter().chain([moved]).collect();
+        let moved = Some(moved).filter(|change| change.new != change.old);
+        let refs: Vec<RefChange> = made.into_iter().chain(moved).collect();
         self.commit_refs_checkout("switch", &refs, &old, &kept)?;
         Ok(changes)
     }

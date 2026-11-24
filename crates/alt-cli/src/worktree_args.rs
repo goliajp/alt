@@ -93,6 +93,10 @@ pub struct Checkout {
     /// Create the branch named before switching to it
     #[arg(short = 'b')]
     pub create: bool,
+    /// Create the branch named before switching to it, or put the one
+    /// of that name at the start named
+    #[arg(short = 'B', conflicts_with = "create")]
+    pub create_over: bool,
     /// For a path in conflict, check out the file of the current branch
     #[arg(long, conflicts_with = "theirs")]
     pub ours: bool,

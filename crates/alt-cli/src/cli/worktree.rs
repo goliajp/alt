@@ -10,6 +10,22 @@ use crate::worktree_args;
 
 pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<u8> {
     match cmd {
+        Command::Branch(args) if args.rename || args.rename_over => {
+            let Some(name) = &args.name else {
+                return Err(fatal("branch name required"));
+            };
+            let (old, new) = match &args.start {
+                Some(new) => (Some(name.as_str()), new),
+                None => (None, name),
+            };
+            repo.branch_rename(old, new, args.rename_over, out)?
+        }
+        Command::Branch(args) if args.force_move => {
+            let Some(name) = &args.name else {
+                return Err(fatal("branch name required"));
+            };
+            repo.branch_force(name, args.start.as_deref(), out)?
+        }
         Command::Branch(args) => {
             let (name, start, delete) =
                 (args.name.clone(), args.start.clone(), args.delete.clone());
@@ -17,10 +33,11 @@ pub(super) fn run<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -
         }
         Command::Switch(args) => {
             let start = args.start.as_deref();
-            if start.is_some() && !args.create {
+            let (make, over) = (args.create || args.create_over, args.create_over);
+            if start.is_some() && !make {
                 return Err(fatal("only one reference expected"));
             }
-            let create = args.create.then_some(Create { start });
+            let create = make.then_some(Create { start, over });
             let left = match args.name == "-" && create.is_none() {
                 true => Some(
                     repo.branch_left()?
@@ -140,7 +157,8 @@ fn checkout_new<W: Write>(
         let whose = format!("a branch '{name}' cannot be created from it");
         return Err(fatal(&format!("'{start}' is not a commit and {whose}")));
     }
-    repo.switch(name, Some(Create { start }), args.json, out)
+    let over = args.create_over;
+    repo.switch(name, Some(Create { start, over }), args.json, out)
 }
 
 /// `alt checkout`: a branch switched to where one name is given that is a
@@ -156,7 +174,7 @@ fn checkout<W: Write>(
     if side.is_some() && names.is_empty() && args.paths.is_empty() {
         return Err(fatal("'--ours/--theirs' needs the paths to check out"));
     }
-    if args.create {
+    if args.create || args.create_over {
         return checkout_new(repo, args, out);
     }
     if let ([name], None, true) = (&names[..], side, args.paths.is_empty()) {

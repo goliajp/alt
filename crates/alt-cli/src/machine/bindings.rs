@@ -39,6 +39,10 @@ const LATER: &[&str] = &[
     "symbolic_full_name",
     "verify_one",
     "quiet",
+    "force_move",
+    "rename",
+    "rename_over",
+    "create_over",
 ];
 
 /// The argument values a durable request is bound to. Stored bindings are

@@ -101,6 +101,23 @@ pub(crate) fn drop_section(repo: &Repository, section: &str, subsection: &str) -
     write_entries(&path, &entries)
 }
 
+/// Has what the store's own file sets in `[<section> "<from>"]` set in
+/// `[<section> "<to>"]` instead.
+pub(crate) fn rename_section(repo: &Repository, section: &str, from: &str, to: &str) -> Res<()> {
+    let path = config_path(repo);
+    let mut entries = current_entries(&path)?;
+    let within =
+        |e: &Entry| e.section == section && entry_subsection_bytes(e) == Some(from.as_bytes());
+    if !entries.iter().any(within) {
+        return Ok(());
+    }
+    entries.retain(|e| !(e.section == section && entry_subsection_bytes(e) == Some(to.as_bytes())));
+    for entry in entries.iter_mut().filter(|e| within(e)) {
+        entry.subsection = Some(BString::from(to));
+    }
+    write_entries(&path, &entries)
+}
+
 fn unset_one(repo: &Repository, key: &str, out: &mut impl Write) -> Res<()> {
     let (section, subsection, name) = split_key(key)?;
     let path = config_path(repo);

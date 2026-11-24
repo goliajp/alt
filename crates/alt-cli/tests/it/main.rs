@@ -26,6 +26,7 @@ mod amend;
 mod argument_bindings;
 mod bisect;
 mod blame;
+mod branch_moved;
 mod branch_start;
 mod branch_switch;
 mod byte_names;

@@ -3,6 +3,8 @@
 
 use super::*;
 
+mod moved;
+
 /// The branch of a remote that a local branch follows.
 pub(super) struct Followed {
     pub(super) remote: String,
@@ -73,7 +75,12 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    fn create_branch(&mut self, name: &str, start: Option<&str>, out: &mut impl Write) -> Res<()> {
+    pub(super) fn create_branch(
+        &mut self,
+        name: &str,
+        start: Option<&str>,
+        out: &mut impl Write,
+    ) -> Res<()> {
         check_branch_name(name)?;
         let full = format!("refs/heads/{name}");
         self.ensure_no_branch(name)?;
@@ -115,7 +122,7 @@ impl NativeRepo<'_> {
 
     /// The commit `start` names for `alt branch` to make a branch at, or
     /// git's words for what names none.
-    fn branch_point(&self, start: &str) -> Res<ObjectId> {
+    pub(super) fn branch_point(&self, start: &str) -> Res<ObjectId> {
         if let Some(commit) = self.commit_named(start)? {
             return Ok(commit);
         }
