@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: feat
+summary: an operator has every object of the pack segments read, and a segment that does not give its objects back indexed anew from its pack
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/mend.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/mend.rs
+touched: crates/alt-pack-segment/tests/it/readable.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/action.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/src/operator/scrub.rs
+touched: self-hosted/README.md
