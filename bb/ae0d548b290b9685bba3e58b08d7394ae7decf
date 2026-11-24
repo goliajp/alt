@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what an older build does on a store this one imported into, and whose repositories are opened
+author-type: human
+author: doracawl
+touched: docs/internal-install.md
