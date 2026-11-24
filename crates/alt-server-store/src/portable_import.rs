@@ -26,6 +26,16 @@ fn authorize_read(
 ) -> Result<(RepositorySnapshot, Authorization)> {
     key.validate()?;
     let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
+    authorized(tx, spec, credential, key, current)
+}
+/// who asks about the import `key`, where the repository is `current`
+fn authorized(
+    tx: &mut Transaction<'_>,
+    spec: &InstanceSpec,
+    credential: &Credential,
+    key: &RequestKey,
+    current: RepositorySnapshot,
+) -> Result<(RepositorySnapshot, Authorization)> {
     require_admin(tx, spec, credential)?;
     let auth = authorize(tx, spec, credential, &current)?;
     if key.scope.installation_id != spec.installation_id || auth.actor_id != key.actor_id {
@@ -249,22 +259,6 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(result)
     }
-    pub fn query_portable_import(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-    ) -> Result<PortableImportState> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (current, _) = authorize_read(&mut tx, &self.spec, credential, key)?;
-        let result = match row(&mut tx, key)? {
-            Some(row) => state(&mut tx, &row, key, &current.scope)?,
-            None if current.scope == key.scope => PortableImportState::NotSeen { key: key.clone() },
-            None => PortableImportState::Unknown { key: key.clone() },
-        };
-        tx.commit()?;
-        Ok(result)
-    }
     pub fn register_portable_content(
         &mut self,
         credential: &Credential,
@@ -384,38 +378,5 @@ impl Store {
 }
 
 mod activation;
+mod reads;
 pub use activation::PortableImportWork;
-
-impl Store {
-    /// Validate an immutable upload selection before allocating request-body
-    /// storage. Registration repeats these checks after durable file creation.
-    pub fn selected_portable_upload(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-        digest: &str,
-    ) -> Result<Blob> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (current, auth) = authorize_read(&mut tx, &self.spec, credential, key)?;
-        authorize_write(
-            &mut tx,
-            &self.spec,
-            key,
-            &current,
-            &auth,
-            Some(&key.request_id),
-        )?;
-        let row = row(&mut tx, key)?.ok_or(Error::Precondition("portable import not found"))?;
-        active(&row, key, now(&mut tx)?)?;
-        let envelope: Envelope = row.get::<_, Jsonb>("envelope").read()?;
-        let blob = envelope
-            .catalog
-            .blobs
-            .into_iter()
-            .find(|blob| blob.blake3 == digest)
-            .ok_or(Error::Unauthorized)?;
-        tx.commit()?;
-        Ok(blob)
-    }
-}

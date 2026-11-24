@@ -12,6 +12,7 @@ mod pack_sweep;
 mod pack_view;
 mod provenance;
 mod reading;
+mod reading_uploads;
 mod registration;
 mod retention;
 mod schema_20;
