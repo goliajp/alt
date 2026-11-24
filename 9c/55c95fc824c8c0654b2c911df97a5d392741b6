@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: unset a variable, remove a section and rename one in the text of a configuration file as git does
+author-type: human
+author: doracawl
+touched: crates/alt-git-config/src/edit.rs
+touched: crates/alt-git-config/src/edit/sections.rs
+touched: crates/alt-git-config/src/lib.rs
+touched: crates/alt-git-config/tests/it/edit.rs
