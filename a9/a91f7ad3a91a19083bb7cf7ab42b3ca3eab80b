@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: take the names a checkout lists itself composed where core.precomposeunicode asks
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/spelled.rs
+touched: crates/alt-cli/tests/it/precompose.rs
