@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: look from inside the write that takes a cut back at the lock it is made under
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/hooks.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
