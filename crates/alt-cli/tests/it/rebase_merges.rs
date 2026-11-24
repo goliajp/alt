@@ -227,10 +227,14 @@ fn a_merge_that_does_not_settle_again_stops_the_rebase_where_it_can_go_on() {
 
     // given up, the branch and the files are as they were
     let pair = settled_history();
-    let before = (heads(&pair.alt), files(&pair.alt));
+    let before = (heads(&pair.alt), files(&pair.alt), index(&pair.alt));
     fails(alt(&pair.alt, &["rebase", "-r", "main"]), 1);
-    ok(alt(&pair.alt, &["rebase", "--abort"]));
-    assert_eq!((heads(&pair.alt), files(&pair.alt)), before);
+    fails(git(&pair.git, &["rebase", "-r", "main"]), 1);
+    assert_ne!(index(&pair.alt), before.2);
+    pair.both(&["rebase", "--abort"]);
+    let after = (heads(&pair.alt), files(&pair.alt), index(&pair.alt));
+    assert_eq!(after, before);
+    pair.assert_same_state();
     assert!(!ok(alt(&pair.alt, &["status", "--json"])).contains("rebase"));
 }
 

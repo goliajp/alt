@@ -256,8 +256,11 @@ fn abort_and_undo_both_take_the_rebase_back() {
     let before = ok(alt(&["rev-parse", "topic"]));
 
     // the first commit replays, the second conflicts: abort rewinds it all
+    let index = crate::like_git::index(root);
     assert!(!alt(&["rebase", "main"]).status.success());
+    assert_ne!(crate::like_git::index(root), index);
     ok(alt(&["rebase", "--abort"]));
+    assert_eq!(crate::like_git::index(root), index);
     assert_eq!(ok(alt(&["rev-parse", "topic"])), before);
     assert_eq!(
         std::fs::read_to_string(root.join("f.txt")).unwrap(),
