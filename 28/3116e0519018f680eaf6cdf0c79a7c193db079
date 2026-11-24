@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: end the search for a delta once one is a sixteenth of its object
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/delta_window.rs
