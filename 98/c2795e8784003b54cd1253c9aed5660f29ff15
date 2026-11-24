@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: refactor
+summary: what a committed publication leaves behind, the checks of a credential and the events queued later in files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/change_events.rs
+touched: crates/alt-server-store/src/change_events/incoming.rs
+touched: crates/alt-server-store/src/change_events/later.rs
+touched: crates/alt-server-store/src/change_events/outbox.rs
+touched: crates/alt-server-store/src/cloud.rs
+touched: crates/alt-server-store/src/cloud/restore.rs
+touched: crates/alt-server-store/src/cloud/service.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/publication/settled.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/store/authority.rs
+touched: crates/alt-server-store/src/store/instance.rs
+touched: crates/alt-server-store/src/store/tokens.rs
