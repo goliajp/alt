@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a request that waited for one that asked the platform does not wait for the next that asks
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/cloud/asking.rs
