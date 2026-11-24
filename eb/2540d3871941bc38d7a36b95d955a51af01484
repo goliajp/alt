@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: name the two limits of what the server holds at once
+author-type: human
+author: doracawl
+touched: README.md
