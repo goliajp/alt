@@ -31,8 +31,8 @@ $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"rebase/default","principal":{"kind":"human","id":"json-test","session":null},"staged":[{"path":"only-feat.txt","change":"added"}],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"operation":{"kind":"rebase","step":1,"steps":2},"clean":false}
 $ [repo] alt rebase --continue --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:10>","retryable":false},"schema_version":1}
+exit 1
+err| {"error":{"details":{"operation_ids":[]},"kind":"precondition_failed","message":"You must edit all merge conflicts and then\nmark them as resolved using git add","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:10>","retryable":false},"schema_version":1}
 $ [repo] alt rebase --abort --json
 exit 0
 out| {"command_output":{"encoding":"utf-8","text":"Rebase aborted.\n","truncated":false},"operation_ids":["<id64:11>","<id64:12>","<id64:13>","<id64:14>","<id64:15>","<id64:16>"],"request_id":"<id32:17>","schema_version":1}
@@ -54,8 +54,8 @@ $ [repo] alt rebase main --json
 exit 0
 out| {"command_output":{"encoding":"utf-8","text":"Current branch feat is up to date.\n","truncated":false},"operation_ids":[],"request_id":"<id32:48>","schema_version":1}
 $ [repo] alt rebase --abort --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"rebase --abort: no rebase in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:49>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"fatal: no rebase in progress\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"no rebase in progress","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:49>","retryable":false},"schema_version":1}
 $ [repo] alt undo --json
 exit 0
 out| {"operation_ids":["<id64:50>","<id64:51>","<id64:52>","<id64:53>","<id64:54>","<id64:55>"],"request_id":"<id32:56>","schema_version":1,"undone":true}

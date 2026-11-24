@@ -7,7 +7,7 @@ use crate::native::FastForward;
 #[derive(alt_args::Args)]
 pub struct CherryPick {
     /// Revision of the commit to apply
-    #[arg(required_unless_present_any = ["continue_pick", "abort_pick"], hint = "rev")]
+    #[arg(required_unless_present_any = ["continue_pick", "abort_pick", "skip_pick", "quit_pick"], hint = "rev")]
     pub rev: Option<String>,
     /// Commit the resolved cherry-pick
     #[arg(long = "continue", conflicts_with_all = ["rev", "abort_pick"])]
@@ -15,6 +15,12 @@ pub struct CherryPick {
     /// Put the index and the files back as they were before the cherry-pick
     #[arg(long = "abort", conflicts_with = "rev")]
     pub abort_pick: bool,
+    /// Give the stopped pick up and keep what else is in the files
+    #[arg(long = "skip", conflicts_with_all = ["rev", "continue_pick", "abort_pick"])]
+    pub skip_pick: bool,
+    /// Forget the stopped pick; the index and the files stay as they are
+    #[arg(long = "quit", conflicts_with_all = ["rev", "continue_pick", "abort_pick", "skip_pick"])]
+    pub quit_pick: bool,
     /// End the message with a line that names the commit picked
     #[arg(short = 'x', conflicts_with_all = ["continue_pick", "abort_pick"])]
     pub noted: bool,
@@ -24,13 +30,47 @@ pub struct CherryPick {
 }
 
 #[derive(alt_args::Args)]
+pub struct Revert {
+    /// Commits to revert, in order
+    #[arg(required_unless_present_any = ["cont", "abort", "skip_revert", "quit_revert"], hint = "rev")]
+    pub revs: Vec<String>,
+    /// For a merge commit, the parent (1-based) whose side is kept
+    #[arg(short = 'm', long = "mainline", hint = none)]
+    pub mainline: Option<usize>,
+    /// Commit the resolved revert and go on with the rest
+    #[arg(long = "continue", id = "cont", conflicts_with_all = ["revs", "abort", "mainline"])]
+    pub cont: bool,
+    /// Put the branch back where it was before the reverts
+    #[arg(long, conflicts_with_all = ["revs", "mainline"])]
+    pub abort: bool,
+    /// Leave the stopped revert out and go on with the rest
+    #[arg(long = "skip", conflicts_with_all = ["revs", "mainline", "cont", "abort"])]
+    pub skip_revert: bool,
+    /// Forget the sequence; the branch, the index and the files stay
+    #[arg(long = "quit", conflicts_with_all = ["revs", "mainline", "cont", "abort", "skip_revert"])]
+    pub quit_revert: bool,
+    /// Use the generated message (alt never opens an editor; accepted as in git)
+    #[arg(long)]
+    pub no_edit: bool,
+    /// Emit a structured JSON result instead of human lines.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(alt_args::Args)]
 pub struct Merge {
     /// Branch, or any other commit, to merge into the current branch
-    #[arg(required_unless_present = "abort_merge", hint = "branch")]
+    #[arg(required_unless_present_any = ["abort_merge", "continue_merge", "quit_merge"], hint = "branch")]
     pub branch: Option<String>,
     /// Put the index and the files back as they were before the merge
     #[arg(long = "abort", conflicts_with = "branch")]
     pub abort_merge: bool,
+    /// Commit the merge whose conflicts are resolved
+    #[arg(long = "continue", conflicts_with_all = ["branch", "abort_merge"])]
+    pub continue_merge: bool,
+    /// Forget the stopped merge; the index and the files stay as they are
+    #[arg(long = "quit", conflicts_with_all = ["branch", "abort_merge", "continue_merge"])]
+    pub quit_merge: bool,
     /// Record a merge commit even where the branch could be fast-forwarded
     #[arg(long = "no-ff", conflicts_with_all = ["ff_only", "abort_merge"])]
     pub no_ff: bool,

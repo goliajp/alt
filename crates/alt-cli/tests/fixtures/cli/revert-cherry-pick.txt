@@ -46,14 +46,14 @@ $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":["f.txt"],"operation":{"kind":"revert"},"clean":false}
 $ [repo] alt revert --continue --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"revert --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:29>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"error: Committing is not possible because you have unmerged files.\nhint: Fix them up in the work tree, and then use 'alt add/rm <file>'\nhint: as appropriate to mark resolution and make a commit.\nfatal: Exiting because of an unresolved conflict.\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"Committing is not possible because you have unmerged files.","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:29>","retryable":false},"schema_version":1}
 $ [repo] alt revert --abort --json
 exit 0
 out| {"command_output":{"encoding":"utf-8","text":"Revert aborted.\n","truncated":false},"operation_ids":["<id64:30>","<id64:31>","<id64:32>","<id64:33>","<id64:34>","<id64:35>"],"request_id":"<id32:36>","schema_version":1}
 $ [repo] alt revert --abort --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"revert --abort: no revert in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:37>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"error: no cherry-pick or revert in progress\nfatal: revert failed\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"no cherry-pick or revert in progress","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:37>","retryable":false},"schema_version":1}
 $ [repo] alt revert HEAD~2 --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:38>","<id64:39>","<id64:40>","<id64:41>","<id64:42>","<id64:43>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:43>","outcome":"partial","request_id":"<id32:44>","retryable":false},"schema_version":1}

@@ -2,7 +2,9 @@
 
 use super::*;
 
+mod entry;
 mod step;
+pub(super) use entry::{Entry, Sequence, Stands};
 pub(super) use step::{MarkSaid, STEP, STEP_MARK, Tracked, mark_said};
 
 /// What was begun in a workspace and waits to be finished.

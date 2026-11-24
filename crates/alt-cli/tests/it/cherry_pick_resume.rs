@@ -159,7 +159,7 @@ fn continue_is_refused_while_a_conflict_is_left_or_nothing_is_staged() {
     let said = output(&trees.at("direct"), &["cherry-pick", "--continue"], false);
     let said = String::from_utf8_lossy(&said.stderr).into_owned();
     assert!(
-        said.contains("cherry-pick --continue: resolve the conflicts and `alt add` them first"),
+        said.contains("error: Committing is not possible because you have unmerged files."),
         "{said}"
     );
     assert_eq!(operation(&trees), r#"{"kind":"cherry-pick"}"#);
@@ -243,8 +243,8 @@ fn without_a_pick_both_are_refused_as_those_of_a_revert_are() {
             let revert = output(&trees.at(tree), &["revert", flag], daemon);
             assert_eq!(pick.status.code(), revert.status.code(), "{tree} {flag}");
             let said = String::from_utf8_lossy(&pick.stderr).into_owned();
-            let wanted = format!("cherry-pick {flag}: no cherry-pick in progress");
-            assert!(said.contains(&wanted), "{said}");
+            let wanted = "error: no cherry-pick or revert in progress\nfatal: cherry-pick failed";
+            assert!(said.contains(wanted), "{said}");
         }
     }
     // a commit by hand concludes a pick: there is none to go on with

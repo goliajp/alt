@@ -248,7 +248,11 @@ fn abort_killed_before_its_state_file(
     assert_eq!(killed.status.code(), None, "{abort:?}");
     let again = alt(&repo, abort, None);
     assert!(!again.status.success(), "{abort:?} again");
-    assert!(said(&again).contains("in progress"), "{}", said(&again));
+    let none = said(&again);
+    assert!(
+        none.contains("in progress") || none.contains("no merge to abort"),
+        "{none}"
+    );
     assert_eq!(bench.shape(), clean, "{abort:?} killed and ended");
 }
 

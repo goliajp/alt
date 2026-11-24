@@ -5,6 +5,7 @@
 //! commit being merged in. The commit that concludes the merge removes
 //! it, and so does `alt merge --abort`.
 
+use super::in_progress::{Entry, Sequence, Stands};
 use super::*;
 
 impl NativeRepo<'_> {
@@ -60,12 +61,79 @@ impl NativeRepo<'_> {
         Err(format!("{verb}: {hint}").into())
     }
 
+    fn merge_message_path(&self) -> PathBuf {
+        self.index_path.with_file_name("MERGE_MSG")
+    }
+
+    /// Keeps the message the commit of the merge of `theirs` is to
+    /// have, for `alt merge --continue`.
+    pub(in crate::native) fn keep_merge_message(&self, theirs: ObjectId, message: &str) -> Res<()> {
+        let text = format!("{theirs}\n{message}");
+        Ok(crate::durable::write(
+            self.merge_message_path(),
+            text.as_bytes(),
+        )?)
+    }
+
+    /// The message kept for the merge of `theirs`; where an older alt
+    /// began the merge and kept none, git's for a commit without a name.
+    fn kept_merge_message(&self, theirs: ObjectId) -> Res<String> {
+        let kept = match std::fs::read_to_string(self.merge_message_path()) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e.into()),
+        };
+        let of = format!("{theirs}\n");
+        Ok(match kept.strip_prefix(&of) {
+            Some(message) => message.to_owned(),
+            None => format!("Merge commit '{theirs}'\n"),
+        })
+    }
+
+    fn merge_stands(&self) -> Res<(Stands, Option<ObjectId>)> {
+        let theirs = self.merge_head()?;
+        Ok(match theirs {
+            Some(_) => (Stands::Open, theirs),
+            None => (Stands::Nowhere, None),
+        })
+    }
+
+    /// `alt merge --continue`: the commit that concludes the merge, with
+    /// the message the merge would have given it.
+    pub fn merge_continue(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
+        let (stands, theirs) = self.merge_stands()?;
+        let entered = self.enter(Sequence::Merge, Entry::Continue, stands, out)?;
+        let (Some(_), Some(theirs)) = (entered, theirs) else {
+            return Ok(());
+        };
+        let message = self.kept_merge_message(theirs)?;
+        self.commit(&message, Default::default(), json, out)
+    }
+
+    /// `alt merge --quit`: the merge is forgotten; the index and the
+    /// files stay as they are.
+    pub fn merge_quit(&mut self, out: &mut impl Write) -> Res<()> {
+        let (stands, _) = self.merge_stands()?;
+        if self
+            .enter(Sequence::Merge, Entry::Quit, stands, out)?
+            .is_some()
+        {
+            self.finish_merge()?;
+            self.settle_state()?;
+        }
+        Ok(())
+    }
+
     /// `alt merge --abort`: the index and the files as they were before
     /// the merge, as git's `merge --abort` leaves them. The branch never
     /// moved.
     pub fn merge_abort(&mut self, out: &mut impl Write) -> Res<()> {
-        if self.merge_head()?.is_none() {
-            return Err("merge --abort: no merge in progress".into());
+        let (stands, _) = self.merge_stands()?;
+        if self
+            .enter(Sequence::Merge, Entry::Abort, stands, out)?
+            .is_none()
+        {
+            return Ok(());
         }
         let head = self
             .store

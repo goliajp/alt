@@ -63,6 +63,7 @@ impl NativeRepo<'_> {
                 Ok(false)
             }
             MergeOutcome::Conflicted(resolved) => {
+                self.keep_merge_message(theirs, &brought.message(&into))?;
                 self.start_merge(theirs)?;
                 self.write_conflicted(&resolved)?;
                 self.say_stopped(&resolved, json, out)?;

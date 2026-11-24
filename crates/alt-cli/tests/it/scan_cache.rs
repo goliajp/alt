@@ -369,12 +369,11 @@ fn an_undo_that_writes_back_an_edited_file_does_not_hide_the_edit() {
     cache_agrees(root, "after the undo");
 }
 
-/// `rebase --abort` never puts a file back that it did not plan from a
-/// tree: it checks out the branch as it was, and where the working tree
-/// already holds that content the file is left alone, so an edit made
-/// while it was stopped stays, through the `undo` of the abort as well.
+/// `rebase --abort` resets hard, as git's does: an edit made while the
+/// rebase was stopped is gone with it, in a file the branch has as the
+/// rebase had it too, and the `undo` of the abort brings the edit back.
 #[test]
-fn an_aborted_rebase_keeps_an_edit_and_so_does_its_undo() {
+fn an_aborted_rebase_takes_an_edit_away_and_its_undo_brings_it_back() {
     let dir = alt_os::temp::tempdir().unwrap();
     let root = dir.path();
     // stops in c.txt at the first commit replayed; r.txt is already r2
@@ -383,8 +382,12 @@ fn an_aborted_rebase_keeps_an_edit_and_so_does_its_undo() {
     write(root, "r.txt", "edited and not added\n");
     cache_agrees(root, "edited during the rebase");
     ok(alt(root, &["rebase", "--abort"]));
-    let edited = "On branch side\nChanges not staged for commit:\n\tmodified:   r.txt\n";
-    assert_eq!(status(root), edited);
+    let clean = "On branch side\nnothing to commit, working tree clean\n";
+    assert_eq!(status(root), clean);
+    assert_ne!(
+        std::fs::read_to_string(root.join("r.txt")).unwrap(),
+        "edited and not added\n"
+    );
     cache_agrees(root, "after the abort");
     ok(alt(root, &["undo"]));
     let edit = std::fs::read_to_string(root.join("r.txt")).unwrap();

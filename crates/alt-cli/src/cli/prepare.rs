@@ -9,7 +9,7 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 /// to: it makes several commits, or hands HEAD to a scratch ref.
 fn several_records(cmd: &Command) -> bool {
     match cmd {
-        Command::Revert { revs, .. } => revs.len() > 1,
+        Command::Revert { args } => args.revs.len() > 1,
         Command::Rebase(args) => args.upstream.is_some(),
         _ => false,
     }
@@ -37,7 +37,7 @@ fn gives_up(cmd: &Command) -> Option<(&'static str, &'static str)> {
         Command::CherryPick { args } if args.abort_pick => {
             Some(("CHERRY_PICK_HEAD", "Cherry-pick aborted."))
         }
-        Command::Revert { abort: true, .. } => Some(("REVERT_STATE", "Revert aborted.")),
+        Command::Revert { args } if args.abort => Some(("REVERT_STATE", "Revert aborted.")),
         Command::Rebase(args) if args.abort => Some(("REBASE_STATE", "Rebase aborted.")),
         _ => None,
     }
@@ -59,7 +59,7 @@ pub(super) fn prepare(repo: &mut NativeRepo, cmd: &Command) -> Res<Option<&'stat
         Switch(args) => !args.create || args.start.is_some(),
         // a sequence under way is ended or gone on with all the same
         Rebase(args) => args.upstream.is_some(),
-        Revert { revs, .. } => !revs.is_empty(),
+        Revert { args } => !args.revs.is_empty(),
         _ => matches!(cmd, Status { .. }),
     };
     if excludes {

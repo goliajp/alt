@@ -86,47 +86,10 @@ impl NativeRepo<'_> {
             ran: false,
             labels: Vec::new(),
             merging: None,
+            concluded: None,
         };
         self.save_rebase_state(&state)?;
         self.commit_refs_checkout("rebase", &moved, &old, &target)?;
-        self.run_rebase(state, json, out)
-    }
-
-    /// `alt rebase --continue`: commit the resolved step, then go on.
-    pub fn rebase_continue(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
-        let mut state = self
-            .rebase_state()?
-            .ok_or("rebase --continue: no rebase in progress")?;
-        self.committer()?;
-        if let Some((action, commit)) = state.current {
-            if !self.resolved_and_staged(json, out)? {
-                return Ok(true);
-            }
-            let head_tree = self.commit_tree(self.rebase_head()?)?;
-            let tree = self.staged_tree(Some(head_tree))?;
-            if tree == head_tree && !action.melds() {
-                return Err(
-                    "rebase --continue: no changes staged; if nothing is left of \
-                            this commit, run `alt rebase --skip`"
-                        .into(),
-                );
-            }
-            state.current = None;
-            self.save_rebase_state(&state)?;
-            self.apply_step(action, commit, tree, state.fresh_dates)?;
-        } else if let Some((commit, theirs)) = state.merging {
-            if !self.resolved_and_staged(json, out)? {
-                return Ok(true);
-            }
-            let head_tree = self.commit_tree(self.rebase_head()?)?;
-            let tree = self.staged_tree(Some(head_tree))?;
-            state.merging = None;
-            self.save_rebase_state(&state)?;
-            self.record_merge_again(commit, theirs, tree, state.fresh_dates)?;
-        } else if state.ran {
-            self.ensure_left_clean()?;
-        }
-        state.ran = false;
         self.run_rebase(state, json, out)
     }
 

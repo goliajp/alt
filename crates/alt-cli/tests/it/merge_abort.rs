@@ -175,7 +175,7 @@ fn abort_without_a_merge_is_refused_as_the_abort_of_a_revert_is() {
         assert_eq!(merge.status.code(), revert.status.code(), "{tree}");
         let said = String::from_utf8_lossy(&merge.stderr).into_owned();
         assert!(
-            said.contains("merge --abort: no merge in progress"),
+            said.contains("fatal: There is no merge to abort (MERGE_HEAD missing)."),
             "{said}"
         );
     }

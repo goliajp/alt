@@ -49,6 +49,29 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// git's `reset --hard` to `commit` with the ref changes `moved`, in
+    /// one ref transaction as `verb`: every file that is not as `commit`
+    /// has it is written, a change that is not staged with it.
+    pub(in crate::native) fn reset_hard_with(
+        &mut self,
+        commit: ObjectId,
+        verb: &str,
+        moved: &[RefChange],
+    ) -> Res<()> {
+        let entries = self.commit_entries(commit)?;
+        let wanted: std::collections::HashMap<&BString, &WorkEntry> =
+            entries.iter().map(|entry| (&entry.path, entry)).collect();
+        let mut edit = tree_edit::TreeEdit {
+            index: tree_edit::fresh(&entries),
+            files: Vec::new(),
+        };
+        for path in self.paths_off(&self.index()?, &entries)? {
+            edit.write(&path, wanted.get(&path).copied());
+        }
+        self.apply_edit(verb, moved, edit)?;
+        Ok(())
+    }
+
     /// git's `reset --merge` to `commit`, which a merge or a pick that is
     /// given up ends with: [`reset_worktree_to`](Self::reset_worktree_to),
     /// refused before anything is written where it would write over a

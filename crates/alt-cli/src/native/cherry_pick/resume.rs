@@ -1,6 +1,7 @@
 //! A cherry-pick that stopped on a conflict, gone on with or given up.
 
 use super::super::commit::NewCommit;
+use super::super::in_progress::{Entry, Sequence, Stands};
 use super::super::*;
 use super::{picked_identity, report_picked};
 
@@ -9,16 +10,16 @@ impl NativeRepo<'_> {
     /// itself would have, with the author and the message of the commit
     /// picked.
     pub fn cherry_pick_continue(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        let (picked, head) = self
-            .stopped_cherry_pick()?
-            .ok_or("cherry-pick --continue: no cherry-pick in progress")?;
+        // nobody to make the commit is told before what is left to resolve
+        let committer = match self.stopped_cherry_pick()? {
+            Some(_) => Some(self.committer()?),
+            None => None,
+        };
+        let entered = self.entered_pick(Entry::Continue, out)?;
+        let (Some((picked, head)), Some(committer)) = (entered, committer) else {
+            return Ok(());
+        };
         let noted = self.pick_noted()?;
-        let committer = self.committer()?;
-        if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-            return Err(
-                "cherry-pick --continue: resolve the conflicts and `alt add` them first".into(),
-            );
-        }
         let head_tree = self.commit_tree(head)?;
         let tree = self.staged_tree(Some(head_tree))?;
         if tree == head_tree {
@@ -75,13 +76,51 @@ impl NativeRepo<'_> {
     /// before the pick, as git's `cherry-pick --abort` leaves them. The
     /// branch never moved.
     pub fn cherry_pick_abort(&mut self, out: &mut impl Write) -> Res<()> {
-        let (_, head) = self
-            .stopped_cherry_pick()?
-            .ok_or("cherry-pick --abort: no cherry-pick in progress")?;
+        let Some((_, head)) = self.entered_pick(Entry::Abort, out)? else {
+            return Ok(());
+        };
         self.clear_cherry_pick()?;
         self.reset_merge(head, "cherry-pick --abort", &[])?;
         self.settle_state()?;
         writeln!(out, "Cherry-pick aborted.")?;
         Ok(())
+    }
+
+    /// `alt cherry-pick --skip`: the pick that stopped is not made; the
+    /// index and the files go back to the commit the branch is at, as by
+    /// git's `reset --merge`.
+    pub fn cherry_pick_skip(&mut self, out: &mut impl Write) -> Res<()> {
+        let Some((_, head)) = self.entered_pick(Entry::Skip, out)? else {
+            return Ok(());
+        };
+        self.clear_cherry_pick()?;
+        self.reset_merge(head, "cherry-pick --skip", &[])?;
+        self.settle_state()
+    }
+
+    /// `alt cherry-pick --quit`: the pick is forgotten; the index and
+    /// the files stay as they are.
+    pub fn cherry_pick_quit(&mut self, out: &mut impl Write) -> Res<()> {
+        if self.entered_pick(Entry::Quit, out)?.is_some() {
+            self.clear_cherry_pick()?;
+            self.settle_state()?;
+        }
+        Ok(())
+    }
+
+    /// The pick that stopped, the commit picked and the commit HEAD is
+    /// at, once `entry` may go back into it.
+    fn entered_pick(
+        &self,
+        entry: Entry,
+        out: &mut impl Write,
+    ) -> Res<Option<(ObjectId, ObjectId)>> {
+        let stopped = self.stopped_cherry_pick()?;
+        let stands = match stopped {
+            Some(_) => Stands::Open,
+            None => Stands::Nowhere,
+        };
+        let entered = self.enter(Sequence::CherryPick, entry, stands, out)?;
+        Ok(entered.and(stopped))
     }
 }

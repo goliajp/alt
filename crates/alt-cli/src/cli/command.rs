@@ -153,24 +153,8 @@ pub enum Command {
     Rebase(crate::commit_args::Rebase),
     /// Record new commits that undo earlier ones
     Revert {
-        /// Commits to revert, in order
-        #[arg(required_unless_present_any = ["cont", "abort"], hint = "rev")]
-        revs: Vec<String>,
-        /// For a merge commit, the parent (1-based) whose side is kept
-        #[arg(short = 'm', long = "mainline", hint = none)]
-        mainline: Option<usize>,
-        /// Commit the resolved revert and go on with the rest
-        #[arg(long = "continue", id = "cont", conflicts_with_all = ["revs", "abort", "mainline"])]
-        cont: bool,
-        /// Put the branch back where it was before the reverts
-        #[arg(long, conflicts_with_all = ["revs", "mainline"])]
-        abort: bool,
-        /// Use the generated message (alt never opens an editor; accepted as in git)
-        #[arg(long)]
-        no_edit: bool,
-        /// Emit a structured JSON result instead of human lines.
-        #[arg(long)]
-        json: bool,
+        #[command(flatten)]
+        args: sequence_args::Revert,
     },
     /// Apply the changes from a commit on top of the current branch
     CherryPick {

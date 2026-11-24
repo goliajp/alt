@@ -23,14 +23,14 @@ exit 0
 $ [repo] alt commit -m main: change line two
 exit 0
 $ [repo] alt cherry-pick --continue --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --continue: no cherry-pick in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:0>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"error: no cherry-pick or revert in progress\nfatal: cherry-pick failed\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"no cherry-pick or revert in progress","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:0>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick feat~1 --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:1>","<id64:2>","<id64:3>","<id64:4>","<id64:5>","<id64:6>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:6>","outcome":"partial","request_id":"<id32:7>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick --continue --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --continue: resolve the conflicts and `alt add` them first","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:8>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"error: Committing is not possible because you have unmerged files.\nhint: Fix them up in the work tree, and then use 'alt add/rm <file>'\nhint: as appropriate to mark resolution and make a commit.\nfatal: Exiting because of an unresolved conflict.\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"Committing is not possible because you have unmerged files.","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:8>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick --abort --json
 exit 0
 out| {"command_output":{"encoding":"utf-8","text":"Cherry-pick aborted.\n","truncated":false},"operation_ids":["<id64:9>","<id64:10>","<id64:11>","<id64:12>","<id64:13>","<id64:14>"],"request_id":"<id32:15>","schema_version":1}
@@ -38,8 +38,8 @@ $ [repo] alt status --json
 exit 0
 out| {"schema_version":2,"branch":"main","principal":{"kind":"human","id":"json-test","session":null},"staged":[],"unstaged":[],"untracked":[],"unmerged":[],"operation":null,"clean":true}
 $ [repo] alt cherry-pick --abort --json
-exit 75
-err| {"error":{"details":{"operation_ids":[]},"kind":"result_unknown","message":"cherry-pick --abort: no cherry-pick in progress","next_action":"Query the request and its operations before attempting another write","operation_id":null,"outcome":"unknown","request_id":"<id32:16>","retryable":false},"schema_version":1}
+exit 128
+err| {"error":{"details":{"diagnostics":{"encoding":"utf-8","text":"error: no cherry-pick or revert in progress\nfatal: cherry-pick failed\n","truncated":false},"operation_ids":[]},"kind":"refused_as_said","message":"no cherry-pick or revert in progress","next_action":"Inspect the reported condition before submitting a new request","operation_id":null,"outcome":"not_applied","request_id":"<id32:16>","retryable":false},"schema_version":1}
 $ [repo] alt cherry-pick feat~1 --json
 exit 1
 err| {"error":{"details":{"command_output":{"encoding":"utf-8","text":"{\"schema_version\":1,\"result\":\"conflicted\",\"commit\":null,\"conflicts\":[\"f.txt\"]}\n","truncated":false},"operation_ids":["<id64:17>","<id64:18>","<id64:19>","<id64:20>","<id64:21>","<id64:22>"]},"kind":"conflict","message":"command reported a conflict or failed validation","next_action":"Inspect the reported condition before submitting a new request","operation_id":"<id64:22>","outcome":"partial","request_id":"<id32:23>","retryable":false},"schema_version":1}

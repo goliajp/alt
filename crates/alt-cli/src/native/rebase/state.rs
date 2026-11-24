@@ -28,6 +28,9 @@ pub(in crate::native) struct RebaseState {
     /// The merge commit being made again that stopped on a conflict,
     /// and the commit it brings in.
     pub(in crate::native) merging: Option<(ObjectId, ObjectId)>,
+    /// The step that stopped and was concluded by a commit of the user:
+    /// what is staged when the rebase goes on is committed as it.
+    pub(in crate::native) concluded: Option<(Action, ObjectId)>,
 }
 
 impl RebaseState {
@@ -42,6 +45,9 @@ impl RebaseState {
         }
         if let Some((a, c)) = self.current {
             text.push_str(&format!("current {} {c}\n", a.word()));
+        }
+        if let Some((a, c)) = self.concluded {
+            text.push_str(&format!("done {} {c}\n", a.word()));
         }
         if self.fresh_dates {
             text.push_str("dates fresh\n");
@@ -121,7 +127,7 @@ impl NativeRepo<'_> {
         let (mut branch, mut orig, mut onto, mut current) = (None, None, None, None);
         let mut todo = Vec::new();
         let (mut recovery, mut fresh_dates, mut ran) = (None, false, false);
-        let (mut labels, mut merging) = (Vec::new(), None);
+        let (mut labels, mut merging, mut concluded) = (Vec::new(), None, None);
         for line in text.lines() {
             let (key, value) = line.split_once(' ').ok_or_else(corrupt)?;
             match key {
@@ -130,6 +136,7 @@ impl NativeRepo<'_> {
                 "orig" => orig = Some(oid(value)?),
                 "onto" => onto = Some(oid(value)?),
                 "current" => current = Some(parse_step_line(value, &oid)?),
+                "done" => concluded = Some(parse_step_line(value, &oid)?),
                 "dates" => fresh_dates = true,
                 "ran" => ran = true,
                 "label" => {
@@ -155,6 +162,7 @@ impl NativeRepo<'_> {
             ran,
             labels,
             merging,
+            concluded,
         }))
     }
 
@@ -171,7 +179,7 @@ impl NativeRepo<'_> {
     /// `alt rebase --continue` then goes on with the rest.
     pub(in crate::native) fn rebase_committed(&self) -> Res<()> {
         if let Some(mut state) = self.rebase_state()? {
-            state.current = None;
+            state.concluded = state.current.take().or(state.concluded);
             self.save_rebase_state(&state)?;
         }
         Ok(())

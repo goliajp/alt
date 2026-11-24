@@ -258,6 +258,7 @@ mod precompose;
 #[cfg(debug_assertions)]
 mod recover_shared_refs;
 mod recovery_kinds;
+mod sequence_entries;
 mod sequence_resumed;
 mod stack_overflow;
 mod value_hints;

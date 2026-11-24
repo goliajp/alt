@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::super::in_progress::{Entry, Sequence, Stands};
 use super::super::merge::Resolved;
 use super::super::*;
 use super::RevertState;
@@ -60,19 +61,29 @@ impl NativeRepo<'_> {
         }))
     }
 
+    /// Where the revert sequence stands, with what it remembers.
+    fn revert_stands(&self) -> Res<(Stands, Option<RevertState>)> {
+        let state = self.revert_state()?;
+        let stands = match &state {
+            None => Stands::Nowhere,
+            Some(state) if state.current.is_some() => Stands::Open,
+            Some(_) => Stands::Concluded,
+        };
+        Ok((stands, state))
+    }
+
     /// `alt revert --continue`: commit the resolved revert, then go on with
     /// the rest of the sequence.
     pub fn revert_continue(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
-        let state = self
-            .revert_state()?
-            .ok_or("revert --continue: no revert in progress")?;
-        self.ensure_signing()?;
+        let (stands, state) = self.revert_stands()?;
+        if state.is_some() {
+            self.ensure_signing()?;
+        }
+        let waiting = self.enter(Sequence::Revert, Entry::Continue, stands, out)?;
+        let (Some(waiting), Some(state)) = (waiting, state) else {
+            return Ok(false);
+        };
         if let Some(current) = state.current {
-            if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-                return Err(
-                    "revert --continue: resolve the conflicts and `alt add` them first".into(),
-                );
-            }
             let head = self.branch_tip("revert --continue")?;
             let head_tree = self.commit_tree(head)?;
             let tree = self.staged_tree(Some(head_tree))?;
@@ -87,20 +98,63 @@ impl NativeRepo<'_> {
             let commit = self.commit_revert(head, tree, &msg)?;
             self.report_revert(commit, &msg, json, out)?;
         }
+        let dirty = &waiting.unstaged;
+        self.run_reverts(state.todo, state.mainline, state.orig, dirty, json, out)
+    }
+
+    /// `alt revert --skip`: the revert that stopped is not made; the
+    /// index and the files go back to the commit the branch is at, as by
+    /// git's `reset --merge`, and the rest of the sequence goes on.
+    pub fn revert_skip(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
+        let (stands, state) = self.revert_stands()?;
+        if state.is_some() {
+            self.ensure_signing()?;
+        }
+        let waiting = self.enter(Sequence::Revert, Entry::Skip, stands, out)?;
+        let (Some(_), Some(state)) = (waiting, state) else {
+            return Ok(false);
+        };
+        let head = self.branch_tip("revert --skip")?;
+        let rest = RevertState {
+            current: None,
+            todo: state.todo.clone(),
+            ..state
+        };
+        self.save_revert_state(&rest)?;
+        self.reset_merge(head, "revert --skip", &[])?;
+        self.settle_state()?;
         let dirty = self.unstaged()?;
-        self.run_reverts(state.todo, state.mainline, state.orig, &dirty, json, out)
+        self.run_reverts(rest.todo, rest.mainline, rest.orig, &dirty, json, out)
+    }
+
+    /// `alt revert --quit`: the sequence is forgotten; the branch, the
+    /// index and the files stay as they are.
+    pub fn revert_quit(&mut self, out: &mut impl Write) -> Res<()> {
+        let (stands, _) = self.revert_stands()?;
+        if self
+            .enter(Sequence::Revert, Entry::Quit, stands, out)?
+            .is_some()
+        {
+            self.clear_revert_state()?;
+            self.settle_state()?;
+        }
+        Ok(())
     }
 
     /// `alt revert --abort`: put the branch, index and working tree back to
     /// where they were before the sequence started. A branch that was
-    /// moved since the sequence stopped is left where it is.
+    /// moved since the sequence last stopped is left where it is.
     pub fn revert_abort(&mut self, out: &mut impl Write) -> Res<()> {
-        let state = self
-            .revert_state()?
-            .ok_or("revert --abort: no revert in progress")?;
+        let (stands, state) = self.revert_stands()?;
+        let waiting = self.enter(Sequence::Revert, Entry::Abort, stands, out)?;
+        let (Some(_), Some(state)) = (waiting, state) else {
+            return Ok(());
+        };
         let branch = self.head_branch()?;
         let head = self.branch_tip("revert --abort")?;
-        if head != state.orig && !self.left_by_revert(&branch, head)? {
+        // a revert that waits for its commit stopped with the branch here
+        let left = state.current.is_some() || self.left_by_revert(&branch, head)?;
+        if head != state.orig && !left {
             // as git: the branch is the user's by now, and so is the tree
             self.clear_revert_state()?;
             self.settle_state()?;

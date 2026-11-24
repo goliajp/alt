@@ -182,26 +182,7 @@ fn run_sequence<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> 
             Ok(0)
         }
         Command::Rebase(args) => sequence::rebase(repo, args, out),
-        Command::Revert {
-            revs,
-            mainline,
-            cont,
-            abort,
-            json,
-            ..
-        } => {
-            if *abort {
-                repo.revert_abort(out)?;
-                return Ok(0);
-            }
-            let stopped = if *cont {
-                repo.revert_continue(*json, out)?
-            } else {
-                repo.revert(revs, *mainline, *json, out)?
-            };
-            // git exits 1 when a revert stops in conflict
-            Ok(if stopped { 1 } else { 0 })
-        }
+        Command::Revert { args } => sequence::revert(repo, args, out),
         Command::CherryPick { args } => sequence::cherry_pick(repo, args, out),
         Command::Merge { args } => sequence::merge(repo, args, out),
         _ => Err("not a native command".into()),

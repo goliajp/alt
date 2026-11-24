@@ -1,56 +1,92 @@
-//! Leaving a step a rebase stopped at: without it, or without the rebase.
+//! Going back into a rebase that stopped: on with it, without the step
+//! it stopped at, or out of it.
 
-use std::collections::HashSet;
-
+use super::super::in_progress::{Entry, Sequence, Stands};
+use super::super::sequence_editor::Action;
 use super::super::*;
+use super::RebaseState;
 
 impl NativeRepo<'_> {
-    /// Before `alt rebase --continue` commits a step that stopped on a
-    /// conflict: every conflict is resolved. Whether it goes on: as git
-    /// has it, not while a tracked file holds a change that is not
-    /// staged, which is said as git says it.
-    pub(super) fn resolved_and_staged(&self, json: bool, out: &mut impl Write) -> Res<bool> {
-        if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-            return Err("rebase --continue: resolve the conflicts and `alt add` them first".into());
+    /// The rebase under way with what it remembers, once `entry` may go
+    /// back into it; `None` where it has said why it may not.
+    fn entered_rebase(
+        &self,
+        entry: Entry,
+        out: &mut impl Write,
+    ) -> Res<Option<(RebaseState, bool)>> {
+        let state = self.rebase_state()?;
+        let stands = match &state {
+            None => Stands::Nowhere,
+            Some(state) if state.current.is_some() || state.merging.is_some() => Stands::Open,
+            Some(_) => Stands::Concluded,
+        };
+        let waiting = self.enter(Sequence::Rebase, entry, stands, out)?;
+        Ok(waiting.zip(state).map(|(w, state)| (state, w.staged)))
+    }
+
+    /// `alt rebase --continue`: commit the resolved step, then go on.
+    /// What was staged after a commit of the user concluded the step is
+    /// committed as git commits it: as the step again.
+    pub fn rebase_continue(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
+        if let Some(state) = self.rebase_state()? {
+            self.committer()?;
+            // stopped for a shell command: what it left is said of it
+            if state.ran {
+                self.ensure_left_clean()?;
+            }
         }
-        if self.unstaged()?.is_empty() {
+        let Some((mut state, staged)) = self.entered_rebase(Entry::Continue, out)? else {
             return Ok(true);
+        };
+        let head_tree = self.commit_tree(self.rebase_head()?)?;
+        if let Some((action, commit)) = state.current {
+            let tree = self.staged_tree(Some(head_tree))?;
+            if tree == head_tree && !action.melds() {
+                return Err(
+                    "rebase --continue: no changes staged; if nothing is left of \
+                            this commit, run `alt rebase --skip`"
+                        .into(),
+                );
+            }
+            state.current = None;
+            self.save_rebase_state(&state)?;
+            self.apply_step(action, commit, tree, state.fresh_dates)?;
+        } else if let Some((commit, theirs)) = state.merging {
+            let tree = self.staged_tree(Some(head_tree))?;
+            state.merging = None;
+            self.save_rebase_state(&state)?;
+            self.record_merge_again(commit, theirs, tree, state.fresh_dates)?;
+        } else if let Some((_, commit)) = state.concluded
+            && staged
+        {
+            let tree = self.staged_tree(Some(head_tree))?;
+            state.concluded = None;
+            self.save_rebase_state(&state)?;
+            self.apply_step(Action::Pick, commit, tree, state.fresh_dates)?;
         }
-        let said =
-            "You must edit all merge conflicts and then\nmark them as resolved using git add";
-        if json {
-            return Err(crate::machine::Failure::refusal("precondition_failed", said).into());
+        // what a step that follows stages is not taken for what was
+        // staged after the commit of the user, should it be cut short
+        if state.concluded.take().is_some() {
+            self.save_rebase_state(&state)?;
         }
-        writeln!(out, "{said}")?;
-        Ok(false)
+        state.ran = false;
+        self.run_rebase(state, json, out)
     }
 
     /// `alt rebase --skip`: drop the stopped step and go on. Git resets
-    /// hard here and loses what is not staged; the steps that follow may
-    /// write any file, so a change that is not staged, in a file that is
-    /// not in conflict, refuses the skip.
+    /// hard here and loses what is not staged; alt refuses where a file
+    /// that is not in conflict holds such a change.
     pub fn rebase_skip(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
-        let mut state = self
-            .rebase_state()?
-            .ok_or("rebase --skip: no rebase in progress")?;
         // the steps that follow are committed by whoever skips this one
-        self.committer()?;
-        let index = self.index()?;
-        let conflicted = index.entries.iter().filter(|e| e.stage() > 0);
-        let conflicted: HashSet<&BString> = conflicted.map(|e| &e.path).collect();
-        let unstaged = self.unstaged()?;
-        if let Some(path) = unstaged.iter().filter(|p| !conflicted.contains(p)).min() {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!(
-                    "rebase --skip: '{path}' has changes that are not staged, and the steps \
-                     that follow may write over them; stage them or take them back first"
-                ),
-            )
-            .into());
+        if self.rebase_in_progress() {
+            self.committer()?;
         }
+        let Some((mut state, _)) = self.entered_rebase(Entry::Skip, out)? else {
+            return Ok(true);
+        };
         let head = self.rebase_head()?;
         (state.current, state.merging, state.ran) = (None, None, false);
+        state.concluded = None;
         self.save_rebase_state(&state)?;
         self.reset_worktree_to(head)?;
         self.settle_state()?;
@@ -58,14 +94,13 @@ impl NativeRepo<'_> {
     }
 
     /// `alt rebase --abort`: back to the branch as it was; the branch never
-    /// moved, so only HEAD, the index and the working tree change. A
-    /// file that is written loses a change that is not staged, as by the
-    /// hard reset of git, and an undo brings it back; one that is not
-    /// written keeps it.
+    /// moved, so only HEAD, the index and the working tree change, as by
+    /// the hard reset of git: a change that is not committed is gone,
+    /// staged or not, and an undo brings it back.
     pub fn rebase_abort(&mut self, out: &mut impl Write) -> Res<()> {
-        let state = self
-            .rebase_state()?
-            .ok_or("rebase --abort: no rebase in progress")?;
+        let Some((state, _)) = self.entered_rebase(Entry::Abort, out)? else {
+            return Ok(());
+        };
         self.clear_rebase_state()?;
         // HEAD is on the branch already where an older alt was cut short
         // between leaving the scratch ref and removing the state
@@ -73,9 +108,32 @@ impl NativeRepo<'_> {
             true => self.scratch_left(&state.branch, None)?,
             false => Vec::new(),
         };
-        self.reset_with(state.orig, "rebase", &moved)?;
+        self.reset_hard_with(state.orig, "rebase", &moved)?;
         self.settle_state()?;
         writeln!(out, "Rebase aborted.")?;
+        Ok(())
+    }
+
+    /// `alt rebase --quit`: the rebase is forgotten, with the index and
+    /// the files as they are. Git leaves HEAD at the commits made so
+    /// far, on no branch; a store has no such HEAD, so HEAD goes back to
+    /// the branch, which never moved, and the commits made are named.
+    pub fn rebase_quit(&mut self, out: &mut impl Write) -> Res<()> {
+        let Some((state, _)) = self.entered_rebase(Entry::Quit, out)? else {
+            return Ok(());
+        };
+        let made = self.rebase_head()?;
+        let moved = self.scratch_left(&state.branch, None)?;
+        self.clear_rebase_state()?;
+        self.commit_refs("rebase", &moved)?;
+        let branch = &state.branch;
+        let short = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+        writeln!(
+            out,
+            "The rebase is forgotten: HEAD is back on {short}, which did not move, and the \
+             index and the files are as the rebase left them.\nThe commits it made end at \
+             {made}; `alt branch <name> {made}` keeps them on a branch."
+        )?;
         Ok(())
     }
 }

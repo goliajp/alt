@@ -11,9 +11,15 @@ mod resume;
 mod state;
 pub(super) use state::RevertState;
 
+fn rest_of(todo: &[ObjectId], from: usize) -> Vec<ObjectId> {
+    todo[from..].to_vec()
+}
+
 enum Reverted {
     Committed(ObjectId),
     Conflicted(Vec<BString>),
+    /// it would write over a change that is not staged
+    Refused(Box<dyn std::error::Error>),
 }
 
 impl NativeRepo<'_> {
@@ -54,12 +60,13 @@ impl NativeRepo<'_> {
     ) -> Res<bool> {
         for (i, &target) in todo.iter().enumerate() {
             // what waits once this one is committed, or stopped at
-            let rest = RevertState {
+            let left = || RevertState {
                 current: None,
-                todo: todo[i + 1..].to_vec(),
+                todo: rest_of(&todo, i + 1),
                 mainline,
                 orig,
             };
+            let (rest, left) = (left(), left());
             match self.revert_one(target, rest, dirty)? {
                 Reverted::Committed(commit) => {
                     let msg = self.revert_message(target, mainline)?;
@@ -78,6 +85,13 @@ impl NativeRepo<'_> {
                         )?;
                     }
                     return Ok(true);
+                }
+                Reverted::Refused(why) => {
+                    // as git: the revert refused is not come back to
+                    let todo = rest_of(&todo, i + 1);
+                    self.save_revert_state(&RevertState { todo, ..left })?;
+                    self.settle_state()?;
+                    return Err(why);
                 }
             }
         }
@@ -109,7 +123,9 @@ impl NativeRepo<'_> {
         let subject = self.subject_of(target)?;
         let label = format!("parent of {} ({subject})", &target.to_string()[..7]);
         let resolved = self.merge_trees(&base, &ours, &theirs, &label)?;
-        resume::ensure_none_overwritten(&ours, &resolved, dirty, "revert")?;
+        if let Err(why) = resume::ensure_none_overwritten(&ours, &resolved, dirty, "revert") {
+            return Ok(Reverted::Refused(why));
+        }
         self.store.odb.flush()?;
         if resolved.iter().any(|r| r.conflicted) {
             let current = Some(target);

@@ -282,7 +282,10 @@ fn a_command_that_fails_stops_the_rebase_where_it_can_go_on() {
     // a command that leaves a change to a tracked file stops it too
     let (a, g) = pair.run(&["rebase", "main", "-x", "echo x >>a"]);
     let said = fails(a, 1);
-    assert!(said.contains("error: execution succeeded: echo x >>a\nbut left changes to"));
+    assert!(
+        said.contains("error: execution succeeded: echo x >>a\nbut left changes to"),
+        "{said}"
+    );
     assert!(fails(g, 1).contains("execution succeeded: echo x >>a\nbut left changes to"));
     for root in [&pair.alt, &pair.git] {
         std::fs::write(root.join("a"), "a\n").unwrap();

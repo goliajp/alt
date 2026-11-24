@@ -51,6 +51,13 @@ const LATER: &[&str] = &[
     "create_over",
     "tag_made",
     "no_tag",
+    "skip_pick",
+    "quit_pick",
+    "continue_merge",
+    "quit_merge",
+    "quit_rebase",
+    "skip_revert",
+    "quit_revert",
 ];
 
 /// The argument values a durable request is bound to. Stored bindings are

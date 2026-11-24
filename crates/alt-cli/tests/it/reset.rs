@@ -152,8 +152,8 @@ fn a_reset_gives_up_the_merge_that_stopped() {
         "Unstaged changes after reset:\nM\ta\n"
     );
     pair.assert_same_state();
-    let none = fails(alt(&pair.alt, &["merge", "--abort"]), 75);
-    assert!(none.contains("no merge in progress"), "{none}");
+    let none = pair.same_failure(&["merge", "--abort"], 128);
+    assert!(none.contains("There is no merge to abort"), "{none}");
 
     let pair = conflicted();
     pair.same(&["reset", "--hard"]);

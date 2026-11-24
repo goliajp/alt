@@ -1807,6 +1807,7 @@ Options:
       --continue               Commit the resolved step and go on
       --skip                   Drop the stopped step and go on
       --abort                  Put the branch back as it was before the rebase
+      --quit                   Forget the rebase: HEAD goes back to the branch, which did not move; the index and the files stay as they are
   -x, --exec <COMMAND>         Run a shell command after each commit replayed; the rebase stops where one fails
   -r, --rebase-merges          Replay the merge commits too, each made again of the commits replayed, instead of leaving them out
       --reset-author-date      Give each commit replayed the moment of the rebase as its author's date
@@ -1826,6 +1827,8 @@ Options:
   -m, --mainline <MAINLINE>    For a merge commit, the parent (1-based) whose side is kept
       --continue               Commit the resolved revert and go on with the rest
       --abort                  Put the branch back where it was before the reverts
+      --skip                   Leave the stopped revert out and go on with the rest
+      --quit                   Forget the sequence; the branch, the index and the files stay
       --no-edit                Use the generated message (alt never opens an editor; accepted as in git)
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
@@ -1842,6 +1845,8 @@ Arguments:
 Options:
       --continue               Commit the resolved cherry-pick
       --abort                  Put the index and the files back as they were before the cherry-pick
+      --skip                   Give the stopped pick up and keep what else is in the files
+      --quit                   Forget the stopped pick; the index and the files stay as they are
   -x                           End the message with a line that names the commit picked
       --json                   Emit a structured JSON result instead of human lines
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
@@ -1908,6 +1913,8 @@ Arguments:
 
 Options:
       --abort                  Put the index and the files back as they were before the merge
+      --continue               Commit the merge whose conflicts are resolved
+      --quit                   Forget the stopped merge; the index and the files stay as they are
       --no-ff                  Record a merge commit even where the branch could be fast-forwarded
       --ff-only                Fast-forward or change nothing: refuse a merge that needs a commit
       --no-edit                Take the message of the merge commit as it is (alt never opens an editor, so this is already the default; accepted as in git)

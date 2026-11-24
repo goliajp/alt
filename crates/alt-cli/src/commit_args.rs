@@ -55,7 +55,7 @@ pub struct Commit {
 #[derive(alt_args::Args)]
 pub struct Rebase {
     /// The base to replay onto
-    #[arg(required_unless_present_any = ["cont", "skip", "abort"], hint = "rev")]
+    #[arg(required_unless_present_any = ["cont", "skip", "abort", "quit_rebase"], hint = "rev")]
     pub upstream: Option<String>,
     /// Edit the list of commits first (pick, reword, squash, fixup,
     /// drop) in $GIT_SEQUENCE_EDITOR, $GIT_EDITOR, $VISUAL or $EDITOR
@@ -70,6 +70,10 @@ pub struct Rebase {
     /// Put the branch back as it was before the rebase
     #[arg(long, conflicts_with = "upstream")]
     pub abort: bool,
+    /// Forget the rebase: HEAD goes back to the branch, which did not
+    /// move; the index and the files stay as they are
+    #[arg(long = "quit", conflicts_with_all = ["upstream", "cont", "skip", "abort"])]
+    pub quit_rebase: bool,
     /// Run a shell command after each commit replayed; the rebase stops
     /// where one fails
     #[arg(short = 'x', long = "exec", value_name = "COMMAND", requires = "upstream", hint = none)]

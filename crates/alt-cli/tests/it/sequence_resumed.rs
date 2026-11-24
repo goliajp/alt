@@ -120,14 +120,17 @@ fn a_revert_gone_on_with_writes_over_no_change_that_is_not_staged() {
     );
     // the one that was resolved is committed, and the other waits
     same(&pair);
-    // git, asked to go on once more, ends the sequence without the
-    // revert that waited; here it is made
+    // asked to go on once more, both end the sequence without the
+    // revert that was refused
     ok(alt(&pair.alt, &["restore", "other"]));
-    ok(alone(&pair, &["revert", "--continue"]));
+    ok(crate::like_git::git(&pair.git, &["checkout", "other"]));
+    both(&pair, &["revert", "--continue"]);
+    same(&pair);
     assert_eq!(
         std::fs::read_to_string(pair.alt.join("other")).unwrap(),
-        "base\n"
+        "B\n"
     );
+    assert!(!pair.alt.join(".alt/REVERT_STATE").exists());
     let said = ok(alt(&pair.alt, &["status"]));
     assert!(
         said.contains("nothing to commit, working tree clean"),
@@ -242,18 +245,21 @@ fn a_rebase_gone_on_with_or_left_treats_what_is_not_staged_as_git_does() {
         assert_eq!(skipped.status.code(), Some(1), "{changed}");
         same_tree(&pair);
     }
-    // given up: git resets hard. Here a change stays where the file is
-    // as the branch has it
+    // given up: a hard reset, as by git, and an undo brings the change
+    // back with the rebase
     let pair = with_side();
     both(&pair, &["switch", "main"]);
     stops(&pair, &["rebase", "side"]);
     pair.write("third", "mine\n");
     both(&pair, &["rebase", "--abort"]);
+    same(&pair);
+    ok(alt(&pair.alt, &["undo"]));
     assert_eq!(
         std::fs::read_to_string(pair.alt.join("third")).unwrap(),
         "mine\n"
     );
-    ok(alt(&pair.alt, &["restore", "third"]));
+    assert!(pair.alt.join(".alt/REBASE_STATE").exists());
+    ok(alt(&pair.alt, &["rebase", "--abort"]));
     same(&pair);
     // where the file is written the change goes, as with git, and an
     // undo of the abort has it again
