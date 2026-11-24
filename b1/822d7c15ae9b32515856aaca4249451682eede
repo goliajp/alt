@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the actions of the operator command line are told in a file of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/action.rs
+touched: crates/alt-server/src/main.rs
