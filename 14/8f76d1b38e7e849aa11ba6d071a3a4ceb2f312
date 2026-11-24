@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: say of a file in the way that it is another tracked path's where it is, and not that it is untracked
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/merge/write.rs
+touched: crates/alt-cli/src/native/stash/apply.rs
+touched: crates/alt-cli/src/native/switch.rs
+touched: crates/alt-cli/tests/it/casefold.rs
