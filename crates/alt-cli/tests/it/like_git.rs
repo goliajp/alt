@@ -92,7 +92,16 @@ pub struct Pair {
 
 impl Pair {
     pub fn new() -> Self {
-        let dir = alt_os::temp::tempdir().unwrap();
+        Self::in_directory(alt_os::temp::tempdir().unwrap())
+    }
+
+    /// The pair in a directory made in `place`, for the file system
+    /// `place` is on.
+    pub fn new_in(place: &Path) -> Self {
+        Self::in_directory(alt_os::temp::tempdir_in(place).unwrap())
+    }
+
+    fn in_directory(dir: alt_os::temp::TempDir) -> Self {
         let (a, g) = (dir.path().join("alt"), dir.path().join("git"));
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&g).unwrap();

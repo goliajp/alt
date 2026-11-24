@@ -32,6 +32,7 @@ mod branch_start;
 mod branch_switch;
 mod byte_names;
 mod capability_gate;
+mod casefold;
 mod charset;
 mod cherry_pick;
 mod cherry_pick_resume;
