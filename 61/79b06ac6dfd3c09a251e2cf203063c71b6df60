@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the second body of an account is turned away for what it says it has, which nothing races
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections/caller_bytes.rs
