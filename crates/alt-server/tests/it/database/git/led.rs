@@ -105,3 +105,117 @@ fn a_push_refers_to_what_the_refs_lead_to_or_carries_it() {
     let had = text(ok(&cloned, &f.token, &["rev-parse", "origin/again"]));
     assert_eq!(had, gone);
 }
+
+/// Once a branch was deleted, each push is held against what the refs lead to.
+/// That is found from nothing once, and from then on from what was found for
+/// the refs before: a push, a branch that is deleted while another leads to
+/// its commit, and refs forced onto a commit above one that was led to all
+/// read the trees that are new and no others. Refs forced onto a history of
+/// its own are walked from nothing, and a walk that runs out of steps leaves
+/// what it came to for the next. Where the refs are found to lead to every
+/// object there is, the repository is asked this no more.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn what_the_refs_lead_to_is_found_from_what_they_led_to_before() {
+    use alt_server_store::Error::Limit;
+    use std::sync::Arc;
+    let mut f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let work = temp.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let work = work.as_path();
+    let url = format!("{}/git/repository", server.url);
+    let token = f.token.clone();
+    let git = |args: &[&str]| text(ok(work, &token, args));
+    git(&["init", "-q", "--initial-branch=main"]);
+    identity(work, &token);
+    // three directories, of which a commit changes one: two trees are new with it
+    let commit = |n: usize| {
+        let directory = work.join(format!("d{}", n % 3));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("file"), format!("{n}\n")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", &format!("revision {n}")]);
+        git(&["rev-parse", "HEAD"])
+    };
+    let id = |commit: &str| -> [u8; 20] {
+        let byte = |at: usize| u8::from_str_radix(&commit[at * 2..at * 2 + 2], 16).unwrap();
+        std::array::from_fn(byte)
+    };
+    let view = |f: &mut Fixture| f.store.pack_view(&f.credential, "repository").unwrap();
+    let led = |f: &mut Fixture, steps: usize| view(f).led(steps, None);
+
+    // a branch is deleted that another leads to: the next push finds that
+    // every object is led to, and the repository is one that holds no other
+    let early: Vec<String> = (0..3).map(commit).collect();
+    git(&["branch", "below", &early[1]]);
+    git(&["push", "-q", &url, "main", "below"]);
+    assert!(!view(&mut f).unreachable);
+    git(&["push", "-q", &url, ":below"]);
+    assert!(view(&mut f).unreachable);
+    let third = commit(3);
+    git(&["push", "-q", &url, "main"]);
+    assert!(!view(&mut f).unreachable);
+
+    // a branch is deleted with what it alone held
+    git(&["branch", "beside", &early[2]]);
+    git(&["checkout", "-q", "-b", "gone"]);
+    let gone = commit(4);
+    git(&["checkout", "-q", "main"]);
+    git(&["push", "-q", &url, "beside", "gone"]);
+    git(&["push", "-q", &url, ":gone"]);
+    assert!(view(&mut f).unreachable);
+    // found from what the push before was held against: the two trees of the
+    // commit pushed then, and no tree below it
+    assert!(matches!(led(&mut f, 1), Err(Limit(_))));
+    let both = led(&mut f, 2).unwrap();
+    assert!(both.to(&id(&third)) && both.to(&id(&early[0])) && !both.to(&id(&gone)));
+    // a branch less that the other leads to: the two commits are gone through
+    // that tell so, and no tree is read, where from nothing it is every tree
+    git(&["push", "-q", &url, ":beside"]);
+    let one = led(&mut f, 2).unwrap();
+    assert_eq!(one.len(), both.len());
+    // a push: its two trees. One who read the refs before it is given what
+    // they led to then
+    let before = view(&mut f);
+    let fifth = commit(5);
+    git(&["push", "-q", &url, "main"]);
+    assert!(matches!(led(&mut f, 1), Err(Limit(_))));
+    let pushed = led(&mut f, 2).unwrap();
+    assert!(pushed.to(&id(&fifth)) && !one.to(&id(&fifth)));
+    assert!(Arc::ptr_eq(&before.led(0, None).unwrap(), &one));
+    // forced onto a commit above one that was led to: its two trees
+    git(&["checkout", "-q", "--detach", &early[2]]);
+    let above = commit(6);
+    git(&["push", "-q", "-f", &url, "HEAD:main"]);
+    assert!(matches!(led(&mut f, 1), Err(Limit(_))));
+    let forced = led(&mut f, 2).unwrap();
+    assert!(forced.to(&id(&above)) && forced.to(&id(&early[2])));
+    assert!(!forced.to(&id(&third)) && !forced.to(&id(&fifth)));
+
+    // forced onto a history of its own: from nothing, three trees a walk. The
+    // first commit has four, and the two above it two each
+    git(&["checkout", "-q", "--orphan", "apart"]);
+    let apart: Vec<String> = (7..10).map(commit).collect();
+    git(&["push", "-q", "-f", &url, "HEAD:main"]);
+    let mut walks = 0;
+    let whole = loop {
+        walks += 1;
+        match led(&mut f, 3) {
+            Ok(whole) => break whole,
+            Err(Limit(_)) => assert!(walks < 8, "nothing is left of a walk for the next"),
+            Err(error) => panic!("{error}"),
+        }
+    };
+    assert!((3..=6).contains(&walks), "{walks}");
+    assert!(apart.iter().all(|commit| whole.to(&id(commit))));
+    assert!(!whole.to(&id(&above)) && !whole.to(&id(&early[0])) && !whole.to(&id(&gone)));
+    assert!(view(&mut f).unreachable);
+    // what a clone is sent is what the refs lead to
+    ok(temp.path(), &token, &["clone", "-q", &url, "c"]);
+    let cloned = temp.path().join("c");
+    ok(&cloned, &token, &["fsck", "--strict", "--full"]);
+    let listed = text(ok(&cloned, &token, &["rev-list", "--objects", "--all"]));
+    assert_eq!(listed.lines().count(), whole.len());
+}

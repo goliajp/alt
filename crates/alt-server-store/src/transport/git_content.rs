@@ -46,7 +46,7 @@ impl Store {
             };
             // the records are asked last: what the refs lead to is kept, and every
             // manifest is read for what they name
-            if !view.led(self.limits.walk_steps, gone)?.to(&oid)
+            if !self.led(&view, gone)?.to(&oid)
                 && !(led == Led::RefsOrRecords && self.named(scope, digest)?)
             {
                 return Err(Error::Unauthorized);

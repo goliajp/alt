@@ -11,12 +11,13 @@ use alt_remote_protocol::ContentEntry;
 use std::sync::{Arc, OnceLock};
 
 pub(crate) struct Reached {
+    /// as [`Store::led_under`] has it
     repository: String,
-    ids: Vec<String>,
     /// none where every object of the segments is led to
     tips: Option<Vec<Oid>>,
     steps: usize,
-    led: OnceLock<Arc<Led>>,
+    /// with whether it was found to be every object of the segments
+    led: OnceLock<(Arc<Led>, bool)>,
 }
 
 impl Reached {
@@ -25,12 +26,16 @@ impl Reached {
             return Ok(None);
         };
         if self.led.get().is_none() {
-            let ids = self.ids.iter().map(String::as_str);
-            let asked = (self.repository.as_str(), ids, segments);
-            let led = crate::pack_view::led(asked, tips.clone(), self.steps, None)?;
+            let repository = self.repository.as_str();
+            let led = crate::pack_view::led(repository, segments, tips.clone(), self.steps, None)?;
             let _ = self.led.set(led);
         }
-        Ok(self.led.get().map(|led| &**led))
+        Ok(self.led.get().map(|(led, _)| &**led))
+    }
+    /// the tips, where they were found to lead to every object of the segments
+    fn all(&self) -> Option<Vec<Oid>> {
+        let all = self.led.get().is_some_and(|(_, all)| *all);
+        self.tips.clone().filter(|_| all)
     }
     /// whether the refs lead to an object `segments` hold
     pub(crate) fn to(&self, segments: &SegmentSet, oid: &Oid) -> Result<bool> {
@@ -105,8 +110,7 @@ impl Store {
     /// of it reads that inside a transaction.
     pub(crate) fn published_walked(&mut self, repository: &str) -> Result<Published> {
         let published = self.published(repository)?;
-        published.reached.led(&published.segments)?;
-        Ok(published)
+        self.walked(repository, published)
     }
     pub(crate) fn published_walked_as(
         &mut self,
@@ -114,16 +118,21 @@ impl Store {
         listed: Listed,
     ) -> Result<Published> {
         let published = self.published_as(repository, listed)?;
+        self.walked(repository, published)
+    }
+    fn walked(&mut self, repository: &str, published: Published) -> Result<Published> {
         published.reached.led(&published.segments)?;
+        if let Some(tips) = published.reached.all() {
+            self.all_led(repository, tips)?;
+        }
         Ok(published)
     }
     fn published_as(&mut self, repository: &str, listed: Listed) -> Result<Published> {
-        let (ids, segments) = self.open_listed_segments(repository, listed.ids)?;
+        let (_, segments) = self.open_listed_segments(repository, listed.ids)?;
         Ok(Published {
             segments,
             reached: Reached {
-                repository: repository.into(),
-                ids: ids.into_iter().map(|(id, _)| id).collect(),
+                repository: self.led_under(repository),
                 tips: listed.tips,
                 steps: self.limits.walk_steps,
                 led: OnceLock::new(),

@@ -139,9 +139,10 @@ fn what_a_deleted_ref_led_to_is_given_where_a_published_record_names_it_and_not_
 }
 
 /// What the refs of a repository lead to is found by reading every tree they
-/// reach. It is kept for whoever asks it of the same refs and segments, and
-/// found anew once a segment is added; and it is looked for no longer than the
-/// one who asked waits for it, which one who finds it kept does not notice.
+/// reach. It is kept for whoever asks it of the same refs, and found anew once
+/// the refs lead to nothing of what they led to; and it is looked for no longer
+/// than the one who asked waits for it, which one who finds it kept does not
+/// notice.
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn what_the_refs_lead_to_is_kept_and_looked_for_no_longer_than_it_is_waited_for() {
@@ -177,7 +178,7 @@ fn what_the_refs_lead_to_is_kept_and_looked_for_no_longer_than_it_is_waited_for(
     (f.store)
         .open_reached_content(&f.credential, &scope, digest, Some(&gone))
         .unwrap();
-    // a segment more: found anew
+    // the branch is gone and another is there that does not lead to it: found anew
     deleted(&mut f, "remove-the-other", kept.commit);
     let back = Payload::new("the-branch-that-comes", None);
     back.publish_new(&mut f.store, &f.credential);

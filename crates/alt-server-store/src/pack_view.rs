@@ -62,6 +62,8 @@ pub struct PackView {
     pub segment_ids: Vec<String>,
     /// some stored objects may be unreachable from the refs
     pub unreachable: bool,
+    /// what is kept of the objects the refs lead to is kept under this
+    pub(crate) led_under: String,
     pub actor_id: String,
     pub attribution: alt_remote_protocol::Attribution,
     /// writes are enabled and the caller holds some ref-changing grant
@@ -237,6 +239,7 @@ impl Store {
             default_branch: text(&repository_row, "default_branch")
                 .ok_or(Error::Integrity("default branch"))?,
             unreachable: flag(&repository_row, "pack_unreachable") == Some(true),
+            led_under: self.led_under(repository),
             writable: flag(&repository_row, "writable") == Some(true)
                 && grants
                     .iter()
@@ -270,6 +273,7 @@ impl Store {
             ref_scope: RefScope::Complete,
             default_branch: row.get(0),
             unreachable: row.get(1),
+            led_under: self.led_under(repository),
             writable: current.writes_enabled
                 && auth
                     .grants
