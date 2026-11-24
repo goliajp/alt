@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: perf
+summary: the upgrade to schema 22 writes no request, and the server gives each its moment as it runs
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/earlier_requests.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/retention.rs
+touched: crates/alt-server-store/src/schema-v22.sql
+touched: crates/alt-server-store/src/schema.rs
+touched: crates/alt-server-store/src/schema.sql
+touched: crates/alt-server-store/tests/it/database/schema_22.rs
+touched: crates/alt-server-store/tests/it/database/schema_22/earlier_requests.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/http/expiry.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21/served.rs
+touched: self-hosted/README.md
