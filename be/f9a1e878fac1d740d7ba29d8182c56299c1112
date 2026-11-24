@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: refuse the commands a directory is in the way of before a ref moves, and the undo of one
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/edit_order.rs
