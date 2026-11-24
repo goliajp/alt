@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the sync of the oplog and a comment of it within their length
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/src/v2/ticket.rs
