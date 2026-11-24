@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: keep from a cut of the oplog the frames a sync can have ended at or past, and no other
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cuts.rs
+touched: crates/alt-oplog/src/v2/kept.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_kept_ends.rs
+touched: crates/alt-oplog/tests/it/v2_kept_past.rs
