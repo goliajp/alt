@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: a review is read without the lease of its request or the row of its repository
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/src/publication/acquire.rs
+touched: crates/alt-server-store/src/publication/fence.rs
+touched: crates/alt-server-store/src/review.rs
+touched: crates/alt-server-store/src/tasks.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/review_reads.rs
+touched: crates/alt-server-store/tests/it/database/tasks.rs
+touched: crates/alt-server/src/web_review.rs
