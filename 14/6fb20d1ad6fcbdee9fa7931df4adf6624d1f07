@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: the size a request claims for content it never stored holds no other request to it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/registration.rs
+touched: crates/alt-server-store/src/requests.rs
+touched: crates/alt-server-store/src/segments.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/claimed_sizes.rs
+touched: crates/alt-server-store/tests/it/database/segments.rs
