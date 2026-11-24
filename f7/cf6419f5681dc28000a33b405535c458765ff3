@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: read an oplog frame from before a cut whose checkpoint a cut being made lies over
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/since.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
