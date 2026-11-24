@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the push that waits is in a group that is ended however the test ends
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/verifying.rs
