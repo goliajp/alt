@@ -12,11 +12,11 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
+use super::back::{Back, Way};
 use super::head::{Framing, Head, Header, Method};
 use super::paced::{Sent, Source};
-use super::response::{Outgoing, Response};
+use super::response::Response;
 use super::shares::{Share, Shares};
 
 /// Where the reading of a chunked body is.
@@ -37,14 +37,6 @@ struct Spool {
     _dir: alt_os::temp::TempDir,
     failed: Option<io::Error>,
     _share: Share,
-}
-
-/// What a request hands to the thread of its connection.
-pub(super) enum Back {
-    /// the answer, with the connection it goes out on
-    Answer(Box<(Source, Outgoing)>),
-    /// the request, for its body to be received within so many bytes
-    Receive(Box<Request>, u64),
 }
 
 /// The body of a request, read off the connection or out of the file it
@@ -214,11 +206,11 @@ pub(crate) struct Request {
     /// nothing once the request is answered
     body: Option<Body>,
     /// to the thread of the connection
-    back: Sender<Back>,
+    back: Way,
 }
 
 impl Request {
-    pub(super) fn new(head: Head, source: Source, back: Sender<Back>) -> Self {
+    pub(super) fn new(head: Head, source: Source, back: Way) -> Self {
         let body = Body {
             source,
             spool: None,
@@ -272,14 +264,18 @@ impl Request {
     /// it ends in the error.
     pub(crate) fn receive(self, most: u64) {
         let back = self.back.clone();
-        // the thread is gone where its connection is
-        let _ = back.send(Back::Receive(Box::new(self), most));
+        back.send(Back::Receive(Box::new(self), most));
     }
 
     /// Receives the body: see [`Self::receive`].
     pub(super) fn spool(&mut self, most: u64, held: &Arc<Shares>) -> io::Result<()> {
         let body = self.body.as_mut().expect("a request not yet answered");
         body.receive(most, held)
+    }
+
+    /// Set once the peer has closed its side: nobody waits for an answer.
+    pub(crate) fn given_up(&self) -> &std::sync::atomic::AtomicBool {
+        &self.back.gone
     }
 
     /// The address the peer is counted under; none for this host.
@@ -313,9 +309,8 @@ impl Request {
         };
         let last = self.head.last || !body.over();
         let bodiless = self.head.method == Method::Head;
-        // the thread is gone where its connection is
         let answer = Back::Answer(Box::new((body.source, response.outgoing(last, bodiless))));
-        let _ = self.back.send(answer);
+        self.back.send(answer);
     }
 }
 

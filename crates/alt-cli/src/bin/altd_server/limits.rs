@@ -85,7 +85,9 @@ pub(super) fn body_cap(suffix: &str) -> u64 {
 ///
 /// The memory of the packs indexed at once is one amount, and a pack
 /// waits for its part of it for `ALT_SERVER_MAX_INDEX_WAIT_MS`.
-pub(super) fn pack_limits() -> alt_git_pack::IndexLimits<'static> {
+///
+/// A push whose peer is gone waits for nothing and is indexed no further.
+pub(super) fn pack_limits(of: &super::http::Request) -> alt_git_pack::IndexLimits<'_> {
     static INDEXING: std::sync::OnceLock<alt_git_pack::Memory> = std::sync::OnceLock::new();
     let told = super::told::told();
     alt_git_pack::IndexLimits {
@@ -96,9 +98,19 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits<'static> {
         each_bytes: alt_git_pack::EACH.min(told.index_bytes / 16),
         memory: Some(INDEXING.get_or_init(|| alt_git_pack::Memory::new(told.index_bytes))),
         memory_by: Some(std::time::Instant::now() + told.index_wait),
+        given_up: Some(of.given_up()),
         files: told.bases.as_ref(),
         ..Default::default()
     }
+}
+
+/// The answer to a push that waited for the memory other pushes are indexed
+/// in for as long as one waits.
+pub(super) fn busy() -> super::http::Response<std::io::Cursor<Vec<u8>>> {
+    let busy = "the packs of other pushes are being indexed; send the push again";
+    let mut response = super::http::Response::from_string(busy).with_status_code(503);
+    response.add_header(super::upload::header("Retry-After", "60"));
+    response
 }
 
 /// The status a push is refused with where its commands could not be read:

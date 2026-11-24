@@ -16,6 +16,7 @@
 //!
 //! TLS is in front of this, with whatever else a public listener needs.
 
+mod back;
 mod head;
 mod paced;
 mod request;
@@ -26,7 +27,6 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -203,6 +203,9 @@ fn connection(open: Open, stream: TcpStream) {
     if stream.set_nodelay(true).is_err() {
         return;
     }
+    let Ok(watched) = stream.try_clone() else {
+        return;
+    };
     let shared = &open.0;
     let mut source = paced::Source::new(stream, shared.limits, open.1);
     loop {
@@ -220,19 +223,19 @@ fn connection(open: Open, stream: TcpStream) {
                 return source.close();
             }
         };
-        let (back, returned) = mpsc::channel();
-        shared.enqueue(Request::new(head, source, back));
+        let (way, returned) = back::Way::new();
+        shared.enqueue(Request::new(head, source, way.clone()));
         let (back, answer) = loop {
-            match returned.recv() {
-                Ok(request::Back::Answer(answered)) => break *answered,
-                Ok(request::Back::Receive(mut request, most)) => {
+            match way.returned(&returned, &watched) {
+                Some(back::Back::Answer(answered)) => break *answered,
+                Some(back::Back::Receive(mut request, most)) => {
                     // one whose body has no file to go to is let go of,
                     // and answers itself
                     if request.spool(most, &shared.held).is_ok() {
                         shared.enqueue(*request);
                     }
                 }
-                Err(_) => return,
+                None => return,
             }
         };
         source = back;

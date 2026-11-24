@@ -129,7 +129,7 @@ pub(super) fn handle_receive_pack(
         let read = read.map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(read.map(|raw| (raw.kind, raw.data)))
     };
-    let whole = (pack_tmp_path.as_path(), pack_limits(), &bases as _);
+    let whole = (pack_tmp_path.as_path(), pack_limits(&req), &bases as _);
     let pack = (pack_bytes_streamed != 0).then_some(whole);
     // nothing is appended behind what a failed sync left in doubt
     let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
@@ -138,9 +138,7 @@ pub(super) fn handle_receive_pack(
         None => match receive::take_in(store, pack, &head.updates, &principal, &writer.group) {
             Ok(report) => report,
             Err(e) if receive::busy(&*e) => {
-                let busy = "the packs of other pushes are being indexed; send the push again";
-                let r = Response::from_string(busy).with_status_code(StatusCode(503));
-                return Ok(respond_logged(req, r, log)?);
+                return Ok(respond_logged(req, limits::busy(), log)?);
             }
             Err(e) => return Err(e),
         },
