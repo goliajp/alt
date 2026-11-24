@@ -85,11 +85,27 @@ impl NativeRepo<'_> {
         }
         let branch = self.head_branch().unwrap_or_else(|_| "HEAD".to_string());
         let short = branch.strip_prefix("refs/heads/").unwrap_or(&branch);
-        Ok(writeln!(
+        writeln!(out, "materialized {short} into {}", target.display())?;
+        self.say_collided(out)
+    }
+
+    /// Says, as a git clone does, which paths of the head came to be one
+    /// file on a file system that takes names differing in case for one.
+    fn say_collided(&self, out: &mut impl Write) -> Res<()> {
+        let groups = self.collided(&self.head_entries()?)?;
+        if groups.is_empty() {
+            return Ok(());
+        }
+        writeln!(
             out,
-            "materialized {short} into {}",
-            target.display()
-        )?)
+            "warning: the following paths have collided (e.g. case-sensitive paths\n\
+             on a case-insensitive filesystem) and only one from the same\n\
+             colliding group is in the working tree:\n"
+        )?;
+        for path in groups.iter().flatten() {
+            writeln!(out, "  '{path}'")?;
+        }
+        Ok(())
     }
 
     /// The variables the git repository `source` read from its own

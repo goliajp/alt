@@ -151,7 +151,9 @@ impl Walk<'_> {
         if (kind_of(stat.mode) == Kind::Dir) != dir {
             return Ok(None);
         }
-        for item in (0..names.len()).filter(|&i| !taken[i]) {
+        // a file may be that of two paths of the index at once; a directory
+        // is walked for one
+        for item in (0..names.len()).filter(|&i| !dir || !taken[i]) {
             let same = |s: crate::snapshot::FileStat| (s.dev, s.ino) == (stat.dev, stat.ino);
             if (names.kind(item) == Kind::Dir) == dir
                 && fd.stat(names.c_name(item))?.is_some_and(same)

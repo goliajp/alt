@@ -79,4 +79,22 @@ impl NativeRepo<'_> {
         *changes = kept;
         Ok(())
     }
+
+    /// The paths among `entries` that reach one file with another of
+    /// them, each group in the order of its paths: of a group the tree
+    /// holds one file, with what the path written last put there.
+    pub(in crate::native) fn collided(&self, entries: &[WorkEntry]) -> Res<Vec<Vec<BString>>> {
+        if !self.folds()? {
+            return Ok(Vec::new());
+        }
+        let mut reached: std::collections::BTreeMap<(u64, u64), Vec<BString>> = Default::default();
+        for entry in entries.iter().filter(|e| e.mode != 0o160000) {
+            if let Some(file) = self.file_there(&entry.path)? {
+                reached.entry(file).or_default().push(entry.path.clone());
+            }
+        }
+        let mut groups: Vec<_> = reached.into_values().filter(|g| g.len() > 1).collect();
+        groups.sort();
+        Ok(groups)
+    }
 }
