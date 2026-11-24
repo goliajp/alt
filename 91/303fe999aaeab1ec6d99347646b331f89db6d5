@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a handle opened at an anchor while the note beside the log is changed may begin after none
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_more_steps.rs
