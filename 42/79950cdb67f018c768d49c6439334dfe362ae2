@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: have a handle that begins where the driven oplog ends come upon a cut that died before there
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_settling.rs
