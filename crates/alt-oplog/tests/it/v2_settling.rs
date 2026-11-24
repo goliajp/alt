@@ -69,10 +69,10 @@ impl Run {
         true
     }
 
-    /// A cut is begun and comes to no more than the log telling of it,
-    /// and a handle that holds ops past where it would have cut does
-    /// what finds that told: it is told its ops were cut, while the log
-    /// holds them.
+    /// A cut dies after one of its steps, any of them, and a handle that
+    /// holds ops past where it cut does what finds the cut told in the
+    /// log: it is told its ops were cut. After the first step the log
+    /// holds them still, and tells of the cut in its header alone.
     pub fn cut_begun(&mut self) {
         // what is not synced is another boot's to look at
         for _ in 0..2 {
@@ -82,13 +82,24 @@ impl Run {
         self.reboot(true);
         let held = self.open(false);
         let cutter = self.open(false);
-        self.settle(cutter, Some(1), true);
-        if self.ledger.begun.is_none() {
+        let (step, died) = (1 + self.also.below(5) as u8, self.died);
+        let (ops, held_to) = (self.ledger.ops.len(), self.handles[held].log.appended_len());
+        self.settle(cutter, Some(step), true);
+        // it died, of a cut of ops, at a place the handle holds ops
+        // past: the log may have ended for it before, where an earlier
+        // cut was begun and never made
+        let cut = self
+            .ledger
+            .was
+            .first()
+            .filter(|_| self.ledger.ops.len() < ops);
+        let at = self.ledger.begun.or(cut.map(|op| op.at));
+        if self.died == died || at.is_none_or(|at| at >= held_to) {
             return;
         }
         let way = self.rng.below(4);
         self.trace.push(format!(
-            "handle {held} comes upon the cut the log tells of (way {way})"
+            "handle {held} comes upon the cut that died after step {step} (way {way})"
         ));
         let handle = &mut self.handles[held];
         let mut did = match way {
@@ -99,11 +110,15 @@ impl Run {
         };
         if let (2, Ok(()), Some(sink)) = (way, &did, &handle.sink) {
             did = sink.fsync();
+            self.by_sink = true;
+            self.handles[held].leaves();
         }
         assert!(
             matches!(did, Err(OpLogError::CutBack)),
-            "a handle that holds ops past where a cut was begun is told {did:?}"
+            "a handle that holds ops past where a cut died after step {step} is told {did:?}"
         );
+        let came = &self.counts.came_upon[step as usize - 1];
+        came.fetch_add(1, Ordering::Relaxed);
         self.took(held, did, false);
     }
 }

@@ -36,20 +36,31 @@ impl Run {
     ) -> Option<T> {
         let told = self.handles[index].log.take_discarded();
         self.cuts_told(&told, None);
+        let by_sink = std::mem::take(&mut self.by_sink);
         match did {
             Ok(value) => Some(value),
             Err(OpLogError::CutBack) => {
-                self.trace.push("  it is told its ops were cut".into());
+                self.trace.push(format!(
+                    "  it is told its ops were cut (by its sink: {by_sink})"
+                ));
                 let len = self.file_len();
                 let handle = &mut self.handles[index];
-                let end = handle.log.appended_len();
+                // a handle is told of the ops it holds, its sink of what
+                // it was left to sync; either way that is not told again
+                let (last, end) = match (by_sink, handle.left.take()) {
+                    (false, _) => (handle.log.anchor(), handle.log.appended_len()),
+                    (true, Some(left)) => left,
+                    (true, None) => panic!("the sink of handle {index} was left nothing to sync"),
+                };
                 let begun = self.ledger.begun.is_some_and(|at| at < end);
-                let held = self.ledger.holds(handle.log.anchor());
+                let held = self.ledger.holds(last);
                 assert!(
                     begun || !held,
                     "handle {index} is told its ops were cut: the log holds them"
                 );
-                if held {
+                if by_sink {
+                    self.counts.told_by_sink.fetch_add(1, Ordering::Relaxed);
+                } else if held {
                     let begun = &self.counts.cut_back_begun;
                     begun.fetch_add(1, Ordering::Relaxed);
                 }

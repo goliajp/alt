@@ -84,7 +84,7 @@ impl Run {
             self.model.fsynced = self.model.fsynced.max(log.cut.1);
         }
         self.cut_synced = false;
-        let claimed = alt_oplog::bounded_in(self.path()).unwrap_or(0);
+        let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
         assert!(
             log.said_synced <= self.model.synced,

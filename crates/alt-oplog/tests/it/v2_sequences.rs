@@ -11,54 +11,14 @@
 //! no more than they do.
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 
 use alt_oplog::OpLogError;
 
+use super::v2_counts::Counts;
 use super::v2_driver::{Run, name};
 use super::v2_meanwhile::{Plan, says};
 use super::v2_model::Laid;
-
-/// How often a run on blocks of one size did each kind of thing.
-pub struct Counts {
-    pub sequences: AtomicU64,
-    pub cuts: AtomicU64,
-    pub cuts_died: AtomicU64,
-    pub cut_back: AtomicU64,
-    /// of them, those whose ops the log held: a cut of them was begun
-    pub cut_back_begun: AtomicU64,
-    pub meanwhile: AtomicU64,
-    pub meanwhile_cuts: AtomicU64,
-    pub receipts: AtomicU64,
-    pub anchored: AtomicU64,
-    pub anchored_gone: AtomicU64,
-    pub grown_back: AtomicU64,
-    pub grown_back_after_death: AtomicU64,
-    pub hidden: AtomicU64,
-}
-
-impl Counts {
-    const fn new() -> Self {
-        Counts {
-            sequences: AtomicU64::new(0),
-            cuts: AtomicU64::new(0),
-            cuts_died: AtomicU64::new(0),
-            cut_back: AtomicU64::new(0),
-            cut_back_begun: AtomicU64::new(0),
-            meanwhile: AtomicU64::new(0),
-            meanwhile_cuts: AtomicU64::new(0),
-            receipts: AtomicU64::new(0),
-            anchored: AtomicU64::new(0),
-            anchored_gone: AtomicU64::new(0),
-            grown_back: AtomicU64::new(0),
-            grown_back_after_death: AtomicU64::new(0),
-            hidden: AtomicU64::new(0),
-        }
-    }
-}
-
-/// For blocks of 1, 4 and 16 KiB.
-pub static BY_BLOCK: [Counts; 3] = [Counts::new(), Counts::new(), Counts::new()];
 
 impl Run {
     /// The ops before byte `end` that another boot left and nobody has
@@ -66,7 +26,7 @@ impl Run {
     pub fn unsettled_before(&mut self, end: u64) -> Vec<Laid> {
         self.calls();
         let log = self.log();
-        let claimed = alt_oplog::bounded_in(self.path()).unwrap_or(0);
+        let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
         let left = self.model.unsettled(&log);
         left.into_iter().filter(|op| op.at < end).cloned().collect()
@@ -127,6 +87,10 @@ impl Run {
         };
         if let (Ok(()), Some(sink)) = (&synced, &handle.sink) {
             synced = sink.fsync();
+            self.by_sink = true;
+            if how == 0 {
+                self.handles[index].leaves();
+            }
         }
         if how != 0 && !matches!(synced, Err(OpLogError::CutBack)) {
             // it read the log to its end under the lock first
@@ -258,8 +222,8 @@ impl Run {
 /// Runs the sequence of `steps` steps that `seed` gives on a log with
 /// blocks of two to the power of `block_exp` bytes, and tells what was
 /// done when a step of it fails.
-fn run(seed: u64, block_exp: u8, steps: usize) {
-    let mut run = Run::new(seed, block_exp);
+fn run(seed: u64, block_exp: u8, steps: usize, counts: &'static Counts) {
+    let mut run = Run::new(seed, block_exp, counts);
     let ran = catch_unwind(AssertUnwindSafe(|| {
         for _ in 0..steps {
             run.step();
@@ -267,9 +231,11 @@ fn run(seed: u64, block_exp: u8, steps: usize) {
         }
     }));
     alt_oplog::v2::cut_dies_after(None);
+    alt_oplog::v2::before_note_read(None);
     if let Err(panic) = ran {
         eprintln!(
-            "the sequence of seed {seed}, blocks of 2^{block_exp}:\n{}",
+            "the sequence of seed {seed}, blocks of 2^{block_exp}, the note beside the log {:?}:\n{}",
+            run.beside,
             run.trace.join("\n")
         );
         resume_unwind(panic);
@@ -277,15 +243,15 @@ fn run(seed: u64, block_exp: u8, steps: usize) {
     run.counts.sequences.fetch_add(1, Ordering::Relaxed);
 }
 
-/// Runs `sequences` sequences on logs with blocks of two to the power of
-/// `block_exp` bytes.
-pub fn run_all(block_exp: u8, sequences: u64) {
+/// Runs the `sequences` sequences of the seeds from `first` on, on logs
+/// with blocks of two to the power of `block_exp` bytes.
+pub fn run_all(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
     const THREADS: u64 = 8;
     std::thread::scope(|scope| {
         for thread in 0..THREADS {
             scope.spawn(move || {
-                for seed in (thread..sequences).step_by(THREADS as usize) {
-                    run(seed, block_exp, 40);
+                for seed in (first + thread..first + sequences).step_by(THREADS as usize) {
+                    run(seed, block_exp, 40, counts);
                 }
             });
         }

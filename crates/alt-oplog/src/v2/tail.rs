@@ -176,6 +176,7 @@ impl Tail {
         let Some(boot) = boot else {
             return Noted::Nothing;
         };
+        crate::v2::note_read(dir);
         let file = match File::open(dir.join("tail")) {
             Ok(file) => file,
             Err(none) if none.kind() == ErrorKind::NotFound => return Noted::Gone,

@@ -7,11 +7,12 @@ use std::sync::{Arc, Mutex};
 
 use alt_oplog::{Anchor, Meta, OpLog, OpLogSink, SyncNamed};
 
+use super::v2_beside::{Beside, meddled};
+use super::v2_counts::Counts;
 use super::v2_ledger::{Entry, Ledger};
-use super::v2_log::{boot, file_len};
+use super::v2_log::file_len;
 use super::v2_meanwhile::Meanwhile;
 use super::v2_model::{Model, Reference, Rng, reference};
-use super::v2_sequences::{BY_BLOCK, Counts};
 
 /// What each call gave to whoever syncs what ops name, by payload, and
 /// whether that one did.
@@ -23,6 +24,21 @@ pub struct Handle {
     pub sink: Option<OpLogSink>,
     /// how long the file was each time the handle read it as an open does
     pub seen: Vec<u64>,
+    /// What its sink was left to sync when the handle last asked for
+    /// that: the op that was its last then, and where its frames ended.
+    /// Its sink tells of a cut of these, whatever the handle holds since.
+    pub left: Option<(Option<Anchor>, u64)>,
+}
+
+impl Handle {
+    /// The handle asked for what it holds to be synced, which is left
+    /// to its sink where it holds a frame.
+    pub fn leaves(&mut self) {
+        let end = self.log.appended_len();
+        if end > 64 {
+            self.left = Some((self.log.anchor(), end));
+        }
+    }
 }
 
 pub struct Run {
@@ -30,6 +46,7 @@ pub struct Run {
     pub rng: Rng,
     /// numbers for what a sequence draws beside what it is drawn to do
     pub also: Rng,
+    pub beside: Beside,
     pub model: Model,
     pub ledger: Ledger,
     pub handles: Vec<Handle>,
@@ -46,6 +63,8 @@ pub struct Run {
     pub cut_synced: bool,
     /// how many cuts of this run died
     pub died: u64,
+    /// what the call taken in next came to, its sink told
+    pub by_sink: bool,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -83,9 +102,19 @@ fn seer(
 }
 
 impl Run {
-    pub fn new(seed: u64, block_exp: u8) -> Run {
+    pub fn new(seed: u64, block_exp: u8, counts: &'static Counts) -> Run {
         let dir = alt_os::temp::tempdir().unwrap();
-        boot(1);
+        let mut also = Rng(seed ^ 0x6a09_e667_f3bc_c908);
+        let (beside, of_it) = match also.below(3) {
+            0 => (Beside::Kept, &counts.kept),
+            1 => (Beside::Meddled, &counts.meddled),
+            _ => (Beside::Never, &counts.never),
+        };
+        of_it.fetch_add(1, Ordering::Relaxed);
+        if beside == Beside::Meddled {
+            meddled(seed, counts);
+        }
+        Self::in_boot(beside, 1);
         alt_oplog::v2::create_with(dir.path(), block_exp).unwrap();
         // the log is named after the seed: a sequence lays the same bytes
         // every time it runs
@@ -95,7 +124,8 @@ impl Run {
         Run {
             dir,
             rng: Rng(seed),
-            also: Rng(seed ^ 0x6a09_e667_f3bc_c908),
+            also,
+            beside,
             model: Model {
                 boot: 1,
                 ..Model::default()
@@ -110,8 +140,9 @@ impl Run {
             request: 1,
             cut_synced: false,
             died: 0,
+            by_sink: false,
             trace: Vec::new(),
-            counts: &BY_BLOCK[(block_exp as usize - 10) / 2],
+            counts,
         }
     }
 
@@ -150,6 +181,7 @@ impl Run {
             read_only,
             sink,
             seen: vec![self.file_len()],
+            left: None,
         });
         self.handles.len() - 1
     }

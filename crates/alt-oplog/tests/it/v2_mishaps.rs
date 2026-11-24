@@ -8,7 +8,6 @@ use alt_oplog::OpLog;
 
 use super::v2_cut_told::tell_cut;
 use super::v2_driver::Run;
-use super::v2_log::boot;
 
 impl Run {
     /// A writer dies in the middle of an append: it has read the log to
@@ -88,7 +87,7 @@ impl Run {
         }
         let log = self.log();
         self.model.rebooted(&log);
-        boot(self.model.boot);
+        Self::in_boot(self.beside, self.model.boot);
         self.trace
             .push(format!("boot {} of {len} bytes: {lost}", self.model.boot));
     }

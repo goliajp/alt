@@ -1,6 +1,7 @@
 //! What a test has a log do that no machine does on its own: run in a
-//! boot of its choosing or in none, and have a cut of the log die or
-//! wait at one of its steps.
+//! boot of its choosing or in none, have a cut of the log die or wait at
+//! one of its steps, and have something done to `tail` before each read
+//! of it.
 //!
 //! All of it is built with the feature `hooks` alone, which the tests of
 //! this crate turn on for themselves through its dev-dependencies, as a
@@ -11,6 +12,7 @@
 #[cfg(feature = "hooks")]
 mod told {
     use std::cell::{Cell, RefCell};
+    use std::path::Path;
     use std::sync::mpsc::{Receiver, Sender};
 
     /// What a thread takes for the boot it runs in.
@@ -25,7 +27,12 @@ mod told {
     /// is there, and who tells it to go on.
     type Waits = (u8, Sender<()>, Receiver<()>);
 
+    /// What a test has done in the directory of a log before `tail`
+    /// there is read.
+    type BeforeRead = Box<dyn FnMut(&Path)>;
+
     thread_local! {
+        static NOTE_READ: RefCell<Option<BeforeRead>> = const { RefCell::new(None) };
         static BOOT: Cell<Told> = const { Cell::new(Told::ByTheKernel) };
         static CUT_DIES: Cell<u8> = const { Cell::new(0) };
         static CUT_WAITS: RefCell<Option<Waits>> = const { RefCell::new(None) };
@@ -72,6 +79,22 @@ mod told {
         ASKED_WAITS.set(Some((reached, go)));
     }
 
+    /// Has `first` done in the directory of a log before every read of
+    /// `tail` there that a handle of this thread makes, and nothing
+    /// with `None`: for a test of a note that is gone or spoiled at any
+    /// moment.
+    pub fn before_note_read(first: Option<BeforeRead>) {
+        NOTE_READ.set(first);
+    }
+
+    pub(crate) fn note_read(dir: &Path) {
+        NOTE_READ.with_borrow_mut(|first| {
+            if let Some(first) = first {
+                first(dir);
+            }
+        });
+    }
+
     pub(crate) fn cut_asked() {
         if let Some((reached, go)) = ASKED_WAITS.take() {
             let _ = reached.send(());
@@ -102,9 +125,11 @@ mod told {
 }
 
 #[cfg(feature = "hooks")]
-pub(crate) use told::{cut_asked, cut_reached, running_boot};
+pub use told::{
+    before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot,
+};
 #[cfg(feature = "hooks")]
-pub use told::{cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot};
+pub(crate) use told::{cut_asked, cut_reached, note_read, running_boot};
 
 /// The boot a handle opened now runs in, as the kernel tells it.
 #[cfg(not(feature = "hooks"))]
@@ -124,3 +149,8 @@ pub(crate) fn cut_reached(_step: u8) -> std::io::Result<()> {
 #[cfg(not(feature = "hooks"))]
 #[inline(always)]
 pub(crate) fn cut_asked() {}
+
+/// `tail` in `dir` is about to be read.
+#[cfg(not(feature = "hooks"))]
+#[inline(always)]
+pub(crate) fn note_read(_dir: &std::path::Path) {}
