@@ -48,6 +48,40 @@ pub(crate) fn same_state(pair: &Pair) {
     assert_eq!(index(&pair.alt), ok(git(&pair.git, &["ls-files", "-s"])));
     assert_eq!(folded(&pair.alt), folded(&pair.git));
     assert_eq!(heads(&pair.alt), heads(&pair.git));
+    spelled_alike(pair);
+}
+
+/// Every name of the tree, as the directory that holds it spells it:
+/// what `read_dir` gives, files and directories.
+pub(crate) fn spelled(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_owned()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap();
+            if name == ".alt" || name == ".git" {
+                continue;
+            }
+            found.push(
+                path.strip_prefix(root)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+            if std::fs::symlink_metadata(&path).unwrap().is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The two trees spell every name alike on disk.
+pub(crate) fn spelled_alike(pair: &Pair) {
+    assert_eq!(spelled(&pair.alt), spelled(&pair.git));
 }
 
 pub(crate) fn clean(repo: &Path, served: bool) {
@@ -167,8 +201,16 @@ fn a_switch_between_two_spellings_of_a_name_keeps_the_file() {
     pair.both(&["switch", "other"]);
     ok(alt(&pair.alt, &["undo"]));
     pair.both(&["switch", "main"]);
-    same_state(&pair);
+    // an undo brings back the content under the name the file has by
+    // now: the spelling the switch gave it stays on disk
+    assert_eq!(index(&pair.alt), ok(git(&pair.git, &["ls-files", "-s"])));
+    assert_eq!(folded(&pair.alt), folded(&pair.git));
+    assert_eq!(spelled(&pair.alt), ["A", "d", "d/x"]);
+    assert_eq!(spelled(&pair.git), ["a", "d", "d/x"]);
     clean(&pair.alt, false);
+    pair.both(&["switch", "up"]);
+    pair.both(&["switch", "main"]);
+    same_state(&pair);
     // a merge that only respells the name
     pair.write("z", "z\n");
     pair.commit_all("apart");

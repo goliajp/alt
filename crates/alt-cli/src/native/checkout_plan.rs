@@ -170,7 +170,10 @@ impl NativeRepo<'_> {
             if directory && after.as_ref().is_some_and(|s| s.mode != 0o160000) {
                 ignored.extend(self.ignored_in_the_way(path, &tracked, &mut visible)?);
             }
-            if before != after {
+            // a file that stays as it is under another spelling of its
+            // name is written again, under the name the tree has for it
+            let respelled = || Res::Ok(after.is_some() && self.spelled_otherwise(path)?);
+            if before != after || respelled()? {
                 files.push(FileChange {
                     path: path.to_vec(),
                     before,

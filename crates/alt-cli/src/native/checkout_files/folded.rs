@@ -24,6 +24,23 @@ impl NativeRepo<'_> {
         Ok(*self.folded.get_or_init(|| folds))
     }
 
+    /// Whether what is at `path` is listed by its directory under another
+    /// spelling of its name, where names fold.
+    pub(in crate::native) fn spelled_otherwise(&self, path: &BString) -> Res<bool> {
+        let abs = self.abs(path)?;
+        if !self.folds()? || abs.symlink_metadata().is_err() {
+            return Ok(false);
+        }
+        let (above, name) = (abs.parent(), abs.file_name());
+        let (above, name) = above.zip(name).ok_or("checkout path has no parent")?;
+        for entry in std::fs::read_dir(above)? {
+            if entry?.file_name() == name {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Which file is at `path`, to the file system; `None` where none is.
     pub(in crate::native) fn file_there(&self, path: &BString) -> Res<Option<(u64, u64)>> {
         let found = self.abs(path)?.symlink_metadata().ok();
