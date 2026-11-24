@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: make no workspace of a tree whose names meet where its own directory folds them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/apart.rs
+touched: crates/alt-cli/src/native/workspace.rs
