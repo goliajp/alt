@@ -2,6 +2,7 @@ mod browser;
 mod buffered_read;
 mod bulk_publication;
 mod change_links;
+mod claimed_sizes;
 mod cloud;
 mod delegation;
 mod expiry;

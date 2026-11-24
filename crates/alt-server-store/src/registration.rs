@@ -71,7 +71,7 @@ impl Store {
             let (state, _, bytes) = blobs
                 .get(&entry.blake3)
                 .ok_or(Error::Precondition("upload pin expired"))?;
-            if state == "deleting" || *bytes != entry.bytes {
+            if state == "deleting" || (state == "stored" && *bytes != entry.bytes) {
                 return Err(Error::Precondition("upload content fenced by GC"));
             }
             self.bytes.check_proof(proof)?;
@@ -137,7 +137,11 @@ impl Store {
             tx.execute("UPDATE alt_requests SET reserved_bytes=reserved_bytes-$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4", &[repository, &epoch, &key.actor_id, &key.request_id, &integer(release)?])?;
         }
         crate::segments::register_locations(&mut tx, key, entries, &self.bytes)?;
-        if tx.execute("UPDATE alt_blobs SET state='stored',accounted=true WHERE repository=$1 AND blake3=ANY($2)", &[repository, &digests])? != unique.len() as u64 {
+        let sizes = unique
+            .values()
+            .map(|entry| integer(entry.bytes))
+            .collect::<Result<Vec<_>>>()?;
+        if tx.execute("UPDATE alt_blobs b SET state='stored',accounted=true,bytes=v.bytes FROM unnest($2::text[],$3::bigint[]) AS v(blake3,bytes) WHERE b.repository=$1 AND b.blake3=v.blake3", &[repository, &digests, &sizes])? != unique.len() as u64 {
             return Err(Error::Precondition("upload pin expired"));
         }
         if !missing.is_empty() {
@@ -160,4 +164,18 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }
+}
+
+/// Whether the content a row records is of another size than `bytes`. Only content
+/// that is stored has a size: until then the row carries what the first request to
+/// select the digest said of it, which nobody has verified and which holds no other
+/// request to anything. The size is written when the content is stored.
+pub(crate) fn another_size(state: &str, recorded: i64, bytes: u64) -> Result<bool> {
+    Ok(state == "stored" && unsigned(recorded)? != bytes)
+}
+
+/// Whether content of `bytes` may not be stored under a row: it is being removed,
+/// or content of another size is stored there.
+pub(crate) fn fenced(state: &str, recorded: i64, bytes: u64) -> Result<bool> {
+    Ok(state == "deleting" || another_size(state, recorded, bytes)?)
 }

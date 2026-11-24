@@ -2,7 +2,7 @@ use crate::Jsonb;
 pub(crate) use crate::committed::{request_row, request_seen};
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, DurableBytes, Error, Result, Store, reading};
+use crate::{Credential, DurableBytes, Error, Result, Store, reading, registration};
 use alt_remote_protocol::{
     ContentEntry, ContentKind, Manifest, Publication, RequestKey, RequestObservation, RequestState,
 };
@@ -64,7 +64,7 @@ impl Store {
             for (digest, content) in batch {
                 let stored = match existing.get(digest.as_str()) {
                     Some((bytes, state)) => {
-                        if unsigned(*bytes)? != content.bytes {
+                        if registration::another_size(state, *bytes, content.bytes)? {
                             return Err(Error::Integrity("content size collision"));
                         }
                         if state == "deleting" {
@@ -270,7 +270,7 @@ impl Store {
                 &[repository, &entry.blake3],
             )?
             .ok_or(Error::Precondition("upload pin expired"))?;
-        if blob.get::<_, String>(0) == "deleting" || unsigned(blob.get(2))? != entry.bytes {
+        if registration::fenced(&blob.get::<_, String>(0), blob.get(2), entry.bytes)? {
             return Err(Error::Precondition("upload content fenced by GC"));
         }
         self.bytes.check_proof(proof)?;
@@ -281,8 +281,8 @@ impl Store {
             tx.execute("UPDATE alt_requests SET reserved_bytes=reserved_bytes-$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&integer(release)?])?;
         }
         tx.execute(
-            "UPDATE alt_blobs SET state='stored',accounted=true WHERE repository=$1 AND blake3=$2",
-            &[repository, &entry.blake3],
+            "UPDATE alt_blobs SET state='stored',accounted=true,bytes=$3 WHERE repository=$1 AND blake3=$2",
+            &[repository, &entry.blake3, &integer(entry.bytes)?],
         )?;
         if let Some(oid) = &entry.git_oid {
             let kind = git_kind(entry.kind)?;

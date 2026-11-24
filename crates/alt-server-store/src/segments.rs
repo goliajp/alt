@@ -163,8 +163,8 @@ impl Store {
         for row in rows {
             let digest: String = row.get(0);
             let entries: Vec<ContentEntry> = row.get::<_, Jsonb>(1).read()?;
-            if row.get::<_, String>(3) == "deleting"
-                || unsigned(row.get(2))? != selection[&digest]
+            let state: String = row.get(3);
+            if crate::registration::fenced(&state, row.get(2), selection[&digest])?
                 || !entries
                     .iter()
                     .any(|entry| entry.blake3 == digest && entry.bytes == selection[&digest])
@@ -214,7 +214,7 @@ impl Store {
             let (state, bytes) = states
                 .get(input.digest)
                 .ok_or(Error::Precondition("selected content disappeared"))?;
-            if state == "deleting" || *bytes != input.bytes {
+            if state == "deleting" || (state == "stored" && *bytes != input.bytes) {
                 return Err(Error::Precondition("selected content changed"));
             }
             if state == "stored" {

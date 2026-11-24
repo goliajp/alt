@@ -3,7 +3,7 @@ use alt_portable::BlobSource;
 use alt_server_store::{ByteInput, DurableBytes, MaintenanceSnapshot};
 use std::{collections::BTreeMap, io::Read};
 
-struct Uploaded(Vec<DurableBytes>);
+pub(super) struct Uploaded(Vec<DurableBytes>);
 impl Uploaded {
     fn id(&self) -> &str {
         self.0[0].segment_id().unwrap()
@@ -52,7 +52,7 @@ fn register(
         .collect();
     store.register_contents(credential, &p.publication.key, &entries)
 }
-fn upload(f: &mut Fixture, p: &Payload) -> Uploaded {
+pub(super) fn upload(f: &mut Fixture, p: &Payload) -> Uploaded {
     f.store
         .begin(&f.credential, &p.publication, &p.manifest, 60_000)
         .unwrap();
