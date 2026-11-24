@@ -1,7 +1,7 @@
 //! `alt commit --amend` that would leave a commit changing nothing is
 //! refused as by git, unless `--allow-empty` asks for it.
 
-use crate::like_git::{Pair, alt, alt_daemon, fails, git, ok};
+use crate::like_git::{Pair, alt, alt_daemon, fails, git, index, ok};
 
 const SAID: &str = "You asked to amend the most recent commit, but doing so would make\n\
                     it empty. You can repeat your command with --allow-empty, or you can\n\
@@ -69,5 +69,46 @@ fn a_merge_amended_to_the_tree_of_a_parent_is_made() {
     pair.merge_at("side", 1_700_000_100);
     pair.both(&["rm", "-q", "--cached", "g"]);
     pair.both(&["commit", "--amend", "-m", "merged, with nothing of side"]);
+    same_head(&pair);
+}
+
+#[test]
+fn a_commit_of_an_index_with_nothing_in_it_is_made_where_git_makes_it() {
+    let pair = Pair::new();
+    // the first commit of a repository, asked to be of nothing
+    pair.both(&["commit", "--allow-empty", "-m", "first, of nothing"]);
+    same_head(&pair);
+    let (ours, theirs) = pair.run(&["commit", "-m", "of nothing again"]);
+    fails(ours, 1);
+    fails(theirs, 1);
+    pair.write("a", "a\n");
+    pair.both(&["add", "a"]);
+    pair.both(&["commit", "--amend", "-m", "first"]);
+    same_head(&pair);
+    // amended back into a commit of nothing
+    pair.both(&["rm", "-q", "--cached", "a"]);
+    pair.both(&["commit", "--amend", "--allow-empty", "-m", "emptied"]);
+    same_head(&pair);
+    let tree = ok(git(&pair.git, &["rev-parse", "HEAD^{tree}"]));
+    assert_eq!(ok(alt(&pair.alt, &["rev-parse", "HEAD^{tree}"])), tree);
+    assert_eq!(index(&pair.alt), "");
+    // a commit that takes every file out of the index needs no asking
+    pair.both(&["add", "a"]);
+    pair.both(&["commit", "-m", "a again"]);
+    pair.both(&["rm", "-q", "--cached", "a"]);
+    pair.both(&["commit", "-m", "all gone"]);
+    same_head(&pair);
+    // through the daemon alike, and taken back
+    let again = [
+        "commit",
+        "--amend",
+        "--allow-empty",
+        "-m",
+        "all gone, said again",
+    ];
+    ok(alt_daemon(&pair.alt, &again));
+    let tree = ok(git(&pair.git, &["rev-parse", "HEAD^{tree}"]));
+    assert_eq!(ok(alt(&pair.alt, &["rev-parse", "HEAD^{tree}"])), tree);
+    ok(alt(&pair.alt, &["undo"]));
     same_head(&pair);
 }

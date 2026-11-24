@@ -72,6 +72,13 @@ impl NativeRepo<'_> {
         let branch = self.head_branch()?;
         let parent = self.store.refs.resolve(&branch)?;
         let head_tree = parent.map(|p| self.commit_tree(p)).transpose()?;
+        if parent.is_none() && !opts.allow_empty && self.index()?.entries.is_empty() {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                "nothing to commit (empty index)",
+            )
+            .into());
+        }
         let tree = self.staged_tree(head_tree)?;
         let merging = self.merge_head()?;
         // a commit that changes nothing is almost always a mistake (a
@@ -194,13 +201,6 @@ impl NativeRepo<'_> {
             .into());
         }
         let staged = index_entries(&index);
-        if staged.is_empty() {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                "nothing to commit (empty index)",
-            )
-            .into());
-        }
         let tree = self.store_tree(&staged)?;
         let algo = self.store.algo()?;
         if let Some((path, blob)) = alt_worktree::unstored_blob(&self.store.odb, tree, base, algo)?
