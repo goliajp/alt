@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the room for responses is what is told, or half of what is free on its disk
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-shares/src/lib.rs
