@@ -82,6 +82,7 @@ mod fsck_trees;
 mod fsync_by_branch;
 mod gitlink;
 mod gitlink_said;
+mod held_branches;
 mod help_texts;
 mod identity;
 mod ignore_sources;

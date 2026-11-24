@@ -4,8 +4,9 @@
 use super::*;
 
 impl NativeRepo<'_> {
-    /// Where the workspace that has the branch `full` checked out is:
-    /// any workspace, or with `own` left out any but this one.
+    /// Where the workspace that has the branch `full` checked out is, or
+    /// that rebases or bisects it: any workspace, or with `own` left out
+    /// any but this one.
     pub(in crate::native) fn held_at(&self, full: &str, own: bool) -> Res<Option<PathBuf>> {
         for (workspace, path, current) in self.list_workspaces()? {
             if current && !own {
@@ -16,8 +17,47 @@ impl NativeRepo<'_> {
                 named => format!("workspaces/{named}/HEAD"),
             };
             let on = self.store.refs.get(&head);
-            if matches!(on, Some(RefTarget::Symbolic(branch)) if branch == full) {
+            let on_it = matches!(on, Some(RefTarget::Symbolic(branch)) if branch == full);
+            if on_it || self.busy_with(&workspace, full)?.is_some() {
                 return Ok(Some(path));
+            }
+        }
+        Ok(None)
+    }
+
+    /// What the workspace `workspace` took its HEAD off the branch `full`
+    /// for and has not ended: `rebased` or `bisected`, in git's words.
+    fn busy_with(&self, workspace: &str, full: &str) -> Res<Option<&'static str>> {
+        let index = Coord::for_name(&self.store.alt_dir, workspace)?.index_path;
+        for (file, doing) in [("REBASE_STATE", "rebased"), ("BISECT_STATE", "bisected")] {
+            let text = match std::fs::read_to_string(index.with_file_name(file)) {
+                Ok(text) => text,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            if text
+                .lines()
+                .any(|line| line.strip_prefix("branch ") == Some(full))
+            {
+                return Ok(Some(doing));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Where the branch `full` is being rebased or bisected, and which:
+    /// in any workspace, or with `own` left out any but this one.
+    pub(in crate::native) fn busy_at(
+        &self,
+        full: &str,
+        own: bool,
+    ) -> Res<Option<(PathBuf, &'static str)>> {
+        for (workspace, path, current) in self.list_workspaces()? {
+            if current && !own {
+                continue;
+            }
+            if let Some(doing) = self.busy_with(&workspace, full)? {
+                return Ok(Some((path, doing)));
             }
         }
         Ok(None)
@@ -109,10 +149,17 @@ impl NativeRepo<'_> {
             Some(old) => format!("refs/heads/{old}"),
             None => self.head_branch()?,
         };
-        let old = from.strip_prefix("refs/heads/").unwrap_or(&from).to_owned();
+        let Some(old) = from.strip_prefix("refs/heads/").map(str::to_owned) else {
+            let said = "cannot rename the current branch while not on any";
+            return Err(settings::fatal(said.to_owned()));
+        };
         let Some(at) = self.store.refs.get(&from).cloned() else {
             return Err(settings::fatal(format!("no branch named '{old}'")));
         };
+        if let Some((at, doing)) = self.busy_at(&from, true)? {
+            let said = format!("branch {from} is being {doing} at {}", at.display());
+            return Err(settings::fatal(said));
+        }
         if old == new {
             return Ok(());
         }

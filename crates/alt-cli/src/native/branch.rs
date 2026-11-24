@@ -195,6 +195,11 @@ impl NativeRepo<'_> {
         if full == self.head_branch()? {
             return Err(format!("cannot delete branch '{name}': it is the current branch").into());
         }
+        if let Some((at, _)) = self.busy_at(&full, true)? {
+            let at = at.display();
+            let said = format!("error: cannot delete branch '{name}' used by worktree at '{at}'\n");
+            return Err(said::refused(&said, 1));
+        }
         self.delete_ref(&full, out)?;
         // what the branch followed goes with it, as with git
         crate::config_cmd::drop_section(&self.store.git_view()?, "branch", name)
