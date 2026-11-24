@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say how the hooks of the oplog are turned on now
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/hooks.rs
