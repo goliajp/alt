@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: shallow fetches written line by line are answered as git answers them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_shallow.rs
+touched: crates/alt-cli/tests/it/altd_server_shallow_lines.rs
+touched: crates/alt-cli/tests/it/altd_server_wants.rs
+touched: crates/alt-cli/tests/it/main.rs
