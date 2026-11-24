@@ -26,10 +26,10 @@ const VERSIONS: [&str; 22] = [
     "e16e814061ae7cc1f075bcebc6f231bfd9d07c9230b85304afa97766f38f8b68",
     "968c5f3709549ce9ab7b574bf8f60f67cff97ca3429cb9f6ef99c1f5800d4a8e",
     "31c6f773004402658ce42f9955ed1cdb41184db9e3ce88c7169041ad56a2f3eb",
-    "bdc237ff1c5cdfb725fe4f978995aa7e92b64e03fdd0e112bf6ed0baa98cfc3f",
+    "d3d649d6969168ef5e94e28c276a3af0676ba0a6d623af84d93e47fb86a81e3a",
 ];
 /// the file a new database is created from; a change to it is a new schema version
-const BASELINE: &str = "7e08ba167067dfc22a1da8be85197572674a3a2f899ecf1d52a828f6f71a86d7";
+const BASELINE: &str = "e14824f7451437bdb0ae238e9c41872189c8dc674a5e0424afb834a1c7609597";
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
