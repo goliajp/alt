@@ -82,7 +82,16 @@ pub(super) fn handle_upload_pack(
                     return respond_logged(req, r, log).map_err(Into::into);
                 }
             };
-            let mut resp = Response::from_file(fetch::response(repo, &fetch_req)?);
+            let sent = match fetch::response(repo, &fetch_req, sending::Room::shared()) {
+                Ok(sent) => sent,
+                Err(e) if limits::refusal(&*e) == 503 => {
+                    let mut r = Response::from_string(format!("{e}")).with_status_code(503);
+                    r.add_header(header("Retry-After", "60"));
+                    return respond_logged(req, r, log).map_err(Into::into);
+                }
+                Err(e) => return Err(e),
+            };
+            let mut resp = Response::sized(sent.length(), sent);
             resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
             resp.add_header(header("Cache-Control", "no-cache"));
             return Ok(respond_logged(req, resp, log)?);

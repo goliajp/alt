@@ -34,6 +34,7 @@ ALT_SERVER_WORKERS                      requests handled at once (4)
   ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in (3 pushes and 1 GiB)
   ALT_SERVER_MAX_INDEX_WAIT_MS            how long a push waits for that memory before a 503 (600000)
   ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes)
+  ALT_SERVER_MAX_SENDING_BYTES            bytes of responses to fetches written and not yet sent (half of what is free for temporary files)
   ALT_SERVER_MAX_OPEN_REPOS               repositories of a root kept open (16)
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
   ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
@@ -50,8 +51,15 @@ pub(super) struct Told {
     pub(super) index_bytes: u64,
     /// `ALT_SERVER_MAX_INDEX_WAIT_MS`: how long a push waits for that
     /// memory before it is told to come again. It has a worker while it
-    /// waits, and its body is sent anew when it comes again
+    /// waits, and its body is sent anew when it comes again. What it
+    /// waits for is the packs of the other workers, three by default,
+    /// each indexed in under a minute where it is as large as a push may
+    /// be: ten minutes is several times as long as they take together
     pub(super) index_wait: Duration,
+    /// `ALT_SERVER_MAX_SENDING_BYTES`: the bytes the responses to fetches
+    /// take on the disk between them until they are sent. Not set, it is
+    /// zero here and [`told`] makes it half of what is free
+    pub(super) sending_bytes: u64,
     /// `ALT_SERVER_WORKERS`
     pub(super) workers: usize,
     /// `ALT_SERVER_MAX_CONNECTIONS`
@@ -107,6 +115,7 @@ impl Told {
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
             index_bytes: number(lookup, "ALT_SERVER_MAX_INDEX_BYTES", index)?,
             index_wait: Duration::from_millis(index_wait),
+            sending_bytes: number(lookup, "ALT_SERVER_MAX_SENDING_BYTES", 0u64)?,
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections,
             repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
@@ -128,7 +137,14 @@ impl Told {
 pub(super) fn told() -> &'static Told {
     static TOLD: OnceLock<Told> = OnceLock::new();
     TOLD.get_or_init(|| {
-        Told::read(&|name| std::env::var_os(name)).unwrap_or_else(|why| super::die(&why))
+        let mut told =
+            Told::read(&|name| std::env::var_os(name)).unwrap_or_else(|why| super::die(&why));
+        if told.sending_bytes == 0 {
+            let free = super::sending::half_of_what_is_free();
+            let unread = |why| super::die(&format!("what is free for temporary files: {why}"));
+            told.sending_bytes = free.unwrap_or_else(unread);
+        }
+        told
     })
 }
 

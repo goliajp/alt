@@ -16,6 +16,7 @@ use alt_wire::fetch::{
     FetchRequest, encode_acknowledgments, encode_fetch_response_packfile, encode_shallow_info,
 };
 
+use super::sending::{Room, Sent, Written};
 use super::shallow::{self, Shallow};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -189,11 +190,14 @@ fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
 /// them is, and is otherwise left to send more of them or `done`: the
 /// pack then leaves out what the commits acknowledged so far reach, which
 /// may be less than a longer negotiation would have found.
-pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
+///
+/// The file is written within the room responses have between them, and has
+/// its part of it until it is sent.
+pub(super) fn response(repo: &Repository, req: &FetchRequest, room: &Room) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
-    let mut framed = BufWriter::new(File::create(&path)?);
-    let refused = |framed: &mut BufWriter<File>, why: &str| {
+    let mut framed = BufWriter::new(room.writing(File::create(&path)?));
+    let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };
     if let Some(oid) = unreached(repo, req)? {
@@ -218,9 +222,8 @@ pub(super) fn response(repo: &Repository, req: &FetchRequest) -> Res<File> {
             }
         }
     }
-    framed.flush()?;
-    drop(framed);
-    Ok(File::open(&path)?)
+    let written = framed.into_inner().map_err(|failed| failed.into_error())?;
+    Ok(written.sent_from(File::open(&path)?))
 }
 
 /// The objects `req` asks for, as a pack written under `dir` and framed

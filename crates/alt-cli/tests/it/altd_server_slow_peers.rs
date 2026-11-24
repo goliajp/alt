@@ -12,7 +12,7 @@ use crate::altd_server_untrusted::repository;
 
 /// The refs `git ls-remote` lists at `url`, or nothing where it has not
 /// answered in a minute.
-fn listed(url: &str) -> Option<String> {
+pub(crate) fn listed(url: &str) -> Option<String> {
     let (done, waited) = channel();
     let url = url.to_owned();
     std::thread::spawn(move || {
@@ -106,7 +106,7 @@ fn a_body_that_comes_slowly_and_goes_on_keeps_the_one_worker_from_nobody() {
 }
 
 /// bytes no compression makes fewer
-fn noise(count: usize) -> Vec<u8> {
+pub(crate) fn noise(count: usize) -> Vec<u8> {
     let mut state = 0x9e37_79b9_7f4a_7c15_u64;
     let mut next = || {
         state ^= state << 13;

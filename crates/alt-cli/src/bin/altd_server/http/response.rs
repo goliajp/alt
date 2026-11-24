@@ -1,6 +1,5 @@
 //! The answer to a request: a status, headers and a body of known length.
 
-use std::fs::File;
 use std::io::{self, Cursor, Read};
 
 use super::head::Header;
@@ -41,14 +40,14 @@ impl Response<Cursor<Vec<u8>>> {
     }
 }
 
-impl Response<File> {
-    /// The file from where it is read to its end.
-    pub(crate) fn from_file(file: File) -> Self {
+impl<R: Read> Response<R> {
+    /// `body`, which is `length` bytes read to its end.
+    pub(crate) fn sized(length: u64, body: R) -> Self {
         Response {
             status: StatusCode(200),
             headers: Vec::new(),
-            length: file.metadata().map_or(0, |about| about.len()),
-            body: file,
+            length,
+            body,
         }
     }
 }

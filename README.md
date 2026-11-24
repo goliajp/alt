@@ -263,7 +263,12 @@ slow peer keeps a connection and never one of the request handlers: the
 connections open at once are limited, and so are those of one address that
 is not the host itself. Behind a reverse proxy on the same host every
 client comes from the host, and the proxy is where the connections of one
-client are limited. These numbers, and those for the size of a push and the
+client are limited. The response to a fetch is a file until its peer has
+taken it, and those files together take no more than
+`ALT_SERVER_MAX_SENDING_BYTES`, half of what is free for temporary files
+when the server starts unless it is set: a fetch whose response has no room
+is answered `503` with `Retry-After`, and one that is alone is answered
+whatever its size. These numbers, and those for the size of a push and the
 memory and disk requests may take, are set through the environment;
 `altd-server --help` lists them with their defaults.
 
