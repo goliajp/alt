@@ -106,6 +106,26 @@ are stopped, and verify a separate Git exit for committed content. Use the
 operation log stays readable; unsafe automatic undo is refused, not migrated by
 guessing its workspace.
 
+A store this build has imported into keeps the configuration of the Git
+repository in a copy of its own, `.alt/git-import/source/`, beside the file
+`alt config` writes. An older executable selected afterwards reads the store,
+but two of its commands do not know the copy:
+
+- its `alt export` writes a `.git/config` without what the source repository
+  had configured (remotes, what each branch follows, attributes of the
+  repository), and reports no error;
+- its `alt import` into that store rewrites `.alt/git-import/config` from the
+  Git repository: the values `alt config` set there since are lost.
+
+Run `export` and a repeated `import` with this build or a newer one. Where an
+older build has already exported, compare the exported `.git/config` with the
+source repository's before relying on it.
+
+A repository whose working tree or `.alt` directory belongs to another user is
+refused, as Git refuses one (`detected dubious ownership`): its configuration
+names filters that would be run. Name the directory in `safe.directory` of
+your own Git configuration to open it.
+
 If installation stops, inspect `status` before retrying. A complete staged
 release with no active pointer can be activated by rerunning installation of
 the same verified package. A malformed/incomplete prefix or unknown file is
