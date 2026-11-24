@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the workflow.toml subset is read in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/ci.rs
+touched: crates/alt-cli/src/ci/toml.rs
