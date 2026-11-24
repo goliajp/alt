@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: leave an empty directory where a checkout moves the files beside it, and take it along with mv
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/directories.rs
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/src/native/tree_edit.rs
+touched: crates/alt-cli/tests/it/checkout_moves.rs
+touched: crates/alt-cli/tests/it/main.rs
