@@ -11,7 +11,7 @@
 //! inflated and hashed again, so a merge can only publish what verifies.
 
 use crate::{
-    Error, Kind, Limits, OidMap, Segment, SegmentSet,
+    Error, Kind, Limits, OidMap, Record, Segment, SegmentSet,
     format::Delta,
     ingest,
     scan::{self, Form},
@@ -51,45 +51,24 @@ pub fn merge(parts: &[Arc<Segment>], older: &SegmentSet) -> Result<Vec<u8>, Erro
         // in pack order a base inside the pack comes before the deltas on it
         order.sort_unstable();
         for (_, index) in order {
-            let record = part.record(index)?;
-            if written.contains_key(&record.oid) {
-                continue;
-            }
-            let entry = part.entry(&record)?;
-            let at = pack.len() as u64;
-            if record.delta == Delta::Plain {
-                pack.extend_from_slice(entry);
-                written.insert(record.oid, (at, 0));
-                continue;
-            }
-            let (form, size, head) = scan::header(entry, 0)?;
-            let base = match (record.delta, form) {
-                (Delta::Inside, _) => part.record(record.base as usize)?.oid,
-                (_, Form::Reference(base)) => base,
-                _ => return Err(Error::Corrupt("record and entry disagree")),
-            };
-            let below = match written.get(&base) {
-                Some((_, depth)) => *depth,
-                None => older.record(&base)?.ok_or(Error::MissingBase(base))?.depth,
-            };
-            if below >= DEPTH {
-                let (kind, data) = all.read(&record.oid)?;
-                write_whole(&mut pack, kind, &data);
-                written.insert(record.oid, (at, 0));
-                continue;
-            }
-            match written.get(&base) {
-                Some((base_at, _)) => {
-                    pack.extend_from_slice(&entry_header(6, size));
-                    pack.extend_from_slice(&offset_bytes(at - base_at));
+            // A delta is written behind what it is made of. A base named by its id
+            // may come later in the pack than the delta: it is written first.
+            let mut waits = vec![index];
+            while let Some(at) = waits.last() {
+                let record = part.record(*at)?;
+                let base = match record.delta {
+                    Delta::Inside => Some(part.record(record.base as usize)?.oid),
+                    _ => None,
+                };
+                if base.is_some_and(|base| !written.contains_key(&base))
+                    && waits.len() <= part.len()
+                {
+                    waits.push(record.base as usize);
+                    continue;
                 }
-                None => {
-                    pack.extend_from_slice(&entry_header(7, size));
-                    pack.extend_from_slice(&base);
-                }
+                copy(part, &record, (older, &all), &mut pack, &mut written)?;
+                waits.pop();
             }
-            pack.extend_from_slice(&entry[head..]);
-            written.insert(record.oid, (at, below + 1));
         }
     }
     let count = u32::try_from(written.len()).map_err(|_| Error::Limit("objects in one pack"))?;
@@ -114,6 +93,57 @@ pub fn merge(parts: &[Arc<Segment>], older: &SegmentSet) -> Result<Vec<u8>, Erro
     }
     ingested.write_index(&mut pack)?;
     Ok(pack)
+}
+
+/// Writes the object of `record`, a record of `part`, behind what `pack` has,
+/// unless it is there: as it is stored, or whole where the chain under it is long.
+/// `written` tells where each object is and how many deltas are under it.
+fn copy(
+    part: &Segment,
+    record: &Record,
+    (older, all): (&SegmentSet, &SegmentSet),
+    pack: &mut Vec<u8>,
+    written: &mut OidMap<(u64, u16)>,
+) -> Result<(), Error> {
+    if written.contains_key(&record.oid) {
+        return Ok(());
+    }
+    let entry = part.entry(record)?;
+    let at = pack.len() as u64;
+    if record.delta == Delta::Plain {
+        pack.extend_from_slice(entry);
+        written.insert(record.oid, (at, 0));
+        return Ok(());
+    }
+    let (form, size, head) = scan::header(entry, 0)?;
+    let base = match (record.delta, form) {
+        (Delta::Inside, _) => part.record(record.base as usize)?.oid,
+        (_, Form::Reference(base)) => base,
+        _ => return Err(Error::Corrupt("record and entry disagree")),
+    };
+    let below = match written.get(&base) {
+        Some((_, depth)) => *depth,
+        None => older.record(&base)?.ok_or(Error::MissingBase(base))?.depth,
+    };
+    if below >= DEPTH {
+        let (kind, data) = all.read(&record.oid)?;
+        write_whole(pack, kind, &data);
+        written.insert(record.oid, (at, 0));
+        return Ok(());
+    }
+    match written.get(&base) {
+        Some((base_at, _)) => {
+            pack.extend_from_slice(&entry_header(6, size));
+            pack.extend_from_slice(&offset_bytes(at - base_at));
+        }
+        None => {
+            pack.extend_from_slice(&entry_header(7, size));
+            pack.extend_from_slice(&base);
+        }
+    }
+    pack.extend_from_slice(&entry[head..]);
+    written.insert(record.oid, (at, below + 1));
+    Ok(())
 }
 
 fn write_whole(pack: &mut Vec<u8>, kind: Kind, data: &[u8]) {

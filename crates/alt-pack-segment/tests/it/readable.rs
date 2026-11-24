@@ -176,3 +176,31 @@ fn a_pack_that_is_taken_in_gives_back_every_object_whatever_makes_it() {
     assert!(taken > 0 && too_deep > 0 && unmade > 0, "{counts:?}");
     println!("taken, too deep, not made: {counts:?}");
 }
+
+/// A delta that names its base by id may stand before the base in its pack. The
+/// segment of such a pack is merged like any other, alone and with one that has a
+/// delta of an object of it, and the merged segment gives back every object.
+#[test]
+fn a_segment_whose_delta_stands_before_its_base_is_merged() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let none = SegmentSet::default();
+    // the third object of the second, which is made behind it of the first
+    let first = pack(&[(0, Of::Nothing), (2, Of::Object(1)), (1, Of::Entry(0))]);
+    let first = super::segment(work.path(), "first.seg", &first, &none);
+    let before = SegmentSet::new(vec![first.clone()]);
+    let second = pack(&[(4, Of::Object(3)), (3, Of::Object(2))]);
+    let second = super::segment(work.path(), "second.seg", &second, &before);
+    for (name, parts, objects) in [
+        ("one", vec![first.clone()], 0..=2),
+        ("both", vec![first, second], 0..=4),
+    ] {
+        let merged = alt_pack_segment::merge(&parts, &none).unwrap();
+        let path = work.path().join(name);
+        std::fs::write(&path, merged).unwrap();
+        let set = SegmentSet::new(vec![Arc::new(Segment::open(&path).unwrap())]);
+        for n in objects {
+            let data = object(n);
+            assert_eq!(set.read(&id(&data)).unwrap().1, data, "{name}: object {n}");
+        }
+    }
+}
