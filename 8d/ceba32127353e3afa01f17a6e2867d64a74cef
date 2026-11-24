@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the tests of this round within the sizes functions and files are held to
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_bounds.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
+touched: crates/alt-oplog/tests/it/v2_unseen.rs
