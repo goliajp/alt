@@ -4,7 +4,7 @@
 use super::*;
 
 /// Posts `body` to the repository's receive-pack; the status and the report.
-fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
+pub(super) fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
     use std::io::Read;
     let response = match ureq::post(&format!("{url}/git-receive-pack"))
         .timeout(Duration::from_secs(15))
