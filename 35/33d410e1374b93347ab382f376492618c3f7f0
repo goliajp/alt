@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: check trees made at random out over what no tree holds, beside git
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/checkout_order/random.rs
+touched: crates/alt-cli/tests/it/checkout_order/random/extras.rs
