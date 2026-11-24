@@ -1,0 +1,23 @@
+schema: alt-meta/1
+type: fix
+summary: a delta is resolved once however many deltas make its base, and a pack nobody waits for is verified no further
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack/budget.rs
+touched: crates/alt-git-pack/src/index_pack/walk.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/walk_given_up.rs
+touched: crates/alt-pack-segment/src/descend.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/limits.rs
+touched: crates/alt-pack-segment/src/room.rs
+touched: crates/alt-pack-segment/src/scan.rs
+touched: crates/alt-pack-segment/tests/it/bases.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/many_of_one.rs
+touched: crates/alt-pack-segment/tests/it/waiting.rs
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/http/handle.rs
