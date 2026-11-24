@@ -24,8 +24,9 @@ impl Store {
 
     /// Gives their moment to up to `rows` requests in each of up to `transactions`
     /// transactions, then vacuums the table if any was written. How many were
-    /// given theirs, and whether the last transaction wrote as many as it may:
-    /// there may be more for the next round.
+    /// given theirs, and whether there may be more for the next round: the last
+    /// transaction wrote as many as it may, or a request is left that another
+    /// transaction had locked and this one passed.
     pub fn give_earlier_requests_their_moment(
         &mut self,
         rows: u32,
@@ -42,6 +43,10 @@ impl Store {
         }
         if given > 0 {
             self.vacuum_requests()?;
+        }
+        if !more {
+            let left = "SELECT EXISTS(SELECT 1 FROM alt_requests WHERE settled_at IS NULL AND state IN ('committed','rejected','expired'))";
+            more = self.client.query_one(left, &[])?.get(0);
         }
         Ok((given, more))
     }

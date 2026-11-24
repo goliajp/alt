@@ -234,3 +234,25 @@ fn the_vacuum_of_a_round_is_not_held_to_the_time_a_statement_is_given() {
     holding.join().unwrap();
     assert!(asked.is_err(), "{asked:?}");
 }
+
+/// A request that another transaction has locked when the last of them are given
+/// their moment is passed, and is still owed its own: the round says so, and the
+/// next round gives it.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn a_request_another_transaction_has_locked_is_given_its_moment_in_a_later_round() {
+    let mut f = Fixture::new();
+    older_instance(&mut f);
+    super::super::schema_20::migrate(&mut f, 21).unwrap();
+    let mut other = f.client();
+    other.batch_execute("BEGIN").unwrap();
+    let lock = "SELECT 1 FROM alt_requests WHERE request_id='e-expired-3' FOR UPDATE";
+    assert_eq!(other.query(lock, &[]).unwrap().len(), 1);
+    // room for all fifty-seven: fifty-six are given theirs, and one is left
+    let round = f.store.give_earlier_requests_their_moment(100, 2).unwrap();
+    assert_eq!(round, (56, true));
+    other.batch_execute("ROLLBACK").unwrap();
+    let round = f.store.give_earlier_requests_their_moment(100, 2).unwrap();
+    assert_eq!(round, (1, false));
+    assert_eq!(f.store.requests_without_moment().unwrap(), 0);
+}
