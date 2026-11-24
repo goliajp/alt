@@ -79,7 +79,10 @@ fn a_pick_is_given_up_or_gone_on_with_only_where_the_new_program_stopped_it() {
         let refused = run(&new, repo, &["cherry-pick", flag]);
         assert!(!refused.status.success(), "{flag}");
         let said = String::from_utf8_lossy(&refused.stderr).into_owned();
-        assert!(said.contains("no cherry-pick in progress"), "{said}");
+        assert!(
+            said.contains("no cherry-pick or revert in progress"),
+            "{said}"
+        );
     }
     assert_eq!(status(), before);
     assert!(before.contains(r#""unmerged":["f.txt"]"#), "{before}");
