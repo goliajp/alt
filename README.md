@@ -341,7 +341,20 @@ bases of their deltas. A pack has what it holds throughout out of that memory,
 and room for its largest object is kept free once for all the packs being
 indexed; pushes that find no memory wait in the order they came, for
 `ALT_SERVER_MAX_INDEX_WAIT_MS` at the longest and no longer than their client
-stays, and are then answered `503` with `Retry-After`.
+stays, and are then answered `503` with `Retry-After`. The response to a
+fetch is made for `ALT_SERVER_MAX_FETCH_MS` at the longest, ten minutes by
+default, and no longer than its client stays; a fetch that takes longer is
+answered `503`.
+
+Under `ALT_SERVER_ROOT`, a file `users` in the root names who may come: a
+name, a tab, the BLAKE3 hash of a token in hex and, behind another tab, rules
+as `<repository>:<r|w|rw|n>` with blanks between them, `*` for the repositories
+no rule names. The rules that name a repository decide for it. A user without
+a column of rules is held to none. A rule that does not read is an error of
+the file: the server does not start with it, and answers `500` to every
+request while the file has it. `altd-server check-users <file>` reads a file
+as the server does and lists the users held to no rules and those whose rules
+gave more when they were added up, which they were before.
 
 ## Status and roadmap
 

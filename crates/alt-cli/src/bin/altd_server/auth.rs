@@ -28,9 +28,9 @@ pub(super) enum AuthOutcome {
 /// they can read, write, or both.
 #[derive(Debug, Clone)]
 pub(super) struct AclRule {
-    repo: String,
-    can_read: bool,
-    can_write: bool,
+    pub(super) repo: String,
+    pub(super) can_read: bool,
+    pub(super) can_write: bool,
 }
 
 /// What kind of access the current HTTP request needs.
@@ -77,7 +77,7 @@ pub(super) fn acl_allows(acl: &[AclRule], repo: &str, action: Action) -> bool {
 /// The rules of `field`, or the first of its words that is none. A word
 /// that does not read is not left out: the rule it was meant for would
 /// then not be there, and `*` would decide for the repository it names.
-fn parse_acl(field: &str) -> Result<Vec<AclRule>, String> {
+pub(super) fn parse_acl(field: &str) -> Result<Vec<AclRule>, String> {
     let rule = |token: &str| {
         let (repo, perm) = token.split_once(':').filter(|(repo, _)| !repo.is_empty())?;
         let (can_read, can_write) = match perm {
@@ -188,26 +188,30 @@ struct UserEntry {
     acl: Option<Vec<AclRule>>,
 }
 
+/// What a line of the users file names: a user, the hash of their token and,
+/// where the line has a third column, their rules. Nothing for a line that is
+/// empty, a comment, or has no hash. The line is taken without the blanks
+/// around it, so a third column of blanks alone is no column.
+pub(super) fn fields(line: &str) -> Option<(&str, &str, Option<&str>)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let mut parts = trimmed.splitn(3, '\t');
+    Some((parts.next()?.trim(), parts.next()?.trim(), parts.next()))
+}
+
 fn read_users(path: &Path) -> Result<HashMap<String, UserEntry>, String> {
     let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let mut out = HashMap::new();
     for (at, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        let Some((user, hash, rules)) = fields(line) else {
             continue;
-        }
-        let mut parts = trimmed.splitn(3, '\t');
-        let Some(user) = parts.next() else { continue };
-        let Some(hash) = parts.next() else { continue };
-        let acl = parts.next().map(parse_acl).transpose();
+        };
+        let acl = rules.map(parse_acl).transpose();
         let acl = acl.map_err(|why| format!("line {}: {why}", at + 1))?;
-        out.insert(
-            user.trim().to_owned(),
-            UserEntry {
-                token_hash: hash.trim().to_owned(),
-                acl,
-            },
-        );
+        let token_hash = hash.to_owned();
+        out.insert(user.to_owned(), UserEntry { token_hash, acl });
     }
     Ok(out)
 }

@@ -28,13 +28,19 @@ fn a_rule_that_does_not_read_ends_the_start_and_lets_nobody_in_afterwards() {
     );
 
     fs::write(&users, format!("{good}{bad}")).unwrap();
-    let start = Command::new(env!("CARGO_BIN_EXE_altd-server"))
+    let mut start = Command::new(env!("CARGO_BIN_EXE_altd-server"))
         .args(["--bind", "127.0.0.1:0"])
         .env("ALT_SERVER_ROOT", &root)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    // one that took the file serves, and does not end
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while start.try_wait().unwrap().is_none() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let _ = start.kill();
     let out = start.wait_with_output().unwrap();
     let said = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "{said}");
@@ -69,4 +75,42 @@ fn a_rule_that_does_not_read_ends_the_start_and_lets_nobody_in_afterwards() {
     }
     fs::write(&users, &good).unwrap();
     assert_eq!(told("alice", "hers", "git-upload-pack"), "200");
+}
+
+/// `check-users` reads a users file as the server does and tells the lines an
+/// operator is to look at: a user held to no rules, and one whose rules gave
+/// more when they were added up. It ends with 1 where there are such lines,
+/// 0 where there are none, and 2 for a file the server would not start with.
+#[test]
+fn the_check_of_a_users_file_tells_the_lines_that_give_all_or_less_than_before() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let users = tmp.path().join("users");
+    let checked = |text: &str| {
+        fs::write(&users, text).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_altd-server"))
+            .arg("check-users")
+            .arg(&users)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        (
+            out.status.code(),
+            said,
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let file = [
+        line("alice", "a", "docs:rw"),
+        "bob\t00\n".into(),
+        line("carol", "c", "*:r\tdocs:w"),
+    ];
+    let (code, said, _) = checked(&file.concat());
+    assert_eq!(code, Some(1), "{said}");
+    let expected = "line 2: bob: no rules: every repository is read and written\n\
+                    line 3: carol: docs was read and written and is written\n";
+    assert_eq!(said, expected);
+    assert_eq!(checked(&line("alice", "a", "docs:rw *:r")).0, Some(0));
+    let (code, said, why) = checked(&line("dave", "d", "docs:x"));
+    assert_eq!((code, said.as_str()), (Some(2), ""), "{why}");
+    assert!(why.contains("line 1: \"docs:x\" is no rule"), "{why}");
 }

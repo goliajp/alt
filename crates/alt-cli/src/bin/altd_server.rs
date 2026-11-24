@@ -26,6 +26,8 @@
 
 #[path = "altd_server/auth.rs"]
 mod auth;
+#[path = "altd_server/check.rs"]
+mod check;
 #[path = "altd_server/fetch.rs"]
 mod fetch;
 #[path = "altd_server/http/mod.rs"]
@@ -95,7 +97,8 @@ fn main() {
             }
             "-h" | "--help" => {
                 eprintln!(
-                    "usage: altd-server [--bind 127.0.0.1:PORT]\n\n\
+                    "usage: altd-server [--bind 127.0.0.1:PORT]\n       \
+                     altd-server check-users <users file>   the lines that give every repository, or less than when rules were added up\n\n\
                      env:\n  \
                      ALT_SERVER_REPO          single alt repo to serve (legacy mode)\n  \
                      ALT_SERVER_ROOT          multi-repo root; URLs map /<name>/… → <root>/<name>\n  \
@@ -104,6 +107,10 @@ fn main() {
                 );
                 return;
             }
+            "check-users" => match args.get(i + 1) {
+                Some(path) => check::run(path),
+                None => die("check-users needs the users file"),
+            },
             other => die(&format!("unknown arg {other:?}")),
         }
         i += 1;
