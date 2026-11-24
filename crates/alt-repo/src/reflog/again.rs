@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use alt_git_codec::HashAlgo;
+use alt_git_codec::{HashAlgo, ObjectId};
 use alt_git_refs::reflog::{Line, parse, write};
 
 use super::{Entry, KEPT};
@@ -50,6 +50,15 @@ impl Repository {
         }
         Ok(lines)
     }
+}
+
+/// Whether the store under `alt_dir` has had the ref `name` at `commit`,
+/// by the log of the ref.
+pub fn was_at(alt_dir: &Path, name: &str, commit: ObjectId) -> Result<bool, RepoError> {
+    let repo = Repository::open_alt(alt_dir.to_owned(), None)?.reading();
+    let log = repo.reflog(name)?;
+    let at = |entry: &Entry| entry.new == Some(commit) || entry.old == Some(commit);
+    Ok(log.iter().any(at))
 }
 
 /// The logs the store under `alt_dir` has of `names` before an import

@@ -23,7 +23,7 @@ use alt_oplog::OpId;
 
 use crate::{Backend, RepoError, Repository};
 
-pub use again::{Carried, carried};
+pub use again::{Carried, carried, was_at};
 
 /// Where an import keeps the logs of the git repository, from the store.
 const KEPT: &str = "git-import/logs";

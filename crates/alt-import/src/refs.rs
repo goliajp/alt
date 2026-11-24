@@ -51,11 +51,29 @@ pub(crate) fn wanted(repo: &Repository) -> Result<Vec<(String, RefTarget)>, Impo
     Ok(wanted)
 }
 
+/// Whether what the store did with the ref `name` since it met git
+/// stands: the store has the ref, and has it, or by its log had it, as
+/// git had it then, `met`. A store that never had it so is another than
+/// the one that met git, or an older state of it brought back.
+fn stands(
+    refs: &RefStore,
+    alt_dir: &Path,
+    name: &str,
+    met: &RefTarget,
+) -> Result<bool, ImportError> {
+    Ok(match (refs.get(name), met) {
+        (None, _) => false,
+        (Some(now), _) if now == met => true,
+        (Some(_), RefTarget::Oid(commit)) => alt_repo::reflog::was_at(alt_dir, name, *commit)?,
+        (Some(_), RefTarget::Symbolic(_)) => true,
+    })
+}
+
 /// The changes that bring `refs` to `wanted`: none for a ref that is
 /// there already, and none for one the repository at `git_dir` has as
 /// it had it when the store under `alt_dir` last met it: what the store
 /// did with such a ref since stands. Where the store keeps nothing of
-/// that, what git has is taken.
+/// that, or never had the ref so, what git has is taken.
 pub(crate) fn changes(
     refs: &RefStore,
     wanted: &[(String, RefTarget)],
@@ -67,7 +85,7 @@ pub(crate) fn changes(
     let of_stash = |name: &str| name == stash::TOP || stash::entry_number(name).is_some();
     let mut changes = stashed(refs, wanted, met);
     for (name, new) in wanted.iter().filter(|(name, _)| !of_stash(name)) {
-        if met.is_some_and(|met| met.get(name) == Some(new)) {
+        if met.is_some_and(|met| met.get(name) == Some(new)) && stands(refs, alt_dir, name, new)? {
             continue;
         }
         let (name, new) = (name.clone(), new.clone());
@@ -92,6 +110,19 @@ pub(crate) fn changes(
         }
     }
     Ok(changes)
+}
+
+/// The branches among `changes` that leave a commit for another, each
+/// with the commit it was at and the one it comes to be at.
+pub(crate) fn moved_branches(changes: &[RefChange]) -> Vec<(String, ObjectId, ObjectId)> {
+    let moved = |change: &RefChange| match (&change.old, &change.new) {
+        (Some(RefTarget::Oid(old)), Some(RefTarget::Oid(new))) => {
+            let branch = change.name.strip_prefix("refs/heads/")?;
+            Some((branch.to_owned(), *old, *new))
+        }
+        _ => None,
+    };
+    changes.iter().filter_map(moved).collect()
 }
 
 /// The changes to the stash: the stack becomes the one git has, and on

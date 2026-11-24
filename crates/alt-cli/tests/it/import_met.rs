@@ -155,7 +155,18 @@ fn a_second_import_leaves_the_refs_git_did_not_change() {
     std::fs::write(source.join("f"), "three").unwrap();
     ok(git(&source, &["commit", "-q", "-a", "-m", "three"]));
     let moved = ok(git(&source, &["rev-parse", "main"]));
-    import(&source, &to);
+    // the branch that leaves the commits made here is named, with
+    // where it was and how they are kept
+    let told = alt(&source, &["import", to.to_str().unwrap()]);
+    let told = String::from_utf8_lossy(&told.stderr).into_owned();
+    let was = format!("warning: branch 'main' was at {}", before.0[1].trim());
+    assert!(told.contains(&was), "{told}");
+    let keep = format!("`alt branch <name> {}`", before.0[1].trim());
+    assert!(
+        told.contains(&keep) && told.contains("`alt reflog main`"),
+        "{told}"
+    );
+    assert!(!told.contains("made-here"), "{told}");
     assert_eq!(at("main"), moved);
     assert_eq!(at("main@{1}"), before.0[1]);
     let log = ok(alt(&to, &["reflog", "main"]));
@@ -173,4 +184,96 @@ fn a_second_import_leaves_the_refs_git_did_not_change() {
     let before = state(&to);
     import(&source, &to);
     assert_eq!(state(&to), before);
+}
+
+/// What the store has `main`, `side`, the tag `v1` and HEAD at.
+fn named(to: &Path) -> Vec<String> {
+    let refs = ["HEAD", "main", "side", "v1"];
+    let mut named: Vec<String> = refs
+        .iter()
+        .map(|r| ok(alt(to, &["rev-parse", r])))
+        .collect();
+    named.push(ok(alt(to, &["status"])));
+    named
+}
+
+#[test]
+fn a_store_made_anew_where_one_was_takes_every_ref_of_what_the_old_one_exported() {
+    let (_dir, _source, to) = imported();
+    ok(alt(&to, &["branch", "side"]));
+    ok(alt(&to, &["tag", "v1"]));
+    let before = named(&to);
+    let out = export(&to);
+    let exported = out.path().join("exported");
+    // the store is gone, with its files; what it exported is imported
+    // to where it was
+    std::fs::remove_dir_all(to.join(".alt")).unwrap();
+    std::fs::remove_file(to.join("f")).unwrap();
+    let told = ok(alt(&exported, &["import", to.to_str().unwrap()]));
+    assert!(!told.contains("already up to date"), "{told}");
+    assert_eq!(named(&to), before);
+    // and a branch the store deleted comes back where git still has it
+    ok(alt(&to, &["branch", "-d", "side"]));
+    import(&exported, &to);
+    assert_eq!(named(&to), before);
+}
+
+#[test]
+fn a_store_brought_back_as_it_once_was_takes_what_it_exported_since() {
+    let (dir, _source, to) = imported();
+    let kept = dir.path().join("kept");
+    let copy = |from: &Path, to: &Path| {
+        let copied = std::process::Command::new("cp")
+            .arg("-R")
+            .args([from, to])
+            .status();
+        assert!(copied.unwrap().success());
+    };
+    copy(&to.join(".alt"), &kept);
+    std::fs::write(to.join("f"), "later").unwrap();
+    ok(alt(&to, &["add", "f"]));
+    ok(alt(&to, &["commit", "-m", "later"]));
+    let later = ok(alt(&to, &["rev-parse", "main"]));
+    let out = export(&to);
+    let exported = out.path().join("exported");
+    std::fs::remove_dir_all(to.join(".alt")).unwrap();
+    copy(&kept, &to.join(".alt"));
+    assert_ne!(ok(alt(&to, &["rev-parse", "main"])), later);
+    import(&exported, &to);
+    assert_eq!(ok(alt(&to, &["rev-parse", "main"])), later);
+}
+
+#[test]
+fn a_repository_cloned_anew_where_one_was_has_dropped_no_stash() {
+    let (dir, source, to) = imported();
+    let entry = stash("git", &source, "put away");
+    import(&source, &to);
+    assert_eq!(stack(&to), std::slice::from_ref(&entry));
+    // another repository at the path of the first, with no stash
+    let again = dir.path().join("again");
+    ok(git(&source, &["clone", "-q", ".", again.to_str().unwrap()]));
+    std::fs::remove_dir_all(&source).unwrap();
+    std::fs::rename(&again, &source).unwrap();
+    assert!(git_stack(&source).is_empty());
+    import(&source, &to);
+    assert_eq!(stack(&to), [entry]);
+}
+
+#[test]
+fn what_an_export_left_is_named_where_it_cannot_be_read() {
+    let (_dir, _source, to) = imported();
+    let out = export(&to);
+    let exported = out.path().join("exported");
+    let left = std::fs::read_to_string(exported.join(".git/alt-met")).unwrap();
+    let head: Vec<&str> = left.lines().take(2).collect();
+    assert!(head[1].ends_with(" :store"), "{left}");
+    let broken = format!("{}\n{}\nno ref at all\n", head[0], head[1]);
+    std::fs::write(exported.join(".git/alt-met"), broken).unwrap();
+    let refused = alt(&exported, &["import", to.to_str().unwrap()]);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(
+        said.contains("alt-met") && !said.contains("git-import/met"),
+        "{said}"
+    );
 }

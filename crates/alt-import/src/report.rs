@@ -17,6 +17,9 @@ pub struct ImportReport {
     pub tree_lineage_deltas: u64,
     /// The subset of `lineage_deltas` that are commit objects.
     pub commit_lineage_deltas: u64,
+    /// The branches the store had at a commit and has at another now:
+    /// the name, where it was, and where git has it.
+    pub moved_branches: Vec<(String, alt_git_codec::ObjectId, alt_git_codec::ObjectId)>,
     /// The import op — None when state was already converged (rerun).
     pub op: Option<alt_refs::OpId>,
 }

@@ -221,6 +221,26 @@ impl NativeRepo<'_> {
     }
 }
 
+impl NativeRepo<'_> {
+    /// Says of each branch the import took off commits git does not
+    /// have on it, for git's, where it was and how its commits are kept.
+    pub(super) fn say_replaced(&self, report: &alt_import::ImportReport) -> Res<()> {
+        for (branch, was, now) in &report.moved_branches {
+            if self.is_ancestor(*was, *now)? {
+                continue;
+            }
+            let said = format!(
+                "warning: branch '{branch}' was at {was}, which git does not have on it; it is \
+                 at {now} now, as in git, and the files are as they were. The commits that \
+                 were on it are kept: `alt branch <name> {was}` puts a branch at them, and \
+                 `alt reflog {branch}` lists where the branch has been\n"
+            );
+            crate::diagnostics::emit(said.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
 /// What an import says it brought into the store under `alt_dir`.
 pub(super) fn say_imported(
     out: &mut impl Write,

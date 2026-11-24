@@ -224,6 +224,7 @@ pub fn import_git_with(
     let changes = refs::changes(&refs, &wanted, alt_dir, repo.git_dir())?;
 
     let refs_changed = changes.len();
+    let moved_branches = refs::moved_branches(&changes);
     let logs = kept::logs(alt_dir, &refs, &changes)?;
     let op = if changes.is_empty() {
         None
@@ -242,6 +243,7 @@ pub fn import_git_with(
         lineage_deltas,
         tree_lineage_deltas,
         commit_lineage_deltas,
+        moved_branches,
         op,
     })
 }

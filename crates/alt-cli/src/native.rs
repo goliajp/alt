@@ -336,13 +336,12 @@ pub fn import(
     out: &mut impl Write,
 ) -> Res<()> {
     let alt_dir = target.join(".alt");
-    let timestamp_ms = now_ms();
     let actor = format!(
         "cli/import@{}",
         std::env::var("USER").as_deref().unwrap_or("unknown")
     );
     let prepare = |refs: &mut RefStore| unconfirmed::sync_objects_first(refs, &alt_dir);
-    let report = alt_import::import_git_with(repo, &alt_dir, &actor, timestamp_ms, prepare)?;
+    let report = alt_import::import_git_with(repo, &alt_dir, &actor, now_ms(), prepare)?;
     import_config::say_imported(out, &report, &alt_dir)?;
 
     // Materialize only where the work tree is empty (a fresh import into
@@ -371,6 +370,7 @@ pub fn import(
         }
     };
     let mut native = open.repo();
+    native.say_replaced(&report)?;
     native.note_composition()?;
     let taken = native.lfs_take(repo.git_dir())?;
     if taken > 0 {
