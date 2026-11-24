@@ -127,3 +127,51 @@ fn transport_validates_exact_claims_bounds_and_refuses_redirected_credentials() 
     assert!(redirect_target.try_recv().unwrap().is_none());
     worker.join().unwrap();
 }
+
+/// A platform that takes the connection and says nothing, and one that begins
+/// an answer and goes on with it a byte at a time without end: the client
+/// gives each up when the time for one request is over, however often the
+/// second gave it something to read.
+#[test]
+fn a_platform_that_says_nothing_or_never_ends_its_answer_is_given_up_when_the_time_is_over() {
+    use std::io::Write;
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+    use std::time::{Duration, Instant};
+    for trickles in [false, true] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (over, ended) = channel::<()>();
+        let platform = std::thread::spawn(move || {
+            let (mut peer, _) = listener.accept().unwrap();
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000000\r\n\r\n";
+            if trickles {
+                peer.write_all(head.as_bytes()).unwrap();
+            }
+            while ended.recv_timeout(Duration::from_millis(500)) == Err(RecvTimeoutError::Timeout) {
+                if trickles {
+                    // the client may be gone by now
+                    let _ = peer.write_all(b" ");
+                }
+            }
+        });
+        let client = Client::new(audience(&origin), secret(&"ab".repeat(32))).unwrap();
+        let (done, waited) = channel();
+        let began = Instant::now();
+        std::thread::spawn(move || done.send(client.service(|| 1500).map(|_| ())));
+        let answered = waited
+            .recv_timeout(Duration::from_secs(120))
+            .expect("the client waits for the platform without end");
+        assert!(
+            matches!(answered, Err(alt_cloud_client::Error::Unavailable)),
+            "{answered:?}"
+        );
+        // it was the time that ended it, and not a peer taken for gone
+        assert!(
+            began.elapsed() >= Duration::from_secs(9),
+            "{:?}",
+            began.elapsed()
+        );
+        drop(over);
+        platform.join().unwrap();
+    }
+}
