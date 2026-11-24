@@ -62,6 +62,11 @@ pub(crate) struct Owed {
     /// the generation the log was of when it was written
     pub generation: u32,
     holder: Holder,
+    /// the last look could not tell whether it is cut
+    unsure: bool,
+    /// Its holder was told of a cut while that could not be told: found
+    /// cut after, it is told of to nobody again.
+    told: bool,
 }
 
 #[derive(Default)]
@@ -99,6 +104,8 @@ impl Account {
             closes,
             generation,
             holder: self.writing,
+            unsure: false,
+            told: false,
         });
     }
 
@@ -121,7 +128,7 @@ impl Account {
             let ticket = Holder::Ticket(*number);
             for owed in &mut self.owed {
                 if owed.holder == ticket {
-                    owed.holder = Holder::Own;
+                    (owed.holder, owed.told) = (Holder::Own, false);
                 }
             }
             if self.cut.contains(&ticket) {
@@ -233,15 +240,20 @@ impl Account {
         let owed = self.owed.iter().copied();
         let (kept, gone): (Vec<Owed>, Vec<Owed>) = owed.partition(|owed| owed.end <= at);
         self.owed = kept;
-        for owed in gone.iter().filter(|owed| owed.holder != Holder::Own) {
+        let others = |owed: &&Owed| owed.holder != Holder::Own && !owed.told;
+        for owed in gone.iter().filter(others) {
             self.found_cut(owed.holder);
         }
     }
 
     /// Whoever asks the handle with no ticket was told that frames were
-    /// cut.
+    /// cut: the ones found cut, and the ones the last look could not
+    /// tell of, which are owed a sync still where they are in the log.
     pub fn told(&mut self) {
         self.cut.retain(|holder| *holder != Holder::Own);
+        for owed in &mut self.owed {
+            owed.told |= owed.unsure && owed.holder == Holder::Own;
+        }
     }
 
     /// Looks at every frame owed with `placed`, which says whether the
@@ -253,16 +265,18 @@ impl Account {
     ) -> Result<(), E> {
         let mut looked = Ok(());
         self.unsure = false;
-        for owed in std::mem::take(&mut self.owed) {
+        for mut owed in std::mem::take(&mut self.owed) {
             // what is not looked at stays owed
             let placed = match looked {
                 Ok(()) => placed(&owed),
                 Err(_) => Ok(None),
             };
             match placed {
+                Ok(Some(false)) if owed.told => {}
                 Ok(Some(false)) => self.found_cut(owed.holder),
                 Ok(sure) => {
-                    self.unsure |= sure.is_none();
+                    owed.unsure = sure.is_none();
+                    self.unsure |= owed.unsure;
                     self.owed.push(owed);
                 }
                 Err(error) => {

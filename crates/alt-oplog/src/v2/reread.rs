@@ -47,8 +47,10 @@ impl Log {
 
     /// Reads the log anew for a handle whose caller was told its ops
     /// were cut: of the frames the handle holds itself that are gone,
-    /// that caller knows. A frame on a ticket, or left to the sink, is
-    /// told of to whoever asks with the ticket, or asks the sink.
+    /// that caller knows, and of the ones it cannot tell of yet, past
+    /// where a cut was begun: found gone later, they are told of to
+    /// nobody again. A frame on a ticket, or left to the sink, is told
+    /// of to whoever asks with the ticket, or asks the sink.
     pub fn reopen(&mut self) -> Result<(), OpLogError> {
         self.reread()?;
         self.account.lock().unwrap().told();

@@ -142,3 +142,66 @@ fn an_op_of_a_handle_that_was_cut_is_told_of_though_the_handle_cuts_what_an_appe
         assert!(log.confirmed(), "{way}");
     }
 }
+
+/// Leaves `len` bytes of no frame where the log in `dir` ends, and has a
+/// writer that would cut them die with nothing but the header of the
+/// log telling of the cut.
+fn cut_of_an_unfinished_append_dies(dir: &Path, len: usize) {
+    let mut file = fs::OpenOptions::new().append(true).open(dir.join("log"));
+    std::io::Write::write_all(file.as_mut().unwrap(), &vec![0xa5; len]).unwrap();
+    let mut other = OpLog::open(dir).unwrap();
+    alt_oplog::v2::cut_dies_after(Some(1));
+    let died = other.refresh();
+    alt_oplog::v2::cut_dies_after(None);
+    assert!(matches!(died, Err(OpLogError::Io(_))), "{died:?}");
+}
+
+#[test]
+fn a_handle_whose_caller_was_told_tells_of_no_cut_again_for_an_op_it_could_not_look_at_then() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    // an op that ends well past where the log ends once it is cut
+    log.append("a", 3, &[7; 600]).unwrap();
+    assert_eq!(cut_from(dir.path(), &[7; 600]), 1);
+    cut_of_an_unfinished_append_dies(dir.path(), 100);
+    // the log ends for the handle where that cut was begun, short of
+    // where its op ended: whether the op is cut it cannot tell
+    assert!(matches!(log.follow(), Err(OpLogError::CutBack)));
+    log.reopen().unwrap();
+    log.refresh().unwrap();
+    log.sync().unwrap();
+    assert!(log.confirmed());
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
+}
+
+#[test]
+fn an_op_a_caller_was_told_of_while_a_cut_of_it_was_begun_is_synced_where_it_stays_in_the_log() {
+    for cut_after in [false, true] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        let mut log = new_log(dir.path());
+        grow(&mut log, "a", 2);
+        log.append("a", 3, b"mine").unwrap();
+        // a cut of it dies with the header of the log alone telling of it
+        fs::remove_file(dir.path().join("tail")).unwrap();
+        let mut other = OpLog::open(dir.path()).unwrap();
+        alt_oplog::v2::cut_dies_after(Some(1));
+        let died = other.settle(|op| Ok::<_, OpLogError>(op.payload != b"mine"));
+        alt_oplog::v2::cut_dies_after(None);
+        assert!(matches!(died, Err(OpLogError::Io(_))), "{died:?}");
+        drop(other);
+        assert!(matches!(log.follow(), Err(OpLogError::CutBack)));
+        log.reopen().unwrap();
+        assert_eq!(log.len(), 2);
+        if cut_after {
+            // cut for good now: its caller was told once already
+            assert_eq!(cut_from(dir.path(), b"mine"), 1);
+        }
+        log.sync().unwrap();
+        assert!(log.confirmed(), "cut after: {cut_after}");
+        assert_eq!(log.len(), if cut_after { 2 } else { 3 });
+        assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
+    }
+}

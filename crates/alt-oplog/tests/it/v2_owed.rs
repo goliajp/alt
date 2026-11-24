@@ -20,7 +20,7 @@ use super::v2_model::Laid;
 
 /// A frame a handle wrote: an op, or the receipt of a request and where
 /// it ends.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Wrote {
     Op(Anchor),
     Receipt([u8; 16], u64),
@@ -135,32 +135,6 @@ impl Run {
         self.to_look = true;
     }
 
-    /// Handle `index` read the log anew with its caller told that ops
-    /// were cut, or cut some itself: of its frames on no ticket that
-    /// are gone, that caller knows.
-    pub fn forget_gone(&mut self, index: usize) {
-        let mine = std::mem::take(&mut self.handles[index].mine);
-        let mine = mine.into_iter().filter(|frame| self.has(frame)).collect();
-        self.handles[index].mine = mine;
-    }
-
-    /// How many of the frames of handle `index` on no ticket the log
-    /// holds, from the first on.
-    pub fn in_the_log(&self, index: usize) -> Vec<bool> {
-        let mine = self.handles[index].mine.iter();
-        mine.map(|frame| self.has(frame)).collect()
-    }
-
-    /// Handle `index` cut the log itself: of its frames on no ticket
-    /// that the log held before, as `had` says, and holds no longer,
-    /// its caller is told by the look that cut them.
-    pub fn forget_cut_now(&mut self, index: usize, had: Vec<bool>) {
-        let mine = std::mem::take(&mut self.handles[index].mine);
-        let kept = mine.into_iter().zip(had);
-        let kept = kept.filter(|(frame, had)| !had || self.has(frame));
-        self.handles[index].mine = kept.map(|(frame, _)| frame).collect();
-    }
-
     /// Handle `index` syncs for its caller without a ticket (`how` 0),
     /// or sets a boundary over the log (`how` 1): that caller is
     /// answered for the frames on no ticket, by the handle or, where
@@ -199,6 +173,7 @@ impl Run {
         }
         self.read_anew_since(index, before);
         self.meanwhile_done(unsettled);
+        let frames = self.answered_for(index, frames);
         self.trace.push(format!(
             "  asked for {} frames on no ticket, it answers {asked:?}",
             frames.len() + self.handles[index].left.len() * leaves as usize
@@ -227,9 +202,9 @@ impl Run {
         let who = format!("the sink of handle {index}, asked without a ticket,");
         let answered = self.handles[index].sink.as_ref().unwrap().fsync();
         self.meanwhile_done(unsettled);
-        let handle = &mut self.handles[index];
-        let left = std::mem::take(&mut handle.left);
-        let head = handle.head_left;
+        let left = std::mem::take(&mut self.handles[index].left);
+        let left = self.answered_for(index, left);
+        let head = self.handles[index].head_left;
         self.trace.push(format!(
             "  its sink, asked for {} frames on no ticket, answers {answered:?}",
             left.len()
@@ -284,7 +259,11 @@ impl Run {
         synced.expect("a sync that promises nothing");
         match claim {
             Some(claim) => drop(handle.claims.remove(claim)),
-            None => (handle.mine.clear(), handle.left.clear()).0,
+            None => {
+                handle.mine.clear();
+                handle.left.clear();
+                handle.told.clear();
+            }
         }
         self.counts.unpromised.fetch_add(1, Ordering::Relaxed);
     }
