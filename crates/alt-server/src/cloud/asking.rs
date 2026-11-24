@@ -8,7 +8,9 @@
 //! got no answer nobody asks for a while, longer each time. Once the lease is
 //! over there is nothing to go on with: a request then asks whatever came
 //! before, and where another is asking and the platform answered last time, it
-//! waits for that one and looks at the lease again.
+//! waits for that one. What that one was told is what the one that waited goes
+//! by: it looks at the lease again where the platform answered, goes on as one
+//! whose asking failed where it did not, and asks in neither case.
 
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -49,7 +51,8 @@ pub(crate) struct Turn<'a> {
 pub(crate) enum Asked<'a> {
     /// ask the platform
     Turn(Turn<'a>),
-    /// another request asked meanwhile: look at the lease again
+    /// another request asked meanwhile and was answered: look at the lease
+    /// again, and go by what is found without asking
     Look,
     /// go on with the lease as it is
     No,
@@ -71,8 +74,12 @@ impl Asking {
                 return Asked::No;
             }
             let asked = |state: &mut State| state.under_way.contains(&of);
-            drop(self.ended.wait_while(state, asked).unwrap());
-            return Asked::Look;
+            let state = self.ended.wait_while(state, asked).unwrap();
+            // the one waited for got no answer: nor would this one
+            return match state.unanswered > 0 {
+                true => Asked::No,
+                false => Asked::Look,
+            };
         }
         if !over && state.waits(now) {
             return Asked::No;
@@ -90,6 +97,15 @@ impl Turn<'_> {
     /// The platform answered, whatever it said.
     pub(crate) fn answered(mut self) {
         self.end(true, Instant::now());
+    }
+
+    /// The platform was not asked after all: what it would have said is as
+    /// unknown as before.
+    pub(crate) fn unasked(mut self) {
+        let mut state = self.asking.state.lock().unwrap();
+        state.under_way.retain(|of| *of != self.of);
+        self.over = true;
+        self.asking.ended.notify_all();
     }
 
     fn end(&mut self, answered: bool, now: Instant) {
@@ -195,5 +211,54 @@ mod tests {
         let service = turn(&asking, None, true, now).unwrap();
         assert!(turn(&asking, Some("a"), true, now).is_some());
         service.answered();
+    }
+
+    /// Sixteen requests find the lease over while one asks, and the platform
+    /// gives that one no answer. None of them asks in its turn, one after
+    /// the other for as long as the platform takes each time: they are told
+    /// to go on as the one they waited for does, and so is whoever comes
+    /// after. Where the one that asks is answered they look at the lease
+    /// again, all of them, and none has a turn.
+    #[test]
+    fn those_that_waited_for_one_that_asked_go_by_what_it_was_told_and_do_not_ask() {
+        for answered in [false, true] {
+            let asking = Asking::default();
+            let now = Instant::now();
+            let first = turn(&asking, None, true, now).unwrap();
+            let told = std::thread::scope(|scope| {
+                let wait = || match asking.turn_at(None, true, now) {
+                    Asked::Turn(_) => "turn",
+                    Asked::Look => "look",
+                    Asked::No => "no",
+                };
+                let waiting: Vec<_> = (0..16).map(|_| scope.spawn(wait)).collect();
+                std::thread::sleep(Duration::from_millis(50));
+                assert!(waiting.iter().all(|waiting| !waiting.is_finished()));
+                match answered {
+                    true => first.answered(),
+                    false => drop(first),
+                }
+                let told: Vec<_> = waiting.into_iter().map(|w| w.join().unwrap()).collect();
+                told
+            });
+            let expected = if answered { "look" } else { "no" };
+            assert_eq!(told, [expected; 16], "answered: {answered}");
+            assert!(asking.state.lock().unwrap().under_way.is_empty());
+        }
+    }
+
+    /// A turn given up before the platform was asked changes nothing of when
+    /// it is asked next.
+    #[test]
+    fn a_turn_that_did_not_ask_leaves_the_waiting_as_it_was() {
+        let asking = Asking::default();
+        let now = Instant::now();
+        turn(&asking, None, false, now).unwrap().unasked();
+        assert_eq!(asking.state.lock().unwrap().unanswered, 0);
+        drop(turn(&asking, None, false, now).unwrap());
+        let again = asking.state.lock().unwrap().again;
+        turn(&asking, Some("a"), true, now).unwrap().unasked();
+        let state = asking.state.lock().unwrap();
+        assert_eq!((state.unanswered, state.again), (1, again));
     }
 }

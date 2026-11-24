@@ -116,29 +116,39 @@ impl Runtime {
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
         // Check that a local credential exists before admitting control traffic.
         store.cloud_refresh(token)?;
+        // one that waited for another's asking goes by what that one was told
+        let mut waited = false;
         loop {
             let renewal = store.cloud_service_renewal()?;
-            if renewal == Renewal::Fresh {
+            if renewal == Renewal::Fresh || waited {
                 break;
             }
             match self.asking.turn(None, renewal == Renewal::Due) {
+                // the turn ends once what the platform said is written: whoever
+                // waited for it looks at the lease then
                 Asked::Turn(turn) => match self.client.service(clock) {
                     Ok(service) => {
+                        let written = store.refresh_cloud_service(&service);
                         turn.answered();
-                        store.refresh_cloud_service(&service)?
+                        written?
                     }
                     Err(alt_cloud_client::Error::Unauthorized) => {
+                        let written = store.revoke_cloud_service();
                         turn.answered();
-                        store.revoke_cloud_service()?
+                        written?
                     }
                     Err(_) => (), // Never extend the persisted lease on failure.
                 },
-                Asked::Look => continue,
+                Asked::Look => {
+                    waited = true;
+                    continue;
+                }
                 Asked::No => (),
             }
             break;
         }
         // Service refresh may have advanced the shared revocation generation.
+        let mut waited = false;
         loop {
             let descriptor = store.cloud_refresh(token)?;
             if !descriptor.refresh_needed {
@@ -147,25 +157,37 @@ impl Runtime {
             let digest = &descriptor.credential_digest;
             // whoever has no turn to ask goes on as one whose asking failed
             let asked = match self.asking.turn(Some(digest), !descriptor.serves) {
-                Asked::Look => continue,
-                Asked::No => None,
+                Asked::Look if !waited => {
+                    waited = true;
+                    continue;
+                }
+                Asked::Look | Asked::No => None,
+                Asked::Turn(turn) if waited => {
+                    turn.unasked();
+                    None
+                }
                 Asked::Turn(turn) => {
-                    let grant = self.sealer.open(&descriptor.sealed_grant, digest);
-                    let grant = grant.map_err(|_| Error::Unauthorized)?;
-                    let told = self.client.introspect(&grant, clock);
-                    if matches!(told, Ok(_) | Err(alt_cloud_client::Error::Unauthorized)) {
-                        turn.answered();
-                    }
-                    Some(told)
+                    let Ok(grant) = self.sealer.open(&descriptor.sealed_grant, digest) else {
+                        // a grant that does not open is no silence of the platform
+                        turn.unasked();
+                        return Err(Error::Unauthorized);
+                    };
+                    Some((self.client.introspect(&grant, clock), turn))
                 }
             };
             match asked {
-                Some(Ok(claims)) => store.refresh_cloud_account(digest, &claims)?,
-                Some(Err(alt_cloud_client::Error::Unauthorized)) => {
-                    store.revoke_cloud_credential(digest)?;
+                Some((Ok(claims), turn)) => {
+                    let written = store.refresh_cloud_account(digest, &claims);
+                    turn.answered();
+                    written?
+                }
+                Some((Err(alt_cloud_client::Error::Unauthorized), turn)) => {
+                    let written = store.revoke_cloud_credential(digest);
+                    turn.answered();
+                    written?;
                     return Err(Error::Unauthorized);
                 }
-                Some(Err(_)) | None => match store.authenticate(token) {
+                Some((Err(_), _)) | None => match store.authenticate(token) {
                     Ok(_) => (),
                     Err(Error::Unauthorized) => return Err(Error::AuthorityUnavailable),
                     Err(error) => return Err(error),
