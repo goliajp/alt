@@ -3,11 +3,17 @@
 //! what git changed from what the store changed: a ref git has as it had
 //! it then is one git did nothing to.
 //!
-//! `git-import/met` has a part for each repository: a line `git` and
-//! the directory, then a line for each ref, what it names, a space, and
-//! its name. What it names is an object id, or `@` and the ref it
-//! follows. The part of a repository that is no longer there goes with
-//! the next that is written.
+//! `git-import/met` has a part for each repository imported from: a line
+//! `git` and the directory, then a line for each ref, what it names, a
+//! space, and its name. What it names is an object id, or `@` and the
+//! ref it follows. The part of a repository that is no longer there goes
+//! with the next that is written.
+//!
+//! An export writes nothing into the store: it leaves the same lines in
+//! the repository it makes, as `alt-met` in its git directory, under a
+//! line `store` and the directory of the store. An import from a repository
+//! the store has no part for goes by that file where the store is the
+//! one that left it.
 
 use std::collections::HashMap;
 use std::fs;
@@ -18,6 +24,7 @@ use alt_refs::RefTarget;
 use crate::RepoError;
 
 const MET: &str = "git-import/met";
+const LEFT: &str = "alt-met";
 
 /// The refs by their names.
 pub type Side = HashMap<String, RefTarget>;
@@ -49,15 +56,7 @@ fn parts(alt_dir: &Path) -> Result<Vec<(String, String)>, RepoError> {
     Ok(parts)
 }
 
-/// What the repository at `git_dir` had when the store under `alt_dir`
-/// last met it; `None` where the store keeps nothing of it.
-pub fn read(alt_dir: &Path, git_dir: &Path) -> Result<Option<Side>, RepoError> {
-    let Some(at) = named(git_dir)? else {
-        return Ok(None);
-    };
-    let Some((_, refs)) = parts(alt_dir)?.into_iter().find(|part| part.0 == at) else {
-        return Ok(None);
-    };
+fn parsed(refs: &str) -> Result<Side, RepoError> {
     let corrupt = || RepoError::Format("git-import/met");
     let mut side = Side::new();
     for line in refs.lines() {
@@ -68,10 +67,48 @@ pub fn read(alt_dir: &Path, git_dir: &Path) -> Result<Option<Side>, RepoError> {
         };
         side.insert(name.to_owned(), target);
     }
-    Ok(Some(side))
+    Ok(side)
 }
 
-/// Keeps `refs` as what the repository at `git_dir` has now.
+fn written<'r>(refs: impl Iterator<Item = (&'r str, &'r RefTarget)>) -> String {
+    let mut text = String::new();
+    for (name, target) in refs {
+        match target {
+            RefTarget::Oid(oid) => text.push_str(&format!("{oid} {name}\n")),
+            RefTarget::Symbolic(followed) => text.push_str(&format!("@{followed} {name}\n")),
+        }
+    }
+    text
+}
+
+/// The line that names the store under `alt_dir` in what an export
+/// leaves: by where it is, which every store has.
+fn store(alt_dir: &Path) -> Result<Option<String>, RepoError> {
+    Ok(named(alt_dir)?.map(|at| format!("store {at}\n")))
+}
+
+/// What the repository at `git_dir` had when the store under `alt_dir`
+/// last met it; `None` where nothing tells.
+pub fn read(alt_dir: &Path, git_dir: &Path) -> Result<Option<Side>, RepoError> {
+    let Some(at) = named(git_dir)? else {
+        return Ok(None);
+    };
+    if let Some((_, refs)) = parts(alt_dir)?.into_iter().find(|part| part.0 == at) {
+        return Ok(Some(parsed(&refs)?));
+    }
+    let left = match fs::read_to_string(git_dir.join(LEFT)) {
+        Ok(left) => left,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    match store(alt_dir)?.and_then(|store| left.strip_prefix(&store)) {
+        Some(refs) => Ok(Some(parsed(refs)?)),
+        None => Ok(None),
+    }
+}
+
+/// Keeps `refs` in the store as what the repository at `git_dir`, which
+/// was imported from, has now.
 pub fn write<'r>(
     alt_dir: &Path,
     git_dir: &Path,
@@ -85,15 +122,22 @@ pub fn write<'r>(
     for (other, refs) in others.filter(|part| part.0 != at && Path::new(&part.0).is_dir()) {
         text.push_str(&format!("git {other}\n{refs}"));
     }
-    text.push_str(&format!("git {at}\n"));
-    for (name, target) in refs {
-        match target {
-            RefTarget::Oid(oid) => text.push_str(&format!("{oid} {name}\n")),
-            RefTarget::Symbolic(followed) => text.push_str(&format!("@{followed} {name}\n")),
-        }
-    }
+    text.push_str(&format!("git {at}\n{}", written(refs)));
     let (kept, fresh) = (alt_dir.join(MET), alt_dir.join("git-import/met.new"));
     fs::create_dir_all(alt_dir.join("git-import"))?;
     fs::write(&fresh, text)?;
     Ok(fs::rename(fresh, kept)?)
+}
+
+/// Leaves `refs` in the repository at `git_dir`, which the store under
+/// `alt_dir` exported to, as what that repository has now.
+pub fn leave<'r>(
+    alt_dir: &Path,
+    git_dir: &Path,
+    refs: impl Iterator<Item = (&'r str, &'r RefTarget)>,
+) -> Result<(), RepoError> {
+    match store(alt_dir)? {
+        Some(store) => Ok(fs::write(git_dir.join(LEFT), store + &written(refs))?),
+        None => Ok(()),
+    }
 }

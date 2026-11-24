@@ -1,5 +1,5 @@
-//! What an export leaves the git repository with, kept for the next
-//! import from it.
+//! What an export leaves the git repository with, told in a file of
+//! that repository for the next import from it.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -10,9 +10,9 @@ use alt_refs::{RefStore, RefTarget};
 
 use crate::{ExportError, stash};
 
-/// Keeps what the export leaves the repository at `git_dir` with as
-/// what it has: an import from it tells by that what git changed since.
-/// An export that reads past damage writes nothing into the store.
+/// Leaves in the repository at `git_dir` what the export leaves it
+/// with: an import from it tells by that what git changed since. The
+/// store itself is not written: an export only reads it.
 pub(crate) fn keep(
     alt_dir: &Path,
     git_dir: &Path,
@@ -21,9 +21,6 @@ pub(crate) fn keep(
     loose: &[(BString, alt_git_refs::RefTarget)],
     unstored: &HashSet<ObjectId>,
 ) -> Result<(), ExportError> {
-    if alt_odb::reading_past_damage() {
-        return Ok(());
-    }
     let ours = |target: &alt_git_refs::RefTarget| match target {
         alt_git_refs::RefTarget::Direct(oid) => Some(RefTarget::Oid(*oid)),
         alt_git_refs::RefTarget::Symbolic(name) => Some(RefTarget::Symbolic(
@@ -45,5 +42,5 @@ pub(crate) fn keep(
     };
     left.extend(refs.iter().filter_map(entry));
     let left = left.iter().map(|(name, target)| (name.as_str(), target));
-    Ok(alt_repo::met::write(alt_dir, git_dir, left)?)
+    Ok(alt_repo::met::leave(alt_dir, git_dir, left)?)
 }
