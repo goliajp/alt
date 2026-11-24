@@ -116,7 +116,10 @@ pub fn create_with(dir: &Path, block_exp: u8) -> std::io::Result<()> {
         file.sync_all()?;
         // what is appended from now on is appended in this boot
         tail::Tail::update(dir, running_boot(), |tail| {
-            tail.judged = block::FILE_HEADER_LEN as u64;
+            *tail = tail::Tail {
+                judged: block::FILE_HEADER_LEN as u64,
+                ..tail::Tail::default()
+            };
         })
     })();
     let _ = unlock(&file);

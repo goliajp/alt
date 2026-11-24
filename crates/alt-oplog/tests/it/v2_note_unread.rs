@@ -1,6 +1,7 @@
-//! `tail`, the note beside a version 2 log, when it does not read: one
-//! that is being written is waited for, and one that stays unreadable
-//! may have said that ops are left to be looked at.
+//! `tail`, the note beside a version 2 log, when it does not read or is
+//! not there: one that is being written is waited for, and one that
+//! stays unreadable, is gone, or speaks of another log may have said
+//! that ops are left to be looked at.
 
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::FileExt;
@@ -29,21 +30,24 @@ fn left_by_another_boot(dir: &Path) {
 }
 
 /// Leaves `tail` in `dir` as no writer does: with a byte changed, cut
-/// short, or empty.
+/// short, empty, or not there.
 fn spoil(dir: &Path, how: &str) {
     let path = dir.join("tail");
     let mut noted = fs::read(&path).unwrap();
     match how {
         "a byte" => noted[41] ^= 1,
         "short" => noted.truncate(40),
+        "gone" => return fs::remove_file(&path).unwrap(),
         _ => noted.clear(),
     }
     fs::write(&path, noted).unwrap();
 }
 
+const SPOILED: [&str; 4] = ["a byte", "short", "empty", "gone"];
+
 #[test]
 fn a_note_that_does_not_read_leaves_what_another_boot_left_to_be_looked_at() {
-    for how in ["a byte", "short", "empty"] {
+    for how in SPOILED {
         let dir = alt_os::temp::tempdir().unwrap();
         left_by_another_boot(dir.path());
         // a writer that looks at nothing notes that `left` is to be
@@ -68,7 +72,12 @@ fn a_note_that_does_not_read_leaves_what_another_boot_left_to_be_looked_at() {
 
 #[test]
 fn a_sync_over_a_note_that_does_not_read_leaves_noted_that_ops_may_be_left_to_look_at() {
-    for deferred in [false, true] {
+    for (deferred, how) in [
+        (false, "a byte"),
+        (true, "a byte"),
+        (false, "gone"),
+        (true, "gone"),
+    ] {
         let dir = alt_os::temp::tempdir().unwrap();
         left_by_another_boot(dir.path());
         // a reader notes where the log ends in this file, and a handle
@@ -83,7 +92,7 @@ fn a_sync_over_a_note_that_does_not_read_leaves_noted_that_ops_may_be_left_to_lo
         let mut staging = OpLog::open(dir.path()).unwrap();
         stage(&mut staging, 40);
         drop(staging);
-        spoil(dir.path(), "a byte");
+        spoil(dir.path(), how);
         held.sync().unwrap();
         if deferred {
             sink.fsync().unwrap();
@@ -91,7 +100,7 @@ fn a_sync_over_a_note_that_does_not_read_leaves_noted_that_ops_may_be_left_to_lo
         assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
         // `left` lies past where that sync took the log for synced
         let mut writer = OpLog::open(dir.path()).unwrap();
-        assert!(writer.unsettled(), "deferred: {deferred}");
+        assert!(writer.unsettled(), "deferred: {deferred}, {how}");
         assert_eq!(writer.settle(but_left).unwrap().unwrap().ops, 41);
     }
 }
@@ -128,6 +137,53 @@ fn a_note_that_is_being_written_is_read_once_its_writer_has_written_it() {
     note.write_all_at(&whole, 0).unwrap();
     alt_os::sys::flock(&lock, alt_os::sys::LOCK_UN).unwrap();
     assert_eq!(read.join().unwrap(), (Some(synced), Some(synced)));
+}
+
+#[test]
+fn a_look_over_a_note_that_does_not_read_beside_a_log_that_was_cut_leaves_the_ops_to_look_at() {
+    for how in SPOILED {
+        let dir = alt_os::temp::tempdir().unwrap();
+        boot(1);
+        let mut log = new_log(dir.path());
+        grow(&mut log, "a", 2);
+        drop(log);
+        // cut once, of an append that was never finished
+        let path = dir.path().join("log");
+        let mut torn = fs::read(&path).unwrap();
+        torn.extend_from_slice(&[1, 2, 3]);
+        fs::write(&path, torn).unwrap();
+        let mut log = OpLog::open(dir.path()).unwrap();
+        // a ref transaction: a sync has to see to what it names
+        log.append_with("a", 3, b"left", &super::v2_image::linked())
+            .unwrap();
+        assert_eq!(log.state().unwrap().generation, 1);
+        drop(log);
+        boot(2);
+        let mut staging = OpLog::open(dir.path()).unwrap();
+        stage(&mut staging, 40);
+        drop(staging);
+        spoil(dir.path(), how);
+        let spoiled = fs::read(dir.path().join("tail")).ok();
+        // a reader looks, and finds `left` not vouched for
+        let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+        assert!(reader.unsettled(), "{how}");
+        let found = reader.unconfirmed(but_left).unwrap();
+        assert_eq!(found.map(|found| found.ops), Some(41), "{how}");
+        // it has nothing to add to a note that says nothing it can read
+        let noted = fs::read(dir.path().join("tail")).ok();
+        assert_eq!(noted, spoiled, "{how}: a look writes the note back");
+        // whoever opens the log after has `left` to look at still
+        let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+        assert!(reader.unsettled(), "{how}: a reader after the look");
+        let mut writer = OpLog::open(dir.path()).unwrap();
+        assert!(writer.unsettled(), "{how}: a writer after the look");
+        // and a writer that syncs gives it to whoever sees to what ops name
+        let given = collecting(&mut writer);
+        writer.append("a", 5, b"more").unwrap();
+        writer.sync().unwrap();
+        let given = given.lock().unwrap();
+        assert!(given.iter().any(|op| op.payload == b"left"), "{how}");
+    }
 }
 
 #[test]

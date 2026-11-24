@@ -16,8 +16,12 @@
 //! [64..72) checksum = blake3(the 64 bytes before it)[..8]
 //! ```
 //!
-//! It is never fsynced: one of another boot says nothing, and the next
-//! command reads more of the log instead. Whoever writes it holds `lock`,
+//! It is never fsynced, and nothing that is right about the log rests on
+//! it alone: with the file gone at any moment, or never read, a handle
+//! reads more of the log, looks at more ops and syncs more, and takes
+//! nothing for looked at or synced that it would not have with it. One
+//! of another boot says nothing, and the next command reads more of the
+//! log instead. Whoever writes it holds `lock`,
 //! as does whoever fsyncs the log to move `synced` and whoever cuts the
 //! log.
 //!
@@ -27,7 +31,11 @@
 //! does not read then either was not left so by a writer of this build.
 //! It may have said that ops are left to be looked at, and is taken to
 //! have: an open judges every op past where the log says it is synced,
-//! and whoever changes the note keeps that in it.
+//! and whoever changes the note keeps that in it. So is one that is not
+//! there in a boot whose writers leave one before they leave a
+//! checkpoint: it was there and is gone. Whoever reads the note and has
+//! nothing to add to it does not write it: what is written back of a
+//! note that did not read would read, and say less than the one lost.
 //!
 //! A writer changes it with the log locked and read to its end, and what
 //! it notes stands. A reader holds no lock on the log, which may have
@@ -68,8 +76,10 @@ pub(crate) struct Tail {
 /// What `tail` says to whoever reads it in a boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Noted {
-    /// there is none, or it is of another boot
+    /// it is of another boot, or no boot is told to write one in
     Nothing,
+    /// there is none
+    Gone,
     /// it is there and does not read
     Unread,
     Says(Tail),
@@ -79,17 +89,18 @@ impl Noted {
     pub fn says(self) -> Option<Tail> {
         match self {
             Noted::Says(tail) => Some(tail),
-            Noted::Nothing | Noted::Unread => None,
+            Noted::Nothing | Noted::Gone | Noted::Unread => None,
         }
     }
 
-    /// What whoever changes `tail` begins with: where it does not read,
-    /// that ops may be left to be looked at from the first frame on.
+    /// What whoever changes `tail` begins with: where it does not read
+    /// or is gone, that ops may be left to be looked at from the first
+    /// frame on.
     pub fn to_change(self) -> Tail {
         match self {
             Noted::Says(tail) => tail,
             Noted::Nothing => Tail::default(),
-            Noted::Unread => Tail {
+            Noted::Gone | Noted::Unread => Tail {
                 pending: true,
                 ..Tail::default()
             },
@@ -151,7 +162,7 @@ impl Tail {
         };
         let file = match File::open(dir.join("tail")) {
             Ok(file) => file,
-            Err(none) if none.kind() == ErrorKind::NotFound => return Noted::Nothing,
+            Err(none) if none.kind() == ErrorKind::NotFound => return Noted::Gone,
             Err(_) => return Noted::Unread,
         };
         let mut bytes = [0u8; LEN];
@@ -229,7 +240,8 @@ impl Tail {
     }
 
     /// Changes `tail` under the lock: `change` is given what it says for
-    /// this boot, or one that says nothing.
+    /// this boot, or one that says nothing. What `change` leaves as it
+    /// was is not written.
     pub fn update(
         dir: &Path,
         boot: Option<[u8; 16]>,
@@ -246,8 +258,12 @@ impl Tail {
         held: &Held,
         change: impl FnOnce(&mut Tail),
     ) -> std::io::Result<()> {
-        let mut tail = Tail::noted_held(dir, boot, held).to_change();
+        let noted = Tail::noted_held(dir, boot, held).to_change();
+        let mut tail = noted;
         change(&mut tail);
-        tail.write(dir, boot, held)
+        match tail == noted {
+            true => Ok(()),
+            false => tail.write(dir, boot, held),
+        }
     }
 }

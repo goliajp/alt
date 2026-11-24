@@ -158,8 +158,8 @@ struct Found {
     tail: Option<Tail>,
     /// the checkpoint it began at is taken on trust
     fresh: bool,
-    /// `tail` is there and does not read, or speaks of another log:
-    /// what it said of the ops left to look at is not known
+    /// `tail` does not read, is gone, or speaks of another log: what it
+    /// said of the ops left to look at is not known
     unknown: bool,
     /// the bytes of the file it holds, from the byte it names on
     window: (u64, Vec<u8>),
@@ -209,7 +209,8 @@ impl Found {
             stop,
             tail,
             fresh,
-            unknown: noted == Noted::Unread || said.is_some() != tail.is_some(),
+            unknown: matches!(noted, Noted::Unread | Noted::Gone)
+                || said.is_some() != tail.is_some(),
             window,
         })
     }
@@ -226,8 +227,8 @@ impl Found {
             judged: match tail {
                 // ops somebody of this boot left to be looked at are still there
                 Some(tail) if tail.pending => tail.judged.max(synced),
-                // a note that does not read may have said the same, and
-                // so may the note of a log that was cut since
+                // a note that does not read or is gone may have said the
+                // same, and so may the note of a log that was cut since
                 _ if fresh && !self.unknown => u64::MAX,
                 _ => self.state.synced,
             },
