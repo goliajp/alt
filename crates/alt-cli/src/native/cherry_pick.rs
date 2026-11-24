@@ -116,7 +116,7 @@ fn picked_identity(
     source: &alt_git_codec::Commit,
     picked: ObjectId,
     noted: bool,
-) -> Res<(Sig<'static>, String)> {
+) -> Res<(Sig<'static>, Vec<u8>)> {
     let author = parse_ident(source.author().map(|b| b.to_vec()).unwrap_or_default())?;
     let message = source.message();
     Ok((author, picked_message(message.as_slice(), picked, noted)))
@@ -148,19 +148,38 @@ fn report_picked(
     Ok(())
 }
 
-/// The message a pick of `picked` is committed with: the one it has,
-/// and where `noted` git's line that names it after that. The line joins
-/// a last paragraph of trailers and stands apart from anything else.
-fn picked_message(original: &[u8], picked: ObjectId, noted: bool) -> String {
-    let mut msg = String::from_utf8_lossy(original).into_owned();
+/// The message a pick of `picked` is committed with, byte for byte as
+/// git has it: the one it has from its first line that is not blank,
+/// and where `noted` that message with its whitespace cleaned up and
+/// git's line that names the commit after it. The line joins a last
+/// paragraph of trailers and stands apart from anything else.
+fn picked_message(original: &[u8], picked: ObjectId, noted: bool) -> Vec<u8> {
+    // what git takes for space
+    let space = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r');
+    let blank = |line: &[u8]| line.iter().all(space);
+    let mut lines = original.split_inclusive(|b| *b == b'\n').peekable();
+    while lines.next_if(|line| blank(line)).is_some() {}
     if !noted {
-        if !msg.ends_with('\n') {
-            msg.push('\n');
-        }
-        return msg;
+        return lines.flatten().copied().collect();
     }
-    msg.truncate(msg.trim_end_matches('\n').len());
-    let trailer = |line: &str| {
+    // no space at the end of a line, one blank line between paragraphs
+    // and none after the last
+    let mut msg: Vec<u8> = Vec::new();
+    let mut apart = false;
+    for line in lines {
+        let kept = &line[..line.iter().rposition(|b| !space(b)).map_or(0, |at| at + 1)];
+        if kept.is_empty() {
+            apart = true;
+            continue;
+        }
+        if std::mem::take(&mut apart) {
+            msg.push(b'\n');
+        }
+        msg.extend_from_slice(kept);
+        msg.push(b'\n');
+    }
+    let trailer = |line: &[u8]| {
+        let line = String::from_utf8_lossy(line);
         let token = line.split(": ").next().unwrap_or_default();
         let named = line.contains(": ")
             && !token.is_empty()
@@ -169,11 +188,14 @@ fn picked_message(original: &[u8], picked: ObjectId, noted: bool) -> String {
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-');
         named || line.starts_with("(cherry picked from commit ")
     };
-    let trailers = msg
-        .rsplit_once("\n\n")
-        .is_some_and(|(_, last)| last.lines().all(trailer));
-    msg.push_str(if trailers { "\n" } else { "\n\n" });
-    msg.push_str(&format!("(cherry picked from commit {picked})\n"));
+    // the last paragraph, where the message has more than one
+    let body = &msg[..msg.len().saturating_sub(1)];
+    let after = body.windows(2).rposition(|pair| pair == b"\n\n");
+    let trailers = after.is_some_and(|at| body[at + 2..].split(|b| *b == b'\n').all(trailer));
+    if !trailers {
+        msg.push(b'\n');
+    }
+    msg.extend_from_slice(format!("(cherry picked from commit {picked})\n").as_bytes());
     msg
 }
 

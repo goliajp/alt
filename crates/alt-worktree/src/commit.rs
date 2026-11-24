@@ -23,7 +23,7 @@ pub fn write_commit(
     parents: &[ObjectId],
     author: &Sig,
     committer: &Sig,
-    message: &str,
+    message: &[u8],
     algo: HashAlgo,
 ) -> Result<ObjectId, WorktreeError> {
     let bytes = build_commit_bytes(tree, parents, author, committer, message);
@@ -40,7 +40,7 @@ pub fn build_commit_bytes(
     parents: &[ObjectId],
     author: &Sig,
     committer: &Sig,
-    message: &str,
+    message: &[u8],
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(format!("tree {tree}\n").as_bytes());
@@ -51,6 +51,6 @@ pub fn build_commit_bytes(
     bytes.extend_from_slice(format!("author {}\n", line(author)).as_bytes());
     bytes.extend_from_slice(format!("committer {}\n", line(committer)).as_bytes());
     bytes.push(b'\n');
-    bytes.extend_from_slice(message.as_bytes());
+    bytes.extend_from_slice(message);
     bytes
 }

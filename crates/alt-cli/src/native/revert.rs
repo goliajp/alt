@@ -172,7 +172,7 @@ impl NativeRepo<'_> {
                 parents: &[head],
                 author: &author.sig(),
                 committer: &committer.sig(),
-                message: msg,
+                message: msg.as_bytes(),
             },
             &branch,
             Some(head),

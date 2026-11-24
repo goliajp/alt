@@ -360,7 +360,7 @@ impl NativeRepo<'_> {
             &[before_oid],
             &author.sig(),
             &committer.sig(),
-            &message,
+            message.as_bytes(),
         );
         if let Some(signed) = self.maybe_sign_commit_bytes(&bytes)? {
             bytes = signed;

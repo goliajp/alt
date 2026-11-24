@@ -195,7 +195,7 @@ impl NativeRepo<'_> {
             &[ours, theirs],
             &author.sig(),
             &committer.sig(),
-            msg,
+            msg.as_bytes(),
             algo,
         )?;
         self.store.odb.flush()?;

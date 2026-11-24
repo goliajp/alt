@@ -131,6 +131,6 @@ fn write_commit_matches_git_commit_tree() {
         when: 100,
         tz: "+0000",
     };
-    let commit = write_commit(&mut odb, tree, &[], &sig, &sig, "hi\n", algo).unwrap();
+    let commit = write_commit(&mut odb, tree, &[], &sig, &sig, b"hi\n", algo).unwrap();
     assert_eq!(commit.to_string(), git_commit.trim(), "vs git commit-tree");
 }

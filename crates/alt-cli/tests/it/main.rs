@@ -48,6 +48,7 @@ mod checkout_guess;
 mod checkout_moves;
 mod checkout_order;
 mod cherry_pick;
+mod cherry_pick_message;
 mod cherry_pick_resume;
 mod ci_validate;
 mod clone;

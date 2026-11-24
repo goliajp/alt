@@ -98,7 +98,7 @@ impl NativeRepo<'_> {
                 parents: &parents,
                 author: &author.sig(),
                 committer: &committer.sig(),
-                message: &msg,
+                message: msg.as_bytes(),
             },
             &branch,
             Some(old),

@@ -107,7 +107,7 @@ impl NativeRepo<'_> {
                 parents: &parents,
                 author: &by.sig(),
                 committer: &me,
-                message: &msg,
+                message: msg.as_bytes(),
             },
             &branch,
             parent,
@@ -234,7 +234,7 @@ impl NativeRepo<'_> {
             bytes = signed;
         }
         let commit = ObjectId::hash_object(self.store.algo()?, ObjectKind::Commit, &bytes);
-        let note = self.meta_for(c.message, c.tree, c.parents, meta)?;
+        let note = self.meta_for(&String::from_utf8_lossy(c.message), c.tree, c.parents, meta)?;
         let move_branch = RefChange {
             name: branch.to_owned(),
             old: old.map(RefTarget::Oid),
@@ -256,7 +256,7 @@ pub(super) struct NewCommit<'a> {
     pub(super) parents: &'a [ObjectId],
     pub(super) author: &'a Sig<'a>,
     pub(super) committer: &'a Sig<'a>,
-    pub(super) message: &'a str,
+    pub(super) message: &'a [u8],
 }
 
 pub(super) fn with_newline(message: &str) -> String {

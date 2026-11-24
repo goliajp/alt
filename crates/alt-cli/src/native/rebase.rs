@@ -221,7 +221,7 @@ impl NativeRepo<'_> {
                 parents,
                 author: &author,
                 committer: &me.sig(),
-                message,
+                message: message.as_bytes(),
             },
             &scratch,
             Some(head),

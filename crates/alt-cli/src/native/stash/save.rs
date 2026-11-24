@@ -266,7 +266,7 @@ impl NativeRepo<'_> {
             parents,
             &author.sig(),
             &committer.sig(),
-            message,
+            message.as_bytes(),
             algo,
         )?)
     }
