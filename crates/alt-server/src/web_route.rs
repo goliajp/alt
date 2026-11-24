@@ -4,6 +4,7 @@ use alt_server_store::{Error, Result};
 use std::collections::BTreeMap;
 
 mod browse;
+mod repository;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WebRoute {
@@ -194,122 +195,8 @@ pub fn parse(
             none()?;
             WebRoute::UserState(identity(actor)?)
         }
-        ("GET", ["", "web", "repositories", repo]) => {
-            none()?;
-            WebRoute::Repository(identity(repo)?)
-        }
-        ("GET", ["", "web", "repositories", repo, "records", kind]) => {
-            WebRoute::Records(identity(repo)?, record_kind(kind)?, after()?)
-        }
-        ("GET", ["", "web", "repositories", repo, "records", kind, record]) => {
-            none()?;
-            let root = RecordRoot {
-                kind: record_kind(kind)?,
-                id: (*record).into(),
-            };
-            root.validate()?;
-            WebRoute::Record(identity(repo)?, root)
-        }
-        ("GET", ["", "web", "repositories", repo, "commits"]) => browse::history(repo, after()?)?,
-        ("GET", ["", "web", "repositories", repo, "tree"]) => browse::tree(repo, query)?,
-        ("GET", ["", "web", "repositories", repo, "objects", oid]) => {
-            none()?;
-            WebRoute::Object(identity(repo)?, id(oid)?, false)
-        }
-        ("GET", ["", "web", "repositories", repo, "objects", oid, "download"]) => {
-            none()?;
-            WebRoute::Object(identity(repo)?, id(oid)?, true)
-        }
-        (
-            "GET",
-            [
-                "",
-                "web",
-                "repositories",
-                repo,
-                "content",
-                digest,
-                "download",
-            ],
-        ) => {
-            none()?;
-            alt_task::check_id(digest).map_err(|_| Error::Precondition("content address"))?;
-            WebRoute::Content(identity(repo)?, (*digest).into())
-        }
-        (
-            "GET",
-            [
-                "",
-                "web",
-                "repositories",
-                repo,
-                "epochs",
-                epoch,
-                "requests",
-                actor,
-                request,
-                "content",
-                digest,
-                "download",
-            ],
-        ) => {
-            none()?;
-            alt_task::check_id(digest).map_err(|_| Error::Precondition("content address"))?;
-            let number = epoch
-                .parse::<u64>()
-                .map_err(|_| Error::Precondition("request epoch"))?;
-            if number.to_string() != *epoch {
-                return Err(Error::Precondition("canonical epoch"));
-            }
-            let key = RequestKey {
-                scope: Scope {
-                    installation_id: installation.into(),
-                    repository_instance_id: identity(repo)?,
-                    recovery_epoch: number,
-                },
-                actor_id: identity(actor)?,
-                request_id: identity(request)?,
-            };
-            key.validate()?;
-            WebRoute::ReviewContent(key, (*digest).into())
-        }
-        (
-            method,
-            [
-                "",
-                "web",
-                "repositories",
-                repo,
-                "epochs",
-                epoch,
-                "requests",
-                actor,
-                request,
-                action,
-            ],
-        ) => {
-            none()?;
-            let number = epoch
-                .parse::<u64>()
-                .map_err(|_| Error::Precondition("request epoch"))?;
-            if number.to_string() != *epoch {
-                return Err(Error::Precondition("canonical epoch"));
-            }
-            let key = RequestKey {
-                scope: Scope {
-                    installation_id: installation.into(),
-                    repository_instance_id: identity(repo)?,
-                    recovery_epoch: number,
-                },
-                actor_id: identity(actor)?,
-                request_id: identity(request)?,
-            };
-            key.validate()?;
-            match (method, *action) {
-                ("GET", "review") => WebRoute::Review(key),
-                ("POST", "approve") => WebRoute::Approve(key),
-                _ => return Err(Error::Precondition("web request action")),
-            }
+        (method, ["", "web", "repositories", repo, rest @ ..]) => {
+            repository::parse(method, repo, rest, query, installation)?
         }
         _ => return Err(Error::Precondition("web route")),
     })
