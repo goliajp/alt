@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a request stays ready where the lease of the service is over as its publication begins
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/publication.rs
+touched: crates/alt-server-store/tests/it/database/cloud.rs
+touched: crates/alt-server-store/tests/it/database/cloud/lease_over.rs
