@@ -163,3 +163,26 @@ fn a_handle_that_holds_a_frame_to_be_known_where_the_log_was_cut_is_told_that_it
         held.sync().unwrap();
     }
 }
+
+#[test]
+fn a_handle_that_was_told_its_ops_were_cut_and_read_the_log_anew_is_not_told_so_by_its_sink() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let (mut held, _given) = held_past_left(dir.path(), true, false);
+    let sink = held.sync_handle().unwrap();
+    // its sink is left to sync up to the last of the forty ops
+    held.sync().unwrap();
+    let mut cutter = OpLog::open(dir.path()).unwrap();
+    assert_eq!(cutter.settle(but_left).unwrap().unwrap().ops, 41);
+    drop(cutter);
+    let appended = held.append("a", 9, b"more");
+    assert!(matches!(appended, Err(OpLogError::CutBack)), "{appended:?}");
+    held.reopen().unwrap();
+    assert_eq!(held.len(), 2);
+    // what the sink was left with is of the ops the handle was told of
+    held.bound_now().unwrap();
+    sink.fsync().unwrap();
+    held.append("a", 9, b"more").unwrap();
+    held.sync().unwrap();
+    sink.fsync().unwrap();
+    assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
+}

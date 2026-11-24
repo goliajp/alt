@@ -50,6 +50,12 @@ impl Log {
         Ok(())
     }
 
+    /// Leaves its sink nothing to sync until this handle asks again.
+    pub(super) fn nothing_deferred(&self) {
+        let mut reached = self.deferred.lock().unwrap();
+        (reached.target, reached.pending) = (0, Vec::new());
+    }
+
     pub(super) fn note_synced(&self, synced: u64) {
         let mut reached = self.deferred.lock().unwrap();
         reached.synced = reached.synced.max(synced);

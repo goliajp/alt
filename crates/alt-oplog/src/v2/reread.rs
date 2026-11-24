@@ -47,6 +47,9 @@ impl Log {
         crate::lock::lock_shared(&self.file)?;
         let read = self.read_anew();
         let _ = crate::lock::unlock(&self.file);
+        // what its sink was left to sync is of the frames it held: it
+        // was told of them, and its sink has nothing to tell of them
+        self.nothing_deferred();
         read
     }
 
