@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: tell apart from the move itself whether the sources go into the directory named last
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/mv.rs
