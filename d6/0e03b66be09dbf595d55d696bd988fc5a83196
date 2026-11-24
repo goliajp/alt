@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: have a cut lay its checkpoint over the one of the cut before, ahead of a handle that syncs from where the driven oplog ends
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
