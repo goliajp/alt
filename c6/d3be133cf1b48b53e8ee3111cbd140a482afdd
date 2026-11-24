@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: a tree of the history served is read once for all the directories of a tree of a push
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/added_commits/trees.rs
+touched: crates/alt-cli/src/added_commits/trees/kept.rs
+touched: crates/alt-cli/src/added_commits/trees/tests.rs
