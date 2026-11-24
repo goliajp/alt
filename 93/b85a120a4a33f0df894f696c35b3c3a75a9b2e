@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: cross two spellings of a name by reset, checkout and stash, through the daemon, in a workspace, cut short and beyond the alphabet
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/casefold_wider.rs
+touched: crates/alt-cli/tests/it/main.rs
