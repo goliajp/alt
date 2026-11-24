@@ -1,0 +1,19 @@
+schema: alt-meta/1
+type: test
+summary: answer the looks of the driven oplog sequences from whether what ops name is stored
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_asked.rs
+touched: crates/alt-oplog/tests/it/v2_checks.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_ledger.rs
+touched: crates/alt-oplog/tests/it/v2_meanwhile.rs
+touched: crates/alt-oplog/tests/it/v2_mishaps.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_settling.rs
