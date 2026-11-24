@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: docs
+summary: say where the servers write for a time and what the packaged server takes of memory
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-server/README.md
+touched: self-hosted/README.md
