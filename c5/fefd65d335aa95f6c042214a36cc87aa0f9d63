@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: tell the store and the git repository a record of their meeting is of, and take what git has where it is of another
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/import_config.rs
+touched: crates/alt-cli/tests/it/import_met.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-import/src/refs.rs
+touched: crates/alt-import/src/report.rs
+touched: crates/alt-repo/src/met.rs
+touched: crates/alt-repo/src/reflog.rs
+touched: crates/alt-repo/src/reflog/again.rs
