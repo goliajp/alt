@@ -5,11 +5,15 @@ use super::*;
 use crate::database::sign_in_deadline::start;
 use std::io::Write;
 
-/// An account sends a push slowly and has more of it received than a quarter of
-/// what the instance holds of bodies: alone it may. A second body of the account
-/// beside it is not begun, however little it says it has; a device that nobody
-/// has signed in for is another caller, and is heard. The push goes on to its
-/// end and lands, and the account has its place for a second body again.
+/// An account has a push under way, of which nothing has come yet. A second
+/// body of the account that says it has more than a quarter of what the instance
+/// holds of bodies is not begun beside it; a device that nobody has signed in
+/// for is another caller, and is heard. The push, which is larger than that
+/// quarter itself, comes whole while it is the only body of the account, and
+/// lands; with it gone the account may begin the body that was turned away.
+///
+/// What came of the bodies of a caller is counted against the quarter as well;
+/// that is held to in the tests of the counting, where nothing races it.
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn the_bodies_one_account_sends_slowly_take_a_quarter_of_the_bytes_and_leave_the_rest() {
@@ -25,28 +29,18 @@ fn the_bodies_one_account_sends_slowly_take_a_quarter_of_the_bytes_and_leave_the
     let head = push_head(&f, body.len());
     socket.write_all(head.as_bytes()).unwrap();
     gone_on(&mut reader);
-    // three quarters of it, which is three eighths of all the instance holds
-    let sent = body.len() / 4 * 3;
-    socket.write_all(&body[..sent]).unwrap();
 
+    // what a second body of the account that says it has `length` bytes is told
     let second = |length: usize| {
         let (mut socket, mut reader) = connect(&server);
         socket.write_all(push_head(&f, length).as_bytes()).unwrap();
         let mut line = String::new();
         std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
-        (line, socket, reader)
+        line
     };
-    // the body beside it is turned away once what came of the first is counted
-    let until = std::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        let (line, ..) = second(1000);
-        if line.starts_with("HTTP/1.1 429") {
-            break;
-        }
-        assert!(line.starts_with("HTTP/1.1 100"), "{line}");
-        assert!(std::time::Instant::now() < until, "a second body is begun");
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    let over_a_quarter = body.len() / 2 + 1;
+    let refused = second(over_a_quarter);
+    assert!(refused.starts_with("HTTP/1.1 429"), "{refused}");
     let code = ureq::post(&format!("{}/oauth/device/code", server.url))
         .timeout(Duration::from_secs(30))
         .send_form(&[("client_id", "alt-cli"), ("scope", "unknown")]);
@@ -55,11 +49,15 @@ fn the_bodies_one_account_sends_slowly_take_a_quarter_of_the_bytes_and_leave_the
         other => panic!("{other:?}"),
     }
 
-    socket.write_all(&body[sent..]).unwrap();
+    // twice the quarter, in pieces: it is the one body its account has
+    for piece in body.chunks(body.len() / 8) {
+        socket.write_all(piece).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let (status, report) = answer(&mut reader);
     assert_eq!(status, "HTTP/1.1 200 OK", "{report}");
     assert!(report.contains("ok refs/heads/queued"), "{report}");
     assert_eq!(queued_refs(&f), 1);
-    let (line, ..) = second(1000);
-    assert!(line.starts_with("HTTP/1.1 100"), "{line}");
+    let begun = second(over_a_quarter);
+    assert!(begun.starts_with("HTTP/1.1 100"), "{begun}");
 }
