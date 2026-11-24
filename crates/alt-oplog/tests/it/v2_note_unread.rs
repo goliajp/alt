@@ -183,7 +183,7 @@ fn a_look_over_a_note_that_does_not_read_beside_a_log_that_was_cut_leaves_the_op
         let appended = writer.append("a", 5, b"more");
         assert!(
             matches!(appended, Err(OpLogError::Unjudged { .. })),
-            "{how}: {appended:?}"
+            "{how}"
         );
         assert_eq!(writer.settle(|_| Ok::<_, OpLogError>(true)).unwrap(), None);
         writer.append("a", 5, b"more").unwrap();

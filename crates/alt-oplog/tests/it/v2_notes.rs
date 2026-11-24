@@ -159,12 +159,25 @@ fn a_note_that_ops_are_left_from_before_the_boundary_has_those_past_it_looked_at
     assert_eq!(log.len(), 2);
 }
 
+/// Gives `log` somebody to sync what ops name, who finds it there when
+/// `stored`: the payloads of the ops that one is given.
+fn given_to(log: &mut OpLog, stored: bool) -> Arc<Mutex<Vec<Vec<u8>>>> {
+    let given = Arc::new(Mutex::new(Vec::new()));
+    let seen = given.clone();
+    log.sync_named_with(Arc::new(move |ops| {
+        let mut seen = seen.lock().unwrap();
+        seen.extend(ops.iter().map(|op| op.payload.clone()));
+        match stored {
+            true => Ok(()),
+            false => Err(std::io::Error::other("what it names is not there")),
+        }
+    }));
+    given
+}
+
 #[test]
 fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_appends() {
-    let linked = Meta {
-        linked: true,
-        ..Meta::default()
-    };
+    let linked = super::v2_image::linked();
     for stored in [false, true] {
         let dir = alt_os::temp::tempdir().unwrap();
         let synced = left_by_boot_1(dir.path(), &linked);
@@ -181,16 +194,7 @@ fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_
         let mut log = OpLog::open(dir.path()).unwrap();
         assert!(log.recent().len() < 20 && log.unsettled());
         assert_eq!(log.left_unsynced_from(), None);
-        let given = Arc::new(Mutex::new(Vec::new()));
-        let seen = given.clone();
-        log.sync_named_with(Arc::new(move |ops| {
-            let mut seen = seen.lock().unwrap();
-            seen.extend(ops.iter().map(|op| op.payload.clone()));
-            match stored {
-                true => Ok(()),
-                false => Err(std::io::Error::other("what it names is not there")),
-            }
-        }));
+        let given = given_to(&mut log, stored);
         // a writer that syncs appends nothing after them before it has
         // looked: among them are ops a sync does not see to, the ones
         // staged that an op of their workspace replaced
@@ -206,13 +210,9 @@ fn ops_another_boot_left_stay_to_be_looked_at_after_a_writer_that_syncs_nothing_
             assert_eq!(log.settle(vouched).unwrap(), None);
             log.append("c", 1, b"committed").unwrap();
             log.sync().unwrap();
-            let named = [
-                b"left".to_vec(),
-                vec![37; 120],
-                vec![38; 120],
-                vec![39; 120],
-            ];
-            assert_eq!(*given.lock().unwrap(), named);
+            let given = given.lock().unwrap();
+            assert_eq!(given[0], b"left");
+            assert_eq!(given[1..], [37u8, 38, 39].map(|n| vec![n; 120]));
             assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
             assert!(!OpLog::open(dir.path()).unwrap().unsettled());
             continue;
@@ -269,12 +269,7 @@ fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() 
     // a writer that syncs looks first; its sync has them seen to, and
     // its boundary is in the log once the next frame says it
     let mut log = OpLog::open(dir.path()).unwrap();
-    let given = Arc::new(Mutex::new(0));
-    let seen = given.clone();
-    log.sync_named_with(Arc::new(move |ops| {
-        *seen.lock().unwrap() += ops.len();
-        Ok(())
-    }));
+    let given = given_to(&mut log, true);
     assert!(matches!(
         log.append("w", 1, b"committed"),
         Err(OpLogError::Unjudged { .. })
@@ -283,7 +278,7 @@ fn where_the_kernel_tells_no_boot_nothing_is_noted_and_nothing_taken_on_trust() 
     log.append("w", 1, b"committed").unwrap();
     log.sync().unwrap();
     // of the sixty ops, the one of each workspace that last staged
-    assert_eq!(*given.lock().unwrap(), 3);
+    assert_eq!(given.lock().unwrap().len(), 3);
     let committed = log.appended_len();
     assert!(log.confirmed() && log.synced_here() == committed);
     assert!(!dir.path().join("tail").exists());

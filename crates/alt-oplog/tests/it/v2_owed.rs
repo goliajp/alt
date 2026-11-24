@@ -162,7 +162,9 @@ impl Run {
     /// the handle leaves them to its sink, by the sink. What another
     /// handle did meanwhile is taken in before the answers are held to
     /// the log; `unsettled` are the ops that were left to look at
-    /// before. Gives what the caller is told.
+    /// before. Gives what the caller is told. A sync that is left to the
+    /// sink answers for nothing itself; a boundary answers for what was
+    /// not left.
     pub fn sync_through(
         &mut self,
         index: usize,
@@ -177,8 +179,6 @@ impl Run {
             0 => handle.log.sync(),
             _ => handle.log.bound_now(),
         };
-        // a sync that is left to the sink answers for nothing itself; a
-        // boundary answers for what was not left
         let leaves = deferred && how == 0;
         let mut frames = std::mem::take(&mut handle.mine);
         if !deferred {

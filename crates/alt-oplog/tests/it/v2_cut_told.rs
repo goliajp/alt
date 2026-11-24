@@ -112,23 +112,29 @@ fn where_no_boot_is_told_a_handle_past_a_cut_that_died_is_told_so_and_appends_to
                     assert_eq!((held.len(), held.reads()), (left, 1), "{case}");
                 }
             }
-            held.set_defer_durability(false);
-            let all = |_: &alt_oplog::Op| Ok::<_, OpLogError>(true);
-            assert_eq!(held.settle(all).unwrap(), None, "{case}");
-            held.append("a", 9, b"more").unwrap();
-            held.sync().unwrap();
-            assert!(held.confirmed(), "{case}");
             // a cut that came to no more than being told left every op
             let ops = if step == 1 { 44 } else { 3 };
-            for read_only in [true, false] {
-                let opened = match read_only {
-                    true => OpLog::open_read_only(dir.path(), None).unwrap(),
-                    false => OpLog::open(dir.path()).unwrap(),
-                };
-                assert_eq!(opened.ops().unwrap().len(), ops, "{case}");
-                opened.verify().unwrap();
-            }
+            goes_on(&mut held, dir.path(), ops, &case);
         }
+    }
+}
+
+/// The handle looks, appends and syncs, and whoever opens the log in
+/// `dir` after reads `ops` ops in it.
+fn goes_on(held: &mut OpLog, dir: &Path, ops: usize, case: &str) {
+    held.set_defer_durability(false);
+    let all = |_: &alt_oplog::Op| Ok::<_, OpLogError>(true);
+    assert_eq!(held.settle(all).unwrap(), None, "{case}");
+    held.append("a", 9, b"more").unwrap();
+    held.sync().unwrap();
+    assert!(held.confirmed(), "{case}");
+    for read_only in [true, false] {
+        let opened = match read_only {
+            true => OpLog::open_read_only(dir, None).unwrap(),
+            false => OpLog::open(dir).unwrap(),
+        };
+        assert_eq!(opened.ops().unwrap().len(), ops, "{case}");
+        opened.verify().unwrap();
     }
 }
 

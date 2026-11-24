@@ -16,6 +16,12 @@ pub fn seeing(mut log: OpLog) -> OpLog {
     log
 }
 
+/// Has a writer that somebody syncs for what ops name set a boundary
+/// over all the log in `dir` holds.
+pub fn bound(dir: &std::path::Path) {
+    seeing(OpLog::open(dir).unwrap()).bound_now().unwrap();
+}
+
 /// A handle on a new log of two synced ops with nobody to sync what ops
 /// name, which leaves its syncs to the sink given with it when
 /// `deferred`; and where the log is synced up to.

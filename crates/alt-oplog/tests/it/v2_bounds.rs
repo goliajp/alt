@@ -162,8 +162,7 @@ fn a_stretch_missing_from_what_this_boot_wrote_ends_the_log_before_it_and_is_tol
     // within what is synced it is damage, and nothing is cut
     let dir = alt_os::temp::tempdir().unwrap();
     let last = many_blocks(dir.path());
-    let mut log = super::v2_unseen::seeing(OpLog::open(dir.path()).unwrap());
-    log.bound_now().unwrap();
+    super::v2_unseen::bound(dir.path());
     let len = file_len(dir.path());
     for at in [len - 100, last + 40] {
         zero(dir.path(), at, at + 20);

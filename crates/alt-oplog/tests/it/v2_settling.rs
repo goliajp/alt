@@ -108,6 +108,12 @@ impl Run {
         if self.died == died || at.is_none_or(|at| at >= held_to) {
             return;
         }
+        self.comes_upon(held, step);
+    }
+
+    /// Handle `held` holds ops past where a cut died after `step`, and
+    /// does what finds the cut told in the log.
+    fn comes_upon(&mut self, held: usize, step: u8) {
         let way = self.rng.below(4);
         self.trace.push(format!(
             "handle {held} comes upon the cut that died after step {step} (way {way})"
