@@ -69,6 +69,7 @@ mod edit_order;
 mod eol;
 mod exclude_dirs;
 mod exclude_order;
+mod export_under_way;
 mod fetch;
 mod file_mode;
 mod flow;

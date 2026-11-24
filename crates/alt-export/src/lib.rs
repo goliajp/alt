@@ -208,6 +208,12 @@ fn named_objects(refs: &RefStore) -> HashSet<ObjectId> {
     refs.iter().filter_map(named).collect()
 }
 
+/// Whether `name` is the ref a rebase or a bisect of a workspace keeps
+/// the commit it stands on under, while HEAD is off its branch.
+fn stands_apart(name: &str) -> bool {
+    name.starts_with("rebase/") || name.starts_with("bisect/")
+}
+
 fn write_git(
     alt_dir: &Path,
     git_dir: &Path,
@@ -237,6 +243,14 @@ fn write_git(
         }
         let converted = match target {
             RefTarget::Oid(oid) => alt_git_refs::RefTarget::Direct(*oid),
+            // git follows HEAD only into refs/: where a rebase or a bisect
+            // has it, HEAD is the commit they stand on, as git has it then
+            RefTarget::Symbolic(sym) if name == "HEAD" && stands_apart(sym) => {
+                match refs.resolve(sym)? {
+                    Some(oid) => alt_git_refs::RefTarget::Direct(oid),
+                    None => continue,
+                }
+            }
             RefTarget::Symbolic(sym) => {
                 alt_git_refs::RefTarget::Symbolic(BString::from(sym.as_str()))
             }
@@ -245,6 +259,7 @@ fn write_git(
             "HEAD" => head = Some(converted),
             // the stack is the store's own form of the log written below
             _ if stash::entry_number(name).is_some() => {}
+            _ if stands_apart(name) => {}
             _ => loose.push((BString::from(name), converted)),
         }
     }

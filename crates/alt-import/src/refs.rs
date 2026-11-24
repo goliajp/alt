@@ -62,6 +62,17 @@ pub(crate) fn changes(refs: &RefStore, wanted: Vec<(String, RefTarget)>) -> Vec<
     };
     let mut changes: Vec<RefChange> = refs.iter().filter_map(gone).collect();
     for (name, new) in wanted {
+        // a rebase or a bisect of the store has HEAD on a ref of its own,
+        // which an export wrote as the commit HEAD is at: that ref takes
+        // what the source has there, and HEAD stays on it
+        let name = match (name.as_str(), &new, refs.get("HEAD")) {
+            ("HEAD", RefTarget::Oid(_), Some(RefTarget::Symbolic(on)))
+                if !on.starts_with("refs/") =>
+            {
+                on.clone()
+            }
+            _ => name,
+        };
         let old = refs.get(&name).cloned();
         if old.as_ref() != Some(&new) {
             changes.push(RefChange {
