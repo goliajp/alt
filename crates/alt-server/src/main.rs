@@ -218,6 +218,10 @@ fn main() -> ExitCode {
             println!("{value}");
             ExitCode::SUCCESS
         }
+        Err(Error::Partly(told, unknown)) => {
+            println!("{told}");
+            ExitCode::from(if unknown { 75 } else { 1 })
+        }
         Err(error) => {
             let writing = !matches!(
                 args.command,

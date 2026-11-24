@@ -2,6 +2,11 @@
 //! that does not give its objects back by its pack indexed anew.
 use super::*;
 
+/// memory for the pack of a segment to be indexed anew in
+pub(super) fn memory() -> &'static alt_pack_segment::Memory {
+    Box::leak(Box::new(alt_pack_segment::Memory::new(1 << 30)))
+}
+
 /// Has the first record of the bytes of a segment tell of the entry of the second.
 pub(super) fn turned(bytes: &mut [u8]) {
     let end = bytes.len() - 64;
@@ -55,7 +60,7 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let written: Vec<u8> = (row.get::<_, Option<Vec<u8>>>(2)).unwrap_or_else(|| {
         std::fs::read(f.store.pack_path("repository", &first).unwrap()).unwrap()
     });
-    let found = f.store.scrub_packs(&f.credential, "repository", false);
+    let found = f.store.scrub_packs(&f.credential, "repository", None);
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (1, 2));
     assert!(found.unread.is_empty());
@@ -65,7 +70,7 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let mut bytes = written.clone();
     turned(&mut bytes);
     planted(&f, &astray, sequence + 1, &bytes);
-    let found = f.store.scrub_packs(&f.credential, "repository", false);
+    let found = f.store.scrub_packs(&f.credential, "repository", None);
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (2, 4));
     assert_eq!(found.unread.len(), 1);
@@ -88,8 +93,28 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
         ]
     );
 
+    // a name that is no repository has no segments, and is not told of as sound
+    let none = f.store.scrub_packs(&f.credential, "repositry", None);
+    let none = none.err().map(|error| error.to_string());
+    let no_repository = format!("precondition failed: {}", alt_server_store::NO_REPOSITORY);
+    assert_eq!(none, Some(no_repository));
+
+    // in less memory than its pack is indexed in it stays, and that is why
+    let little = Box::leak(Box::new(alt_pack_segment::Memory::new(1 << 10)));
+    let kept = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(little));
+    let kept = kept.unwrap();
+    assert!(kept.unread[0].replaced_by.is_none());
+    assert_eq!(
+        kept.unread[0].kept_because.as_deref(),
+        Some("storage limit exceeded: memory to index the pack of the segment anew")
+    );
+
     // asked to, the server puts the pack indexed anew in its place
-    let mended = f.store.scrub_packs(&f.credential, "repository", true);
+    let mended = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(memory()));
     let mended = mended.unwrap();
     assert_eq!(mended.unread.len(), 1);
     let anew = mended.unread[0].replaced_by.clone().unwrap();
@@ -103,7 +128,9 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     );
     let indexed = std::fs::read(f.store.pack_path("repository", &anew).unwrap()).unwrap();
     assert_eq!(indexed.len(), written.len());
-    let found = f.store.scrub_packs(&f.credential, "repository", true);
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(memory()));
     assert!(found.unwrap().unread.is_empty());
 
     // a pack that is no longer what was taken in cannot be: it stays, and is told of
@@ -113,7 +140,9 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let pack = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap()) as usize;
     bytes[pack - 21] ^= 1;
     planted(&f, &changed, sequence + 2, &bytes);
-    let found = f.store.scrub_packs(&f.credential, "repository", true);
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(memory()));
     let found = found.unwrap();
     assert_eq!(found.unread.len(), 1);
     let unread = &found.unread[0];

@@ -153,7 +153,8 @@ pub(super) fn execute(
             json!({"repository":repository,"removed":store.collect_orphans(admin,repository,*limit)?})
         }
         Action::Scrub { repository, mend } => {
-            operator::scrub::read(store, admin, repository.as_deref(), *mend)?
+            let mend = mend.then(|| operator::scrub::memory(config.indexing_bytes()));
+            operator::scrub::read(store, admin, repository.as_deref(), mend)?
         }
         _ => return Err(Error::Config("unsupported operator action")),
     };

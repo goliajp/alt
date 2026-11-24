@@ -1,7 +1,7 @@
 //! The segments of a Cloud instance read, and one that does not give its objects
 //! back replaced.
 use super::*;
-use crate::database::pack_scrub::{planted, states, turned};
+use crate::database::pack_scrub::{memory, planted, states, turned};
 
 /// A Cloud instance holds every transaction to the clock and the authority it
 /// has recorded. Its segments are read and one of them is replaced as on any
@@ -28,12 +28,14 @@ fn cloud_segment_that_does_not_give_its_objects_back_is_indexed_anew() {
     turned(&mut bytes);
     planted(&f, &astray, sequence + 1, &bytes);
 
-    let found = f.store.scrub_packs(&f.credential, "repository", false);
+    let found = f.store.scrub_packs(&f.credential, "repository", None);
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (2, 4));
     assert_eq!(found.unread.len(), 1);
     assert_eq!(found.unread[0].segment, astray);
-    let mended = f.store.scrub_packs(&f.credential, "repository", true);
+    let mended = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(memory()));
     let anew = mended.unwrap().unread[0].replaced_by.clone().unwrap();
     let live = "live".to_owned();
     assert_eq!(
@@ -44,7 +46,9 @@ fn cloud_segment_that_does_not_give_its_objects_back_is_indexed_anew() {
             (astray, "retired".to_owned())
         ]
     );
-    let found = f.store.scrub_packs(&f.credential, "repository", true);
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", Some(memory()));
     assert!(found.unwrap().unread.is_empty());
     assert_eq!(
         f.store.repositories_to_scrub(&f.credential).unwrap(),

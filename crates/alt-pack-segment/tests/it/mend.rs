@@ -3,13 +3,18 @@
 
 use super::readable::{Of, pack, three_chains};
 use super::waiting::{id, object};
-use alt_pack_segment::{Error, Segment, SegmentSet, indexed_anew, unread};
+use alt_pack_segment::{Error, Memory, Segment, SegmentSet, indexed_anew, unread};
 use std::{path::Path, sync::Arc};
 
 /// the deltas of each of three chains: together more than a read goes down
 const CHAIN: usize = 1400;
 
 /// Where the bytes of a segment have the record of `object(n)`.
+/// memory for a pack to be indexed anew in
+fn memory(bytes: u64) -> &'static Memory {
+    Box::leak(Box::new(Memory::new(bytes)))
+}
+
 fn record_of(bytes: &[u8], n: usize) -> usize {
     let end = bytes.len() - 64;
     let pack = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap()) as usize;
@@ -106,7 +111,10 @@ fn a_segment_whose_index_leads_past_what_is_read_is_found_and_indexed_anew() {
     let behind = SegmentSet::new(vec![before.clone()]);
     assert_eq!(unread(&later, &behind).unwrap().len(), 1);
 
-    let anew = indexed_anew(&before, &none).unwrap();
+    // in no more memory than it is given
+    let refused = indexed_anew(&before, &none, memory(1 << 10));
+    assert!(matches!(refused, Err(Error::Limit("index memory"))));
+    let anew = indexed_anew(&before, &none, memory(1 << 30)).unwrap();
     assert_eq!(anew, written);
     let anew = opened(work.path(), "anew.seg", &anew);
     assert!(unread(&anew, &none).unwrap().is_empty());
@@ -141,7 +149,10 @@ fn what_is_read_is_held_against_its_id_and_a_pack_that_changed_is_not_indexed_an
         lost[0].1,
         Error::Corrupt("object differs from its id")
     ));
-    assert_eq!(indexed_anew(&astray, &none).unwrap(), written);
+    assert_eq!(
+        indexed_anew(&astray, &none, memory(1 << 30)).unwrap(),
+        written
+    );
 
     // a byte of the second entry is another: it and what is made of it are lost
     let mut changed = written.clone();
@@ -152,5 +163,5 @@ fn what_is_read_is_held_against_its_id_and_a_pack_that_changed_is_not_indexed_an
     for (_, error) in &lost {
         assert!(matches!(error, Error::Corrupt("entry checksum")), "{error}");
     }
-    assert!(indexed_anew(&changed, &none).is_err());
+    assert!(indexed_anew(&changed, &none, memory(1 << 30)).is_err());
 }

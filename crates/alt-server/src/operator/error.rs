@@ -12,6 +12,10 @@ pub enum Error {
     RestoreStage(&'static str),
     /// the HTTP service refused to start or ended on an error; nothing was written
     Serve(String),
+    /// The action was done for a part of what it was asked for. What it found
+    /// and what it failed at is told as its result; whether a part of it has
+    /// an outcome that is not known.
+    Partly(alt_json::Value, bool),
 }
 
 impl std::fmt::Display for Error {
@@ -30,6 +34,7 @@ impl std::fmt::Display for Error {
                 "restoration incomplete at {v}; inspect the isolated destination before retrying"
             ),
             Self::Serve(v) => write!(f, "service stopped: {v}"),
+            Self::Partly(..) => f.write_str("operator action failed for a part: see its output"),
         }
     }
 }

@@ -353,7 +353,7 @@ pub(super) fn publish(store: &mut Store, token: &str) -> Payload {
 }
 /// Pushes a commit whose single file is too large for a segment kept with its row, so
 /// that its segment is a file. Returns the commit, the blob and the blob's bytes.
-fn push_large(store: &mut Store, token: &str) -> (String, ObjectId, Vec<u8>) {
+pub(super) fn push_large(store: &mut Store, token: &str) -> (String, ObjectId, Vec<u8>) {
     use alt_pack_segment::Kind;
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let asset: Vec<u8> = (0..200_000)
@@ -406,7 +406,7 @@ fn push_large(store: &mut Store, token: &str) -> (String, ObjectId, Vec<u8>) {
     (commit_id.to_string(), blob, asset)
 }
 /// every pack segment file under a byte volume
-fn segment_files(bytes: &std::path::Path) -> Vec<PathBuf> {
+pub(super) fn segment_files(bytes: &std::path::Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for directory in std::fs::read_dir(bytes.join("packs")).unwrap() {
         for file in std::fs::read_dir(directory.unwrap().path()).unwrap() {

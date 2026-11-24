@@ -225,10 +225,7 @@ impl Config {
             },
             // one for as long as the process serves
             verifying: Box::leak(Box::new(alt_pack_segment::Memory::new(
-                match h.indexing_megabytes {
-                    Some(megabytes) => megabytes.saturating_mul(1 << 20),
-                    None => crate::git::least_verifying_bytes(self.limits).max(4 << 30),
-                },
+                self.indexing_bytes(),
             ))),
             base_files: None,
             // told, or as much as there is until the disk it is on is known

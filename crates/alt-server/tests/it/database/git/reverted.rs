@@ -59,6 +59,6 @@ fn a_change_pushed_and_its_revert_pushed_leave_a_repository_that_is_cloned() {
         reverted
     );
     drop(server);
-    let scrubbed = f.store.scrub_packs(&f.credential, "repository", false);
+    let scrubbed = f.store.scrub_packs(&f.credential, "repository", None);
     assert_eq!(scrubbed.unwrap().unread.len(), 0);
 }

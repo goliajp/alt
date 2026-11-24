@@ -58,6 +58,15 @@ fn to_write_for() -> Result<u64> {
 }
 
 impl Config {
+    /// The memory the packs of pushes are verified in between them: what is
+    /// told, or 4 GiB and no less than one pack at its worst takes.
+    pub fn indexing_bytes(&self) -> u64 {
+        match self.http.indexing_megabytes {
+            Some(megabytes) => megabytes.saturating_mul(1 << 20),
+            None => crate::git::least_verifying_bytes(self.limits).max(4 << 30),
+        }
+    }
+
     /// This configuration as it is migrated: one from before the memory for
     /// the packs of pushes was a key takes more for them than the container of
     /// the package has, and is given what goes with its container.

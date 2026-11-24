@@ -13,11 +13,17 @@ use crate::{
     packs::INLINE_SEGMENT_BYTES,
     store::{instance_unlocked, require_admin},
 };
-use alt_pack_segment::{Segment, SegmentSet};
+use alt_pack_segment::{Memory, Segment, SegmentSet};
 use std::sync::Arc;
 
 /// the objects told of by name for one segment; the rest are counted
 const NAMED: usize = 16;
+
+/// why a segment whose pack takes more memory to index than there is stays
+const NO_MEMORY: &str = "memory to index the pack of the segment anew";
+
+/// what a scrub of a name that is no repository is refused with
+pub const NO_REPOSITORY: &str = "no repository of this name";
 
 /// A live segment that does not give back every object of its index.
 pub struct Unread {
@@ -78,17 +84,22 @@ impl Store {
 
     /// Reads every object of the live segments of `repository`, oldest segment
     /// first. With `mend`, a segment that does not give back all of its objects is
-    /// replaced by its pack indexed anew, and the segments behind it are read
-    /// against what replaced it.
+    /// replaced by its pack indexed anew in that memory, and the segments behind
+    /// it are read against what replaced it. A name that is no repository of the
+    /// instance is an error: it has no segments, and would be told of as sound.
     pub fn scrub_packs(
         &mut self,
         admin: &Credential,
         repository: &str,
-        mend: bool,
+        mend: Option<&'static Memory>,
     ) -> Result<Scrubbed> {
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
         require_admin(&mut tx, &self.spec, admin)?;
+        let known = tx.query_opt("SELECT 1 FROM alt_repositories WHERE id=$1", &[&repository])?;
+        if known.is_none() {
+            return Err(Error::Precondition(NO_REPOSITORY));
+        }
         let ids = Self::live_segment_ids(&mut tx, repository)?;
         tx.commit()?;
         let set = self.open_segments(repository, &ids)?;
@@ -117,8 +128,8 @@ impl Store {
                 kept_because: None,
             };
             let mut stands = Arc::clone(segment);
-            if mend {
-                match self.index_anew(repository, part, segment, &before) {
+            if let Some(memory) = mend {
+                match self.index_anew(repository, part, segment, &before, memory) {
                     Ok((id, anew)) => {
                         unread.replaced_by = Some(id);
                         stands = anew;
@@ -141,9 +152,15 @@ impl Store {
         part: &(String, bool),
         segment: &Arc<Segment>,
         before: &SegmentSet,
+        memory: &'static Memory,
     ) -> Result<(String, Arc<Segment>)> {
-        let content = alt_pack_segment::indexed_anew(segment, before)
-            .map_err(|_| Error::Integrity("pack of the segment does not verify"))?;
+        let content =
+            alt_pack_segment::indexed_anew(segment, before, memory).map_err(
+                |error| match error {
+                    alt_pack_segment::Error::Limit("index memory") => Error::Limit(NO_MEMORY),
+                    _ => Error::Integrity("pack of the segment does not verify"),
+                },
+            )?;
         let (id, path) = self.write_segment(repository, &content)?;
         let inline = content.len() <= INLINE_SEGMENT_BYTES;
         let anew = Segment::open(&path).map(Arc::new);

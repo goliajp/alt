@@ -7,7 +7,7 @@
 //! is read, or round in a circle, and ends in an error. The pack still has what
 //! makes the object: the index is written again from it.
 
-use crate::{Error, Limits, Oid, Segment, SegmentSet, ingest, object_id};
+use crate::{Error, Limits, Memory, Oid, Segment, SegmentSet, ingest, object_id};
 use std::sync::Arc;
 
 /// The objects of `segment` that a read does not give back as what their ids
@@ -31,11 +31,18 @@ pub fn unread(segment: &Arc<Segment>, older: &SegmentSet) -> Result<Vec<(Oid, Er
 
 /// The pack of `segment` with an index made of it anew, as if it had just come
 /// in behind `older`. An error where the pack does not verify, or does not hold
-/// every object the index of `segment` tells of.
-pub fn indexed_anew(segment: &Segment, older: &SegmentSet) -> Result<Vec<u8>, Error> {
-    // what the segment was verified within when it came in, it is within
+/// every object the index of `segment` tells of, or cannot be verified in
+/// `memory`.
+pub fn indexed_anew(
+    segment: &Segment,
+    older: &SegmentSet,
+    memory: &'static Memory,
+) -> Result<Vec<u8>, Error> {
+    // what the segment was verified within when it came in, it is within;
+    // the memory it was verified in is told, and may be less now
     let limits = Limits {
         parents_beside: usize::MAX,
+        memory: Some(memory),
         ..Limits::of(u64::from(u32::MAX), u64::MAX, u64::MAX)
     };
     let ingested = ingest(segment.pack(), older, &limits)?;
