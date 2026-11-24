@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a read whose file was removed after it began is begun again
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading.rs
+touched: crates/alt-server-store/src/transport.rs
