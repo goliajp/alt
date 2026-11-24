@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the reader of stored bytes and the reads of segments have files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/bytes/segments.rs
+touched: crates/alt-server-store/src/bytes/segments/read.rs
+touched: crates/alt-server-store/src/bytes/segments/reader.rs
