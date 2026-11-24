@@ -59,7 +59,8 @@ fn a_rule_that_does_not_read_ends_the_start_and_lets_nobody_in_afterwards() {
     let told = |user: &str, token: &str, service: &str| {
         let url = format!("http://{}/docs/info/refs?service={service}", server.addr);
         let out = Command::new("curl")
-            .args(["-sS", "-o", "/dev/null", "-w", "%{http_code}", "-u"])
+            .args(["-sS", "--max-time", "60", "-o", "/dev/null"])
+            .args(["-w", "%{http_code}", "-u"])
             .args([&format!("{user}:{token}"), &url])
             .output()
             .unwrap();
@@ -113,4 +114,50 @@ fn the_check_of_a_users_file_tells_the_lines_that_give_all_or_less_than_before()
     let (code, said, why) = checked(&line("dave", "d", "docs:x"));
     assert_eq!((code, said.as_str()), (Some(2), ""), "{why}");
     assert!(why.contains("line 1: \"docs:x\" is no rule"), "{why}");
+}
+
+/// A server that started with a users file lets nobody in while the file is
+/// not there: not one who names no user, as a server without users would, and
+/// not one the file named. Put back, it lets in whom it names. A server that
+/// started without one serves whoever asks, as before.
+#[test]
+fn a_users_file_that_is_gone_while_the_server_runs_opens_nothing() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    repository(&root.join("docs"));
+    let users = root.join("users");
+    let told = |addr: &dyn std::fmt::Display, who: Option<&str>| {
+        let url = format!("http://{addr}/docs/info/refs?service=git-upload-pack");
+        let mut curl = Command::new("curl");
+        curl.args(["-sS", "--max-time", "60", "-o", "/dev/null"]);
+        curl.args(["-w", "%{http_code}"]);
+        if let Some(who) = who {
+            curl.args(["-u", who]);
+        }
+        let out = curl.arg(&url).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let root_env = [("ALT_SERVER_ROOT", root.to_str().unwrap())];
+    let open = spawn_server_with_env(&root_env);
+    assert_eq!(told(&open.addr, None), "200");
+    drop(open);
+
+    fs::write(&users, line("alice", "hers", "*:r")).unwrap();
+    let server = spawn_server_with_env(&root_env);
+    let alice = Some("alice:hers");
+    assert_eq!(told(&server.addr, alice), "200");
+    assert_eq!(told(&server.addr, None), "401");
+    // taken away, as one who writes it anew in its place does for a moment
+    fs::remove_file(&users).unwrap();
+    assert_eq!(told(&server.addr, None), "401");
+    assert_eq!(told(&server.addr, alice), "500");
+    assert_eq!(told(&server.addr, Some("mallory:any")), "500");
+    // a directory in its place is no users file either
+    fs::create_dir(&users).unwrap();
+    assert_eq!(told(&server.addr, None), "401");
+    assert_eq!(told(&server.addr, alice), "500");
+    fs::remove_dir(&users).unwrap();
+    fs::write(&users, line("alice", "hers", "*:r")).unwrap();
+    assert_eq!(told(&server.addr, alice), "200");
+    assert_eq!(told(&server.addr, None), "401");
 }

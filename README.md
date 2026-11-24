@@ -351,10 +351,21 @@ name, a tab, the BLAKE3 hash of a token in hex and, behind another tab, rules
 as `<repository>:<r|w|rw|n>` with blanks between them, `*` for the repositories
 no rule names. The rules that name a repository decide for it. A user without
 a column of rules is held to none. A rule that does not read is an error of
-the file: the server does not start with it, and answers `500` to every
-request while the file has it. `altd-server check-users <file>` reads a file
+the file: the server does not start with it, and while the file has it answers
+`500` to every request that names a user and `401` to one that names none.
+`altd-server check-users <file>` reads a file
 as the server does and lists the users held to no rules and those whose rules
 gave more when they were added up, which they were before.
+
+A server that started with a `users` file lets nobody in without one. While
+the file is not there, or is not a file that reads, a request that names no
+user is answered `401` and one that names a user `500`, as for a rule that does
+not read. Replace the file by writing the new one beside it and renaming it
+into place (`mv users.new users`), which is one step to the server; removing
+the file and writing it again leaves the server answering `500` in between. A
+server that started without a `users` file serves whoever asks, and begins to
+ask for users when the file appears; `ALT_SERVER_REQUIRE_AUTH=1` keeps such a
+server from starting at all.
 
 ## Status and roadmap
 

@@ -275,9 +275,9 @@ fn dispatch(
     // dispatcher checks against the resolved repo + action below.
     let mut auth_user: Option<String> = None;
     let mut scoped_acl: Option<Vec<AclRule>> = None;
-    if let ServeMode::Multi { root, .. } = mode {
+    if let ServeMode::Multi { root, users, .. } = mode {
         let users_path = root.join("users");
-        if users_path.is_file() {
+        if *users || users_path.is_file() {
             match check_auth(&req, &users_path) {
                 AuthOutcome::Allow { user, acl } => {
                     auth_user = user;

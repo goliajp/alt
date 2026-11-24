@@ -17,6 +17,10 @@ pub(super) enum ServeMode {
     Multi {
         root: PathBuf,
         cache: Held<Opened>,
+        /// Whether the root had a users file when the server started. It
+        /// then lets nobody in without one: a file that is gone for a
+        /// moment, taken away to be written anew, opens nothing.
+        users: bool,
     },
 }
 
@@ -233,13 +237,12 @@ impl ServeMode {
         }
         // a users file that does not read is told now, not to each request
         let users_path = root.join("users");
-        if users_path.is_file()
-            && let Err(why) = auth::users_read(&users_path)
-        {
+        let users = users_path.is_file();
+        if users && let Err(why) = auth::users_read(&users_path) {
             die(&format!("{}: {why}", users_path.display()));
         }
         let cache = Opened::of(told::told().repos);
-        ServeMode::Multi { root, cache }
+        ServeMode::Multi { root, cache, users }
     }
 
     pub(super) fn describe(&self) -> String {
@@ -265,7 +268,7 @@ pub(super) fn resolve_repo(
             let handle = opened(cache, "*", repo_path.clone(), None)?;
             Ok((handle, path.to_owned(), "*".to_owned()))
         }
-        ServeMode::Multi { root, cache } => {
+        ServeMode::Multi { root, cache, .. } => {
             let trimmed = path.trim_start_matches('/');
             let (name, rest) = match trimmed.find('/') {
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
