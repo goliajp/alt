@@ -27,7 +27,7 @@ pub use object_format::native_object_format;
 use object_format::object_format;
 use ssh_url::builtin_ssh_to_https;
 
-pub use reach::Ends;
+pub use reach::{Ends, Reached};
 pub use revwalk::RevWalk;
 
 /// Where objects and refs actually come from.

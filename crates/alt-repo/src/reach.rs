@@ -43,26 +43,60 @@ impl Repository {
         excludes: &[ObjectId],
         ends: &Ends,
     ) -> Result<Vec<(ObjectId, ObjectKind)>, RepoError> {
+        let reached = self.walk(roots, excludes, ends, true)?;
+        Ok(reached.into_iter().map(|at| (at.oid, at.kind)).collect())
+    }
+
+    /// [`Self::reachable_objects_between`] with the name each object was
+    /// come to under, and with no file read: a file is told by the entry
+    /// of the tree it is in, so one the store lacks is listed all the same.
+    pub fn reachable_named_between(
+        &self,
+        roots: &[ObjectId],
+        excludes: &[ObjectId],
+        ends: &Ends,
+    ) -> Result<Vec<Reached>, RepoError> {
+        self.walk(roots, excludes, ends, false)
+    }
+
+    fn walk(
+        &self,
+        roots: &[ObjectId],
+        excludes: &[ObjectId],
+        ends: &Ends,
+        files_read: bool,
+    ) -> Result<Vec<Reached>, RepoError> {
+        let unnamed = |oid: &ObjectId| Under {
+            oid: *oid,
+            name: 0,
+            file: false,
+        };
         let mut uninteresting = KeyedIdSet::<ObjectId>::default();
-        let mut stack: Vec<ObjectId> = excludes.to_vec();
-        while let Some(oid) = stack.pop() {
-            if !uninteresting.insert(oid) {
+        let mut stack: Vec<Under> = excludes.iter().map(unnamed).collect();
+        while let Some(at) = stack.pop() {
+            if !uninteresting.insert(at.oid) || (at.file && !files_read) {
                 continue;
             }
-            if let Some(obj) = self.read_object(&oid)? {
-                stack.extend(children(&obj, oid, &ends.held)?);
+            if let Some(obj) = self.read_object(&at.oid)? {
+                stack.extend(children(&obj, at.oid, &ends.held)?);
             }
         }
 
         let mut seen = KeyedIdSet::<ObjectId>::default();
-        let mut out: Vec<(ObjectId, ObjectKind)> = Vec::new();
-        let mut work: Vec<ObjectId> = roots
+        let mut out: Vec<Reached> = Vec::new();
+        let mut work: Vec<Under> = roots
             .iter()
             .filter(|o| !uninteresting.contains(o))
-            .copied()
+            .map(unnamed)
             .collect();
-        while let Some(oid) = work.pop() {
-            if uninteresting.contains(&oid) || !seen.insert(oid) {
+        while let Some(at) = work.pop() {
+            if uninteresting.contains(&at.oid) || !seen.insert(at.oid) {
+                continue;
+            }
+            let (oid, name) = (at.oid, at.name);
+            if at.file && !files_read {
+                let kind = ObjectKind::Blob;
+                out.push(Reached { oid, kind, name });
                 continue;
             }
             let Some(obj) = self.read_object(&oid)? else {
@@ -71,9 +105,10 @@ impl Repository {
                 // crash so the caller can surface a precise error
                 continue;
             };
-            out.push((oid, obj.kind));
+            let kind = obj.kind;
+            out.push(Reached { oid, kind, name });
             for child in children(&obj, oid, &ends.given)? {
-                if !uninteresting.contains(&child) {
+                if !uninteresting.contains(&child.oid) {
                     work.push(child);
                 }
             }
@@ -82,31 +117,68 @@ impl Repository {
     }
 }
 
+/// An object [`Repository::reachable_named_between`] came to. `name` is a
+/// number made of the end of the name it has in the tree it was found in,
+/// 0 for what no tree names: the versions of one file have one number, and
+/// so do most files of one name or one ending.
+pub struct Reached {
+    pub oid: ObjectId,
+    pub kind: ObjectKind,
+    pub name: u32,
+}
+
+struct Under {
+    oid: ObjectId,
+    name: u32,
+    file: bool,
+}
+
+/// The number Git sorts the objects of a pack by before it looks for
+/// deltas among them: the last sixteen bytes of the name weigh most.
+fn named(name: &[u8]) -> u32 {
+    name.iter()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .fold(0u32, |hash, byte| {
+            (hash >> 2).wrapping_add(u32::from(*byte) << 24)
+        })
+}
+
 /// What `obj` points at. A commit in `ends` has its tree and no parents.
 fn children(
     obj: &RawObject,
     oid: ObjectId,
     ends: &KeyedIdSet<ObjectId>,
-) -> Result<Vec<ObjectId>, RepoError> {
+) -> Result<Vec<Under>, RepoError> {
+    let unnamed = |oid: ObjectId| Under {
+        oid,
+        name: 0,
+        file: false,
+    };
     let mut out = Vec::new();
     match obj.kind {
         ObjectKind::Commit => {
             let commit = Commit::parse(&obj.data)?;
-            out.extend(commit.tree());
+            out.extend(commit.tree().map(unnamed));
             if !ends.contains(&oid) {
-                out.extend(commit.parents());
+                out.extend(commit.parents().map(unnamed));
             }
         }
         ObjectKind::Tree => {
-            for entry in &Tree::parse(&obj.data, oid.algo())?.entries {
+            let algo = oid.algo();
+            for entry in Tree::raw_entries(&obj.data, algo) {
+                let (mode, name, oid) = entry?;
                 // a gitlink (mode 160000) points at a commit of another
                 // repository, which is not in this store
-                if !entry.mode.is_gitlink() {
-                    out.push(entry.oid);
+                if !mode.is_gitlink() {
+                    out.push(Under {
+                        oid: ObjectId::from_bytes(algo, oid).expect("as long as an id"),
+                        name: named(name),
+                        file: mode.object_kind() == ObjectKind::Blob,
+                    });
                 }
             }
         }
-        ObjectKind::Tag => out.extend(Tag::parse(&obj.data)?.object()),
+        ObjectKind::Tag => out.extend(Tag::parse(&obj.data)?.object().map(unnamed)),
         ObjectKind::Blob => {}
     }
     Ok(out)
