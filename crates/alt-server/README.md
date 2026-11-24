@@ -105,13 +105,17 @@ may run, and is answered `503` with `retry: same_request` when none comes free:
 nothing of it was applied. Requests whose time to upload ran out are ended by the
 running server, which gives back what they had reserved.
 
-`http.body_timeout_ms` is the time a body has to move in, not the time a whole
-body has: in every such window at least 1024 bytes a second have to arrive on
-average. A body that keeps to that is received however long it takes; one that
-stalls is answered `408` within two windows. A response is held to the same pace
-while its reader takes it. `http.connection_timeout_ms` is the time a connection
-has when nothing of a body moves on it, counted again from every piece of a body
-that does.
+A peer may be as slow as its line. `http.body_timeout_ms` is the window the body
+of a request and a response have to move in, not a time either has in all: they
+go on for as long as they move, 1 KiB a second on average over each window, and a
+peer that stalls is let go of within two windows. For a request body the windows
+follow one another from when it began to come, and one that stalls is answered
+`408`. For a response they are counted in the time the peer keeps the server
+waiting to write, so the time the server takes to have the next piece is not the
+peer's; a connection whose response is not taken is closed.
+`http.connection_timeout_ms` is the time a connection has when nothing moves on
+it and no request of it waits for its answer, counted again from every piece of
+a request body that comes, from everything that is sent and from each answer.
 
 The packs of pushes are verified in `http.indexing_megabytes` of memory between
 them: 4096 by default, or what one pack that holds an object of

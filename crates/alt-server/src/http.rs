@@ -8,6 +8,7 @@ mod file_body;
 mod handle;
 mod hashers;
 mod observation;
+mod paced;
 mod pack_body;
 use alt_server_telemetry::{Outcome, Phase};
 pub(crate) use observation::{scope as trace_scope, spawn_blocking};

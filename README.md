@@ -255,9 +255,10 @@ Shallow clones and fetches (`--depth`, `--shallow-since`, `--shallow-exclude`,
 `--deepen`, `--unshallow`) are given the history they ask for, as Git's own
 server gives it.
 
-A peer may be as slow as its line. The body of a request and a response go
-on for as long as they move, 1 KiB a second on average over each half
-minute by default, and a peer that stalls is let go of within a minute. A
+A peer may be as slow as its line. The body of a request and a response have
+no time in all: they go on for as long as they move, 1 KiB a second on
+average over each window, half a minute by default, and a peer that stalls
+is let go of within two windows. A
 slow peer keeps a connection and never one of the request handlers: the
 connections open at once are limited, and so are those of one address that
 is not the host itself. Behind a reverse proxy on the same host every
