@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: build
+summary: the image of the old server is built from the checkout or from a branch, with the toolchain the workspace asks for
+author-type: human
+author: doracawl
+touched: deploy/Dockerfile
+touched: deploy/Dockerfile.dockerignore
+touched: deploy/docker-compose.yml
