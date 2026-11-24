@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a backup looks at its recipient and its output before it reads the objects
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/tests/it/database/operator/unread.rs
