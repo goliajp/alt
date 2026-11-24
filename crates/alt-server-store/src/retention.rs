@@ -18,6 +18,8 @@
 //!
 //! Every rule removes a bounded number of rows in a transaction of its own.
 
+mod requests;
+
 use crate::database::Transaction;
 use crate::store::{instance, integer, now, unsigned};
 use crate::{Error, Result, Store};
@@ -175,6 +177,7 @@ impl Store {
     ) -> Removed {
         let limit = i64::from(limit);
         let mut more = false;
+        let requests = requests::over(self, limit, seen, failed);
         let mut told = |name: &str, result: Result<(u64, bool)>| match result {
             Ok((count, full)) => {
                 more |= full;
@@ -187,7 +190,7 @@ impl Store {
         };
         let sessions = SESSION_RETENTION_MS;
         let removed = Removed {
-            requests: told("requests", self.requests_over(limit, seen)),
+            requests: told("requests", Ok(requests)),
             unfinished_requests: told("unfinished requests", self.unfinished_over(limit)),
             approvals: told("approvals", self.rule(APPROVALS, limit, sessions)),
             web_sessions: told("web sessions", self.rule(WEB_SESSIONS, limit, sessions)),
@@ -233,40 +236,6 @@ impl Store {
         let count = unsigned(tx.query_one(UNFINISHED, &[&before, &limit])?.get(0))?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok((count, count >= limit as u64))
-    }
-
-    fn requests_over(&mut self, limit: i64, seen: &mut RequestsSeen) -> Result<(u64, bool)> {
-        let (mut tx, time) = self.removing()?;
-        let before = integer(time.saturating_sub(REQUEST_RETENTION_MS))?;
-        let row = tx.query_opt(
-            REQUESTS,
-            &[
-                &before,
-                &seen.settled_at,
-                &seen.repository,
-                &seen.epoch,
-                &seen.actor,
-                &seen.request,
-                &limit,
-            ],
-        )?;
-        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
-        let Some(row) = row else {
-            *seen = RequestsSeen::default();
-            return Ok((0, false));
-        };
-        let more = row.get::<_, i64>(6) >= limit;
-        *seen = match more {
-            true => RequestsSeen {
-                settled_at: row.get(0),
-                repository: row.get(1),
-                epoch: row.get(2),
-                actor: row.get(3),
-                request: row.get(4),
-            },
-            false => RequestsSeen::default(),
-        };
-        Ok((unsigned(row.get(5))?, more))
     }
 
     fn credentials_over(&mut self, limit: i64) -> Result<(u64, bool)> {

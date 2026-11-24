@@ -3,6 +3,8 @@
 use super::*;
 use alt_server_store::{Removed, RequestsSeen};
 
+mod refused;
+
 const DAY: i64 = 24 * 60 * 60 * 1000;
 
 fn round(f: &mut Fixture, seen: &mut RequestsSeen) -> Removed {
