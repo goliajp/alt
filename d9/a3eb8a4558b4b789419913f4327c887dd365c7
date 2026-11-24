@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: log a branch renamed under the head as git does, not as a branch left
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-repo/src/reflog/derived.rs
