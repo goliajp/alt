@@ -243,3 +243,38 @@ fn a_log_whose_header_tells_of_a_cut_of_any_generation_at_any_place_is_read_as_f
     }
     assert_eq!(hidden, 2 * 2 * 3);
 }
+
+#[test]
+fn a_cut_told_in_the_header_is_taken_back_under_the_lock_beside_the_log() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    log.append_with("a", 3, b"left", &linked()).unwrap();
+    drop(log);
+    boot(2);
+    cut_that_dies(dir.path(), 1);
+    let told = cut_told(dir.path());
+    assert_eq!(told.0, 1);
+    // whoever reads what the header tells under this lock alone, a sync
+    // or a sink, holds it now
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.path().join("lock"));
+    let lock = lock.unwrap();
+    alt_os::sys::flock(&lock, alt_os::sys::LOCK_EX).unwrap();
+    let path = dir.path().to_owned();
+    let (done, is_done) = channel();
+    let writer = std::thread::spawn(move || {
+        boot(2);
+        let mut log = OpLog::open(&path).unwrap();
+        log.refresh().unwrap();
+        done.send(()).unwrap();
+    });
+    let waited = is_done.recv_timeout(std::time::Duration::from_millis(500));
+    assert!(waited.is_err(), "the writer went on without the lock");
+    assert_eq!(cut_told(dir.path()), told);
+    drop(lock);
+    writer.join().unwrap();
+    assert_eq!(cut_told(dir.path()), (0, 0));
+}

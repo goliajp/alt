@@ -12,7 +12,7 @@ use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::scan::Stop;
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
-use crate::v2::tail::Tail;
+use crate::v2::tail::{Held, Tail};
 use crate::{Discarded, Op, OpLogError};
 
 /// The log through frames read past the ones a handle holds, their ops,
@@ -191,7 +191,10 @@ impl Log {
             };
             self.cut_end(discarded)?;
         } else if cuts && told.begun(self.state.generation) {
-            // the log was read to its end, and the cut never came to it
+            // the log was read to its end, and the cut never came to it;
+            // whoever reads what the header tells under `lock` alone
+            // does not meet this write halfway
+            let _held = Held::take(&self.dir)?;
             Mark::default().write(&self.file)?;
         }
         Ok(())
