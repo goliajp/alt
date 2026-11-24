@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a server keeps the session of its lock beside the connections of its requests
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections.rs
