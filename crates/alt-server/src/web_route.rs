@@ -6,13 +6,23 @@ use std::collections::BTreeMap;
 mod browse;
 mod repository;
 
+/// Where an object is shown: under a commit, at a path of its tree. The path is
+/// in hex as a page of a directory tells it, and empty for the tree of the commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Within {
+    pub commit: ObjectId,
+    pub path: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WebRoute {
     Portable(crate::PortableRoute),
     ChangeLink(crate::change_links::route::ChangeRoute),
     Config,
     InstanceStatus,
-    InstanceAudit { before: Option<u64> },
+    InstanceAudit {
+        before: Option<u64>,
+    },
     Login,
     Session,
     Navigation,
@@ -25,9 +35,15 @@ pub enum WebRoute {
     RevokeAgent(String),
     RevokeClientCredential(String),
     Logout,
-    Repositories { after: String },
-    Inbox { after: String },
-    Users { after: String },
+    Repositories {
+        after: String,
+    },
+    Inbox {
+        after: String,
+    },
+    Users {
+        after: String,
+    },
     CreateUser,
     UserState(String),
     Repository(String),
@@ -35,7 +51,8 @@ pub enum WebRoute {
     Record(String, RecordRoot),
     History(String, Option<ObjectId>),
     Tree(String, ObjectId, String, usize),
-    Object(String, ObjectId, bool),
+    /// an object, where it is shown, and whether it is downloaded
+    Object(String, ObjectId, Within, bool),
     Content(String, String),
     Review(RequestKey),
     Approve(RequestKey),

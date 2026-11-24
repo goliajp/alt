@@ -1,6 +1,6 @@
 //! The routes beneath one repository.
 use super::{
-    Error, RecordRoot, RequestKey, Result, Scope, WebRoute, arguments, browse, id, identity,
+    Error, RecordRoot, RequestKey, Result, Scope, WebRoute, arguments, browse, identity,
     record_kind,
 };
 
@@ -61,14 +61,8 @@ pub(super) fn parse(
         }
         ("GET", ["commits"]) => browse::history(repo, after()?)?,
         ("GET", ["tree"]) => browse::tree(repo, query)?,
-        ("GET", ["objects", oid]) => {
-            none()?;
-            WebRoute::Object(identity(repo)?, id(oid)?, false)
-        }
-        ("GET", ["objects", oid, "download"]) => {
-            none()?;
-            WebRoute::Object(identity(repo)?, id(oid)?, true)
-        }
+        ("GET", ["objects", oid]) => browse::object(repo, oid, query, false)?,
+        ("GET", ["objects", oid, "download"]) => browse::object(repo, oid, query, true)?,
         ("GET", ["content", digest, "download"]) => {
             none()?;
             alt_task::check_id(digest).map_err(|_| Error::Precondition("content address"))?;

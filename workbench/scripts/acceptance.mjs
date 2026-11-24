@@ -56,6 +56,8 @@ try {
   await page.locator('.resource-row').filter({ hasText: 'source.txt' }).click();
   await page.locator('.source').waitFor();
   check('published tree remains distinct from pending candidate', (await page.locator('.source').innerText()).includes('base'));
+  const file = await context.request.get(origin + await page.locator('.document-actions a[download]').getAttribute('href'));
+  check('a file is downloaded from the commit and the path it is shown at', file.ok() && (await file.text()).includes('base'));
   await page.keyboard.press('Control+k');
   await page.getByRole('dialog').waitFor();
   await page.getByRole('dialog').locator('input').fill('review');

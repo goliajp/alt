@@ -45,9 +45,12 @@ fn a_file_written_out_for_a_browser_takes_of_the_room_and_an_address_a_quarter_o
     let url = format!("{}/git/repository", server.url);
     ok(work, &f.token, &["push", "-q", &url, "main"]);
     let blob = text(ok(work, &f.token, &["rev-parse", "HEAD:noise"]));
+    let head = text(ok(work, &f.token, &["rev-parse", "HEAD"]));
 
     let download = |from: &str| {
-        let path = format!("/web/repositories/repository/objects/{blob}/download");
+        // the path is the name of the file in hex
+        let shown = format!("commit={head}&path=6e6f697365");
+        let path = format!("/web/repositories/repository/objects/{blob}/download?{shown}");
         let asked = ureq::get(&format!("{}{path}", server.url))
             .timeout(Duration::from_secs(60))
             .set("Cookie", &cookie)

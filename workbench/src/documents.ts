@@ -4,7 +4,7 @@ export type Document =
   | { kind: 'repository' | 'history' | 'tasks' | 'deliveries' | 'migration' | 'associations'; repository: string }
   | { kind: 'deliveryLinks'; repository:string; delivery:string }
   | { kind: 'tree'; repository: string; commit: string; path: string }
-  | { kind: 'blob'; repository: string; oid: string; path: string }
+  | { kind: 'blob'; repository: string; oid: string; path: string; commit: string; at: string }
   | { kind: 'record'; repository: string; recordKind: RecordKind; id: string }
   | { kind: 'review'; repository: string; actor: string; request: string; epoch: string };
 export type OpenDocument = { key: string; document: Document };
@@ -49,7 +49,7 @@ export function documentFromHash(hash: string): Document | undefined {
   if (['repository', 'history', 'tasks', 'deliveries', 'migration', 'associations'].includes(String(data.kind)) && exact('kind', 'repository')) return data as Document;
   if(data.kind==='deliveryLinks'&&text('delivery',64)&&/^[0-9a-f]{64}$/.test(data.delivery as string)&&exact('kind','repository','delivery'))return data as Document;
   if (data.kind === 'tree' && oid('commit') && text('path', 8192) && /^(?:[0-9a-f]{2})*$/.test(data.path as string) && exact('kind', 'repository', 'commit', 'path')) return data as Document;
-  if (data.kind === 'blob' && oid('oid') && text('path', 4096) && exact('kind', 'repository', 'oid', 'path')) return data as Document;
+  if (data.kind === 'blob' && oid('oid') && text('path', 4096) && oid('commit') && text('at', 8192) && /^(?:[0-9a-f]{2})*$/.test(data.at as string) && exact('kind', 'repository', 'oid', 'path', 'commit', 'at')) return data as Document;
   if (data.kind === 'record' && ['task', 'candidate', 'evidence', 'review', 'integration', 'delivery'].includes(String(data.recordKind)) && text('id', 64) && /^[0-9a-f]{64}$/.test(data.id as string) && exact('kind', 'repository', 'recordKind', 'id')) return data as Document;
   if (data.kind === 'review' && identity('actor') && identity('request') && text('epoch', 20) && /^[1-9][0-9]*$/.test(data.epoch as string) && exact('kind', 'repository', 'actor', 'request', 'epoch')) return data as Document;
 }

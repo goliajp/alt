@@ -170,7 +170,8 @@ impl Call {
                     Some(browser.origin.clear_cookie()),
                 ))
             }
-            WebRoute::Object(repository, oid, true) => {
+            WebRoute::Object(repository, oid, within, true) => {
+                crate::browse::shown(&mut store, &credential, &repository, oid, &within)?;
                 let found = store.open_published_object(&credential, &repository, oid)?;
                 let (mut file, mut body) = (found.2, Spill::within(Some(sending)));
                 let written = std::io::copy(&mut file, &mut body).map(drop);
@@ -238,9 +239,13 @@ fn execute(
             &path,
             after,
         )?),
-        WebRoute::Object(repository, oid, false) => {
-            output(crate::browse::blob(store, credential, &repository, oid)?)
-        }
+        WebRoute::Object(repository, oid, within, false) => output(crate::browse::blob(
+            store,
+            credential,
+            &repository,
+            oid,
+            &within,
+        )?),
         WebRoute::Content(repository, digest) => {
             let scope = store.repository_info(credential, &repository)?.scope;
             let (bytes, file) = store.open_published_content(credential, &scope, &digest)?;

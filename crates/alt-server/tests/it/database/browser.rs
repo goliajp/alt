@@ -364,12 +364,14 @@ fn browser_browsing_observes_only_published_bytes_and_current_repository_grants(
     assert_eq!(tree["entries"][0]["name"], "file");
     let oid = tree["entries"][0]["oid"].as_str().unwrap();
     let blob_path = format!("/web/repositories/repository/objects/{oid}");
-    let (status, blob) = get(&server, &blob_path, &cookie);
+    let at = tree["entries"][0]["path"].as_str().unwrap();
+    let shown = format!("?commit={commit}&path={at}");
+    let (status, blob) = get(&server, &format!("{blob_path}{shown}"), &cookie);
     assert_eq!(status, 200, "{blob}");
     let original = send(
         &server,
         "GET",
-        &format!("{blob_path}/download"),
+        &format!("{blob_path}/download{shown}"),
         Some(&cookie),
         None,
         None,
@@ -393,7 +395,7 @@ fn browser_browsing_observes_only_published_bytes_and_current_repository_grants(
     f.store
         .set_grants(&f.credential, "repository", "reader", false, false, &[])
         .unwrap();
-    assert_eq!(get(&server, &blob_path, &cookie).0, 403);
+    assert_eq!(get(&server, &format!("{blob_path}{shown}"), &cookie).0, 403);
     assert_eq!(
         get(&server, "/web/repositories", &cookie).1["items"],
         json!([])

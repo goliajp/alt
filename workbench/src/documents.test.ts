@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test';
 import { closeDocuments, documentKey, documentFromHash, documentHash, moveDocument, openDocument, treeAfter, treeBack, treeCursors, treeForward } from './documents';
 test('documents preserve their original repository when the resource selector changes', () => {
-  const first = openDocument([], { kind: 'blob', repository: 'one', oid: 'abc', path: 'readme' });
-  const second = openDocument(first.documents, { kind: 'blob', repository: 'two', oid: 'abc', path: 'readme' });
+  const first = openDocument([], { kind: 'blob', repository: 'one', oid: 'abc', path: 'readme', commit: 'c', at: '' });
+  const second = openDocument(first.documents, { kind: 'blob', repository: 'two', oid: 'abc', path: 'readme', commit: 'c', at: '' });
   expect(second.documents).toHaveLength(2);
-  expect(second.documents[0].document).toEqual({ kind: 'blob', repository: 'one', oid: 'abc', path: 'readme' });
+  expect(second.documents[0].document).toEqual({ kind: 'blob', repository: 'one', oid: 'abc', path: 'readme', commit: 'c', at: '' });
   expect(openDocument(second.documents, first.documents[0].document).documents).toBe(second.documents);
   expect(closeDocuments(second.documents, second.key, [second.key]).active).toBe(first.key);
   expect(moveDocument(second.documents, first.key, 1)[1].key).toBe(first.key);
 });
 test('paths and request identities cannot collide through delimiters or epochs', () => {
-  expect(documentKey({ kind: 'blob', repository: 'a:b', oid: 'c', path: 'd' })).not.toBe(documentKey({ kind: 'blob', repository: 'a', oid: 'b:c', path: 'd' }));
+  expect(documentKey({ kind: 'blob', repository: 'a:b', oid: 'c', path: 'd', commit: 'e', at: '' })).not.toBe(documentKey({ kind: 'blob', repository: 'a', oid: 'b:c', path: 'd', commit: 'e', at: '' }));
   expect(documentKey({ kind: 'review', repository: 'r', actor: 'a', request: 'q', epoch: '1' })).not.toBe(documentKey({ kind: 'review', repository: 'r', actor: 'a', request: 'q', epoch: '2' }));
 });
 

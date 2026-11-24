@@ -53,4 +53,42 @@ fn a_commit_no_ref_leads_to_is_shown_to_nobody_who_knows_its_id() {
     let never = "0123456789abcdef0123456789abcdef01234567";
     assert_eq!(history(never).0, 403);
     assert_eq!(tree(never).0, 403);
+
+    // A file is given by its id where it is shown: under a commit a ref leads
+    // to, at its path there. The file of the branch that is gone is in the
+    // segments still, and is given under no commit: not under its own, which
+    // no ref leads to, and not under one that does not have it.
+    let blob =
+        |of: &str, name: &str| text(ok(work, &f.token, &["rev-parse", &format!("{of}:{name}")]));
+    let hex = |name: &str| -> String { name.bytes().map(|b| format!("{b:02x}")).collect() };
+    let object = |oid: &str, commit: &str, name: &str, download: &str| {
+        let shown = format!("commit={commit}&path={}", hex(name));
+        let path = format!("/web/repositories/repository/objects/{oid}{download}?{shown}");
+        send(&server, "GET", &path, Some(&cookie), None, None, None).status()
+    };
+    let (kept, lost) = (blob(&main, "main"), blob(&gone, "gone"));
+    for download in ["", "/download"] {
+        assert_eq!(object(&kept, &main, "main", download), 200);
+        assert_eq!(
+            object(&blob(&below, "below"), &below, "below", download),
+            200
+        );
+        assert_eq!(object(&lost, &gone, "gone", download), 403);
+        assert_eq!(object(&lost, &main, "main", download), 403);
+        assert_eq!(object(&lost, &main, "gone", download), 409);
+        assert_eq!(object(never, &main, "main", download), 403);
+        // without a place it is shown at, nothing is given
+        let bare = format!("/web/repositories/repository/objects/{kept}{download}");
+        let status = send(&server, "GET", &bare, Some(&cookie), None, None, None).status();
+        assert_eq!(status, 409);
+    }
+    // a commit and its tree are downloaded as the objects they are
+    let root = text(ok(
+        work,
+        &f.token,
+        &["rev-parse", &format!("{main}^{{tree}}")],
+    ));
+    assert_eq!(object(&main, &main, "", "/download"), 200);
+    assert_eq!(object(&root, &main, "", "/download"), 200);
+    assert_eq!(object(&gone, &gone, "", "/download"), 403);
 }
