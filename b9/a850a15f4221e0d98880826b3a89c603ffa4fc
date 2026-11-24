@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: an object a pack holds again as a delta of itself is read, and no read of a pack goes round
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/pack_repeated.rs
+touched: crates/alt-git-pack/src/idx.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/read_again.rs
