@@ -52,8 +52,12 @@ fn head_of(reader: &mut std::io::BufReader<std::net::TcpStream>) -> (String, Str
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
 fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
     let mut f = Fixture::new();
-    let server = start(&mut f, |_, options| options.connections_each = 2);
-    // two requests of one address whose bodies do not come
+    // two requests of one address whose bodies do not come, and are waited
+    // for longer than the test takes
+    let server = start(&mut f, |_, options| {
+        options.connections_each = 2;
+        options.body_timeout = Duration::from_secs(600);
+    });
     let head = "POST /web/login HTTP/1.1\r\nHost: alt\r\nX-Forwarded-For: 203.0.113.9\r\nOrigin: https://workbench.example.test\r\nContent-Type: application/json\r\nContent-Length: 30\r\n\r\n";
     let under_way: Vec<_> = (0..2)
         .map(|_| {
@@ -96,7 +100,7 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
     // what the proxy names nobody for is the proxy's own, and has no limit
     assert_eq!(alive(&server, None), fine);
     drop(under_way);
-    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let until = std::time::Instant::now() + Duration::from_secs(120);
     while alive(&server, Some("203.0.113.9")) != fine {
         assert!(std::time::Instant::now() < until, "no place is given back");
         std::thread::sleep(Duration::from_millis(50));

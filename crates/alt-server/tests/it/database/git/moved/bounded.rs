@@ -14,7 +14,7 @@ fn waiting(f: &Fixture, count: i64) {
 }
 
 /// A push with as long as these take to be let through, one after another.
-fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
+pub(super) fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
     let request = ureq::post(&format!("{url}/git-receive-pack"))
         .timeout(Duration::from_secs(300))
         .set("Content-Type", "application/x-git-receive-pack-request")
@@ -43,7 +43,7 @@ const MOVE: &str = "UPDATE alt_pack_segments SET sequence=(SELECT sum(sequence) 
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn a_push_the_segments_move_under_each_time_is_published_by_the_fourth_time_it_comes_to_it() {
     let f = Fixture::new();
-    let server = Running::start(&f);
+    let server = super::patient(&f);
     let url = format!("{}/git/repository", server.url);
     let none = id(ObjectKind::Tree, b"");
     // the segments that are moved: of branches the large push has nothing of

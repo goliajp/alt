@@ -70,6 +70,15 @@ fn creating(name: &str, tree: &ObjectId, entries: &[Vec<u8>]) -> Vec<u8> {
 /// request does not come to before: its pack is received and verified by then.
 const HELD: &str = "SELECT 1 FROM alt_repositories WHERE id='repository' FOR UPDATE";
 
+/// A server whose requests wait for the row of the repository for as long as
+/// a test holds it: no time of the test decides what they find.
+fn patient(f: &Fixture) -> Running {
+    let (mut factory, mut options) = Running::parts(f, None, vec![]);
+    factory.statement_timeout = Duration::from_secs(300);
+    options.work_timeout = Duration::from_secs(300);
+    Running::serve(factory, options, None, false)
+}
+
 /// The live segments of the repository, oldest first.
 fn live(f: &Fixture) -> Vec<Segment> {
     let rows = f.client().query(
@@ -97,10 +106,10 @@ fn live(f: &Fixture) -> Vec<Segment> {
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn pushes_verified_before_the_segments_under_them_moved_are_published_as_they_then_stand() {
     let mut f = Fixture::new();
-    let server = Running::start(&f);
+    let server = patient(&f);
     let url = format!("{}/git/repository", server.url);
     let pushed = |body: &[u8]| {
-        let (status, report) = raw_push::receive(&url, &f.token, body);
+        let (status, report) = bounded::receive(&url, &f.token, body);
         assert_eq!(status, 200, "{report}");
         assert!(
             report.contains("unpack ok") && !report.contains("ng "),
