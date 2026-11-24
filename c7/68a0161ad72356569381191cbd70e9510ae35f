@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: what a proxy of this host brings to altd-server is counted for the address it says the request is of
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/peers.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers/sources.rs
