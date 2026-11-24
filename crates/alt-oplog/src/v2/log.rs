@@ -256,7 +256,7 @@ impl Drop for Log {
     fn drop(&mut self) {
         // best-effort durability; an explicit sync is the checked path
         if self.unsynced && !crate::relaxed_durability() {
-            let _ = self.file.sync_all();
+            let _ = crate::v2::fsync(&self.file);
         }
     }
 }

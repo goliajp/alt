@@ -95,7 +95,7 @@ pub(super) fn record(
 ) -> std::io::Result<()> {
     let mut tail = noted.to_sync(reached.generation);
     if tail.synced < reached.target {
-        of.log.sync_all()?;
+        crate::v2::fsync(of.log)?;
         tail.generation = tail.generation.max(reached.generation);
         tail.raise(reached.target, Some(reached.closes));
         tail.judged = tail.judged.max(reached.target);
@@ -187,7 +187,7 @@ impl Sink {
     /// left to read the log again.
     fn sync_to(&self, mut reached: Reached) -> Result<(), OpLogError> {
         if reached.target == 0 {
-            self.file.sync_all()?;
+            crate::v2::fsync(&self.file)?;
             return Ok(());
         }
         let of = self.beside();
@@ -212,7 +212,7 @@ impl Sink {
         // with nobody to see to what ops name, no sync is recorded over
         // an op that names something
         if self.named.is_none() && said < reached.target && !reached.pending.is_empty() {
-            self.file.sync_all()?;
+            crate::v2::fsync(&self.file)?;
             self.account.lock().unwrap().fsynced(reached.target);
             return Ok(());
         }

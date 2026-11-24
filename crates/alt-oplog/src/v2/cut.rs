@@ -182,11 +182,11 @@ impl Log {
         let bytes = self.composer().checkpoint(&mut state, Some(cut))?;
         self.put(&bytes, state)?;
         cut_reached(2)?;
-        self.file.sync_all()?;
+        crate::v2::fsync(&self.file)?;
         cut_reached(3)?;
         self.file.set_len(self.state.end)?;
         cut_reached(4)?;
-        self.file.sync_all()?;
+        crate::v2::fsync(&self.file)?;
         cut_reached(5)?;
         Ok(())
     }

@@ -10,12 +10,10 @@
 //! the file and the driver know: it takes for looked at, and for synced,
 //! no more than they do.
 
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::atomic::Ordering;
 
 use alt_oplog::OpLogError;
 
-use super::v2_counts::Counts;
 use super::v2_driver::Run;
 use super::v2_meanwhile::{Plan, refused_of, says};
 use super::v2_model::Laid;
@@ -199,7 +197,7 @@ impl Run {
         }
     }
 
-    fn step(&mut self) {
+    pub fn step(&mut self) {
         if self.handles.is_empty() {
             self.open(false);
         }
@@ -252,48 +250,4 @@ impl Run {
     pub fn look_and_refuse(&mut self) {
         self.look(true);
     }
-}
-
-/// Runs the sequence of `steps` steps that `seed` gives on a log with
-/// blocks of two to the power of `block_exp` bytes, and tells what was
-/// done when a step of it fails.
-fn run(seed: u64, block_exp: u8, steps: usize, counts: &'static Counts) {
-    let mut run = Run::new(seed, block_exp, counts);
-    let ran = catch_unwind(AssertUnwindSafe(|| {
-        for _ in 0..steps {
-            run.step();
-            run.held_to_the_model();
-        }
-        // every caller asks at last, however long ago it wrote
-        for index in 0..run.handles.len() {
-            run.all_ask(index);
-        }
-        run.held_to_the_model();
-    }));
-    alt_oplog::v2::cut_dies_after(None);
-    alt_oplog::v2::before_note_read(None);
-    if let Err(panic) = ran {
-        eprintln!(
-            "the sequence of seed {seed}, blocks of 2^{block_exp}, the note beside the log {:?}:\n{}",
-            run.beside,
-            run.trace.join("\n")
-        );
-        resume_unwind(panic);
-    }
-    run.counts.sequences.fetch_add(1, Ordering::Relaxed);
-}
-
-/// Runs the `sequences` sequences of the seeds from `first` on, on logs
-/// with blocks of two to the power of `block_exp` bytes.
-pub fn run_all(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
-    const THREADS: u64 = 8;
-    std::thread::scope(|scope| {
-        for thread in 0..THREADS {
-            scope.spawn(move || {
-                for seed in (first + thread..first + sequences).step_by(THREADS as usize) {
-                    run(seed, block_exp, 40, counts);
-                }
-            });
-        }
-    });
 }

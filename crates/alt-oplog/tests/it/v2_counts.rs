@@ -6,6 +6,9 @@ use std::sync::atomic::AtomicU64;
 /// How often a run on blocks of one size did each kind of thing.
 pub struct Counts {
     pub sequences: AtomicU64,
+    /// of them, those whose fsyncs were made; and the fsyncs asked for
+    pub real: AtomicU64,
+    pub fsyncs: AtomicU64,
     pub cuts: AtomicU64,
     pub cuts_died: AtomicU64,
     pub cut_back: AtomicU64,
@@ -66,6 +69,8 @@ impl Counts {
     const fn new() -> Self {
         Counts {
             sequences: AtomicU64::new(0),
+            real: AtomicU64::new(0),
+            fsyncs: AtomicU64::new(0),
             cuts: AtomicU64::new(0),
             cuts_died: AtomicU64::new(0),
             cut_back: AtomicU64::new(0),
@@ -108,6 +113,9 @@ impl Counts {
 /// For each of three batches of seeds, for blocks of 1, 4 and 16 KiB.
 pub static COUNTS: [[Counts; 3]; 3] = [const { [const { Counts::new() }; 3] }; 3];
 
+/// For the sequences the environment names.
+pub static NAMED: Counts = Counts::new();
+
 impl Counts {
     /// Each count with what it is a count of.
     pub fn named(&self) -> Vec<(&'static str, &AtomicU64)> {
@@ -116,6 +124,8 @@ impl Counts {
         let untold = "of them read the log anew with nobody told";
         vec![
             ("sequences", &self.sequences),
+            ("of them with their fsyncs made", &self.real),
+            ("fsyncs asked for", &self.fsyncs),
             ("with the note beside the log kept", &self.kept),
             ("with it meddled with", &self.meddled),
             ("with none ever written", &self.never),

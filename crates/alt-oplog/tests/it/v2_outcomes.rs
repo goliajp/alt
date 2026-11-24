@@ -15,9 +15,7 @@ impl Run {
     /// ops the look of the call had cut.
     pub fn cuts_told(&mut self, told: &[Discarded], cut: Option<&[Entry]>) {
         if !told.is_empty() {
-            // a cut syncs the checkpoint it leaves, and what was noted
-            // of where the log ends holds no longer
-            self.cut_synced = true;
+            // what was noted of where the log ends holds no longer
             self.ledger.hides.clear();
             self.ledger.begun = None;
         }

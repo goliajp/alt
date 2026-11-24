@@ -49,11 +49,11 @@ impl Run {
     /// before the first byte that changed are in the log after, and no
     /// other. With `whole`, nothing is lost.
     pub fn reboot(&mut self, whole: bool) {
-        self.handles.clear();
+        self.all_die();
         let path = self.path().join("log");
         let before = fs::read(&path).unwrap();
         let len = before.len() as u64;
-        let from = self.model.fsynced.max(64);
+        let from = self.durable_to();
         let lost = match self.rng.below(4) {
             _ if whole => "nothing is lost".to_owned(),
             0 if len > from => {
@@ -73,8 +73,7 @@ impl Run {
             _ => "nothing is lost".to_owned(),
         };
         let after = fs::read(&path).unwrap();
-        let same = before.iter().zip(&after).take_while(|(was, is)| was == is);
-        let same = same.count() as u64;
+        let same = super::v2_power::same_to(&before, &after) as u64;
         if same < len {
             self.ledger.lost_from(same, self.model.synced);
         }

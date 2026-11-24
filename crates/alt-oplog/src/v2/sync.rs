@@ -247,7 +247,7 @@ impl Log {
             return Err(OpLogError::CutBack);
         }
         if !seen {
-            self.file.sync_all()?;
+            crate::v2::fsync(&self.file)?;
             self.account.lock().unwrap().fsynced(target);
             return Ok(());
         }

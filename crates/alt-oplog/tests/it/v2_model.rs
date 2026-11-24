@@ -153,9 +153,6 @@ pub struct Model {
     /// up to where the log is synced, what its ops name with it, as far
     /// as the running boot can know
     pub synced: u64,
-    /// up to where the file was fsynced at least: no power cut takes
-    /// what lies before
-    pub fsynced: u64,
     /// What an op names is on disk from when the op is appended, and
     /// may be gone when the machine goes down
     pub stored: Stored,
@@ -199,7 +196,6 @@ impl Model {
             );
         }
         self.synced = claimed;
-        self.fsynced = self.fsynced.max(claimed);
         self.covered = self.covered.max(claimed);
     }
 

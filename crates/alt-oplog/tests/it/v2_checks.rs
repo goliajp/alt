@@ -86,12 +86,15 @@ impl Run {
         if super::v2_cut_told::cut_told(self.path()).0 <= log.cut.0 {
             self.ledger.begun = None;
         }
-        if self.cut_synced {
-            self.model.fsynced = self.model.fsynced.max(log.cut.1);
-        }
-        self.cut_synced = false;
         let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
+        // no boundary is recorded over bytes a loss of power could take
+        let durable = self.durable_to();
+        assert!(
+            self.model.synced <= durable,
+            "the log is recorded as synced up to {}: it is fsynced, as it is now, up to {durable}",
+            self.model.synced
+        );
         assert!(
             log.said_synced <= self.model.synced,
             "a frame says the log was synced up to {}: it is up to {}",

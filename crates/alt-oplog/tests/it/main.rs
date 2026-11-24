@@ -54,6 +54,7 @@ mod v2_notes;
 mod v2_outcomes;
 mod v2_owed;
 mod v2_passed;
+mod v2_power;
 mod v2_properties;
 mod v2_refusals;
 mod v2_reread;

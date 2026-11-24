@@ -258,7 +258,7 @@ impl Log {
             synced?;
             self.catch_up()?;
         }
-        self.file.sync_all()?;
+        crate::v2::fsync(&self.file)?;
         let (generation, closes) = (self.state.generation, self.closes);
         let end = self.state.end;
         Tail::update(&self.beside(), |tail| {

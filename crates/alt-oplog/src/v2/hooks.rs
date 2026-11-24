@@ -1,7 +1,7 @@
 //! What a test has a log do that no machine does on its own: run in a
 //! boot of its choosing or in none, have a cut of the log die or wait at
-//! one of its steps, and have something done to `tail` before each read
-//! of it.
+//! one of its steps, have something done to `tail` before each read of
+//! it, and have the fsyncs of the log told to it or left out.
 //!
 //! All of it is built with the feature `hooks` alone, which no manifest
 //! turns on: the tests of this crate need it, and are built with it
@@ -12,6 +12,7 @@
 #[cfg(feature = "hooks")]
 mod told {
     use std::cell::{Cell, RefCell};
+    use std::fs::File;
     use std::path::Path;
     use std::sync::mpsc::{Receiver, Sender};
 
@@ -31,6 +32,9 @@ mod told {
     /// there is read.
     type BeforeRead = Box<dyn FnMut(&Path)>;
 
+    /// What a test has done with a log file each time it is fsynced.
+    type AtFsync = Box<dyn FnMut(&File)>;
+
     thread_local! {
         static NOTE_READ: RefCell<Option<BeforeRead>> = const { RefCell::new(None) };
         static BOOT: Cell<Told> = const { Cell::new(Told::ByTheKernel) };
@@ -39,6 +43,45 @@ mod told {
         static ASKED_WAITS: RefCell<Option<(Sender<()>, Receiver<()>)>> =
             const { RefCell::new(None) };
         static TAKEN_BACK: RefCell<Option<BeforeRead>> = const { RefCell::new(None) };
+        static FSYNCS_LEFT_OUT: Cell<bool> = const { Cell::new(false) };
+        static FSYNCS: Cell<u64> = const { Cell::new(0) };
+        static AT_FSYNC: RefCell<Option<AtFsync>> = const { RefCell::new(None) };
+    }
+
+    /// Has the fsyncs of log files that this thread asks for counted and
+    /// not made, and made again with `false`: for a test that takes what
+    /// the kernel holds of a file for what is on disk, and plays the loss
+    /// of power itself.
+    pub fn fsyncs_left_out(on: bool) {
+        FSYNCS_LEFT_OUT.set(on);
+    }
+
+    /// How many fsyncs of log files this thread asked for, made or not.
+    pub fn fsyncs_asked() -> u64 {
+        FSYNCS.get()
+    }
+
+    /// Has `then` called with the file each time this thread asks for a
+    /// log file to be fsynced, once it is or would have been, and
+    /// nothing with `None`: for a test that keeps what a loss of power
+    /// could not take.
+    pub fn at_fsync(then: Option<AtFsync>) {
+        AT_FSYNC.set(then);
+    }
+
+    pub(crate) fn fsync(file: &File) -> std::io::Result<()> {
+        if !FSYNCS_LEFT_OUT.get() {
+            file.sync_all()?;
+        }
+        FSYNCS.set(FSYNCS.get() + 1);
+        // taken out while it runs: what it does may fsync a log itself
+        if let Some(mut then) = AT_FSYNC.take() {
+            then(file);
+            AT_FSYNC.with_borrow_mut(|at| {
+                at.get_or_insert(then);
+            });
+        }
+        Ok(())
     }
 
     /// Makes the handles this thread opens from now on take `boot` for
@@ -143,11 +186,18 @@ mod told {
 
 #[cfg(feature = "hooks")]
 pub use told::{
-    before_cut_taken_back, before_note_read, cut_asked_waits, cut_dies_after, cut_waits_after,
-    in_boot, in_no_boot,
+    at_fsync, before_cut_taken_back, before_note_read, cut_asked_waits, cut_dies_after,
+    cut_waits_after, fsyncs_asked, fsyncs_left_out, in_boot, in_no_boot,
 };
 #[cfg(feature = "hooks")]
-pub(crate) use told::{cut_asked, cut_reached, cut_taken_back, note_read, running_boot};
+pub(crate) use told::{cut_asked, cut_reached, cut_taken_back, fsync, note_read, running_boot};
+
+/// Fsyncs the log file `file`.
+#[cfg(not(feature = "hooks"))]
+#[inline(always)]
+pub(crate) fn fsync(file: &std::fs::File) -> std::io::Result<()> {
+    file.sync_all()
+}
 
 /// The boot a handle opened now runs in, as the kernel tells it.
 #[cfg(not(feature = "hooks"))]

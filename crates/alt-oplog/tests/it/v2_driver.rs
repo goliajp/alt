@@ -15,6 +15,7 @@ use super::v2_ledger::Ledger;
 use super::v2_log::file_len;
 use super::v2_meanwhile::Meanwhile;
 use super::v2_model::{Model, Reference, Rng, Stored, reference};
+use super::v2_power::Power;
 
 /// What each call gave to whoever syncs what ops name, by payload, and
 /// whether that one did.
@@ -56,8 +57,8 @@ pub struct Run {
     appended: u64,
     /// the request the next ops and the next receipt are of
     pub request: u8,
-    /// a cut of this step left its checkpoint synced
-    pub cut_synced: bool,
+    /// what a loss of power cannot take from the log
+    pub power: Power,
     /// how many cuts of this run died
     pub died: u64,
     /// what the call taken in next came to, its sink told
@@ -112,6 +113,7 @@ fn seer(
 impl Run {
     pub fn new(seed: u64, block_exp: u8, counts: &'static Counts) -> Run {
         let dir = alt_os::temp::tempdir().unwrap();
+        let power = Power::of(seed);
         let mut also = Rng(seed ^ 0x6a09_e667_f3bc_c908);
         let (beside, of_it) = match also.below(3) {
             0 => (Beside::Kept, &counts.kept),
@@ -148,7 +150,7 @@ impl Run {
             meanwhile: Meanwhile::with(stored),
             appended: 0,
             request: 1,
-            cut_synced: false,
+            power,
             died: 0,
             by_sink: false,
             to_defer: false,
