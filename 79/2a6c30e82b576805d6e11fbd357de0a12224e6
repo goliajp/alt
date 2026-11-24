@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the rules that name a repository decide what a user may do to it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/auth.rs
