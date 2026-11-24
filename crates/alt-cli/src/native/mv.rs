@@ -10,6 +10,8 @@ use std::os::unix::fs::MetadataExt;
 use super::tree_edit::{Put, TreeEdit};
 use super::*;
 
+mod along;
+
 /// How a `mv` goes about it.
 #[derive(Clone, Copy, Default)]
 pub struct Mv {
@@ -181,12 +183,7 @@ impl NativeRepo<'_> {
         }
         let target = self.abs(to)?;
         let there = target.symlink_metadata();
-        let one =
-            |there: &std::fs::Metadata| (there.dev(), there.ino()) == (found.dev(), found.ino());
-        let one = there.as_ref().is_ok_and(one);
-        // two links to a file are two names, each listed as it is spelled
-        let mut listed = super::checkout_files::Listed::default();
-        let spelling = one && folds && self.spelled_otherwise(to, &mut listed)?;
+        let (one, spelling) = self.one_name(&found, there.as_ref().ok(), to, folds)?;
         if found.is_dir() {
             let inside = |e: &&IndexEntry| beneath(&e.path, from);
             if !index.entries.iter().any(|e| inside(&e)) {
@@ -264,14 +261,8 @@ impl NativeRepo<'_> {
             edit.files.push((moved(&file), Put::Found(state)));
             edit.files.push((file, Put::Nothing));
         }
-        // as git, which renames the directory: those in it that hold
-        // nothing go along
         if is_dir && !spelling {
-            for hollow in self.empty_beneath(from)? {
-                let state = self.empty_directory(true)?;
-                edit.files.push((moved(&hollow), Put::Found(state)));
-                edit.files.push((hollow, Put::NoDirectory));
-            }
+            self.move_hollow(from, to, edit)?;
         }
         Ok((beneath, spelling))
     }

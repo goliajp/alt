@@ -3,6 +3,8 @@
 //! with `-x` a "(cherry picked from commit …)" trailer. Conflicts stop
 //! and exit 1, same as git.
 
+mod message;
+
 use std::fs;
 use std::path::Path;
 use std::process::Output;

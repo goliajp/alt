@@ -103,9 +103,14 @@ impl NativeRepo<'_> {
         if !abs.symlink_metadata().is_ok_and(|m| m.is_dir()) {
             std::fs::create_dir(abs)?;
         }
-        if let Some(parent) = abs.parent() {
-            std::fs::File::open(parent)?.sync_all()?;
-        }
-        Ok(())
+        sync_parent(abs)
+    }
+}
+
+/// Has the directory that holds `abs` reach the disk with its entries.
+pub(super) fn sync_parent(abs: &Path) -> Res<()> {
+    match abs.parent() {
+        Some(parent) => Ok(std::fs::File::open(parent)?.sync_all()?),
+        None => Ok(()),
     }
 }

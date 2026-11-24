@@ -205,9 +205,7 @@ impl NativeRepo<'_> {
                     true => super::checkout_plan::remove_left_empty(&abs, path)?,
                     false => crate::durable::remove_file(&abs)?,
                 }
-                if let Some(parent) = abs.parent() {
-                    std::fs::File::open(parent)?.sync_all()?;
-                }
+                directories::sync_parent(&abs)?;
                 self.prune_empty_dirs(abs.parent());
             }
             Some(state) if state.mode == 0o160000 => {
@@ -221,9 +219,7 @@ impl NativeRepo<'_> {
                     Err(_) => std::fs::create_dir(&abs)?,
                 }
                 std::fs::File::open(&abs)?.sync_all()?;
-                if let Some(parent) = abs.parent() {
-                    std::fs::File::open(parent)?.sync_all()?;
-                }
+                directories::sync_parent(&abs)?;
             }
             Some(state) if state.mode == EMPTY_DIRECTORY => self.put_directory(path, &abs)?,
             Some(state) => {

@@ -14,15 +14,11 @@ impl NativeRepo<'_> {
     pub fn merge(
         &mut self,
         branch_name: &str,
-        ff: Option<FastForward>,
+        ff: FastForward,
         json: bool,
         out: &mut impl Write,
     ) -> Res<bool> {
         self.ensure_topic_branch_or_unborn("merge")?;
-        let ff = match ff {
-            Some(ff) => ff,
-            None => self.configured_ff()?,
-        };
         let brought = self.brought(branch_name)?;
         let theirs = brought.commit;
         let cur = self.head_branch()?;

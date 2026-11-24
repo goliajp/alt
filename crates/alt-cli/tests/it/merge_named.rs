@@ -2,6 +2,8 @@
 //! branch of a remote, an earlier commit of a branch, the branch left
 //! last. Each beside git's, down to the id of the merge commit.
 
+mod settings;
+
 use std::path::{Path, PathBuf};
 
 use crate::like_git::{alt, alt_daemon, fails, files, git, heads, index, ok};

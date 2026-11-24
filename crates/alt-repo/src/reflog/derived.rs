@@ -87,6 +87,31 @@ fn oid(target: &Option<RefTarget>) -> Option<ObjectId> {
     }
 }
 
+/// Where the ops after `after` begin among `ops`.
+fn read_from(ops: &[alt_oplog::Op], after: Option<Option<OpId>>) -> usize {
+    let Some(Some(last)) = after else { return 0 };
+    let at = ops.iter().position(|op| op.id == last);
+    at.map_or(0, |at| at + 1)
+}
+
+/// The new base of the rebase `changes` end, where they end one: it
+/// ends where its scratch ref goes. One they begin is kept in `bases`.
+fn rebase_onto(
+    bases: &mut HashMap<String, ObjectId>,
+    verb: &str,
+    changes: &[alt_refs::RefChange],
+) -> Option<ObjectId> {
+    let ended = changes.iter().filter(|c| c.new.is_none());
+    let onto = ended.fold(None, |onto, c| onto.or(bases.remove(&c.name)));
+    let begun = changes.iter().filter(|c| !c.name.starts_with("refs/"));
+    for c in begun.filter(|_| verb == "rebase") {
+        if let (None, Some(base)) = (&c.old, oid(&c.new)) {
+            bases.insert(c.name.clone(), base);
+        }
+    }
+    onto
+}
+
 /// Reads the moves of `want` from the ops after `after`, from all of them
 /// where there is no such op to begin after. An import is no move: what
 /// git logged of the refs it brings is kept beside the store.
@@ -101,13 +126,7 @@ pub(super) fn derived(
     let mut bases: HashMap<String, ObjectId> = HashMap::new();
     let mut counting = !matches!(after, Some(Some(_)));
     let ops = refs.oplog().ops()?;
-    let read = match after {
-        Some(Some(last)) => ops
-            .iter()
-            .position(|op| op.id == last)
-            .map_or(0, |at| at + 1),
-        _ => 0,
-    };
+    let read = read_from(ops, after);
     let (renamed, first) = match head {
         true => (HashMap::new(), want.to_owned()),
         false => renames(&ops[read..], want)?,
@@ -142,16 +161,7 @@ pub(super) fn derived(
         let from_head =
             matches!(verb, "switch" | "checkout") && !tx.changes.iter().any(|c| is_head(&c.name));
         apply(&mut state, &tx.changes);
-        // a rebase ends where its scratch ref goes
-        let ended = tx.changes.iter().filter(|c| c.new.is_none());
-        let onto = ended.fold(None, |onto, c| onto.or(bases.remove(&c.name)));
-        if verb == "rebase" {
-            for c in tx.changes.iter().filter(|c| !c.name.starts_with("refs/")) {
-                if let (None, Some(base)) = (&c.old, oid(&c.new)) {
-                    bases.insert(c.name.clone(), base);
-                }
-            }
-        }
+        let onto = rebase_onto(&mut bases, verb, &tx.changes);
         if verb == "import" {
             continue;
         }

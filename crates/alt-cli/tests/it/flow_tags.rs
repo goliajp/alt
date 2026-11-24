@@ -2,6 +2,8 @@
 //! they leave on the production branch, as git-flow does: an annotated
 //! tag named after the version, made with the merge in one operation.
 
+mod message;
+
 use crate::like_git::{Pair, alt, alt_daemon, export, fails, files, git, heads, ok};
 use std::path::Path;
 

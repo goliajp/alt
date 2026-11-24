@@ -13,9 +13,6 @@ pub(in crate::native) struct Brought {
     /// the message of the annotated tag that was named, which the
     /// message of the merge commit carries
     pub note: Option<String>,
-    /// what git lists the commits it brings under, where `merge.log`
-    /// has them listed
-    pub listed: String,
 }
 
 impl Brought {
@@ -26,7 +23,6 @@ impl Brought {
             label: name.to_owned(),
             title: format!("Merge branch '{name}'"),
             note: None,
-            listed: name.to_owned(),
         }
     }
 
@@ -113,22 +109,11 @@ impl NativeRepo<'_> {
                 _ => format!("Merge commit '{word}'"),
             },
         };
-        // a branch is listed by its name, anything else as the title has it
-        let listed = match title.strip_prefix("Merge ") {
-            Some(named)
-                if title.starts_with("Merge tag ") || title.starts_with("Merge commit ") =>
-            {
-                named.to_owned()
-            }
-            Some(named) => named.split('\'').nth(1).unwrap_or(named).to_owned(),
-            None => word.to_owned(),
-        };
         Ok(Brought {
             commit,
             label,
             title,
             note,
-            listed,
         })
     }
 }
@@ -136,7 +121,7 @@ impl NativeRepo<'_> {
 impl NativeRepo<'_> {
     /// How a merge treats a branch that is behind what it brings where
     /// the command line does not say: `merge.ff`, as git reads it.
-    pub(in crate::native) fn configured_ff(&self) -> Res<FastForward> {
+    pub fn configured_ff(&self) -> Res<FastForward> {
         let settings = self.settings()?;
         if settings
             .get_str("merge", None, "ff")
@@ -215,21 +200,17 @@ impl NativeRepo<'_> {
             if subjects.len() > limit {
                 continue;
             }
-            // the first paragraph on one line, as `%s` has it
-            let message = String::from_utf8_lossy(parsed.message()).into_owned();
-            let first = message.trim_start_matches('\n').split("\n\n").next();
-            let subject = first
-                .unwrap_or_default()
-                .lines()
-                .collect::<Vec<_>>()
-                .join(" ");
-            let subject = subject.trim_start();
-            subjects.push(match subject.is_empty() {
-                true => commit.to_string(),
-                false => subject.to_owned(),
-            });
+            subjects.push(subject(parsed.message()).unwrap_or_else(|| commit.to_string()));
         }
-        let name = &brought.listed;
+        // a branch is listed by its name, anything else as the title has it
+        let title = brought
+            .title
+            .strip_prefix("Merge ")
+            .unwrap_or(&brought.title);
+        let name = match title.starts_with("tag ") || title.starts_with("commit ") {
+            true => title,
+            false => title.split('\'').nth(1).unwrap_or(title),
+        };
         let mut listed = match count > limit {
             true => format!("\n* {name}: ({count} commits)\n"),
             false => format!("\n* {name}:\n"),
@@ -242,6 +223,16 @@ impl NativeRepo<'_> {
         }
         Ok(listed)
     }
+}
+
+/// The first paragraph of `message` on one line, as git's `%s` has it;
+/// `None` where it is empty.
+fn subject(message: &[u8]) -> Option<String> {
+    let message = String::from_utf8_lossy(message);
+    let first = message.trim_start_matches('\n').split("\n\n").next();
+    let lines: Vec<&str> = first.unwrap_or_default().lines().collect();
+    let subject = lines.join(" ");
+    Some(subject.trim_start().to_owned()).filter(|subject| !subject.is_empty())
 }
 
 /// The message of a tag without the signature it ends with.

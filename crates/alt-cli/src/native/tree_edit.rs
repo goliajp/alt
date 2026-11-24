@@ -105,6 +105,23 @@ fn coming<'a>(files: &'a [(BString, Put)], index: &'a Index) -> Coming<'a> {
 }
 
 impl NativeRepo<'_> {
+    /// What an edit finds at `path`, where it leaves `after`: looked at
+    /// as a directory that holds nothing where the edit is of one,
+    /// `hollow` where it takes one away.
+    fn found_before(
+        &self,
+        path: &BString,
+        hollow: bool,
+        after: Option<&FileState>,
+        owned: &dyn Fn(&[u8]) -> bool,
+    ) -> Res<Option<FileState>> {
+        let of = |mode| after.is_some_and(|state| state.mode == mode);
+        match hollow || of(EMPTY_DIRECTORY) {
+            true => self.observed_directory(path, true, owned),
+            false => self.observed(path, true, of(0o160000), owned),
+        }
+    }
+
     /// What making `edit` changes, as the intent of a checkout: the index
     /// to come, and for each path written the file that is there and the
     /// one to come, and the paths at which either differs from what is
@@ -143,11 +160,8 @@ impl NativeRepo<'_> {
                 Put::Found(state) => Some(state.clone()),
                 Put::Nothing | Put::NoDirectory => None,
             };
-            let of = |mode| after.as_ref().is_some_and(|state| state.mode == mode);
-            let before = match matches!(put, Put::NoDirectory) || of(EMPTY_DIRECTORY) {
-                true => self.observed_directory(path, true, &owned)?,
-                false => self.observed(path, true, of(0o160000), &owned)?,
-            };
+            let hollow = matches!(put, Put::NoDirectory);
+            let before = self.found_before(path, hollow, after.as_ref(), &owned)?;
             if before != after {
                 touched.insert(path.clone());
                 changes.push(FileChange {

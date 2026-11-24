@@ -4,6 +4,12 @@ use alt_git_codec::ObjectId;
 
 use crate::{RepoError, Repository};
 
+/// The number `digits` write, where they are digits alone.
+fn number(digits: &str) -> Option<usize> {
+    let plain = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    plain.then(|| digits.parse::<usize>().ok()).flatten()
+}
+
 impl Repository {
     /// The full name of the ref `named` is found by: a branch left
     /// before for `@{-N}`, else the first of git's lookup order there is.
@@ -43,16 +49,10 @@ impl Repository {
         named: &str,
         asked: &str,
     ) -> Result<Option<ObjectId>, RepoError> {
-        let number = |digits: &str| {
-            let plain = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
-            plain.then(|| digits.parse::<usize>().ok()).flatten()
-        };
         if let Some(nth) = asked.strip_prefix('-') {
-            if named == "HEAD" {
-                return Ok(None);
-            }
             let head = if named.is_empty() { "HEAD" } else { named };
-            let Some(nth) = number(nth).and_then(|nth| nth.checked_sub(1)) else {
+            let nth = number(nth).filter(|_| named != "HEAD");
+            let Some(nth) = nth.and_then(|nth| nth.checked_sub(1)) else {
                 return Ok(None);
             };
             let Some(left) = self.branch_before(head, nth)? else {

@@ -126,10 +126,8 @@ fn a_revert_gone_on_with_writes_over_no_change_that_is_not_staged() {
     ok(crate::like_git::git(&pair.git, &["checkout", "other"]));
     both(&pair, &["revert", "--continue"]);
     let other = |dir: &std::path::Path| std::fs::read_to_string(dir.join("other")).unwrap();
-    assert_eq!(
-        (other(&pair.alt), other(&pair.git)),
-        ("base\n".into(), "B\n".into())
-    );
+    assert_eq!(other(&pair.alt), "base\n");
+    assert_eq!(other(&pair.git), "B\n");
     let said = ok(alt(&pair.alt, &["log", "-n", "1"]));
     assert!(said.contains("Revert \"B\""), "{said}");
     assert!(!pair.alt.join(".alt/REVERT_STATE").exists());

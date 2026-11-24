@@ -71,21 +71,16 @@ impl NativeRepo<'_> {
         }
     }
 
-    /// Makes those of the `moves` among `changes` it can by renaming, and
-    /// returns the paths whose change is made with that. What leaves
-    /// without moving is gone by now; a move to beneath a file that
-    /// moves itself waits for that one.
-    pub(super) fn rename_moved<'c>(
+    /// Renames each directory all of whose content the `moves` take to
+    /// one other directory, and adds to `done` the paths whose change is
+    /// made with that.
+    fn rename_whole<'c>(
         &self,
         changes: &[&'c FileChange],
         moves: &HashMap<&'c [u8], &'c [u8]>,
-    ) -> Res<HashSet<&'c [u8]>> {
-        let mut done: HashSet<&'c [u8]> = HashSet::new();
-        if moves.is_empty() {
-            return Ok(done);
-        }
-        super::super::tree_state::wrote_file(&self.root);
-        let mut listed = Listed::default();
+        done: &mut HashSet<&'c [u8]>,
+        listed: &mut Listed,
+    ) -> Res<()> {
         // a directory first, the shortest before those within it
         let mut whole: Vec<(&[u8], &[u8])> = moves
             .iter()
@@ -116,12 +111,31 @@ impl NativeRepo<'_> {
             if files.is_empty() || !apart || !files.iter().all(goes) || expected != files.len() {
                 continue;
             }
-            if self.renamed(from, to, false, &mut listed)? {
+            if self.renamed(from, to, false, listed)? {
                 for (gone, come) in moves.iter().filter(|(gone, _)| inside(gone, from)) {
                     done.extend([*gone, *come]);
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Makes those of the `moves` among `changes` it can by renaming, and
+    /// returns the paths whose change is made with that. What leaves
+    /// without moving is gone by now; a move to beneath a file that
+    /// moves itself waits for that one.
+    pub(super) fn rename_moved<'c>(
+        &self,
+        changes: &[&'c FileChange],
+        moves: &HashMap<&'c [u8], &'c [u8]>,
+    ) -> Res<HashSet<&'c [u8]>> {
+        let mut done: HashSet<&'c [u8]> = HashSet::new();
+        if moves.is_empty() {
+            return Ok(done);
+        }
+        super::super::tree_state::wrote_file(&self.root);
+        let mut listed = Listed::default();
+        self.rename_whole(changes, moves, &mut done, &mut listed)?;
         let mut waiting: Vec<(&'c [u8], &'c [u8])> = moves
             .iter()
             .filter(|(from, _)| !done.contains(*from))

@@ -24,6 +24,7 @@ use alt_refs::{AlsoNamed, RefError, RefStore, RefTarget};
 mod config;
 mod logs;
 mod met;
+mod names;
 pub mod stash;
 
 #[derive(Debug)]
@@ -212,33 +213,22 @@ fn write_objects(
     Ok(writer.finish()?.objects)
 }
 
-/// The objects the refs name.
-fn named_objects(refs: &RefStore) -> HashSet<ObjectId> {
+/// The objects the refs name; refused where git has no place for the
+/// names of two of them.
+fn named_objects(refs: &RefStore) -> Result<HashSet<ObjectId>, ExportError> {
+    if let Some((name, above)) = names::beneath_another(refs) {
+        return Err(ExportError::RefBeneath { name, above });
+    }
     let named = |(_, target): (&str, &RefTarget)| match target {
         RefTarget::Oid(oid) => Some(*oid),
         RefTarget::Symbolic(_) => None,
     };
-    refs.iter().filter_map(named).collect()
-}
-
-/// The first of the refs written that lies beneath another of them,
-/// with that one.
-fn beneath_another(refs: &RefStore) -> Option<(String, String)> {
-    let written =
-        |name: &&str| *name != "HEAD" && stash::entry_number(name).is_none() && !stands_apart(name);
-    let mut names: Vec<&str> = refs.iter().map(|(name, _)| name).filter(written).collect();
-    names.sort_unstable();
-    let held: HashSet<&str> = names.iter().copied().collect();
-    names.iter().find_map(|name| {
-        let above = name.match_indices('/').map(|(at, _)| &name[..at]);
-        let above = above.filter(|above| held.contains(above)).next()?;
-        Some(((*name).to_owned(), above.to_owned()))
-    })
+    Ok(refs.iter().filter_map(named).collect())
 }
 
 /// Whether `name` is the ref a rebase or a bisect of a workspace keeps
 /// the commit it stands on under, while HEAD is off its branch.
-fn stands_apart(name: &str) -> bool {
+pub(crate) fn stands_apart(name: &str) -> bool {
     name.starts_with("rebase/") || name.starts_with("bisect/")
 }
 
@@ -253,10 +243,7 @@ fn write_git(
     let stored = odb.stored_past_cuts();
     let refs = RefStore::open_confirmed(alt_dir, also, |oid| stored(oid).unwrap_or(true))?;
     drop(stored);
-    if let Some((name, above)) = beneath_another(&refs) {
-        return Err(ExportError::RefBeneath { name, above });
-    }
-    let mut unstored = named_objects(&refs);
+    let mut unstored = named_objects(&refs)?;
     let objects = write_objects(&odb, git_dir, algo, &mut unstored)?;
 
     let mut head = None;

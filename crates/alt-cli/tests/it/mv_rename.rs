@@ -2,6 +2,9 @@
 //! permissions, its times and its inode, and a directory goes whole,
 //! with the files in it that are not tracked and its empty directories.
 
+mod directories;
+mod on_casefold;
+
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 

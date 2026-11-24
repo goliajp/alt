@@ -2,6 +2,8 @@
 //! opens: where a rebase or a bisect has HEAD off its branch, HEAD is the
 //! commit they stand on, and an import of it leaves them standing.
 
+mod beneath;
+
 use std::path::Path;
 
 use crate::like_git::{Pair, alt, export, fails, git, ok};
