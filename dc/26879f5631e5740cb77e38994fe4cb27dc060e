@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: the bodies one account sends slowly take a quarter of the bytes, over a connection
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/caller_bytes.rs
+touched: crates/alt-server/tests/it/database/connections/slow_bodies.rs
