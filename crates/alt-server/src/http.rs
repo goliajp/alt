@@ -155,6 +155,7 @@ struct App {
     sources: Arc<sources::Sources>,
     browser: Option<WebOptions>,
     passwords: hashers::Hashers,
+    reviews: Arc<crate::web_review::Reviews>,
 }
 pub fn authorization(headers: &HeaderMap) -> Option<String> {
     if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
@@ -254,6 +255,7 @@ pub async fn serve_with_browser(
         receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
         sources: sources::Sources::new(options.connections_each, &options.trusted_proxies),
         passwords: hashers::Hashers::new(options.password_places),
+        reviews: Arc::new(crate::web_review::Reviews::of(options.workers)),
         options,
         browser,
     });

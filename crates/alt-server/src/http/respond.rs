@@ -282,12 +282,13 @@ pub(super) fn render_output(
             bytes,
             digest,
             file,
+            held,
         }) => {
             let file = match file.into_file() {
                 Ok(file) => file,
                 Err(error) => return store_failure(error.into(), request_key),
             };
-            let mut output = self::file("application/octet-stream", (file, bytes), None);
+            let mut output = self::file("application/octet-stream", (file, bytes), held);
             output.headers_mut().insert(
                 "Alt-Content-Blake3",
                 digest.parse().expect("validated digest"),

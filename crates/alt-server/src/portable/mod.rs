@@ -8,6 +8,9 @@ use alt_portable::{
 use alt_server_store::{Credential, Error, Result, Store};
 use std::io::{Read, Seek, SeekFrom, Write};
 
+/// the media type of an archive
+pub(crate) const ARCHIVE: &str = "application/vnd.alt.portable-v1";
+
 fn bounds(options: &NativeOptions) -> Result<Bounds> {
     options
         .portable
@@ -60,6 +63,8 @@ pub fn execute(
     route: PortableRoute,
     source: &mut dyn Read,
     refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
+    // of the room responses have on disk, for what is written out to be sent
+    sending: Option<alt_shares::Share>,
 ) -> Result<Output> {
     use crate::native::{body, empty, json};
     let settings = bounds(options)?;
@@ -112,20 +117,11 @@ pub fn execute(
                 ExportAction::Archive => {
                     let export =
                         store.open_portable_export(credential, &scope, &id, limits.package)?;
-                    let mut file = alt_os::temp::NamedTempFile::new()?;
-                    alt_portable::write_archive(
-                        file.as_file_mut(),
-                        export.envelope(),
-                        &export,
-                        limits.package,
-                    )?;
-                    let bytes = file.as_file().metadata()?.len();
-                    file.as_file_mut().seek(SeekFrom::Start(0))?;
-                    Ok(Output::Temporary {
-                        content_type: "application/vnd.alt.portable-v1",
-                        bytes,
-                        file,
-                    })
+                    let mut body = crate::git_response::Spill::within(sending);
+                    let (envelope, package) = (export.envelope(), limits.package);
+                    let written =
+                        alt_portable::write_archive(&mut body, envelope, &export, package);
+                    body.into_output(ARCHIVE, written.map_err(Into::into))
                 }
                 ExportAction::Content(digest) => {
                     let export =
@@ -138,6 +134,14 @@ pub fn execute(
                         .find(|b| b.blake3 == digest)
                         .ok_or(Error::Unauthorized)?;
                     let mut input = export.open(blob)?;
+                    let held = match sending {
+                        Some(mut room) => {
+                            let full = |_| Error::Busy("responses to fetches");
+                            room.take(blob.bytes).map_err(full)?;
+                            Some(room)
+                        }
+                        None => None,
+                    };
                     let mut file = alt_os::temp::NamedTempFile::new()?;
                     let mut hash = alt_hash::blake3::Hasher::new();
                     let mut remaining = blob.bytes;
@@ -164,6 +168,7 @@ pub fn execute(
                             file.into_file(),
                             blob.bytes,
                         )?,
+                        held,
                     })
                 }
             }

@@ -211,6 +211,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         peer,
         claim: claim.clone(),
         attempt,
+        reviews: state.reviews.clone(),
+        sending: state.options.sending.share(alt_shares::address(peer)),
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
@@ -224,7 +226,14 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     let unopened = login && outcome.is_err() && claim.abandon();
     match outcome {
         Ok(Ok(Ok((output, cookie)))) => {
-            let download = matches!(output, Output::File { .. } | Output::Temporary { .. });
+            // what was written out to be sent is a file where it is long, and
+            // bytes where it is not
+            const DOWNLOADS: [&str; 2] = ["application/octet-stream", crate::portable::ARCHIVE];
+            let download = match &output {
+                Output::File { .. } | Output::Temporary { .. } | Output::Sending { .. } => true,
+                Output::Bytes { content_type, .. } => DOWNLOADS.contains(content_type),
+                _ => false,
+            };
             let mut response = render_output(Ok(output), None);
             if let Some(cookie) = cookie {
                 response.headers_mut().insert(

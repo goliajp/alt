@@ -36,6 +36,7 @@ pub(super) fn execute(
                 bytes,
                 digest,
                 file,
+                held: None,
             })
         }
         RequestAction::Query => {

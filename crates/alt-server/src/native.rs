@@ -44,6 +44,9 @@ pub enum Output {
         bytes: u64,
         digest: String,
         file: alt_server_store::StoredReader,
+        /// what it takes of the room responses have on disk, where it was
+        /// written out for this response
+        held: Option<alt_shares::Share>,
     },
 }
 pub(crate) fn json(value: &impl alt_json::ToJson) -> Result<Output> {
@@ -166,6 +169,7 @@ pub fn execute_native(
                 bytes,
                 digest,
                 file,
+                held: None,
             })
         }
         Route::Bundles(scope, root, after) => {
