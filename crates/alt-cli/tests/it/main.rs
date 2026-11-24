@@ -77,6 +77,8 @@ mod exclude_dirs;
 mod exclude_order;
 #[cfg(target_os = "linux")]
 mod failed_sync;
+#[cfg(target_os = "linux")]
+mod failed_sync_put_aside;
 mod fetch;
 mod flow;
 mod flow_enforce;
