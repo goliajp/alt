@@ -255,6 +255,7 @@ impl NativeRepo<'_> {
                 in_the_way.push(entry.path.clone());
             }
         }
+        self.ensure_apart(&in_the_way, staged.keys().copied())?;
         if !in_the_way.is_empty() {
             return Err(said::would_overwrite(
                 "The following untracked working tree files",

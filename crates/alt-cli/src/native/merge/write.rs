@@ -83,8 +83,7 @@ impl NativeRepo<'_> {
                     if self.respells(&r.path, changed.iter().filter(leaves).map(|r| &r.path))? {
                         continue;
                     }
-                    let path = &r.path;
-                    let why = format!("untracked working tree file '{path}' would be overwritten");
+                    let why = self.why_in_the_way(&r.path, was.keys())?;
                     return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
                 }
                 _ => {}

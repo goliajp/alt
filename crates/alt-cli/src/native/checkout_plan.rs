@@ -83,11 +83,8 @@ impl NativeRepo<'_> {
                         target.iter().map(|e| &e.path).collect();
                     let leaving = old.iter().map(|e| &e.path).filter(|p| !stays.contains(p));
                     if !self.respells(&entry.path, leaving)? {
-                        return Err(format!(
-                            "untracked working tree file '{}' would be overwritten",
-                            entry.path
-                        )
-                        .into());
+                        let tracked = old.iter().map(|e| &e.path);
+                        return Err(self.why_in_the_way(&entry.path, tracked)?.into());
                     }
                 }
                 _ => {}

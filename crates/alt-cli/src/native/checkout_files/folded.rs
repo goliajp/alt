@@ -80,6 +80,57 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// The path among `tracked` whose file `path` reaches by another
+    /// spelling of its name; `None` where the file at `path` is no
+    /// tracked path's.
+    pub(in crate::native) fn shares<'p>(
+        &self,
+        path: &BString,
+        tracked: impl Iterator<Item = &'p BString>,
+    ) -> Res<Option<BString>> {
+        if !self.folds()? {
+            return Ok(None);
+        }
+        let there = self.file_there(path)?;
+        for other in tracked.filter(|other| *other != path) {
+            if there.is_some() && self.file_there(other)? == there {
+                return Ok(Some(other.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Why the file at `path`, which the index does not have, stops a
+    /// checkout that brings the path: it is another tracked path's file
+    /// under another spelling, or it is not tracked.
+    pub(in crate::native) fn why_in_the_way<'p>(
+        &self,
+        path: &BString,
+        tracked: impl Iterator<Item = &'p BString>,
+    ) -> Res<String> {
+        Ok(match self.shares(path, tracked)? {
+            Some(other) => one_file(path, &other),
+            None => format!("untracked working tree file '{path}' would be overwritten"),
+        })
+    }
+
+    /// Refuses the checkout that the files at `in_the_way` stop where one
+    /// of them is the file of a path among `tracked`: it is not an
+    /// untracked file to move away.
+    pub(in crate::native) fn ensure_apart<'p>(
+        &self,
+        in_the_way: &[BString],
+        tracked: impl Iterator<Item = &'p BString> + Clone,
+    ) -> Res<()> {
+        for path in in_the_way {
+            if let Some(other) = self.shares(path, tracked.clone())? {
+                let said = format!("error: {}\n", one_file(path, &other));
+                return Err(said::refused(&said, 1));
+            }
+        }
+        Ok(())
+    }
+
     /// The paths among `entries` that reach one file with another of
     /// them, each group in the order of its paths: of a group the tree
     /// holds one file, with what the path written last put there.
@@ -97,4 +148,12 @@ impl NativeRepo<'_> {
         groups.sort();
         Ok(groups)
     }
+}
+
+/// Why a path is not checked out beside the tracked path `other` whose
+/// file it reaches.
+pub(in crate::native) fn one_file(path: &BString, other: &BString) -> String {
+    format!(
+        "'{path}' and '{other}' are one file here, where names that differ in case are one name: a tree that holds both is not checked out"
+    )
 }

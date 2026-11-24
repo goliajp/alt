@@ -10,7 +10,7 @@ use std::process::Output;
 
 use crate::like_git::{Pair, alt, alt_daemon, fails, files, git, heads, index, ok};
 
-fn place() -> PathBuf {
+pub(crate) fn place() -> PathBuf {
     let named = std::env::var_os("ALT_CASEFOLD_DIR")
         .expect("ALT_CASEFOLD_DIR names a directory on a file system that ignores case");
     let place = PathBuf::from(named);
@@ -26,7 +26,7 @@ fn place() -> PathBuf {
 
 /// A pair on the file system that ignores case, with `a` and `d/x`
 /// committed.
-fn pair() -> Pair {
+pub(crate) fn pair() -> Pair {
     let pair = Pair::new_in(&place());
     pair.write("a", "1\n");
     pair.write("d/x", "2\n");
@@ -36,7 +36,7 @@ fn pair() -> Pair {
 
 /// The files of a tree with their names in lower case: which spelling a
 /// directory shows for a file is the file system's to say.
-fn folded(root: &Path) -> Vec<(String, String, bool)> {
+pub(crate) fn folded(root: &Path) -> Vec<(String, String, bool)> {
     let lower =
         |(name, content, exec): (String, String, bool)| (name.to_lowercase(), content, exec);
     let mut found: Vec<_> = files(root).into_iter().map(lower).collect();
@@ -44,13 +44,13 @@ fn folded(root: &Path) -> Vec<(String, String, bool)> {
     found
 }
 
-fn same_state(pair: &Pair) {
+pub(crate) fn same_state(pair: &Pair) {
     assert_eq!(index(&pair.alt), ok(git(&pair.git, &["ls-files", "-s"])));
     assert_eq!(folded(&pair.alt), folded(&pair.git));
     assert_eq!(heads(&pair.alt), heads(&pair.git));
 }
 
-fn clean(repo: &Path, served: bool) {
+pub(crate) fn clean(repo: &Path, served: bool) {
     let status = match served {
         true => alt_daemon(repo, &["status"]),
         false => alt(repo, &["status"]),
@@ -63,7 +63,7 @@ fn clean(repo: &Path, served: bool) {
 }
 
 /// Nothing in the tree differs from the index, and nothing is untracked.
-fn clean_but_staged(repo: &Path) {
+pub(crate) fn clean_but_staged(repo: &Path) {
     let said = ok(alt(repo, &["status"]));
     assert!(
         !said.contains("not staged") && !said.contains("Untracked"),
@@ -71,7 +71,7 @@ fn clean_but_staged(repo: &Path) {
     );
 }
 
-fn code(o: &Output) -> Option<i32> {
+pub(crate) fn code(o: &Output) -> Option<i32> {
     o.status.code()
 }
 
@@ -261,7 +261,10 @@ fn two_paths_that_are_one_file_are_not_written_over_each_other() {
     ] {
         let o = alt(&repo, refused);
         let said = fails(o, if refused[0] == "switch" { 1 } else { 75 });
-        assert!(said.contains("would be overwritten"), "{said}");
+        assert!(
+            said.contains("'A' and 'a' are one file here") && !said.contains("untracked"),
+            "{said}"
+        );
         assert_eq!(std::fs::read_to_string(repo.join("a")).unwrap(), "1\n");
         clean(&repo, false);
     }
