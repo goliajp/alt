@@ -4,6 +4,10 @@ use std::cell::Cell;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
+use crate::scan::parse_body;
+use crate::v2::frame::View;
+use crate::{Framed, Op, OpLogError};
+
 /// Bytes of the log file as an open reads them, counted.
 pub(crate) struct Source<'a> {
     pub file: &'a File,
@@ -45,4 +49,25 @@ impl Source<'_> {
         }
         Ok(held)
     }
+}
+
+/// The op an op frame at `at..end` holds.
+pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
+    let Some(id) = view.op else {
+        return Err(OpLogError::Format("an op frame without an id"));
+    };
+    let mut op = parse_body(view.body, id)?;
+    op.frame = Some(Framed {
+        at,
+        end,
+        seq: view.head.seq,
+        flags: view.head.flags,
+        workspace: view.head.workspace,
+        linked: view.ext.linked.is_some(),
+        inverse_of: view.ext.inverse_of,
+        request: view.ext.request,
+        staged: view.ext.index_after.is_some(),
+        retired: view.ext.retired,
+    });
+    Ok(op)
 }

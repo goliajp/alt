@@ -57,6 +57,10 @@ pub(crate) struct Log {
     /// a frame from here on was appended in the running boot, after that
     /// read or after a cut made since.
     pub(super) left_to: u64,
+    /// The latest generation this handle knew the log in the file to
+    /// be of: a cut it finds the log to be of a later one by was made
+    /// since, in the running boot.
+    pub(super) generation_known: u32,
     /// this handle noted that ops are left to be looked at
     pub(super) left_noted: bool,
     /// where the log ended with the checkpoint of a cut when this handle
@@ -132,6 +136,7 @@ impl Log {
             hidden: None,
             seen: 0,
             left_to: 0,
+            generation_known: 0,
             left_noted: false,
             cut_on_disk: 0,
             defer: false,
@@ -174,6 +179,7 @@ impl Log {
             judged,
             hidden,
             seen,
+            of_file,
             clamped,
             passed,
         } = loaded;
@@ -182,13 +188,20 @@ impl Log {
         (self.base, self.recent_from, self.full) = (None, 0, OnceLock::new());
         self.synced = self.synced.max(synced);
         self.judged.set(judged);
-        (self.hidden, self.seen) = (hidden, seen);
         // past the frames held are frames of the log only where the log
         // ends short of them for this handle
         self.left_to = match hidden {
             Some(_) => seen,
             None => self.state.end,
         };
+        // read before, it finds the log cut since: what follows that cut
+        // was appended in the running boot
+        let (generation, cut) = of_file;
+        if self.seen != 0 && generation > self.generation_known {
+            self.left_to = self.left_to.min(cut);
+        }
+        self.generation_known = self.generation_known.max(generation);
+        (self.hidden, self.seen) = (hidden, seen);
         (self.clamped, self.passed) = (clamped, passed);
         Ok(())
     }

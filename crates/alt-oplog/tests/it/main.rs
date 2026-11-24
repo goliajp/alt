@@ -13,6 +13,7 @@ mod sink_generation;
 mod synced_marker;
 mod synced_writers;
 mod unconfirmed;
+mod v2_anew;
 mod v2_asked;
 mod v2_beside;
 mod v2_bounds;

@@ -267,9 +267,9 @@ impl Log {
         self.lay_cut(&discarded, (generation, looked))?;
         // the checkpoint is synced with the cut; of a frame this handle
         // wrote that was cut, its caller is told by the look
-        self.unsynced = false;
-        self.cut_on_disk = self.state.end;
+        (self.unsynced, self.cut_on_disk) = (false, self.state.end);
         self.left_to = self.left_to.min(at);
+        self.generation_known = self.state.generation;
         self.account.lock().unwrap().cut_at(at);
         if !pending {
             // with nothing left to look at, the checkpoint is covered too

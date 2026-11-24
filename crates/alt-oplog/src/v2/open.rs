@@ -10,39 +10,17 @@
 //! begins at a checkpoint within the synced part instead and goes through
 //! everything after it.
 
-use crate::scan::parse_body;
 use crate::v2::block::{FILE_HEADER_LEN, Layout};
 use crate::v2::frame::{KIND_OP, View};
 use crate::v2::locate::locate_past;
 use crate::v2::mark::Mark;
 use crate::v2::salvage::salvage;
 use crate::v2::scan::{Located, Stop, Walk};
-pub(crate) use crate::v2::source::Source;
+pub(crate) use crate::v2::source::{Source, op_of};
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, walk_file};
 use crate::v2::tail::{Noted, Place, Tail};
-use crate::{Framed, Op, OpLogError};
-
-/// The op an op frame at `at..end` holds.
-pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
-    let Some(id) = view.op else {
-        return Err(OpLogError::Format("an op frame without an id"));
-    };
-    let mut op = parse_body(view.body, id)?;
-    op.frame = Some(Framed {
-        at,
-        end,
-        seq: view.head.seq,
-        flags: view.head.flags,
-        workspace: view.head.workspace,
-        linked: view.ext.linked.is_some(),
-        inverse_of: view.ext.inverse_of,
-        request: view.ext.request,
-        staged: view.ext.index_after.is_some(),
-        retired: view.ext.retired,
-    });
-    Ok(op)
-}
+use crate::{Op, OpLogError};
 
 /// What an open read.
 pub(crate) struct Loaded {
@@ -59,6 +37,9 @@ pub(crate) struct Loaded {
     pub hidden: Option<u64>,
     /// how long the file was
     pub seen: u64,
+    /// the generation the log in the file was of, read as far as it
+    /// reads whatever ends it for this handle, and where it was last cut
+    pub of_file: (u32, u64),
     pub clamped: bool,
     pub passed: bool,
 }
@@ -215,8 +196,14 @@ impl Found {
         })
     }
 
-    /// What an open holds of this read, of a file `seen` bytes long.
-    fn loaded(self, hidden: Option<u64>, seen: u64, clamped: bool) -> Loaded {
+    /// What an open holds of this read, of a file `seen` bytes long
+    /// whose log is as `of_file` says.
+    fn loaded(
+        self,
+        hidden: Option<u64>,
+        (seen, of_file): (u64, (u32, u64)),
+        clamped: bool,
+    ) -> Loaded {
         let (tail, fresh) = (self.tail, self.fresh);
         let synced = self.state.synced.max(tail.map_or(0, |tail| tail.synced));
         Loaded {
@@ -234,6 +221,7 @@ impl Found {
             },
             hidden,
             seen,
+            of_file,
             clamped,
             passed: hidden.is_some(),
             state: self.state,
@@ -266,7 +254,7 @@ pub(crate) fn load(
     // to the length holds another log. And the log ends where its header
     // tells of a cut that this read did not find made: the read may have
     // begun past it, at a checkpoint the cut left behind
-    let generation = found.state.generation;
+    let of_file @ (generation, _) = (found.state.generation, found.state.cut);
     let ends = |tail: &Tail| tail.hides(meta.len(), generation);
     let noted_end = tail.filter(ends).map(|tail| tail.ends);
     // the boundary a handle reads on with: the note's with the frames'
@@ -279,7 +267,7 @@ pub(crate) fn load(
         found = Found::up_to(source, layout, (of.boot, noted), (size, meta.len()), all)?;
     }
     let (stop, window) = (found.stop, std::mem::take(&mut found.window));
-    let mut loaded = found.loaded(hidden.map(|_| meta.len()), meta.len(), clamped);
+    let mut loaded = found.loaded(hidden.map(|_| meta.len()), (meta.len(), of_file), clamped);
     let mut read = |at: u64, len: usize| held(source, &window, at, len);
     if loaded.state.last != 0 {
         // the window may begin where that frame ends, when none after it reads

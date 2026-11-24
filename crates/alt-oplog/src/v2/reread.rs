@@ -105,9 +105,16 @@ impl Log {
 
     /// Reads the log again from its first frame; the caller holds a lock
     /// on it. Whoever derived state from the ops of this handle derives
-    /// it again.
+    /// it again. What the handle looked at before, it has looked at:
+    /// the frames before where it had judged are those frames still, or
+    /// frames appended in the running boot where the log was cut. And
+    /// what was appended since it first read the log was appended in
+    /// the running boot, whatever the note beside the log tells now.
     pub(super) fn read_anew(&mut self) -> Result<(), OpLogError> {
+        let (judged, left_to) = (self.judged.get(), self.left_to);
         self.read_all()?;
+        self.judged.set(self.judged.get().max(judged));
+        self.left_to = self.left_to.min(left_to);
         self.reads += 1;
         Ok(())
     }

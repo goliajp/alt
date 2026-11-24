@@ -16,7 +16,7 @@ fn noted(dir: &Path) -> Vec<u8> {
     fs::read(dir.join("tail")).unwrap()
 }
 
-fn vouched(_: &Op) -> Result<bool, OpLogError> {
+pub fn vouched(_: &Op) -> Result<bool, OpLogError> {
     Ok(true)
 }
 
@@ -161,7 +161,7 @@ fn a_note_that_ops_are_left_from_before_the_boundary_has_those_past_it_looked_at
 
 /// Gives `log` somebody to sync what ops name, who finds it there when
 /// `stored`: the payloads of the ops that one is given.
-fn given_to(log: &mut OpLog, stored: bool) -> Arc<Mutex<Vec<Vec<u8>>>> {
+pub fn given_to(log: &mut OpLog, stored: bool) -> Arc<Mutex<Vec<Vec<u8>>>> {
     let given = Arc::new(Mutex::new(Vec::new()));
     let seen = given.clone();
     log.sync_named_with(Arc::new(move |ops| {
