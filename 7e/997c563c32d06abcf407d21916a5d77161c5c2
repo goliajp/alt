@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: walk a directory once for the index directories that are spellings of its name where the file system ignores case
+author-type: human
+author: doracawl
+touched: crates/alt-worktree/src/walk.rs
+touched: crates/alt-worktree/src/walk/listing.rs
