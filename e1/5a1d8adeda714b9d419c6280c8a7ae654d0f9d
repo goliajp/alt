@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: the native content route looks for what the refs lead to no longer than it is waited for
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading/again.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/native.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/unwaited.rs
+touched: crates/alt-server/tests/it/database/native_led.rs
