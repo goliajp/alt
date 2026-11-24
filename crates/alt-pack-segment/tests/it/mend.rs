@@ -217,3 +217,28 @@ fn a_segment_is_read_through_with_each_delta_applied_once() {
         "{applied} {chains:?}"
     );
 }
+
+/// The counts a segment ends with are not under the sum of its index. Counts
+/// that add up, with a length of the pack that no file has, to where the
+/// index ends are those of no segment: the file is refused, and nothing of it
+/// is read at a place beyond its end.
+#[test]
+fn a_segment_whose_counts_add_up_past_its_end_is_no_segment() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let none = SegmentSet::default();
+    super::segment(work.path(), "now.seg", &pack(&three_chains(2)), &none);
+    let mut bytes = std::fs::read(work.path().join("now.seg")).unwrap();
+    let end = bytes.len() - 64;
+    let number =
+        |at: usize, bytes: &[u8]| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let more = number(end + 8, &bytes) + 1_000_000;
+    let pack = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap());
+    bytes[end + 8..end + 12].copy_from_slice(&more.to_le_bytes());
+    bytes[end..end + 8].copy_from_slice(&pack.wrapping_sub(88_000_000).to_le_bytes());
+    let path = work.path().join("past.seg");
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(
+        Segment::open(&path),
+        Err(Error::Corrupt("segment footer"))
+    ));
+}
