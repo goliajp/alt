@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: an image fails to build where a crate of other sources was taken as built
+author-type: human
+author: doracawl
+touched: self-hosted/Dockerfile
+touched: self-hosted/Dockerfile.dockerignore
+touched: self-hosted/build-server.sh
