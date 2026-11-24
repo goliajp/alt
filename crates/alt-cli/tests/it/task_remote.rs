@@ -1,5 +1,6 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod adopt;
+mod base;
 mod browser;
 mod changes;
 mod served;
@@ -374,12 +375,7 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
     let bw = root.path().join("bob-work");
     std::fs::create_dir(&alice).unwrap();
     ok(&alice, &server.token, &["init", "."]);
-    std::fs::write(alice.join("source.txt"), "base\n").unwrap();
-    std::fs::write(
-        alice.join("gate.sh"),
-        "test -s source.txt\nprintf verified\n",
-    )
-    .unwrap();
+    base::write(&alice);
     ok(&alice, &server.token, &["add", "."]);
     ok(&alice, &server.token, &["commit", "-m", "base"]);
     let baseline_git = root.path().join("baseline-git");
