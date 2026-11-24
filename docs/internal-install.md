@@ -124,7 +124,28 @@ source repository's before relying on it.
 A repository whose working tree or `.alt` directory belongs to another user is
 refused, as Git refuses one (`detected dubious ownership`): its configuration
 names filters that would be run. Name the directory in `safe.directory` of
-your own Git configuration to open it.
+your own Git configuration to open it. `altd-server` refuses to serve such a
+repository to a fetch or a push alike, as `git daemon` does, and so does
+`alt intake` to read one: where the server runs as another user than the one
+the repositories belong to, name them in `safe.directory` of the configuration
+that user reads (the working tree, also where Git itself wants the `.git`
+directory named).
+
+A repeated `alt import` goes by what the Git repository had when the store
+last met it (the last import from it, or export to it), kept in
+`.alt/git-import/met`. A branch, a tag, the notes or `HEAD` that Git has left
+as they were then stay as the store has them, so commits made in the store
+and not exported are no longer taken off their branch; where Git moved the
+ref as well, Git's value is taken and the log of the ref leads back to the
+store's. A stash made in the store stays on top of the stashes Git has, and
+one Git has dropped since goes. A store imported by an older build has no
+such record until its next import: that import takes every ref Git has, as
+before, and drops no stash.
+
+On macOS `alt init` and `alt import` set `core.precomposeUnicode` as
+`git init` does, and file names are then recorded in their composed form.
+A tree an older build committed there with decomposed names shows those files
+as untracked afterwards, as it does to Git.
 
 If installation stops, inspect `status` before retrying. A complete staged
 release with no active pointer can be activated by rerunning installation of
