@@ -140,7 +140,7 @@ impl Body {
             .write(true)
             .create_new(true)
             .open(dir.path().join("body"))?;
-        let mut share = held.share(self.source.from());
+        let mut share = held.share(self.source.from);
         let mut piece = vec![0u8; 64 * 1024];
         let failed = loop {
             let read = self.wire(&mut piece);
@@ -281,7 +281,7 @@ impl Request {
     /// The address the peer is counted under; none for this host.
     pub(crate) fn from(&self) -> Option<std::net::IpAddr> {
         let body = self.body.as_ref().expect("a request not yet answered");
-        body.source.from()
+        body.source.from
     }
 
     /// The body. Where it was not received it is read off the wire, and

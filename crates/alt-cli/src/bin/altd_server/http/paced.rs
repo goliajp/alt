@@ -99,7 +99,8 @@ pub(crate) struct Source {
     budget: u64,
     /// the bytes taken of it, the lines around its chunks among them
     spent: u64,
-    from: Option<std::net::IpAddr>,
+    /// what the request being read is counted under; none for this host
+    pub(super) from: Option<std::net::IpAddr>,
 }
 
 impl Source {
@@ -131,9 +132,6 @@ impl Source {
     }
     pub(super) fn spent(&self) -> u64 {
         self.spent
-    }
-    pub(super) fn from(&self) -> Option<std::net::IpAddr> {
-        self.from
     }
 
     /// Takes `count` bytes off what the body may still have.

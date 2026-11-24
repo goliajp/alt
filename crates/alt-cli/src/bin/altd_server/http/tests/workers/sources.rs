@@ -85,6 +85,46 @@ fn the_bodies_of_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
     assert_eq!(status(&mut reader), "HTTP/1.1 200 OK");
 }
 
+/// [`posted`] through a proxy of this host that says the request is of `of`.
+fn forwarded(
+    address: SocketAddr,
+    of: &str,
+    said: usize,
+    sent: usize,
+) -> (TcpStream, BufReader<TcpStream>) {
+    let (mut stream, reader) = connected(address);
+    let head =
+        format!("POST /p HTTP/1.1\r\nX-Forwarded-For: {of}\r\nContent-Length: {said}\r\n\r\n");
+    stream.write_all(head.as_bytes()).unwrap();
+    stream.write_all(&vec![b'x'; sent]).unwrap();
+    (stream, reader)
+}
+
+/// Behind a proxy every connection comes from this host. The bodies are counted
+/// for the address the proxy says each request is of: one address holds eight
+/// hundred of its thousand in a body that does not end, a second body of its
+/// own has no room, and one of another address has, whatever it says before
+/// the name the proxy wrote.
+#[test]
+fn the_bodies_a_proxy_of_this_host_brings_are_counted_for_whom_it_says_they_are_of() {
+    let limits = Limits {
+        spool: 4000,
+        each: 8,
+        ..within(LONG)
+    };
+    let near = SocketAddr::from(([127, 0, 0, 1], receiving(limits)));
+    let (mut slow, mut slow_reader) = forwarded(near, "198.51.100.1", 900, 800);
+    std::thread::sleep(Duration::from_millis(300));
+    let (_second, mut reader) = forwarded(near, "10.1.1.1, 198.51.100.1", 400, 400);
+    assert_eq!(status(&mut reader), "HTTP/1.1 503 Service Unavailable");
+    let (_other, mut reader) = forwarded(near, "198.51.100.1, 198.51.100.2", 400, 400);
+    assert_eq!(status(&mut reader), "HTTP/1.1 200 OK");
+    slow.write_all(&[b'x'; 100]).unwrap();
+    assert_eq!(status(&mut slow_reader), "HTTP/1.1 200 OK");
+    let (_third, mut reader) = forwarded(near, "198.51.100.1", 400, 400);
+    assert_eq!(status(&mut reader), "HTTP/1.1 200 OK");
+}
+
 /// Six chunks of one byte, each with five hundred bytes of extension, are
 /// three thousand bytes of the four thousand there are: a body of two
 /// thousand beside them has no room.

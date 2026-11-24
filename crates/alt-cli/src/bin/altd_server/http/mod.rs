@@ -215,6 +215,13 @@ fn connection(open: Open, stream: TcpStream) {
                 return source.close();
             }
         };
+        // a proxy of this host says whose the request is
+        let forwarded = head
+            .headers
+            .iter()
+            .filter(|h| h.field.equiv("X-Forwarded-For"));
+        let forwarded = forwarded.map(|h| h.value.as_str());
+        source.from = peers::asked_from(open.1, forwarded, shared.here);
         let (way, returned) = back::Way::new();
         shared.enqueue(Request::new(head, source, way.clone()));
         let (back, answer) = loop {

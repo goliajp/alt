@@ -1,4 +1,4 @@
-//! Which peers are of this host.
+//! Which peers are of this host, and whose request one of them brings.
 //!
 //! A connection is counted for the address it comes from, and an address
 //! has so many connections and so much of what the server holds. A proxy
@@ -8,6 +8,11 @@
 //! address the container's network gives the host, which only whoever set
 //! the container up knows. So the networks that are of this host are told
 //! to the server, the loopback ones where nothing is told.
+//!
+//! A proxy says in `X-Forwarded-For` whose each request is. What a peer of
+//! this host says there is taken, as far back as peers of this host vouch
+//! for it, and what the request holds is counted for that address; what any
+//! other peer says there is not read.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -79,6 +84,42 @@ pub(crate) fn counted(peer: IpAddr, here: &[Network]) -> Option<IpAddr> {
     }
 }
 
+/// The address `text` names, as proxies write one: bare, with a port, or
+/// an IPv6 address in brackets.
+fn written(text: &str) -> Option<IpAddr> {
+    let text = text.trim();
+    if let Ok(address) = text.parse::<IpAddr>() {
+        return Some(address);
+    }
+    if let Ok(with_port) = text.parse::<std::net::SocketAddr>() {
+        return Some(with_port.ip());
+    }
+    text.strip_prefix('[')?.strip_suffix(']')?.parse().ok()
+}
+
+/// What a request is counted under that came over a connection counted
+/// under `peer` with `forwarded`, the values of its `X-Forwarded-For`
+/// headers in the order they came. The last name is the one the nearest
+/// proxy wrote; the names are gone through from there for as long as each
+/// is of this host, and what does not read as an address was written by
+/// nobody that is.
+pub(crate) fn asked_from<'a>(
+    peer: Option<IpAddr>,
+    forwarded: impl DoubleEndedIterator<Item = &'a str>,
+    here: &[Network],
+) -> Option<IpAddr> {
+    if peer.is_some() {
+        return peer;
+    }
+    for name in forwarded.rev().flat_map(|field| field.rsplit(',')) {
+        match counted(written(name)?, here) {
+            None => continue,
+            from => return from,
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +173,43 @@ mod tests {
                 "{told}: {refused}"
             );
         }
+    }
+
+    #[test]
+    fn a_request_a_peer_of_this_host_brings_is_counted_for_whom_it_says_it_is_of() {
+        let here = networks("127.0.0.0/8,::1,172.30.90.1").unwrap();
+        let from = |peer: &str, forwarded: &[&str]| {
+            let peer = counted(peer.parse().unwrap(), &here);
+            let asked = asked_from(peer, forwarded.iter().copied(), &here);
+            asked.map(|address| address.to_string())
+        };
+        let some = |text: &str| Some(text.to_owned());
+        // what a peer that is not of this host says is not read
+        assert_eq!(from("203.0.113.7", &["198.51.100.1"]), some("203.0.113.7"));
+        // the proxy says who, as it writes addresses
+        assert_eq!(from("127.0.0.1", &["198.51.100.1"]), some("198.51.100.1"));
+        assert_eq!(
+            from("172.30.90.1", &["198.51.100.1:4711"]),
+            some("198.51.100.1")
+        );
+        assert_eq!(from("::1", &["[2001:db8:1:2::9]"]), some("2001:db8:1:2::"));
+        // the last name is the nearest proxy's: what stands before it the client sent
+        assert_eq!(
+            from("127.0.0.1", &["10.9.9.9, 198.51.100.1"]),
+            some("198.51.100.1")
+        );
+        assert_eq!(
+            from("127.0.0.1", &["10.9.9.9", "198.51.100.2"]),
+            some("198.51.100.2")
+        );
+        // through proxies of this host, as far back as they go
+        assert_eq!(
+            from("127.0.0.1", &["198.51.100.3, 172.30.90.1, 127.0.0.1"]),
+            some("198.51.100.3")
+        );
+        // nothing said, nothing that reads, or this host itself: counted for nothing
+        assert_eq!(from("127.0.0.1", &[]), None);
+        assert_eq!(from("127.0.0.1", &["198.51.100.1, unknown"]), None);
+        assert_eq!(from("127.0.0.1", &["127.0.0.1"]), None);
     }
 }
