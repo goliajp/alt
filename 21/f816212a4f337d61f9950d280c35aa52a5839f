@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the processes that read a repeated pack have a bound on their memory
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/pack_repeated.rs
