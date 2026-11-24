@@ -216,7 +216,14 @@ impl Store {
     /// What the device that holds a code is told. An approved code is exchanged
     /// for its token once, and is gone with that: the row is locked while it is
     /// looked at, so of two that ask together one finds it and the other does not.
-    pub fn poll_device_authorization(&mut self, device_digest: &str) -> Result<DevicePoll> {
+    ///
+    /// `spend` is asked once, when the code is about to be gone: where it says no,
+    /// nobody is there to be given the token, and the code is left as it was.
+    pub fn poll_device_authorization(
+        &mut self,
+        device_digest: &str,
+        spend: impl FnOnce() -> bool,
+    ) -> Result<DevicePoll> {
         crate::bytes::check_digest(device_digest)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
@@ -248,6 +255,9 @@ impl Store {
                     "DELETE FROM alt_device_authorizations WHERE device_digest=$1",
                     &[&device_digest],
                 )?;
+                if !spend() {
+                    return Ok(DevicePoll::Waiting(DeviceError::TemporarilyUnavailable));
+                }
                 tx.commit().map_err(|_| Error::OutcomeUnknown)?;
                 Ok(DevicePoll::Ready {
                     expires_at_unix_ms: expires,

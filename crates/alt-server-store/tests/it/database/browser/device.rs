@@ -21,7 +21,7 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         .unwrap();
     assert!(f.store.authenticate(&token).is_err());
     assert!(matches!(
-        f.store.poll_device_authorization(&device).unwrap(),
+        f.store.poll_device_authorization(&device, || true).unwrap(),
         DevicePoll::Waiting(DeviceError::SlowDown)
     ));
     f.client()
@@ -31,7 +31,7 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         )
         .unwrap();
     assert!(matches!(
-        f.store.poll_device_authorization(&device).unwrap(),
+        f.store.poll_device_authorization(&device, || true).unwrap(),
         DevicePoll::Waiting(DeviceError::AuthorizationPending)
     ));
     assert!(
@@ -96,7 +96,9 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
     assert_eq!(list[0].id, digest);
     assert!(!list[0].current);
     assert!(matches!(
-        restarted.poll_device_authorization(&device).unwrap(),
+        restarted
+            .poll_device_authorization(&device, || true)
+            .unwrap(),
         DevicePoll::Ready { .. }
     ));
     assert!(
@@ -122,7 +124,9 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
     assert!(restarted.authenticate(&token).is_err());
     // the code was exchanged above: it is no code any more, revoked token or not
     assert!(matches!(
-        restarted.poll_device_authorization(&device).unwrap(),
+        restarted
+            .poll_device_authorization(&device, || true)
+            .unwrap(),
         DevicePoll::Waiting(DeviceError::InvalidGrant)
     ));
     assert_eq!(
@@ -169,7 +173,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .unwrap();
     assert!(matches!(
         f.store
-            .poll_device_authorization(&format!("{:064x}", 1))
+            .poll_device_authorization(&format!("{:064x}", 1), || true)
             .unwrap(),
         DevicePoll::Waiting(DeviceError::AccessDenied)
     ));
@@ -186,7 +190,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .unwrap();
     assert!(matches!(
         f.store
-            .poll_device_authorization(&format!("{:064x}", 2))
+            .poll_device_authorization(&format!("{:064x}", 2), || true)
             .unwrap(),
         DevicePoll::Waiting(DeviceError::ExpiredToken)
     ));
@@ -365,7 +369,7 @@ fn an_approved_device_code_is_exchanged_for_its_token_once() {
                 let (start, device) = (&start, &device);
                 scope.spawn(move || {
                     start.wait();
-                    store.poll_device_authorization(device).unwrap()
+                    store.poll_device_authorization(device, || true).unwrap()
                 })
             })
             .collect();
@@ -378,7 +382,7 @@ fn an_approved_device_code_is_exchanged_for_its_token_once() {
     let none = |poll: &&DevicePoll| matches!(poll, DevicePoll::Waiting(DeviceError::InvalidGrant));
     assert_eq!(told.iter().filter(none).count(), 7);
     assert!(matches!(
-        f.store.poll_device_authorization(&device).unwrap(),
+        f.store.poll_device_authorization(&device, || true).unwrap(),
         DevicePoll::Waiting(DeviceError::InvalidGrant)
     ));
 
@@ -387,7 +391,7 @@ fn an_approved_device_code_is_exchanged_for_its_token_once() {
     f.store.revoke_client_credential(&parent, &digest).unwrap();
     for _ in 0..2 {
         assert!(matches!(
-            f.store.poll_device_authorization(&device).unwrap(),
+            f.store.poll_device_authorization(&device, || true).unwrap(),
             DevicePoll::Waiting(DeviceError::AccessDenied)
         ));
     }

@@ -82,7 +82,9 @@ fn cloud_device_consent_issues_non_browser_current_account_credential() {
     assert_eq!(descriptor.credential_digest, digest);
     assert_eq!(descriptor.sealed_grant, "CLI-envelope");
     assert!(matches!(
-        f.reopen().poll_device_authorization(&device).unwrap(),
+        f.reopen()
+            .poll_device_authorization(&device, || true)
+            .unwrap(),
         DevicePoll::Ready { .. }
     ));
     f.store.browser_logout(&parent, &origin).unwrap();
