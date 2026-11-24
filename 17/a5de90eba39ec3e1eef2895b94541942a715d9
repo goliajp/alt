@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a round goes on to remove what is over where the requests of some repository could not be ended
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/expiry.rs
