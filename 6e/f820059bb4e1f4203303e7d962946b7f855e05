@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a pack that says it has a million entries is refused for the memory they would take
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/tests/it/many_of_one.rs
+touched: self-hosted/README.md
