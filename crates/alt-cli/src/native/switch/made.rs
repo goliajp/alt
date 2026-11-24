@@ -30,8 +30,9 @@ impl NativeRepo<'_> {
         if let Some(commit) = self.store.refs.resolve(current)? {
             // non-terminal tx of switch-with-create: the move_head below
             // is the one that carries this command's idempotency key.
+            // Told as of a switch, it is a branch made where the head is.
             self.commit_refs(
-                "branch",
+                "switch",
                 &[RefChange {
                     name: full.to_owned(),
                     old: None,

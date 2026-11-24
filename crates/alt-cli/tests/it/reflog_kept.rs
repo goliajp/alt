@@ -51,6 +51,38 @@ fn a_branch_that_is_renamed_takes_its_log_along() {
 }
 
 #[test]
+fn a_branch_a_switch_makes_where_the_head_is_is_logged_as_made_from_it() {
+    let pair = Pair::new();
+    for text in ["one", "two"] {
+        pair.write("f", text);
+        pair.commit_all(text);
+    }
+    pair.both(&["switch", "-c", "made"]);
+    pair.both(&["switch", "main"]);
+    pair.both(&["checkout", "-b", "checked"]);
+    pair.write("f", "three");
+    pair.commit_all("three");
+    pair.both(&["switch", "-c", "further"]);
+    for branch in ["made", "checked", "further"] {
+        let log = ["reflog", branch];
+        let (ours, theirs) = (ok(alt(&pair.alt, &log)), ok(git(&pair.git, &log)));
+        assert_eq!(ours, theirs);
+        assert!(ours.contains("branch: Created from HEAD"), "{ours}");
+    }
+    // made from a commit that is named, git logs the word: no record
+    // of the store has it, and the log tells the commit
+    pair.both(&["switch", "-c", "named", "main~1"]);
+    let at = ok(alt(&pair.alt, &["rev-parse", "named"]));
+    let ours = ok(alt(&pair.alt, &["reflog", "named"]));
+    assert!(
+        ours.contains(&format!("branch: Created from {}", at.trim())),
+        "{ours}"
+    );
+    let theirs = ok(git(&pair.git, &["reflog", "named"]));
+    assert!(theirs.contains("branch: Created from main~1"), "{theirs}");
+}
+
+#[test]
 fn a_second_import_keeps_the_moves_git_never_saw() {
     let dir = alt_os::temp::tempdir().unwrap();
     let (source, to) = (dir.path().join("source"), dir.path().join("to"));

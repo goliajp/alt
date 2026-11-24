@@ -75,6 +75,11 @@ fn at(state: &HashMap<String, RefTarget>, head: &str) -> At {
     }
 }
 
+/// Whether `name` is the head ref of a workspace.
+fn is_head(name: &str) -> bool {
+    name == "HEAD" || (name.starts_with("workspaces/") && name.ends_with("/HEAD"))
+}
+
 fn oid(target: &Option<RefTarget>) -> Option<ObjectId> {
     match target {
         Some(RefTarget::Oid(oid)) => Some(*oid),
@@ -131,6 +136,11 @@ pub(super) fn derived(
             Some(want)
         };
         let tips = matches!(verb, "merge" | "flow").then(|| tips(&state, moved));
+        // a switch makes a branch where the head is before the head goes
+        // on to it; one it makes at a commit that is named comes with
+        // the head, in one transaction
+        let from_head =
+            matches!(verb, "switch" | "checkout") && !tx.changes.iter().any(|c| is_head(&c.name));
         apply(&mut state, &tx.changes);
         // a rebase ends where its scratch ref goes
         let ended = tx.changes.iter().filter(|c| c.new.is_none());
@@ -195,6 +205,15 @@ pub(super) fn derived(
         }
         for c in tx.changes.iter().filter(|c| c.name == name) {
             match &c.new {
+                Some(RefTarget::Oid(new)) if c.old.is_none() && from_head => {
+                    // git logs the word the branch was made from, which
+                    // is `HEAD` where none was given
+                    let said = Said::Kept(Some(b"branch: Created from HEAD".to_vec()));
+                    found.moves.push(Move {
+                        said,
+                        ..told(None, *new, None, None)
+                    });
+                }
                 Some(RefTarget::Oid(new)) => found.moves.push(told(oid(&c.old), *new, None, None)),
                 Some(RefTarget::Symbolic(_)) => {}
                 None => {
