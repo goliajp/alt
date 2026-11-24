@@ -98,6 +98,10 @@ impl NativeRepo<'_> {
             let kinds =
                 [&change.before, &change.after].map(|s| s.as_ref().map(|s| s.mode == 0o160000));
             let between = actual.is_none() && matches!(kinds, [Some(a), Some(b)] if a != b);
+            // so is a file that is written again under another spelling
+            // of its name: it goes first, with what it held kept
+            let files = matches!(kinds, [Some(false), Some(false)]);
+            let between = between || (actual.is_none() && files && self.folds()?);
             if actual != change.before && actual != change.after && !between {
                 let Some(index) = conflicts else {
                     return Err(refusal(format!(
@@ -116,7 +120,10 @@ impl NativeRepo<'_> {
                     )));
                 }
             }
-            if actual != change.after {
+            // what is as the intent leaves it but for the spelling of its
+            // name is written again
+            let respelled = change.after.as_ref().is_some_and(|s| s.mode != 0o160000);
+            if actual != change.after || (respelled && self.spelled_otherwise(&path)?) {
                 outstanding.push(change);
             }
         }

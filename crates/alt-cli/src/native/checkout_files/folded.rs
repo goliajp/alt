@@ -41,6 +41,55 @@ impl NativeRepo<'_> {
         Ok(true)
     }
 
+    /// Removes the file at `path` that its directory lists under another
+    /// spelling, before it is written: gone first, as by git, since
+    /// written over it would keep the spelling its directory has for it.
+    pub(super) fn remove_spelled_otherwise(&self, path: &BString, abs: &Path) -> Res<()> {
+        if self.spelled_otherwise(path)? {
+            crate::durable::remove_file(abs)?;
+            crash_point!("checkout-file:respelled");
+        }
+        Ok(())
+    }
+
+    /// Names each of `changes` that writes a file again at a path the
+    /// index `restored` lacks by the path of `restored`, one `current`
+    /// lacks, whose file it reaches under another spelling: written
+    /// there, the file takes the spelling the index it comes back to has
+    /// for it.
+    pub(in crate::native) fn named_as_indexed(
+        &self,
+        mut changes: Vec<FileChange>,
+        restored: &Index,
+        current: &Index,
+    ) -> Res<Vec<FileChange>> {
+        if !self.folds()? {
+            return Ok(changes);
+        }
+        let paths = |index: &Index| -> HashSet<Vec<u8>> {
+            index.entries.iter().map(|e| e.path.to_vec()).collect()
+        };
+        let (back, now) = (paths(restored), paths(current));
+        let changed: HashSet<Vec<u8>> = changes.iter().map(|c| c.path.clone()).collect();
+        let names = restored.entries.iter().map(|e| &e.path);
+        let names: Vec<&BString> = names
+            .filter(|p| !now.contains(p.as_slice()) && !changed.contains(p.as_slice()))
+            .collect();
+        for change in &mut changes {
+            let file = |state: &Option<FileState>| {
+                state.as_ref().is_some_and(|state| state.mode != 0o160000)
+            };
+            if !file(&change.before) || !file(&change.after) || back.contains(&change.path) {
+                continue;
+            }
+            let path = BString::from(change.path.clone());
+            if let Some(named) = self.shares(&path, names.iter().copied())? {
+                change.path = named.to_vec();
+            }
+        }
+        Ok(changes)
+    }
+
     /// Which file is at `path`, to the file system; `None` where none is.
     pub(in crate::native) fn file_there(&self, path: &BString) -> Res<Option<(u64, u64)>> {
         let found = self.abs(path)?.symlink_metadata().ok();

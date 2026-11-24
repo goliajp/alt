@@ -37,6 +37,7 @@ mod casefold_asked;
 mod casefold_dirs;
 mod casefold_left;
 mod casefold_meet;
+mod casefold_undo;
 mod casefold_untracked;
 mod casefold_wider;
 mod charset;

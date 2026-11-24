@@ -201,12 +201,8 @@ fn a_switch_between_two_spellings_of_a_name_keeps_the_file() {
     pair.both(&["switch", "other"]);
     ok(alt(&pair.alt, &["undo"]));
     pair.both(&["switch", "main"]);
-    // an undo brings back the content under the name the file has by
-    // now: the spelling the switch gave it stays on disk
-    assert_eq!(index(&pair.alt), ok(git(&pair.git, &["ls-files", "-s"])));
-    assert_eq!(folded(&pair.alt), folded(&pair.git));
-    assert_eq!(spelled(&pair.alt), ["A", "d", "d/x"]);
-    assert_eq!(spelled(&pair.git), ["a", "d", "d/x"]);
+    // an undo brings the file back under the name it had
+    same_state(&pair);
     clean(&pair.alt, false);
     pair.both(&["switch", "up"]);
     pair.both(&["switch", "main"]);

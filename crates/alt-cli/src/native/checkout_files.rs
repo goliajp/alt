@@ -253,11 +253,7 @@ impl NativeRepo<'_> {
                 let parent = abs.parent().ok_or("checkout path has no parent")?;
                 self.make_directories_above(path)?;
                 paths::remove_empty_directories(&abs)?;
-                // gone first, as by git: written over, it would keep the
-                // spelling its directory has for it
-                if state.mode != 0o160000 && self.spelled_otherwise(path)? {
-                    crate::durable::remove_file(&abs)?;
-                }
+                self.remove_spelled_otherwise(path, &abs)?;
                 if state.mode == 0o120000 {
                     let temp = alt_os::temp::tempdir_in(parent)?;
                     let link = temp.path().join("link");

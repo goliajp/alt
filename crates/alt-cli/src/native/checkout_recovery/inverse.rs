@@ -18,9 +18,8 @@ impl NativeRepo<'_> {
             )
             .into());
         }
-        for id in [&intent.index_before, &intent.index_after] {
-            Index::parse(&self.read_snapshot(id)?, self.store.algo()?)?;
-        }
+        let parsed = |id| Res::Ok(Index::parse(&self.read_snapshot(id)?, self.store.algo()?)?);
+        let (restored, current) = (parsed(&intent.index_before)?, parsed(&intent.index_after)?);
         if hash(&canonical_index(self.index()?, self.store.algo()?)) != intent.index_after {
             return Err(crate::machine::Failure::refusal(
                 "precondition_failed",
@@ -46,21 +45,19 @@ impl NativeRepo<'_> {
                 .into());
             }
         }
+        let back = intent.files.iter().map(|change| FileChange {
+            path: change.path.clone(),
+            before: change.after.clone(),
+            after: change.before.clone(),
+        });
+        let back = back.collect();
         let inverse = CheckoutIntent {
             version: 1,
             workspace: intent.workspace.clone(),
             request_id: self.request_id.map(|id| crate::machine::hex(&id)),
             index_before: intent.index_after.clone(),
             index_after: intent.index_before.clone(),
-            files: intent
-                .files
-                .iter()
-                .map(|change| FileChange {
-                    path: change.path.clone(),
-                    before: change.after.clone(),
-                    after: change.before.clone(),
-                })
-                .collect(),
+            files: self.named_as_indexed(back, &restored, &current)?,
         };
         // a file it puts back has no directory that holds something in its place
         self.ensure_directories_replaceable(&inverse)?;
