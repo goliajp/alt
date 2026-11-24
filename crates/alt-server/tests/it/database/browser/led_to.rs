@@ -91,4 +91,33 @@ fn a_commit_no_ref_leads_to_is_shown_to_nobody_who_knows_its_id() {
     assert_eq!(object(&main, &main, "", "/download"), 200);
     assert_eq!(object(&root, &main, "", "/download"), 200);
     assert_eq!(object(&gone, &gone, "", "/download"), 403);
+
+    // by the digest of its content a file is given as it is by its id: what a
+    // ref leads to, and nothing of the branch that is gone
+    let content = |held: &str| {
+        let digest = alt_hash::blake3::hash(held.as_bytes()).to_hex().to_string();
+        let path = format!("/web/repositories/repository/content/{digest}/download");
+        send(&server, "GET", &path, Some(&cookie), None, None, None).status()
+    };
+    assert_eq!((content("main\n"), content("below\n")), (200, 200));
+    assert_eq!(content("gone\n"), 403);
+
+    // A tree may name a commit of another repository, by any id: pushed with
+    // the id of the file that is gone, the path of that link is no place the
+    // file is shown at.
+    let link = format!("160000,{lost},link");
+    ok(work, &f.token, &["checkout", "-q", "main"]);
+    ok(
+        work,
+        &f.token,
+        &["update-index", "--add", "--cacheinfo", &link],
+    );
+    ok(work, &f.token, &["commit", "-qm", "link"]);
+    let linked = text(ok(work, &f.token, &["rev-parse", "HEAD"]));
+    ok(work, &f.token, &["push", "-q", &url, "main"]);
+    for download in ["", "/download"] {
+        assert_eq!(object(&lost, &linked, "link", download), 409);
+        assert_eq!(object(&kept, &linked, "main", download), 200);
+    }
+    assert_eq!(content("gone\n"), 403);
 }

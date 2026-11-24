@@ -100,7 +100,20 @@ impl Store {
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
-        twice(|| self.open_published_content_once(credential, scope, digest))
+        twice(|| self.open_published_content_once(credential, scope, digest, false))
+    }
+
+    /// [`Self::open_published_content`] for a caller that is shown the
+    /// repository by its refs: a Git object is given where a ref leads to it.
+    /// The native protocol gives the objects records name too, which stay
+    /// when the ref they were published under is deleted.
+    pub fn open_reached_content(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        digest: &str,
+    ) -> Result<(u64, crate::StoredReader)> {
+        twice(|| self.open_published_content_once(credential, scope, digest, true))
     }
 
     /// Early admission for Git receive-pack before reading a potentially large

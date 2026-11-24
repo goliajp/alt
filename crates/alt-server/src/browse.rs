@@ -56,6 +56,11 @@ impl Reader<'_> {
                     .into_iter()
                     .find(|e| e.name.as_slice() == component)
                     .ok_or(Error::Precondition("tree path absent"))?;
+                // a link names a commit of another repository: whatever of this
+                // one has that id is not at this path
+                if entry.mode.is_gitlink() {
+                    return Err(Error::Precondition("tree path is a link"));
+                }
                 directory = entry.mode.is_tree();
                 oid = entry.oid;
             }

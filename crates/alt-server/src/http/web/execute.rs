@@ -248,7 +248,7 @@ fn execute(
         )?),
         WebRoute::Content(repository, digest) => {
             let scope = store.repository_info(credential, &repository)?.scope;
-            let (bytes, file) = store.open_published_content(credential, &scope, &digest)?;
+            let (bytes, file) = store.open_reached_content(credential, &scope, &digest)?;
             Ok(Output::File {
                 bytes,
                 digest,

@@ -219,6 +219,7 @@ impl Store {
         credential: &Credential,
         scope: &Scope,
         digest: &str,
+        reached: bool,
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = reading::transaction(&mut self.client, &self.spec)?;
@@ -230,7 +231,7 @@ impl Store {
         }
         let Some(row) = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])? else {
             tx.commit()?;
-            return self.open_published_git_content(credential, scope, digest);
+            return self.open_published_git_content(credential, scope, digest, reached);
         };
         let size = unsigned(row.get(0))?;
         let location = crate::segments::location(&mut tx, &scope.repository_instance_id, digest)?;
@@ -242,15 +243,42 @@ impl Store {
     }
     /// A published Git object by the digest of its content. Git objects live in the
     /// pack segments, whichever protocol brought them in.
+    ///
+    /// The segments of a repository whose history was replaced, or that had a
+    /// branch deleted, hold objects no ref leads to. With `reached`, such a
+    /// repository gives by digest what its refs reach and nothing else; in any
+    /// other, every object of the segments is reached.
     fn open_published_git_content(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
+        reached: bool,
     ) -> Result<(u64, crate::StoredReader)> {
         let view = self.pack_view(credential, &scope.repository_instance_id)?;
         if &view.scope != scope {
             return Err(Error::Unauthorized);
+        }
+        if reached && view.unreachable {
+            let key = alt_provenance::decode_hex::<32>(digest).map_err(|_| Error::Unauthorized)?;
+            let found = view.segments.open_blake3(&key);
+            let found = found.map_err(|_| Error::Integrity("published object bytes"))?;
+            let Some((oid, ..)) = found else {
+                return Err(Error::Unauthorized);
+            };
+            let id = |oid: &alt_git_codec::ObjectId| -> alt_pack_segment::Oid {
+                oid.as_bytes().try_into().expect("sha1 object id")
+            };
+            let tips: Vec<_> = view.refs.values().map(|oid| id(&oid)).collect();
+            let steps = self.limits.walk_steps;
+            let reached = view.segments.select_while(&tips, &[], steps, None);
+            let reached = reached.map_err(|error| match error {
+                alt_pack_segment::Error::Limit(_) => Error::Limit("objects the refs reach"),
+                _ => Error::Integrity("objects the refs reach"),
+            })?;
+            if !reached.objects().contains(&oid) {
+                return Err(Error::Unauthorized);
+            }
         }
         segment_content(&view.segments, digest)?.ok_or(Error::Unauthorized)
     }
