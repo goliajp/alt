@@ -137,6 +137,25 @@ impl PackIndex {
     }
 }
 
+impl PackIndex {
+    /// Every entry of `oid`: an index lists an object as often as its pack
+    /// holds it.
+    pub fn all_of(&self, oid: &ObjectId) -> std::ops::Range<u32> {
+        let Some(found) = self.lookup(oid) else {
+            return 0..0;
+        };
+        let is = |i: u32| self.oid_at(i) == *oid;
+        let (mut first, mut end) = (found, found + 1);
+        while first > 0 && is(first - 1) {
+            first -= 1;
+        }
+        while end < self.len() && is(end) {
+            end += 1;
+        }
+        first..end
+    }
+}
+
 pub(crate) fn read_u32(data: &[u8], at: usize) -> u32 {
     u32::from_be_bytes(data[at..at + 4].try_into().unwrap())
 }

@@ -118,21 +118,68 @@ impl IndexedPack {
         &self.pack
     }
 
-    /// Reads the object `oid` if this pack contains it.
+    /// Reads the object `oid` if this pack contains it. A pack may hold an
+    /// object more than once: it is read from whichever of them leads to
+    /// a stored object.
     pub fn read(&self, oid: &ObjectId) -> Result<Option<PackedObject>, PackError> {
-        match self.idx.lookup(oid) {
-            None => Ok(None),
-            Some(i) => self.read_at(self.idx.offset_at(i)?).map(Some),
+        let mut held = Vec::new();
+        for i in self.idx.all_of(oid) {
+            held.push(self.idx.offset_at(i)?);
+        }
+        match held.is_empty() {
+            true => Ok(None),
+            false => self.resolve(held, &mut 0).map(Some),
         }
     }
 
     /// Reads the object stored at pack offset `offset`, resolving its delta
     /// chain iteratively (deep chains must not recurse).
     pub fn read_at(&self, offset: u64) -> Result<PackedObject, PackError> {
-        // walk down the chain until a cached result or a plain entry
+        self.resolve(vec![offset], &mut 0)
+    }
+
+    /// [`Self::read_at`], adding to `steps` the entries it looked at.
+    #[doc(hidden)]
+    pub fn read_at_counting(
+        &self,
+        offset: u64,
+        steps: &mut usize,
+    ) -> Result<PackedObject, PackError> {
+        self.resolve(vec![offset], steps)
+    }
+
+    /// The object one of the entries at `from` makes, the last of them
+    /// tried first. `steps` counts the entries looked at.
+    ///
+    /// A delta names its base by where it is, or by its id, and a pack may
+    /// hold that id in several entries, one of which may be a delta of the
+    /// very entry that is being made: taken for the base it leads round in
+    /// a circle. So the entries are gone through as a graph is searched for
+    /// a way to a stored object, each looked at once at the most: the way
+    /// found has no entry twice and is no longer than the pack has entries,
+    /// and a read ends where there is none.
+    fn resolve(&self, from: Vec<u64>, steps: &mut usize) -> Result<PackedObject, PackError> {
+        let mut seen = Seen::default();
+        // the deltas on the way, and at each depth the entries still to try
         let mut frames: Vec<(u64, EntryInfo)> = Vec::new();
-        let mut cur = offset;
+        let mut ahead: Vec<Vec<u64>> = vec![from];
+        let mut lacking = false;
         let (kind, mut data) = loop {
+            let Some(next) = ahead.last_mut() else {
+                return Err(PackError::Format(match lacking {
+                    true => "ref-delta base not in pack",
+                    false => "delta chain leads to no stored object",
+                }));
+            };
+            let Some(cur) = next.pop() else {
+                ahead.pop();
+                frames.pop();
+                continue;
+            };
+            if !seen.insert(cur) {
+                continue;
+            }
+            *steps += 1;
             if let Some(hit) = self.cache.lock().unwrap().get(cur) {
                 break hit;
             }
@@ -145,17 +192,18 @@ impl IndexedPack {
                 }
                 EntryKind::OfsDelta { base_at } => {
                     frames.push((cur, info));
-                    cur = base_at;
+                    ahead.push(vec![base_at]);
                 }
                 EntryKind::RefDelta { base } => {
                     // on-disk packs are self-contained; thin packs exist only
                     // on the wire
-                    let i = self
-                        .idx
-                        .lookup(&base)
-                        .ok_or(PackError::Format("ref-delta base not in pack"))?;
+                    let mut bases = Vec::new();
+                    for i in self.idx.all_of(&base) {
+                        bases.push(self.idx.offset_at(i)?);
+                    }
+                    lacking |= bases.is_empty();
                     frames.push((cur, info));
-                    cur = self.idx.offset_at(i)?;
+                    ahead.push(bases);
                 }
             }
         };
@@ -167,6 +215,31 @@ impl IndexedPack {
             data = out;
         }
         Ok(PackedObject { kind, data })
+    }
+}
+
+/// The entries a read has looked at, by where they are: a few in a row,
+/// and a set once there are many.
+#[derive(Default)]
+struct Seen {
+    few: Vec<u64>,
+    many: std::collections::HashSet<u64>,
+}
+
+impl Seen {
+    /// whether `offset` was not seen before
+    fn insert(&mut self, offset: u64) -> bool {
+        if self.many.is_empty() && self.few.len() < 64 {
+            let new = !self.few.contains(&offset);
+            if new {
+                self.few.push(offset);
+            }
+            return new;
+        }
+        if self.many.is_empty() {
+            self.many.extend(self.few.drain(..));
+        }
+        self.many.insert(offset)
     }
 }
 

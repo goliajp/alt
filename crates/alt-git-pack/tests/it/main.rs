@@ -6,6 +6,7 @@ mod index_memory;
 mod index_pack;
 mod pack_read;
 mod pack_write;
+mod read_again;
 mod regained;
 mod representation;
 mod thin_pack;

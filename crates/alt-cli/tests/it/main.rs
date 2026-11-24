@@ -125,6 +125,7 @@ mod never_synced_runs;
 mod old_daemon;
 mod op_log;
 mod operation_state;
+mod pack_repeated;
 mod past_damage;
 mod path_gate;
 mod pathspec_git;
