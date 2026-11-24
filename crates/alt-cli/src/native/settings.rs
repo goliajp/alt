@@ -38,7 +38,7 @@ impl NativeRepo<'_> {
             excludes: self.exclude_files(&settings)?,
             file_mode: crate::git_settings::file_mode(&settings)?,
             ignore_case: crate::git_settings::ignore_case(&settings)?
-                || import_config::folds_case(&self.store.alt_dir),
+                || import_config::folds_case(&self.root.join(".alt")),
         })
     }
 

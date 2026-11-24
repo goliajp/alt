@@ -10,12 +10,13 @@ use super::*;
 
 impl NativeRepo<'_> {
     /// Whether names that differ in case are one name here: where
-    /// `core.ignoreCase` says so, and where the file system of the store
-    /// shows it. The configuration of an imported store was written on
-    /// the file system of the git repository, which may be another.
+    /// `core.ignoreCase` says so, and where the file system of this
+    /// working tree shows it. The configuration of an imported store was
+    /// written on the file system of the git repository, and a parallel
+    /// workspace may lie on another than the store.
     pub(in crate::native) fn folds(&self) -> Res<bool> {
         let set = crate::git_settings::ignore_case(&self.settings()?)?;
-        Ok(set || import_config::folds_case(&self.store.alt_dir))
+        Ok(set || import_config::folds_case(&self.root.join(".alt")))
     }
 
     /// Which file is at `path`, to the file system; `None` where none is.

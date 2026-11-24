@@ -54,9 +54,9 @@ impl NativeRepo<'_> {
     }
 }
 
-/// Whether the file system that holds the store `alt_dir` takes names
-/// that differ in case for one: told, as git tells it, by reaching the
-/// directory under another spelling.
+/// Whether the file system of the working tree whose `.alt` is `alt_dir`
+/// takes names that differ in case for one: told, as git tells it, by
+/// reaching `.alt` under another spelling.
 pub(super) fn folds_case(alt_dir: &Path) -> bool {
     alt_dir.with_file_name(".ALT").symlink_metadata().is_ok()
 }
