@@ -191,27 +191,30 @@ fn a_sink_tells_once_of_the_cut_of_what_it_was_left_with_though_its_handle_was_t
     assert_eq!(alt_oplog::bounded_in(dir.path()), Some(held.appended_len()));
 }
 
+/// A log, with blocks of a kibibyte, of two synced ops and, left by
+/// writers of boot 1 that do not sync: a ref transaction, ops over
+/// blocks after it, and two short ones. Where the last starts.
+fn over_blocks_past_a_ref_transaction(dir: &Path) -> usize {
+    boot(1);
+    alt_oplog::v2::create_with(dir, 10).unwrap();
+    let mut log = seeing(OpLog::open(dir).unwrap());
+    grow(&mut log, "a", 2);
+    let _unsynced = alt_os::durability::leave_unsynced(true);
+    log.append_with("a", 3, b"tx", &linked()).unwrap();
+    for n in 0..10 {
+        log.append("pad", n, &[n as u8; 150]).unwrap();
+    }
+    log.append("a", 5, b"p").unwrap();
+    log.append("a", 6, b"last").unwrap();
+    log.anchor().unwrap().start as usize
+}
+
 #[test]
 fn a_sync_that_reads_an_op_from_before_a_cut_whose_checkpoint_a_cut_lays_its_own_over_tells_of_no_damage()
  {
     let dir = alt_os::temp::tempdir().unwrap();
     let path = dir.path().join("log");
-    boot(1);
-    alt_oplog::v2::create_with(dir.path(), 10).unwrap();
-    let mut log = seeing(OpLog::open(dir.path()).unwrap());
-    grow(&mut log, "a", 2);
-    let last = {
-        // a ref transaction, ops over blocks after it, and two short ones
-        let _unsynced = alt_os::durability::leave_unsynced(true);
-        log.append_with("a", 3, b"tx", &linked()).unwrap();
-        for n in 0..10 {
-            log.append("pad", n, &[n as u8; 150]).unwrap();
-        }
-        log.append("a", 5, b"p").unwrap();
-        log.append("a", 6, b"last").unwrap();
-        log.anchor().unwrap().start as usize
-    };
-    drop(log);
+    let last = over_blocks_past_a_ref_transaction(dir.path());
     // the last op is cut: the checkpoint of that cut tells under which
     // generation the ops before it read. A handle opened then begins
     // where the log ends, past the ref transaction

@@ -82,25 +82,37 @@ impl Run {
         true
     }
 
+    /// Writers that do not sync leave some ops, or enough of them to lie
+    /// before where a handle begins to read, and the machine goes down:
+    /// they are another boot's to look at. Their payloads.
+    fn left_by_another_boot(&mut self) -> Vec<Vec<u8>> {
+        let mut left = Vec::new();
+        for _ in 0..2 + self.also.below(7) {
+            let (index, op) = (self.writer(), self.op());
+            if self.put(index, op.clone(), true, false) {
+                left.push(op.1);
+            }
+        }
+        self.reboot(true);
+        left
+    }
+
     /// A cut dies after one of its steps, any of them, and a handle that
     /// holds ops past where it cut does what finds the cut told in the
     /// log: it is told its ops were cut. After the first step the log
     /// holds them still, and tells of the cut in its header alone.
     pub fn cut_begun(&mut self) {
-        // what is not synced is another boot's to look at: some ops, or
-        // enough of them to lie before where a handle begins to read
-        let mut first = None;
-        for _ in 0..2 + self.also.below(7) {
-            let (index, op) = (self.writer(), self.op());
-            let put = self.put(index, op.clone(), true, false);
-            first = first.or(put.then_some(op.1));
-        }
-        self.reboot(true);
+        let left = self.left_by_another_boot();
         // somebody has looked at them all, so that a handle opened after
         // begins to read where the log ends, and whoever cuts, with no
         // note beside the log, does not find what the first names; or
-        // nobody has looked, and what one of them names is gone
+        // nobody has looked, and what one of them names is gone. The
+        // one that looks may cut the last, and whoever cuts after, the
+        // op before that: its checkpoint lies over the one of that cut
         let looked = self.beside != super::v2_beside::Beside::Kept && self.also.one_in(2);
+        let last = left.len().saturating_sub(1);
+        let near = looked && last > 1 && self.lose(&left[last]);
+        let first = left.get(if near { last - 1 } else { 0 }).cloned();
         let vouched = looked && {
             let first = self.open(false);
             self.settle(first, None, false)
@@ -110,7 +122,10 @@ impl Run {
         self.to_defer = false;
         let _ = vouched && std::fs::remove_file(self.path().join("tail")).is_ok();
         let cutter = self.open(false);
-        let (step, died) = (1 + self.also.below(5) as u8, self.died);
+        let (step, died) = (
+            1 + (near as u64 + self.also.below(5)).min(4) as u8,
+            self.died,
+        );
         let (ops, held_to) = (self.ledger.ops.len(), self.handles[held].log.appended_len());
         match first.filter(|_| vouched) {
             Some(first) => {
@@ -130,13 +145,13 @@ impl Run {
         if self.died == died || at.is_none_or(|at| at >= held_to) {
             return;
         }
-        self.comes_upon(held, step);
+        self.comes_upon(held, step, near);
     }
 
     /// Handle `held` holds ops past where a cut died after `step`, and
     /// does what finds the cut told in the log.
-    fn comes_upon(&mut self, held: usize, step: u8) {
-        let way = self.rng.below(4);
+    fn comes_upon(&mut self, held: usize, step: u8, syncs: bool) {
+        let way = if syncs { 2 } else { self.rng.below(4) };
         self.trace.push(format!(
             "handle {held} comes upon the cut that died after step {step} (way {way})"
         ));
