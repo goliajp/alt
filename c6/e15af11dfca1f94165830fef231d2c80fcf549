@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: what the refs lead to is looked for no longer than a browser waits for a payload by its digest
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading/again.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server-store/tests/it/database/tasks/named.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/content.rs
+touched: crates/alt-server/src/http/web/execute.rs
