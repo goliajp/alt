@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a checkout over an untracked file the file system reaches in a directory spelled otherwise
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/checkout_plan/in_the_way.rs
+touched: crates/alt-cli/tests/it/casefold_untracked.rs
+touched: crates/alt-cli/tests/it/main.rs
