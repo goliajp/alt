@@ -200,8 +200,10 @@ pub(crate) fn execute_git_with_cache(
         }
         _ => view,
     };
+    let room = room.as_ref();
     let sending = room.map(|room| room.sending.0.share(room.sending.1));
-    crate::git_read::read(store.limits(), receive, &command, view, sending)
+    let gone = room.map(|room| &*room.given_up);
+    crate::git_read::read(store.limits(), receive, &command, view, sending, gone)
 }
 
 /// What a Git request takes of what the instance has for all of them: the memory

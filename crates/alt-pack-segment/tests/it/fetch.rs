@@ -319,3 +319,55 @@ fn a_history_of_more_trees_than_a_walk_keeps_is_selected_whole() {
         none
     );
 }
+
+/// Sixty commits are wanted, and the client says it has forty that are beside
+/// them. The trees of those forty are gone through once, not once for each commit
+/// that is wanted: the walk reads a few hundred trees, where forty for each of
+/// sixty would be thousands. It reads no more than it is given, and none once
+/// nobody waits for it.
+#[test]
+fn what_the_client_has_beside_the_wanted_is_gone_through_once_and_within_bounds() {
+    use alt_pack_segment::Error;
+    use std::sync::atomic::AtomicBool;
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    write(&source, "main.txt", b"0\n");
+    write(&source, "side.txt", b"0\n");
+    let root = commit(&source, "root");
+    git(&source, &["checkout", "-q", "-b", "side"]);
+    let mut beside = Vec::new();
+    for version in 1..=40 {
+        write(&source, "side.txt", format!("side {version}\n").as_bytes());
+        beside.push(commit(&source, &format!("side {version}")));
+    }
+    git(&source, &["checkout", "-q", "main"]);
+    let mut tip = root;
+    for version in 1..=60 {
+        write(&source, "main.txt", format!("main {version}\n").as_bytes());
+        tip = commit(&source, &format!("main {version}"));
+    }
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    let haves: Vec<&str> = beside.iter().map(String::as_str).collect();
+    assert_eq!(
+        fetch(&source, &set, &[&tip], &haves, "beside"),
+        Vec::<String>::new()
+    );
+    let (wants, haves) = ([oid(&tip)], haves.iter().map(|have| oid(have)));
+    let haves: Vec<_> = haves.collect();
+    let whole = set.select(&wants, &haves).unwrap();
+    let within = set.select_while(&wants, &haves, 400, None).unwrap();
+    assert_eq!(within.objects(), whole.objects());
+    let refused = set.select_while(&wants, &haves, 50, None);
+    assert!(matches!(refused, Err(Error::Limit(_))));
+    let gone = AtomicBool::new(true);
+    let ended = set.select_while(&wants, &haves, usize::MAX, Some(&gone));
+    assert!(matches!(ended, Err(Error::GivenUp)));
+}

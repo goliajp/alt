@@ -9,9 +9,13 @@
 use crate::{
     Error, Kind, Oid, OidMap, OidSet, SegmentSet,
     object::{self, Parsed},
-    trees::{Beside, Trees, entries},
+    trees::{Beside, Trees, entries, named},
 };
-use std::collections::{BinaryHeap, HashMap};
+use std::sync::atomic::AtomicBool;
+use std::{
+    collections::{BinaryHeap, HashSet},
+    rc::Rc,
+};
 
 const WANT: u8 = 1;
 const HAVE: u8 = 2;
@@ -67,6 +71,8 @@ fn mark(
 /// what the walk has gathered so far
 struct Found<'a> {
     trees: Trees<'a>,
+    /// no trees: what the client has at a path it has nothing at
+    none: Rc<[Oid]>,
     /// candidates in the order found, with whether each is a blob
     objects: Vec<(Oid, bool)>,
     seen: OidSet,
@@ -78,9 +84,10 @@ struct Found<'a> {
 }
 
 impl<'a> Found<'a> {
-    fn new(set: &'a SegmentSet) -> Self {
+    fn new(set: &'a SegmentSet, steps: usize, gone: Option<&'a AtomicBool>) -> Self {
         Found {
-            trees: Trees::new(set),
+            trees: Trees::new(set, steps, gone),
+            none: Rc::from([]),
             objects: Vec::new(),
             seen: OidSet::default(),
             known: OidSet::default(),
@@ -108,7 +115,7 @@ impl SegmentSet {
         &self,
         tree: Oid,
         base: Option<Oid>,
-        held: Vec<Oid>,
+        held: Rc<[Oid]>,
         found: &mut Found<'_>,
     ) -> Result<(), Error> {
         let mut pending = vec![(tree, base, held)];
@@ -134,37 +141,35 @@ impl SegmentSet {
             let old = old_data.as_deref().map(|data| entries(data)).transpose()?;
             let mut old = Beside::new(old.as_deref().unwrap_or_default());
             // per name, the trees the client has there
-            let mut held_below: HashMap<&[u8], Vec<Oid>> = HashMap::new();
-            let held_data = held
-                .iter()
-                .map(|held| found.trees.read(held))
-                .collect::<Result<Vec<_>, Error>>()?;
-            for data in &held_data {
-                for entry in entries(data)? {
-                    found.known.insert(entry.oid);
-                    if entry.tree {
-                        held_below.entry(entry.name).or_default().push(entry.oid);
-                    }
-                }
-            }
+            let below = match held.is_empty() {
+                true => Rc::default(),
+                false => found.trees.below(&held, &mut found.known)?,
+            };
             for entry in &new {
-                let held = match held_below.is_empty() {
-                    true => None,
-                    false => held_below.remove(entry.name),
-                };
                 let before = old.of(entry);
                 if before == Some(entry.oid) {
                     continue;
                 }
                 if entry.tree {
-                    pending.push((entry.oid, before, held.unwrap_or_default()));
+                    let held = below.0.get(entry.name).cloned();
+                    pending.push((
+                        entry.oid,
+                        before,
+                        held.unwrap_or_else(|| found.none.clone()),
+                    ));
                 } else {
                     found.add(entry.oid, true);
                 }
             }
-            // directories the client has here that are gone, or replaced by a file
-            for gone in held_below.into_values().flatten() {
-                self.tree_known(&gone, found)?;
+            // Directories the client has here that are gone: seldom any, so each
+            // of their names is looked for first where a tree in order has it.
+            // One that is not found there is looked for among all the names.
+            if below.0.keys().any(|name| !named(&new, name)) {
+                let here: HashSet<&[u8]> = new.iter().map(|entry| entry.name).collect();
+                let gone = (below.0.iter()).filter(|(name, _)| !here.contains(name.as_slice()));
+                for gone in gone.flat_map(|(_, trees)| trees.iter()) {
+                    self.tree_known(gone, found)?;
+                }
             }
         }
         Ok(())
@@ -206,7 +211,19 @@ impl SegmentSet {
 
     /// objects reachable from `wants` and not from `haves`; unknown haves are ignored
     pub fn select(&self, wants: &[Oid], haves: &[Oid]) -> Result<Selection, Error> {
-        let mut found = Found::new(self);
+        self.select_while(wants, haves, usize::MAX, None)
+    }
+
+    /// [`Self::select`] that reads `steps` trees at the most and ends once `gone`
+    /// is set: with [`Error::Limit`], and with [`Error::GivenUp`].
+    pub fn select_while(
+        &self,
+        wants: &[Oid],
+        haves: &[Oid],
+        steps: usize,
+        gone: Option<&AtomicBool>,
+    ) -> Result<Selection, Error> {
+        let mut found = Found::new(self, steps, gone);
         let mut flags: OidMap<u8> = OidMap::default();
         let mut heap = BinaryHeap::new();
         let mut open = 0usize;
@@ -295,24 +312,21 @@ impl SegmentSet {
         // same rule, so whatever a commit shares with its first parent need not be sent.
         boundary.sort_unstable();
         boundary.dedup();
+        let boundary: Rc<[Oid]> = Rc::from(boundary);
         for (oid, tree, parent) in &commits {
             found.add(*oid, false);
             let base = match parent {
                 Some(parent) => Some(self.commit(parent).ok_or(Error::Corrupt("commit graph"))?),
                 None => None,
             };
-            self.tree_difference(
-                *tree,
-                base.map(|base| base.tree),
-                boundary.clone(),
-                &mut found,
-            )?;
+            let base = base.map(|base| base.tree);
+            self.tree_difference(*tree, base, boundary.clone(), &mut found)?;
         }
         for tree in &trees {
             self.tree_difference(*tree, None, boundary.clone(), &mut found)?;
         }
         if !boundary.is_empty() && self.sends_large_blob(&found)? {
-            for tree in &boundary {
+            for tree in boundary.iter() {
                 self.tree_known(tree, &mut found)?;
             }
         }

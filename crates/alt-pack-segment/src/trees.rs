@@ -6,11 +6,20 @@
 //! goes on, within a bound, so that a version is made of the one the walk read before.
 
 use crate::{
-    Error, Kind, Oid, SegmentSet,
+    Error, Kind, Oid, OidSet, SegmentSet,
     format::Delta,
     scan::{self, Form},
 };
-use std::{collections::HashMap, rc::Rc};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::{cmp::Ordering, collections::HashMap, rc::Rc};
+
+/// how many sets of trees the client has are remembered with what they hold
+const HELD: usize = 1024;
+
+/// What the trees the client has at one path hold between them: per name, the
+/// directories there, each once.
+#[derive(Default)]
+pub(crate) struct Below(pub HashMap<Vec<u8>, Rc<[Oid]>>);
 
 /// The bytes of trees one walk keeps: what a fetch takes in memory beside the
 /// tables of what it found.
@@ -79,17 +88,36 @@ impl<'a, 'b> Beside<'a, 'b> {
     /// or not
     pub fn of(&mut self, entry: &Entry<'_>) -> Option<Oid> {
         while let Some(old) = self.entries.get(self.at) {
-            let shared = old.name.len().min(entry.name.len());
-            let order = (old.name[..shared].cmp(&entry.name[..shared]))
-                .then_with(|| after(old, shared).cmp(&after(entry, shared)));
-            match order {
-                std::cmp::Ordering::Less => self.at += 1,
-                std::cmp::Ordering::Equal => return Some(old.oid),
-                std::cmp::Ordering::Greater => break,
+            match order(old, entry) {
+                Ordering::Less => self.at += 1,
+                Ordering::Equal => return Some(old.oid),
+                Ordering::Greater => break,
             }
         }
         None
     }
+}
+
+/// the order Git has two entries of a tree in
+fn order(one: &Entry<'_>, other: &Entry<'_>) -> Ordering {
+    let shared = one.name.len().min(other.name.len());
+    (one.name[..shared].cmp(&other.name[..shared]))
+        .then_with(|| after(one, shared).cmp(&after(other, shared)))
+}
+
+/// Whether a tree whose entries are in Git's order has `name`, as a directory or
+/// as anything else.
+pub(crate) fn named(entries: &[Entry<'_>], name: &[u8]) -> bool {
+    [false, true].into_iter().any(|tree| {
+        let sought = Entry {
+            name,
+            oid: [0; 20],
+            tree,
+        };
+        entries
+            .binary_search_by(|entry| order(entry, &sought))
+            .is_ok()
+    })
 }
 
 /// where an object is: the segment, by its place in the set, and the record
@@ -103,16 +131,59 @@ pub(crate) struct Trees<'a> {
     late: HashMap<Place, Rc<Vec<u8>>>,
     before: HashMap<Place, Rc<Vec<u8>>>,
     late_bytes: usize,
+    /// what was worked out of sets of trees the client has
+    held: HashMap<Rc<[Oid]>, Rc<Below>>,
+    /// the trees that may still be read, and the mark that nobody waits for them
+    left: usize,
+    gone: Option<&'a AtomicBool>,
 }
 
 impl<'a> Trees<'a> {
-    pub fn new(set: &'a SegmentSet) -> Self {
+    /// A walk that reads `steps` trees at the most, a tree as often as it is
+    /// asked for, and ends when `gone` is set.
+    pub fn new(set: &'a SegmentSet, steps: usize, gone: Option<&'a AtomicBool>) -> Self {
         Trees {
             set,
             late: HashMap::new(),
             before: HashMap::new(),
             late_bytes: 0,
+            held: HashMap::new(),
+            left: steps,
+            gone,
         }
+    }
+
+    /// What `held`, the trees the client has at one path, hold between them;
+    /// their entries are recorded in `known`. The same trees stand beside every
+    /// commit that is compared, and are gone through once.
+    pub fn below(&mut self, held: &Rc<[Oid]>, known: &mut OidSet) -> Result<Rc<Below>, Error> {
+        if let Some(below) = self.held.get(held) {
+            return Ok(below.clone());
+        }
+        let mut trees: HashMap<Vec<u8>, Vec<Oid>> = HashMap::new();
+        for tree in held.iter() {
+            let data = self.read(tree)?;
+            for entry in entries(&data)? {
+                known.insert(entry.oid);
+                if entry.tree {
+                    trees
+                        .entry(entry.name.to_vec())
+                        .or_default()
+                        .push(entry.oid);
+                }
+            }
+        }
+        let once = |(name, mut trees): (Vec<u8>, Vec<Oid>)| {
+            trees.sort_unstable();
+            trees.dedup();
+            (name, Rc::from(trees))
+        };
+        let below = Rc::new(Below(trees.into_iter().map(once).collect()));
+        if self.held.len() >= HELD {
+            self.held.clear();
+        }
+        self.held.insert(held.clone(), below.clone());
+        Ok(below)
     }
 
     fn kept(&mut self, at: Place) -> Option<Rc<Vec<u8>>> {
@@ -139,6 +210,10 @@ impl<'a> Trees<'a> {
 
     /// the canonical bytes of the tree `oid`
     pub fn read(&mut self, oid: &Oid) -> Result<Rc<Vec<u8>>, Error> {
+        self.left = (self.left.checked_sub(1)).ok_or(Error::Limit("trees of a fetch"))?;
+        if self.gone.is_some_and(|gone| gone.load(Relaxed)) {
+            return Err(Error::GivenUp);
+        }
         let mut at = self.set.place(oid).ok_or(Error::NotFound(*oid))?;
         let mut deltas = Vec::new();
         let mut data = loop {
@@ -236,6 +311,19 @@ mod tests {
         let mut beside = Beside::new(&old);
         let found: Vec<_> = new.iter().map(|entry| beside.of(entry)).collect();
         assert_eq!(found, [None, None, Some([2; 20])]);
+        // a name is found among them as whichever kind of thing it is
+        let all = [
+            entry("a-x", 1, false),
+            entry("a.d", 2, false),
+            entry("a", 3, true),
+            entry("b", 4, false),
+        ];
+        for name in ["a-x", "a.d", "a", "b"] {
+            assert!(named(&all, name.as_bytes()), "{name}");
+        }
+        for name in ["", "a-", "a.", "aa", "c"] {
+            assert!(!named(&all, name.as_bytes()), "{name}");
+        }
     }
 
     #[test]

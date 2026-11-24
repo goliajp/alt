@@ -37,6 +37,7 @@ pub(crate) fn read(
     command: &Command,
     view: PackView,
     sending: Option<alt_shares::Share>,
+    gone: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Output> {
     let bytes = |content_type, bytes| {
         Ok(Output::Bytes {
@@ -159,7 +160,10 @@ pub(crate) fn read(
         let (pieces, checksum) = set.whole().map_err(segment_error)?;
         return Ok(Output::WholePack(pieces, checksum));
     }
-    let mut selection = set.select(&wants, &haves).map_err(segment_error)?;
+    // the trees a fetch may read are as many as any walk may take steps; one
+    // nobody waits for any more ends at the next
+    let select = |wants: &[Oid]| set.select_while(wants, &haves, limits.walk_steps, gone);
+    let mut selection = select(&wants).map_err(segment_error)?;
     if request.include_tag {
         let chosen: KeyedIdSet<&Oid> = selection.objects().iter().collect();
         let mut more = wants.clone();
@@ -174,7 +178,7 @@ pub(crate) fn read(
             }
         }
         if more.len() > wants.len() {
-            selection = set.select(&more, &haves).map_err(segment_error)?;
+            selection = select(&more).map_err(segment_error)?;
         }
     }
     // the pack is framed as it is written; a large one is not kept in memory
