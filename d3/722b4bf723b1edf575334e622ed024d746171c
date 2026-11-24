@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: answer what is asked about an import without the row of its repository
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/portable_import.rs
+touched: crates/alt-server-store/src/portable_import/reads.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/reading_uploads.rs
