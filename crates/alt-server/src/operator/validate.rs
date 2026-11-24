@@ -183,6 +183,7 @@ impl Config {
         if self.instance.installation_id == TEMPORARY {
             return Err(Error::Config("installation id"));
         }
+        self.within(super::bounds::memory::of_the_container())?;
         let directory = self.bytes_directory.join(TEMPORARY);
         temporary(&directory)?;
         // SAFETY: the caller is the one thread there is: nothing else reads or

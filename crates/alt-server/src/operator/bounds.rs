@@ -1,5 +1,7 @@
 //! The bounds of the HTTP listener and its workers, as the configuration has them.
 
+pub(super) mod memory;
+
 #[derive(Clone, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct HttpBounds {

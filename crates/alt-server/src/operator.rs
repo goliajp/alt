@@ -337,7 +337,7 @@ impl Config {
         if !(alt_server_store::OLDEST_SCHEMA..alt_server_store::SCHEMA_VERSION).contains(&from) {
             return Err(Error::Config(alt_server_store::UNSUPPORTED_SOURCE_SCHEMA));
         }
-        let mut next = self.clone();
+        let mut next = self.for_its_container()?;
         next.instance.runtime_generation = next
             .instance
             .runtime_generation

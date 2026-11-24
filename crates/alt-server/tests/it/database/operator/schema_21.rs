@@ -110,6 +110,15 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(migrated["migrated"], true);
     assert_eq!(migrated["schema"], 22);
     assert_eq!(copies(&source.dsn), (22, 0, 0));
+    // The configuration from before had no memory for the packs of pushes told,
+    // which is 4096 MiB. The next one has what goes with the memory of the
+    // container of the package, which this process is told no other than.
+    let written: alt_json::Value = alt_json::from_slice(&std::fs::read(&next).unwrap()).unwrap();
+    let megabytes = written["http"]["indexing_megabytes"].as_u64();
+    assert!(
+        megabytes.is_some_and(|megabytes| megabytes <= 1536),
+        "{megabytes:?}"
+    );
     // the request is given its moment by the server as it runs, and counted until then
     assert_eq!(moments(&source.dsn), Some((0, 0)));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
