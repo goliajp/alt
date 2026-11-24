@@ -160,12 +160,13 @@ impl Log {
 
     /// With the log read to its end under the exclusive lock by a
     /// handle that may write it (`writes`): fsyncs it where it ends
-    /// with the checkpoint of a cut that nothing tells is on disk. Whoever cut the log may have died before it fsynced
-    /// that, and nothing is written after such a checkpoint. A loss of
-    /// power could take a part of it and leave what follows: the cut is
-    /// then made again, of the generation the lost checkpoint was of,
-    /// and frames of that generation which were cut or lost before
-    /// would follow the new checkpoint as if appended after it.
+    /// with the checkpoint of a cut that nothing tells is on disk.
+    /// Whoever cut the log may have died before it fsynced that, and
+    /// nothing is written after such a checkpoint. A loss of power
+    /// could take a part of it and leave what follows: the cut is then
+    /// made again, of the generation the lost checkpoint was of, and
+    /// frames of that generation which were cut or lost before would
+    /// follow the new checkpoint as if appended after it.
     fn cut_fsynced(&mut self, writes: bool) -> Result<(), OpLogError> {
         let (cut, end) = (self.state.cut, self.state.end);
         let on_disk = self.cut_on_disk == end || self.synced >= end;

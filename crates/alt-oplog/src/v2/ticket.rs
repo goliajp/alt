@@ -16,8 +16,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-use crate::OpLogError;
+use crate::v2::log::Log;
 use crate::v2::owed::{Account, Holder, Shared};
+use crate::{OpLogError, relaxed_durability};
 
 /// What became of the frames on a ticket that were not cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +169,43 @@ impl Writing {
 impl Drop for Writing {
     fn drop(&mut self) {
         self.end();
+    }
+}
+
+impl Log {
+    /// Has the frames this handle writes be on a new ticket for as
+    /// long as what is given lives.
+    pub fn writing_on_a_ticket(&mut self) -> Writing {
+        Writing::begin(&self.account)
+    }
+
+    /// [`Self::sync`] for the holder of `ticket`. A handle that leaves
+    /// its syncs to a sink syncs by itself for a ticket the sink
+    /// answered it has nothing to sync up to: what it answers then is
+    /// what became of the frames.
+    pub fn sync_for(&mut self, ticket: &Ticket) -> Result<(), OpLogError> {
+        ticket.asked_of(&self.account)?;
+        if ticket.told_cut() {
+            return Err(OpLogError::CutBack);
+        }
+        let of = |holder| ticket.holds(holder);
+        if relaxed_durability() || !self.writable {
+            return self.promises_nothing(&of);
+        }
+        let leaves = self.defer && !ticket.owed();
+        let synced = match leaves {
+            false => self.sync_as(&of, true),
+            true => {
+                self.write_count += 1;
+                self.answered(&of, true).and_then(|()| self.leave(&of))
+            }
+        };
+        match &synced {
+            Err(OpLogError::CutBack) => ticket.tell_cut(),
+            Ok(()) if !leaves => ticket.owes(false),
+            _ => {}
+        }
+        synced
     }
 }
 

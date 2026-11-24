@@ -34,7 +34,6 @@ use crate::v2::log::Log;
 use crate::v2::owed::Holder;
 use crate::v2::sink::{Reached, Sink, record};
 use crate::v2::tail::{Held, Tail};
-use crate::v2::ticket::{Ticket, Writing};
 use crate::{OpLogError, SyncNamed, relaxed_durability};
 
 /// The frames on no ticket.
@@ -75,45 +74,10 @@ impl Log {
         self.leave(&|holder| leaves && holder == Holder::Left)
     }
 
-    /// Has the frames this handle writes be on a new ticket for as
-    /// long as what is given lives.
-    pub fn writing_on_a_ticket(&mut self) -> Writing {
-        Writing::begin(&self.account)
-    }
-
-    /// [`Self::sync`] for the holder of `ticket`. A handle that leaves
-    /// its syncs to a sink syncs by itself for a ticket the sink
-    /// answered it has nothing to sync up to: what it answers then is
-    /// what became of the frames.
-    pub fn sync_for(&mut self, ticket: &Ticket) -> Result<(), OpLogError> {
-        ticket.asked_of(&self.account)?;
-        if ticket.told_cut() {
-            return Err(OpLogError::CutBack);
-        }
-        let of = |holder| ticket.holds(holder);
-        if relaxed_durability() || !self.writable {
-            return self.promises_nothing(&of);
-        }
-        let leaves = self.defer && !ticket.owed();
-        let synced = match leaves {
-            false => self.sync_as(&of, true),
-            true => {
-                self.write_count += 1;
-                self.answered(&of, true).and_then(|()| self.leave(&of))
-            }
-        };
-        match &synced {
-            Err(OpLogError::CutBack) => ticket.tell_cut(),
-            Ok(()) if !leaves => ticket.owes(false),
-            _ => {}
-        }
-        synced
-    }
-
     /// Answers `of` as a sync does that is told to leave what is written
     /// unsynced: the frames were written, and of those it holds that
     /// were written so told, `of` is owed no answer after.
-    fn promises_nothing(&self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
+    pub(super) fn promises_nothing(&self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
         self.account.lock().unwrap().spend_unpromised(of);
         Ok(())
     }
@@ -142,7 +106,11 @@ impl Log {
 
     /// Tells `of`, once, where frames it holds were found cut: of every
     /// one that is gone by now, which are looked for first.
-    fn answered(&mut self, of: &dyn Fn(Holder) -> bool, spent: bool) -> Result<(), OpLogError> {
+    pub(super) fn answered(
+        &mut self,
+        of: &dyn Fn(Holder) -> bool,
+        spent: bool,
+    ) -> Result<(), OpLogError> {
         if self.account.lock().unwrap().found_cut_of(of) {
             lock_shared(&self.file)?;
             let looked = self.owed_looked();
@@ -155,7 +123,11 @@ impl Log {
     /// Syncs what this handle holds and answers for the frames `of`
     /// holds: where one was cut, `of` is told so, with nothing of it
     /// owed an answer after that when `spent`.
-    fn sync_as(&mut self, of: &dyn Fn(Holder) -> bool, spent: bool) -> Result<(), OpLogError> {
+    pub(super) fn sync_as(
+        &mut self,
+        of: &dyn Fn(Holder) -> bool,
+        spent: bool,
+    ) -> Result<(), OpLogError> {
         loop {
             self.resolved()?;
             self.answered(of, spent)?;
@@ -179,7 +151,7 @@ impl Log {
 
     /// Leaves what this handle holds to its sink, which answers for the
     /// frames `of` holds.
-    fn leave(&mut self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
+    pub(super) fn leave(&mut self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
         loop {
             self.resolved()?;
             match self.defer_sync() {
