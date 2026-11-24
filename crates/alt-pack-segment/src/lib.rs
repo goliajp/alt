@@ -26,6 +26,7 @@ mod send;
 mod set;
 mod stream;
 mod told;
+mod trees;
 mod wanted;
 
 pub use alt_git_pack::{BaseFiles, IndexWork, Memory, Wait};

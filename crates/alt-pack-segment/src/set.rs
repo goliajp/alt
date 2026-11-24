@@ -36,6 +36,12 @@ impl SegmentSet {
             .find_map(|segment| segment.find(oid).map(|index| (segment.as_ref(), index)))
     }
 
+    /// where the object is: the segment, by its place in the set, and the record
+    pub(crate) fn place(&self, oid: &Oid) -> Option<(usize, usize)> {
+        let found = |(at, segment): (usize, &Arc<Segment>)| Some((at, segment.find(oid)?));
+        self.segments.iter().enumerate().rev().find_map(found)
+    }
+
     /// whether any segment holds the object
     pub fn locate_any(&self, oid: &Oid) -> bool {
         self.locate(oid).is_some()

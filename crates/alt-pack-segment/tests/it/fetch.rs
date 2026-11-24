@@ -225,3 +225,97 @@ fn a_directory_that_returns_to_an_earlier_state_is_sent_whole() {
         Vec::<String>::new()
     );
 }
+
+/// A file gives way to a directory of its name, and the directory to a file again:
+/// what is at a name is compared with what was there only where both are of one kind.
+#[test]
+fn a_file_and_a_directory_of_one_name_are_not_compared_with_each_other() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    write(&source, "thing", b"a file\n");
+    write(
+        &source,
+        "thing-x",
+        b"before the directory, after the file\n",
+    );
+    write(&source, "thing.d", b"as well\n");
+    let file = commit(&source, "a file");
+    fs::remove_file(source.join("thing")).unwrap();
+    write(&source, "thing/inside.txt", b"in the directory\n");
+    let directory = commit(&source, "a directory of its name");
+    write(&source, "thing/inside.txt", b"changed\n");
+    let changed = commit(&source, "change in the directory");
+    fs::remove_dir_all(source.join("thing")).unwrap();
+    write(&source, "thing", b"a file again\n");
+    let again = commit(&source, "a file again");
+
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    let none = Vec::<String>::new();
+    assert_eq!(fetch(&source, &set, &[&again], &[], "clone"), none);
+    assert_eq!(fetch(&source, &set, &[&directory], &[&file], "to it"), none);
+    assert_eq!(fetch(&source, &set, &[&changed], &[&file], "past it"), none);
+    assert_eq!(fetch(&source, &set, &[&again], &[&changed], "back"), none);
+    assert_eq!(fetch(&source, &set, &[&again], &[&file], "over"), none);
+}
+
+/// More versions of one directory than a walk keeps at once: those it let go of are
+/// made again, and the selection and the pack are what they are for a short history.
+#[test]
+fn a_history_of_more_trees_than_a_walk_keeps_is_selected_whole() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    // a directory of some eighty kilobytes, in three hundred versions
+    for file in 0..2000 {
+        write(
+            &source,
+            &format!("wide/file-with-a-long-name-{file:05}.txt"),
+            b"0\n",
+        );
+    }
+    let mut commits = vec![commit(&source, "wide")];
+    for version in 1..300usize {
+        let file = version * 7 % 2000;
+        write(
+            &source,
+            &format!("wide/file-with-a-long-name-{file:05}.txt"),
+            format!("{version}\n").as_bytes(),
+        );
+        commits.push(commit(&source, &format!("version {version}")));
+    }
+    git(&source, &["repack", "-adq", "--depth=50", "--window=10"]);
+    let pack = git_in(
+        &source,
+        &[
+            "pack-objects",
+            "--all",
+            "--stdout",
+            "-q",
+            "--delta-base-offset",
+        ],
+        b"",
+    );
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    let none = Vec::<String>::new();
+    let tip = commits.last().unwrap();
+    assert_eq!(fetch(&source, &set, &[tip], &[], "clone"), none);
+    assert_eq!(fetch(&source, &set, &[tip], &[&commits[150]], "half"), none);
+    assert_eq!(
+        fetch(&source, &set, &[&commits[150]], &[&commits[3]], "middle"),
+        none
+    );
+}

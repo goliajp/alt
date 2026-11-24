@@ -9,6 +9,7 @@
 use crate::{
     Error, Kind, Oid, OidMap, OidSet, SegmentSet,
     object::{self, Parsed},
+    trees::{Beside, Trees, entries},
 };
 use std::collections::{BinaryHeap, HashMap};
 
@@ -63,48 +64,9 @@ fn mark(
     }
 }
 
-/// an entry of a tree that names an object of this repository
-struct Entry<'a> {
-    name: &'a [u8],
-    oid: Oid,
-    tree: bool,
-}
-
-fn entries(data: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
-    let mut out = Vec::new();
-    let mut rest = data;
-    while !rest.is_empty() {
-        let space = rest.iter().position(|byte| *byte == b' ');
-        let space = space.ok_or(Error::Corrupt("tree entry"))?;
-        let nul = rest.iter().position(|byte| *byte == 0);
-        let nul = nul.ok_or(Error::Corrupt("tree entry"))?;
-        let (Some(name), Some(oid)) = (rest.get(space + 1..nul), rest.get(nul + 1..nul + 21))
-        else {
-            return Err(Error::Corrupt("tree entry"));
-        };
-        let oid = oid.try_into().unwrap();
-        match &rest[..space] {
-            b"40000" => out.push(Entry {
-                name,
-                oid,
-                tree: true,
-            }),
-            // a gitlink names a commit of another repository
-            b"160000" => {}
-            _ => out.push(Entry {
-                name,
-                oid,
-                tree: false,
-            }),
-        }
-        rest = &rest[nul + 21..];
-    }
-    Ok(out)
-}
-
 /// what the walk has gathered so far
-#[derive(Default)]
-struct Found {
+struct Found<'a> {
+    trees: Trees<'a>,
     /// candidates in the order found, with whether each is a blob
     objects: Vec<(Oid, bool)>,
     seen: OidSet,
@@ -115,7 +77,18 @@ struct Found {
     compared: alt_hash::KeyedIdSet<(Oid, Option<Oid>)>,
 }
 
-impl Found {
+impl<'a> Found<'a> {
+    fn new(set: &'a SegmentSet) -> Self {
+        Found {
+            trees: Trees::new(set),
+            objects: Vec::new(),
+            seen: OidSet::default(),
+            known: OidSet::default(),
+            walked: OidSet::default(),
+            compared: Default::default(),
+        }
+    }
+
     fn add(&mut self, oid: Oid, blob: bool) -> bool {
         let new = self.seen.insert(oid);
         if new {
@@ -126,13 +99,6 @@ impl Found {
 }
 
 impl SegmentSet {
-    fn tree(&self, oid: &Oid) -> Result<Vec<u8>, Error> {
-        match self.read(oid)? {
-            (Kind::Tree, data) => Ok(data),
-            _ => Err(Error::Corrupt("tree expected")),
-        }
-    }
-
     /// Adds what `tree` holds and `base` does not hold at the same path. `held` are the
     /// trees at that path in commits the client has: their entries are recorded as
     /// known for every directory opened, and what they hold in a directory that no
@@ -143,7 +109,7 @@ impl SegmentSet {
         tree: Oid,
         base: Option<Oid>,
         held: Vec<Oid>,
-        found: &mut Found,
+        found: &mut Found<'_>,
     ) -> Result<(), Error> {
         let mut pending = vec![(tree, base, held)];
         while let Some((tree, base, held)) = pending.pop() {
@@ -162,20 +128,16 @@ impl SegmentSet {
             if !found.compared.insert((tree, base)) {
                 continue;
             }
-            let data = self.tree(&tree)?;
+            let data = found.trees.read(&tree)?;
             let new = entries(&data)?;
-            let old_data = base.map(|base| self.tree(&base)).transpose()?;
-            let mut old = HashMap::new();
-            if let Some(old_data) = &old_data {
-                for entry in entries(old_data)? {
-                    old.insert(entry.name, entry.oid);
-                }
-            }
+            let old_data = base.map(|base| found.trees.read(&base)).transpose()?;
+            let old = old_data.as_deref().map(|data| entries(data)).transpose()?;
+            let mut old = Beside::new(old.as_deref().unwrap_or_default());
             // per name, the trees the client has there
             let mut held_below: HashMap<&[u8], Vec<Oid>> = HashMap::new();
             let held_data = held
                 .iter()
-                .map(|held| self.tree(held))
+                .map(|held| found.trees.read(held))
                 .collect::<Result<Vec<_>, Error>>()?;
             for data in &held_data {
                 for entry in entries(data)? {
@@ -186,15 +148,17 @@ impl SegmentSet {
                 }
             }
             for entry in &new {
-                if old.get(entry.name) == Some(&entry.oid) {
-                    held_below.remove(entry.name);
+                let held = match held_below.is_empty() {
+                    true => None,
+                    false => held_below.remove(entry.name),
+                };
+                let before = old.of(entry);
+                if before == Some(entry.oid) {
                     continue;
                 }
                 if entry.tree {
-                    let held = held_below.remove(entry.name).unwrap_or_default();
-                    pending.push((entry.oid, old.get(entry.name).copied(), held));
+                    pending.push((entry.oid, before, held.unwrap_or_default()));
                 } else {
-                    held_below.remove(entry.name);
                     found.add(entry.oid, true);
                 }
             }
@@ -207,7 +171,7 @@ impl SegmentSet {
     }
 
     /// records `tree` and everything under it as known
-    fn tree_known(&self, tree: &Oid, found: &mut Found) -> Result<(), Error> {
+    fn tree_known(&self, tree: &Oid, found: &mut Found<'_>) -> Result<(), Error> {
         let mut pending = vec![*tree];
         while let Some(oid) = pending.pop() {
             found.known.insert(oid);
@@ -215,7 +179,7 @@ impl SegmentSet {
             if !found.walked.insert(oid) {
                 continue;
             }
-            for entry in entries(&self.tree(&oid)?)? {
+            for entry in entries(&found.trees.read(&oid)?)? {
                 if entry.tree {
                     pending.push(entry.oid);
                 } else {
@@ -228,7 +192,7 @@ impl SegmentSet {
 
     /// whether the selection would send a large blob, which is when it pays to find out
     /// exactly what the client holds
-    fn sends_large_blob(&self, found: &Found) -> Result<bool, Error> {
+    fn sends_large_blob(&self, found: &Found<'_>) -> Result<bool, Error> {
         for (oid, blob) in &found.objects {
             if *blob
                 && !found.known.contains(oid)
@@ -242,7 +206,7 @@ impl SegmentSet {
 
     /// objects reachable from `wants` and not from `haves`; unknown haves are ignored
     pub fn select(&self, wants: &[Oid], haves: &[Oid]) -> Result<Selection, Error> {
-        let mut found = Found::default();
+        let mut found = Found::new(self);
         let mut flags: OidMap<u8> = OidMap::default();
         let mut heap = BinaryHeap::new();
         let mut open = 0usize;
