@@ -30,6 +30,15 @@ pub(super) struct Opened {
     /// kept while one of them is good, whether the repository is open
     /// or not
     nonces: HashMap<(String, (u64, u64)), Arc<NonceTable>>,
+    /// The writer of each repository, by its name and directory, for as
+    /// long as a request has it in hand: one that is closed meanwhile,
+    /// or put aside for another and put back, is written through the
+    /// one writer it has. A writer keeps its directory open, so no other
+    /// directory is taken for it.
+    writers: HashMap<(String, (u64, u64)), std::sync::Weak<WriteCoordinator>>,
+    /// those a sync failed of, whose repository was put aside: kept, so
+    /// that the repository put back is not written to again
+    stopped: HashMap<(String, (u64, u64)), Arc<WriteCoordinator>>,
     clock: u64,
     most: usize,
 }
@@ -37,9 +46,9 @@ pub(super) struct Opened {
 struct Open {
     handle: RepoHandle,
     used: u64,
-    /// the directory it was opened in: another one under the same name
-    /// is another repository
-    dir: (u64, u64),
+    /// the directory it was opened in, kept open: another one under the
+    /// same name is another repository and has another number
+    dir: ((u64, u64), std::fs::File),
 }
 
 impl Opened {
@@ -48,12 +57,16 @@ impl Opened {
     fn known(&mut self, name: &str, dir: (u64, u64)) -> Option<RepoHandle> {
         self.clock += 1;
         match self.repos.get_mut(name) {
-            Some(open) if open.dir == dir => {
+            Some(open) if open.dir.0 == dir => {
                 open.used = self.clock;
                 Some(open.handle.clone())
             }
             Some(_) => {
-                self.repos.remove(name);
+                let closed = self.repos.remove(name).expect("found there");
+                let stopped = |writer: &Arc<WriteCoordinator>| writer.group.failed().is_some();
+                if let Some(writer) = closed.handle.writer.filter(stopped) {
+                    self.stopped.insert((name.to_owned(), closed.dir.0), writer);
+                }
                 None
             }
             None => None,
@@ -68,9 +81,37 @@ impl Opened {
         Arc::clone(table)
     }
 
+    /// The writer there is of the repository `name` in `dir`.
+    fn writer(&mut self, name: &str, dir: (u64, u64)) -> Option<Arc<WriteCoordinator>> {
+        let key = (name.to_owned(), dir);
+        let stopped = self.stopped.get(&key).cloned();
+        stopped.or_else(|| self.writers.get(&key)?.upgrade())
+    }
+
+    /// Keeps `opened` as that writer unless another request did so first.
+    fn written(
+        &mut self,
+        name: &str,
+        dir: (u64, u64),
+        opened: Arc<WriteCoordinator>,
+    ) -> Arc<WriteCoordinator> {
+        self.writers.retain(|_, writer| writer.strong_count() > 0);
+        if let Some(first) = self.writer(name, dir) {
+            return first;
+        }
+        let key = (name.to_owned(), dir);
+        self.writers.insert(key, Arc::downgrade(&opened));
+        opened
+    }
+
     /// Keeps `opened` under `name` unless another request did so first,
     /// and closes what is over the number that may be open.
-    fn keep(&mut self, name: &str, dir: (u64, u64), opened: RepoHandle) -> RepoHandle {
+    fn keep(
+        &mut self,
+        name: &str,
+        dir: ((u64, u64), std::fs::File),
+        opened: RepoHandle,
+    ) -> RepoHandle {
         let used = self.clock;
         let open = Open {
             handle: opened,
@@ -99,68 +140,13 @@ impl Opened {
     }
 }
 
-/// What tells the directory of a repository from another under its name.
-/// Only a repository that has no `.alt` is told by its `.git`: one whose
-/// `.alt` could not be looked at this once is not taken for another, to
-/// be opened a second time beside itself.
-fn directory(repo_path: &std::path::Path) -> std::io::Result<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    let about = match std::fs::metadata(repo_path.join(".alt")) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::metadata(repo_path.join(".git"))?
-        }
-        about => about?,
-    };
-    Ok((about.dev(), about.ino()))
-}
-
-/// three-piece write coordinator for one repo. `store` is what a push
-/// has in hand from its look at the refs to its ref transaction; a
-/// request that panics with it in hand ends the process (see
-/// [`alt_cli::held`]).
-/// `sink` is an independent fsync handle (own fds) that the leader
-/// committer calls outside the store lock — overlap is what makes
-/// group commit pay off. `group` hands out tickets + makes followers
-/// wait for the leader's flush, so N concurrent receive-pack pushes
-/// share ~1 fsync instead of paying N fsyncs each. Shared across
-/// requests via `Arc`.
-pub(super) struct WriteCoordinator {
-    pub(super) store: Held<Store>,
-    pub(super) sink: alt_cli::native::StoreSink,
-    pub(super) group: alt_cli::group_commit::GroupCommit,
-    /// single-use nonces issued during receive-pack info/refs
-    /// and consumed during the matching `git-receive-pack` POST. Bounds
-    /// the replay window to "between info/refs advert and EOL of the
-    /// LRU table". A captured signed push payload can only be replayed
-    /// against this server if its nonce hasn't yet been consumed and
-    /// hasn't aged out of the table.
-    pub(super) nonces: Arc<NonceTable>,
-}
-
-/// Open the write store and build the write coordinator: turn on deferred
-/// durability so each commit appends-without-fsync, create the off-write
-/// `sink` so the fsync uses independent fds, instantiate the
-/// `GroupCommit` that coalesces concurrent flushes.
-pub(super) fn open_write_coordinator(
-    alt_dir: std::path::PathBuf,
-    nonces: Arc<NonceTable>,
-) -> Result<Arc<WriteCoordinator>, Box<dyn std::error::Error>> {
-    let mut store = Store::open(alt_dir)?;
-    store.set_defer_durability(true);
-    let sink = store.sink()?;
-    Ok(Arc::new(WriteCoordinator {
-        store: Held::new(store),
-        sink,
-        group: alt_cli::group_commit::GroupCommit::new(),
-        nonces,
-    }))
-}
-
 impl Opened {
     fn of(most: usize) -> Held<Opened> {
         Held::new(Opened {
             repos: HashMap::new(),
             nonces: HashMap::new(),
+            writers: HashMap::new(),
+            stopped: HashMap::new(),
             clock: 0,
             most,
         })
@@ -174,7 +160,7 @@ fn opened(
     name: &str,
     repo_path: PathBuf,
 ) -> Result<RepoHandle, Box<dyn std::error::Error>> {
-    let dir = directory(&repo_path)?;
+    let (dir, open) = readers::directory(&repo_path)?;
     if let Some(handle) = cache.take().known(name, dir) {
         return Ok(handle);
     }
@@ -183,16 +169,18 @@ fn opened(
     // tells what is no repository here, and not on every request
     Repository::discover(&repo_path)?;
     let alt_dir = repo_path.join(".alt");
-    let writer = match alt_dir.is_dir() {
-        true => {
+    let known = cache.take().writer(name, dir);
+    let writer = match (alt_dir.is_dir(), known) {
+        (true, None) => {
             let nonces = cache.take().nonces(name, dir);
-            Some(open_write_coordinator(alt_dir, nonces)?)
+            let opened = open_write_coordinator(alt_dir, nonces, open.try_clone()?)?;
+            Some(cache.take().written(name, dir, opened))
         }
-        false => None,
+        (_, known) => known,
     };
     // the first to have opened it is the one every request uses
     let opened = RepoHandle::new(repo_path, writer, &readers::none());
-    Ok(cache.take().keep(name, dir, opened))
+    Ok(cache.take().keep(name, (dir, open), opened))
 }
 
 impl ServeMode {
@@ -272,3 +260,10 @@ pub(super) fn resolve_repo(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mode/tests.rs"]
+mod tests;
+#[path = "mode/writer.rs"]
+mod writer;
+pub(super) use writer::{WriteCoordinator, open_write_coordinator};

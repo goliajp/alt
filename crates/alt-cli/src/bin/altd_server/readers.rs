@@ -39,6 +39,24 @@ pub(super) fn named(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// What tells the directory of a repository from another under its name,
+/// and that directory open: while it is, its number is given to no other,
+/// and one put in its place is not taken for it. Only a repository that
+/// has no `.alt` is told by its `.git`: one whose `.alt` could not be
+/// looked at this once is not taken for another, to be opened a second
+/// time beside itself.
+pub(super) fn directory(repo_path: &Path) -> std::io::Result<((u64, u64), std::fs::File)> {
+    use std::os::unix::fs::MetadataExt;
+    let open = match std::fs::File::open(repo_path.join(".alt")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::File::open(repo_path.join(".git"))?
+        }
+        open => open?,
+    };
+    let about = open.metadata()?;
+    Ok(((about.dev(), about.ino()), open))
+}
+
 pub(super) fn none() -> Readers {
     Arc::new(Held::new(Vec::new()))
 }
