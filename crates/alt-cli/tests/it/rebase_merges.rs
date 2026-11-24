@@ -335,3 +335,74 @@ fn a_parallel_workspace_makes_its_merges_again_and_leaves_the_others_alone() {
         "M1\n"
     );
 }
+
+/// `main` has merged `A` and `B` and gone one commit on; `topic` starts
+/// on `B`, has merged `other`, which starts on `A`, and has a commit
+/// after the merge. `topic` and `main` have both `A` and `B` for bases;
+/// the commit of `A` is the later one where `a_later`. `topic` checked
+/// out.
+fn two_bases(a_later: bool) -> Pair {
+    let pair = Pair::new();
+    let mut time = 1_700_000_000;
+    let mut at = move || {
+        time += 60;
+        time
+    };
+    let commit = |file: &str, time: u64| {
+        pair.write(file, &format!("{file}\n"));
+        pair.commit_all_at(file, time);
+    };
+    commit("R", at());
+    pair.both(&["branch", "A"]);
+    pair.both(&["branch", "B"]);
+    let (first, second) = (at(), at());
+    let (of_a, of_b) = match a_later {
+        true => (second, first),
+        false => (first, second),
+    };
+    pair.both(&["switch", "A"]);
+    commit("a", of_a);
+    pair.both(&["switch", "B"]);
+    commit("b", of_b);
+    pair.both(&["switch", "main"]);
+    pair.merge_at("A", at());
+    pair.merge_at("B", at());
+    commit("m", at());
+    pair.both(&["switch", "-c", "other", "A"]);
+    commit("a1", at());
+    pair.both(&["switch", "-c", "topic", "B"]);
+    commit("b1", at());
+    pair.merge_at("other", at());
+    commit("t", at());
+    pair
+}
+
+#[test]
+fn of_two_bases_the_later_one_is_where_a_line_leaves_for_the_new_base() {
+    for a_later in [true, false] {
+        // the merge kept: the line from the later base goes onto main
+        let pair = two_bases(a_later);
+        let before = ok(alt(&pair.alt, &["rev-parse", "other", "topic~2"]));
+        pair.both(&["rebase", "-r", "main"]);
+        same_commit(&pair, "HEAD");
+        assert_eq!(parents(&pair.alt, "HEAD~1"), 2);
+        let stays = ok(alt(&pair.alt, &["rev-parse", "HEAD~1^2", "HEAD~2"]));
+        let kept: Vec<_> = before.lines().zip(stays.lines()).collect();
+        // what started on the earlier base is the commit it was
+        let (left, moved) = if a_later {
+            (kept[1], kept[0])
+        } else {
+            (kept[0], kept[1])
+        };
+        assert_eq!(left.0, left.1, "a_later {a_later}");
+        assert_ne!(moved.0, moved.1, "a_later {a_later}");
+        pair.assert_same_state();
+
+        // the merge dropped: all of the branch's own in one line
+        let pair = two_bases(a_later);
+        pair.both(&["rebase", "main"]);
+        same_commit(&pair, "HEAD");
+        assert_eq!(parents(&pair.alt, "HEAD~1"), 1);
+        pair.assert_same_state();
+    }
+}

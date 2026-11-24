@@ -83,8 +83,16 @@ impl NativeRepo<'_> {
         }
         let ends: Vec<ObjectId> = tips.iter().rev().map(|tip| tip.0).chain([orig]).collect();
         let lines = lines(&mine, &ends);
-        // a line that starts on a base of the branch goes onto the new base
-        let bases = self.merge_bases(&[orig], &[onto])?;
+        // a line that starts on the base of the branch goes onto the new
+        // base; of several bases that is the one committed last, as by git
+        let mut base: Option<(i64, ObjectId)> = None;
+        for found in self.merge_bases(&[orig], &[onto])? {
+            let at = self.committer_time(found)?;
+            if base.is_none_or(|(latest, _)| at > latest) {
+                base = Some((at, found));
+            }
+        }
+        let base = base.map(|(_, commit)| commit);
         let starts: HashSet<ObjectId> = lines.iter().map(|line| line.0).collect();
         let mut taken = HashSet::from(["onto".to_owned()]);
         let mut names: std::collections::HashMap<ObjectId, String> = Default::default();
@@ -92,7 +100,7 @@ impl NativeRepo<'_> {
         for (start, line) in lines {
             steps.push(Step::Reset(match names.get(&start) {
                 Some(name) => name.clone(),
-                None if bases.contains(&start) => "onto".to_owned(),
+                None if base == Some(start) => "onto".to_owned(),
                 None => start.to_string(),
             }));
             for commit in line {
