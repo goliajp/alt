@@ -155,10 +155,16 @@ impl RefStore {
     /// pull in ops other writers committed and fold them into the ref map, so a
     /// served read reflects the true on-disk state — not the snapshot this
     /// process held at open.
+    ///
+    /// Ops this store held that another writer cut are dropped from the
+    /// refs and nobody is told here. A transaction of this store among
+    /// them that was never synced is told of by the sync that was to
+    /// cover it: the next one asked of this store, or, where the store
+    /// leaves its syncs to a sink, the sink.
     pub fn refresh(&mut self) -> Result<(), RefError> {
         match self.oplog.refresh() {
             // another writer cut ops this handle held
-            Err(alt_oplog::OpLogError::CutBack) => self.oplog.reopen()?,
+            Err(alt_oplog::OpLogError::CutBack) => self.oplog.reread()?,
             refreshed => refreshed?,
         }
         if self.oplog.reads() != self.reads_seen {

@@ -197,7 +197,9 @@ impl RefStore {
             });
             match appended {
                 Err(RefError::OpLog(OpLogError::CutBack)) if self.oplog.syncs_inline() => {
-                    self.oplog.reopen()?;
+                    // nobody is told here: the sync that follows tells
+                    // where an op of this store was among those cut
+                    self.oplog.reread()?;
                     self.rebuild()?;
                 }
                 appended => return appended,

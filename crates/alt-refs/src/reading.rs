@@ -96,11 +96,13 @@ impl RefStore {
     /// [`Self::refresh`] for a store held across commands, before one that
     /// only reads: the ops other writers committed are folded in under the
     /// log's shared lock and nothing is written. An append that never
-    /// finished stays at the end of the log, passed over.
+    /// finished stays at the end of the log, passed over. Of ops that
+    /// were cut it tells as [`Self::refresh`] does: through the sync that
+    /// was to cover them.
     pub fn follow(&mut self) -> Result<(), RefError> {
         match self.oplog.follow() {
             // another writer cut ops this handle held
-            Err(OpLogError::CutBack) => self.oplog.reopen()?,
+            Err(OpLogError::CutBack) => self.oplog.reread()?,
             followed => followed?,
         }
         if self.oplog.reads() != self.reads_seen {

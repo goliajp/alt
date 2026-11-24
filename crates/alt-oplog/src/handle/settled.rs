@@ -155,9 +155,23 @@ impl OpLog {
     }
 
     /// Reads the log again from its first record, for a handle whose
-    /// records were cut ([`OpLogError::CutBack`]).
+    /// records were cut ([`OpLogError::CutBack`]) and whose caller was
+    /// told so. What a sink of the handle was left to sync is not
+    /// dropped by this: the sink tells whoever waits for it.
     pub fn reopen(&mut self) -> Result<(), OpLogError> {
         on!(mut self, log => log.reopen())
+    }
+
+    /// [`Self::reopen`] for whoever goes on without telling its own
+    /// caller that records were cut. Where records this handle wrote and
+    /// never had synced are among them, the next sync asked of the handle
+    /// tells so ([`OpLogError::CutBack`]), once, instead of recording a
+    /// log without them as synced.
+    pub fn reread(&mut self) -> Result<(), OpLogError> {
+        match &mut self.0 {
+            Inner::V1(log) => log.reopen(),
+            Inner::V2(log) => log.reread(),
+        }
     }
 
     /// How many times this handle has read the log anew since it was

@@ -43,14 +43,53 @@ impl Log {
         Ok(())
     }
 
+    /// Reads the log anew for a handle whose caller was told its ops
+    /// were cut: of what the handle wrote and never had synced, that
+    /// caller knows. What its sink was left to sync stays with the sink:
+    /// whoever waits for that sync was not told, and the sink tells it.
     pub fn reopen(&mut self) -> Result<(), OpLogError> {
+        (self.told_cut, self.lost) = (true, false);
+        self.reread()
+    }
+
+    /// Reads the log anew for whoever found the ops of this handle cut
+    /// and tells nobody: what the handle wrote and never had synced stays
+    /// owed an answer, which the next sync asked of it gives.
+    pub fn reread(&mut self) -> Result<(), OpLogError> {
         crate::lock::lock_shared(&self.file)?;
-        let read = self.read_anew();
+        let read = self.read_anew().and_then(|()| self.owing());
         let _ = crate::lock::unlock(&self.file);
-        // what its sink was left to sync is of the frames it held: it
-        // was told of them, and its sink has nothing to tell of them
-        self.nothing_deferred();
         read
+    }
+
+    /// After the log was read anew: where the last frame this handle
+    /// wrote is no longer in it and still awaited an answer from a sync
+    /// of the handle, the next sync asked of it tells so, unless a sync
+    /// told already that frames held were cut. A frame left to the sink
+    /// is the sink's to tell of. One past where the log ends for a
+    /// reader, at a cut that was begun, is not cut yet: the cut is made,
+    /// and the handle finds its frames gone again, or it never is.
+    pub(super) fn owing(&mut self) -> Result<(), OpLogError> {
+        let told = std::mem::take(&mut self.told_cut);
+        let (end, closes) = self.wrote;
+        let waits = end > self.state.end && self.hidden.is_some();
+        if !(self.unsynced || self.owes) || waits {
+            return Ok(());
+        }
+        if end <= self.state.end && self.source().at(end - 4, 4)? == closes {
+            return Ok(());
+        }
+        self.lost |= self.owes && !told;
+        (self.unsynced, self.owes) = (false, false);
+        Ok(())
+    }
+
+    /// The frames this handle wrote up to byte `end` are answered for: a
+    /// sync covered them, or they are left to the sink.
+    pub(super) fn answered_to(&mut self, end: u64) {
+        if self.wrote.0 <= end {
+            self.owes = false;
+        }
     }
 
     /// Reads the log again from its first frame; the caller holds a lock

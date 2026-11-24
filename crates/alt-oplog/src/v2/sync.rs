@@ -9,9 +9,16 @@
 //! took it to the disk, because nobody synced what it names. The next
 //! frame anyone appends carries the boundary into the log.
 
+//!
+//! No sync says of frames that were cut that they are synced. A handle
+//! that is asked to sync and holds frames which are no longer in the log
+//! is told so (`CutBack`), and so is one that wrote frames, never had
+//! them synced, and read the log anew since without them: once, by the
+//! next sync asked of it.
+
 use crate::lock::{lock_exclusive, unlock};
 use crate::v2::log::Log;
-use crate::v2::sink::Sink;
+use crate::v2::sink::{Reached, Sink, record};
 use crate::v2::tail::{Held, Tail};
 use crate::{OpLogError, SyncNamed, relaxed_durability};
 
@@ -21,12 +28,25 @@ impl Log {
         if relaxed_durability() || !self.writable {
             return Ok(());
         }
-        if self.defer {
+        let synced = match self.defer {
             // the sink fsyncs off the write path and records how far
-            self.write_count += 1;
-            return self.defer_sync();
+            true => self.told_lost().and_then(|()| {
+                self.write_count += 1;
+                self.defer_sync()
+            }),
+            false => self.sync_to_end(),
+        };
+        self.told_cut |= matches!(synced, Err(OpLogError::CutBack));
+        synced
+    }
+
+    /// Tells, once, that frames this handle wrote and never had synced
+    /// were cut off the log.
+    fn told_lost(&mut self) -> Result<(), OpLogError> {
+        match std::mem::take(&mut self.lost) {
+            true => Err(OpLogError::CutBack),
+            false => Ok(()),
         }
-        self.sync_to_end()
     }
 
     pub fn set_defer_durability(&mut self, on: bool) {
@@ -57,6 +77,12 @@ impl Log {
     }
 
     pub fn bound_now(&mut self) -> Result<(), OpLogError> {
+        let bound = self.bound_to_end();
+        self.told_cut |= matches!(bound, Err(OpLogError::CutBack));
+        bound
+    }
+
+    fn bound_to_end(&mut self) -> Result<(), OpLogError> {
         lock_exclusive(&self.file)?;
         let caught_up = self.catch_up_bounded();
         let _ = unlock(&self.file);
@@ -65,8 +91,8 @@ impl Log {
             return Ok(());
         }
         // over a frame this build would have to know it sets no boundary
-        let end = self.state.end;
-        if !self.tail().is_some_and(|tail| tail.synced >= end) && !self.knows_all_unlocked()? {
+        let noted = self.tail();
+        if self.said_synced(noted) < self.state.end && !self.knows_all_unlocked()? {
             self.may_append()?;
         }
         self.sync_to_end()
@@ -87,12 +113,23 @@ impl Log {
     /// Records the log as synced up to the last frame this handle holds,
     /// fsyncing it unless another committer's fsync already covered it.
     fn sync_to_end(&mut self) -> Result<(), OpLogError> {
+        self.told_lost()?;
         let Some((target, closes)) = self.sync_target()? else {
             return Ok(());
         };
-        if self.tail().is_some_and(|tail| tail.synced >= target) {
+        // what it left for a sink: where it has come to sync by itself
+        // since, this sync tells of it in the sink's place
+        if self.left_cut(target)? {
+            if !self.defer {
+                self.left_told();
+            }
+            return Err(OpLogError::CutBack);
+        }
+        let noted = self.tail();
+        if self.said_synced(noted) >= target {
             self.unsynced = false;
-            self.note_synced(target);
+            self.answered_to(target);
+            self.left_synced(target);
             return Ok(());
         }
         self.may_write()?;
@@ -100,6 +137,8 @@ impl Log {
             sync(&self.named_unlocked(self.synced)?)?;
         }
         let held = Held::take(&self.dir)?;
+        let noted = Tail::noted_held(&self.beside(), &held);
+        self.synced = self.synced.max(self.said_synced(noted.says()));
         // frames up to there were cut since the append, or the log tells
         // of a cut that takes them: no boundary is set over them
         let generation = self.state.generation;
@@ -107,17 +146,16 @@ impl Log {
         if cut || !self.holds_head(self.file.metadata()?.len())? {
             return Err(OpLogError::CutBack);
         }
-        let mut tail = Tail::noted_held(&self.beside(), &held).to_change();
-        if tail.synced < target {
-            self.file.sync_all()?;
-            tail.generation = tail.generation.max(generation);
-            tail.raise(target, Some(closes));
-            tail.judged = tail.judged.max(target);
-            tail.write(&self.beside(), &held)?;
-        }
+        record(
+            &self.beside(),
+            &held,
+            noted,
+            &Reached::at(target, closes, generation),
+        )?;
         self.unsynced = false;
+        self.answered_to(target);
         self.synced = self.synced.max(target);
-        self.note_synced(target);
+        self.left_synced(target);
         Ok(())
     }
 }

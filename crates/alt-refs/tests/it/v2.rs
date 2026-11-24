@@ -10,7 +10,7 @@ use alt_oplog::v2::block::FileHeader;
 use alt_oplog::v2::frame::{Seed, encode, parse};
 use alt_refs::{RefChange, RefError, RefStore, RefTarget, named_objects};
 
-fn oid(n: u8) -> ObjectId {
+pub fn oid(n: u8) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &[n])
 }
 
@@ -24,14 +24,14 @@ fn point(store: &mut RefStore, name: &str, at: u8) {
 }
 
 /// A store over a new version 2 log with blocks of 4 KiB.
-fn new_store(dir: &Path) -> RefStore {
+pub fn new_store(dir: &Path) -> RefStore {
     alt_oplog::v2::create_with(&dir.join("oplog"), 12).unwrap();
     let store = RefStore::open(dir).unwrap();
     assert_eq!(store.oplog().format(), 2);
     store
 }
 
-fn boot(n: u8) {
+pub fn boot(n: u8) {
     alt_oplog::v2::in_boot(Some([n; 16]));
 }
 
@@ -311,10 +311,43 @@ fn a_store_held_open_follows_a_cut_made_by_another() {
             Some(&RefTarget::Oid(oid(1)))
         );
         assert_eq!(held_open.get("refs/heads/dev"), None);
-        point(&mut held_open, "refs/heads/main", 8);
-        if deferred {
-            held_open.sync_handle().unwrap().fsync().unwrap();
+        // the sync that was to cover the ops that were cut tells of them,
+        // once: the sink they were left to, or, with the store syncing
+        // by itself since, its next sync
+        let cut_back = |told: &RefError| match told {
+            RefError::Recorded { cause, .. } => {
+                matches!(**cause, RefError::OpLog(alt_oplog::OpLogError::CutBack))
+            }
+            _ => false,
+        };
+        let main_at = |store: &RefStore, at: u8| RefChange {
+            name: "refs/heads/main".to_owned(),
+            old: store.get("refs/heads/main").cloned(),
+            new: Some(RefTarget::Oid(oid(at))),
+        };
+        match deferred {
+            true => {
+                let sink = held_open.sync_handle().unwrap();
+                let told = sink.fsync();
+                assert!(
+                    matches!(told, Err(alt_oplog::OpLogError::CutBack)),
+                    "{told:?}"
+                );
+                point(&mut held_open, "refs/heads/main", 8);
+                sink.fsync().unwrap();
+            }
+            false => {
+                let change = main_at(&held_open, 8);
+                let told = held_open.commit("a", 8, &[change]).unwrap_err();
+                assert!(cut_back(&told), "{told:?}");
+                // the transaction is in the log, and is synced by the next
+                held_open.bound().unwrap();
+            }
         }
+        assert_eq!(
+            held_open.get("refs/heads/main"),
+            Some(&RefTarget::Oid(oid(8)))
+        );
         drop(held_open);
         let store = RefStore::open(dir.path()).unwrap();
         assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(8))));

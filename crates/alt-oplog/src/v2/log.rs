@@ -12,7 +12,6 @@ use crate::v2::mark::{Mark, header_of};
 use crate::v2::open::{Loaded, Source, load};
 use crate::v2::sink::Deferred;
 use crate::v2::state::State;
-use crate::v2::tail::Tail;
 use crate::{Anchor, Discarded, Op, OpId, OpLogError, SyncNamed};
 
 pub(crate) struct Log {
@@ -62,6 +61,15 @@ pub(crate) struct Log {
     /// where the last frame this handle wrote ends, and the four bytes
     /// of the file before that
     pub(super) wrote: (u64, [u8; 4]),
+    /// the last frame this handle wrote awaits an answer from a sync of
+    /// the handle: it was neither synced nor left to the sink
+    pub(super) owes: bool,
+    /// frames this handle wrote that awaited such an answer were cut, and
+    /// no sync of it has told so yet
+    pub(super) lost: bool,
+    /// a sync of this handle told that frames it holds were cut, and the
+    /// handle has not read the log anew since
+    pub(super) told_cut: bool,
     pub(super) deferred: Deferred,
     pub(super) clamped: bool,
     pub(super) passed: bool,
@@ -131,6 +139,9 @@ impl Log {
             write_count: 0,
             unsynced: false,
             wrote: (0, [0; 4]),
+            owes: false,
+            lost: false,
+            told_cut: false,
             deferred: Deferred::default(),
             clamped: false,
             passed: false,
@@ -237,46 +248,6 @@ impl Log {
 
     pub fn passed_over(&self) -> bool {
         self.passed
-    }
-
-    /// What `tail` says in the running boot; its boundary is taken in.
-    pub(super) fn tail(&mut self) -> Option<Tail> {
-        let tail = Tail::read(&self.beside());
-        if let Some(tail) = &tail {
-            self.synced = self.synced.max(tail.synced);
-        }
-        tail
-    }
-
-    pub fn bounded_to(&self) -> Option<u64> {
-        let tail = Tail::read(&self.beside());
-        Some(self.synced.max(tail.map_or(0, |tail| tail.synced)))
-    }
-
-    pub fn unsynced_from(&self) -> Option<u64> {
-        self.bounded_to()
-    }
-
-    /// The boundary, when frames follow it that were appended or read
-    /// through in the running boot.
-    pub fn left_unsynced_from(&self) -> Option<u64> {
-        let synced = self.bounded_to()?;
-        (synced < self.state.end && self.judged.get() >= self.state.end).then_some(synced)
-    }
-
-    pub fn confirmed(&self) -> bool {
-        self.bounded_to()
-            .is_some_and(|synced| synced >= self.state.end)
-    }
-
-    pub fn check_synced(&self) -> Result<(), OpLogError> {
-        match self.bounded_to() {
-            Some(synced) if self.state.end < synced => Err(OpLogError::Lost {
-                synced,
-                holds: self.state.end,
-            }),
-            _ => Ok(()),
-        }
     }
 
     pub fn take_discarded(&mut self) -> Vec<Discarded> {

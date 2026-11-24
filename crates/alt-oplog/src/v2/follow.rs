@@ -109,7 +109,7 @@ impl Log {
     /// `noted` is what `tail` says.
     fn take_in(&mut self, past: Past, noted: Option<Tail>) -> Result<Option<Salvaged>, OpLogError> {
         let (state, added, found) = past;
-        let synced = noted.map_or(0, |tail| tail.synced);
+        let synced = noted.map_or(0, |tail| tail.synced_of(state.generation));
         let claim = found.as_ref().map_or(0, |found| found.claim);
         if found.is_some() && state.end < synced.max(self.synced).max(state.synced).max(claim) {
             return Err(OpLogError::Format("oplog record corrupt"));

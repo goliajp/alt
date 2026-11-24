@@ -123,6 +123,18 @@ impl Noted {
             },
         }
     }
+
+    /// What a sync changes for a handle of a log of `generation` whose
+    /// last frame is in its place. A note of a later generation speaks of
+    /// a log that holds that frame too. One of an earlier generation is
+    /// none a cut left: it says nothing of this log, and is taken for
+    /// gone.
+    pub fn to_sync(self, generation: u32) -> Tail {
+        match self {
+            Noted::Says(tail) if tail.generation < generation => Noted::Gone.to_change(),
+            noted => noted.to_change(),
+        }
+    }
 }
 
 impl Tail {
@@ -131,6 +143,17 @@ impl Tail {
     pub fn raise(&mut self, synced: u64, closes: Option<[u8; 4]>) {
         if synced > self.synced {
             (self.synced, self.closes) = (synced, closes.unwrap_or_default());
+        }
+    }
+
+    /// Up to where it says a log of `generation` is synced. Of a log of
+    /// another generation it says nothing by itself: frames a handle
+    /// holds of that one may have been cut, and the note speak of what
+    /// was appended in their place.
+    pub fn synced_of(&self, generation: u32) -> u64 {
+        match self.generation == generation {
+            true => self.synced,
+            false => 0,
         }
     }
 

@@ -215,7 +215,7 @@ impl Log {
         self.closes.copy_from_slice(&bytes[bytes.len() - 4..]);
         self.state = state;
         self.wrote = (self.state.end, self.closes);
-        self.unsynced = true;
+        (self.unsynced, self.owes) = (true, true);
         Ok(())
     }
 
