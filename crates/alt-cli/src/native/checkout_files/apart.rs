@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 
-use super::asked::Asked;
+use super::asked::{self, Asked};
 use super::*;
 
 /// A file, to the file system.
@@ -236,9 +236,25 @@ impl NativeRepo<'_> {
     /// where the other, to the file system, has a file or a directory of
     /// the same name.
     pub(in crate::native) fn ensure_new_apart(&self, coming: &Coming) -> Res<()> {
-        if !self.folds()? {
-            return Ok(());
+        match self.folds()? {
+            true => self.new_apart(coming),
+            false => Ok(()),
         }
+    }
+
+    /// The checks of a tree that comes into a directory which has no
+    /// `.alt` yet to tell by whether names fold there: those of a
+    /// checkout, and that no two of its paths meet where the directory
+    /// itself, asked, takes their names for one.
+    pub(in crate::native) fn ensure_tree_can_come(&self, target: &[WorkEntry]) -> Res<()> {
+        self.preflight_checkout(&[], target)?;
+        if !self.folds()? && asked::folds_in(&self.root)? {
+            self.new_apart(&Coming::of(&[], target, &HashSet::new()))?;
+        }
+        Ok(())
+    }
+
+    fn new_apart(&self, coming: &Coming) -> Res<()> {
         let paths: Vec<&BString> = coming.come.iter().map(|(path, _)| *path).collect();
         match self.clashes(&paths)?.first() {
             Some(clash) => {

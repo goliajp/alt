@@ -108,7 +108,7 @@ impl NativeRepo<'_> {
         };
         let preview = child.clone();
         NativeRepo::attach(&mut *self.store, preview, self.id.clone(), self.request_id)
-            .preflight_checkout(&[], &target)?;
+            .ensure_tree_can_come(&target)?;
         std::fs::create_dir_all(&ws_dir)?;
         crate::durable::write(
             ws_dir.join("meta"),
