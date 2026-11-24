@@ -67,7 +67,7 @@ pub(super) fn note_case(alt_dir: &Path) -> Res<()> {
     if folds_case(alt_dir) {
         let kept = alt_dir.join("git-import");
         std::fs::create_dir_all(&kept)?;
-        crate::durable::write(&kept.join("config"), "[core]\n\tignorecase = true\n")?;
+        crate::durable::write(kept.join("config"), "[core]\n\tignorecase = true\n")?;
     }
     Ok(())
 }
