@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: scanning the entries of a pack and reading a base outside it are functions of their own
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/ingress.rs
