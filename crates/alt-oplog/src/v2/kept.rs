@@ -10,21 +10,24 @@
 //!
 //! The rule is one: the log is not cut where a frame past the cut may
 //! have been covered by a sync that succeeded. What the ops of the log
-//! name tells whether one can have. A sync sees to every ref
-//! transaction it covers, and to the op of each workspace that last
-//! changed its index before where the sync ends: what such an op names
-//! is stored before the log is recorded as synced past it. So a frame
-//! past a ref transaction that names what is not stored was covered by
-//! no sync. Nor was one past a change of an index that names what is
-//! not stored, where no op after that one in all the log replaces it or
-//! takes its workspace away. Where one does, a sync that ends past the
-//! op which replaces it saw to that op instead, and covered the frames
-//! in between as well. And where the log was cut past the change, an
-//! op that replaced it may have been among what was cut: nothing tells
-//! then that every sync saw to it. Past any other op that names what
-//! is not stored a frame may have been covered too. Such a frame is one to keep when
-//! a writer who syncs left it and what it names is stored; a receipt,
-//! which names the ops of its request, when none of them is cut.
+//! name tells whether one can have. A sync ends where a frame ends. It
+//! sees to every ref transaction between the boundary it found and
+//! there, and to the op of each workspace that last changed its index
+//! as the log stood up to there, where that op lies past the boundary:
+//! what such an op names is stored before the log is recorded as synced
+//! past it, and stays. So a sync can have ended at a frame only where
+//! all those ops name what is stored, counted from the op refused or
+//! from where an earlier sync that can have been made ended. A frame is
+//! one to keep when a sync can have ended at it or past it, a writer
+//! who syncs left it, and what it names is stored; a receipt, which
+//! names the ops of its request, when none of them is cut.
+//!
+//! Where the log was cut past the op refused and the cut took ops, a
+//! sync may have ended among what that cut took, and what it saw to
+//! there is not known: an op that replaced a change of an index may
+//! have been among it. Such a sync covered every frame before that
+//! cut, and can have been made where the ref transactions before the
+//! cut name what is stored. So with each cut past the op refused.
 
 use crate::v2::frame::{KIND_RECEIPT, UNSYNCED, View};
 use crate::v2::log::Log;
@@ -32,7 +35,94 @@ use crate::v2::receipt::Receipt;
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
 use crate::v2::tail::Tail;
-use crate::{Discarded, Op, OpLogError};
+use crate::{Discarded, Framed, Op, OpLogError};
+
+/// The ops from one a look refused on, and what is known of them so far.
+struct Past<'a, H> {
+    ops: &'a [Op],
+    frames: Vec<Framed>,
+    /// whether what each op names is stored, where `held` was asked
+    stored: Vec<Option<bool>>,
+    held: H,
+    /// of each workspace, the op that last touched its index among the
+    /// ops taken in
+    last: Vec<([u8; 8], usize)>,
+    /// how far the ops were looked at for one to keep, and where the
+    /// first starts
+    looked: usize,
+    keeps: Option<u64>,
+}
+
+impl<'a, H, E> Past<'a, H>
+where
+    H: FnMut(&Op, bool) -> Result<bool, E>,
+{
+    /// The ops `cut` holds, the first of which names what is not
+    /// stored; `None` where one of them was read from no frame.
+    fn of(cut: &'a Discarded, held: H) -> Option<Self> {
+        let frames: Vec<Framed> = cut.ops.iter().filter_map(|op| op.frame).collect();
+        let mut stored = vec![None; frames.len()];
+        *stored.first_mut()? = Some(false);
+        (frames.len() == cut.ops.len()).then_some(Past {
+            ops: &cut.ops,
+            frames,
+            stored,
+            held,
+            last: Vec::new(),
+            looked: 1,
+            keeps: None,
+        })
+    }
+
+    fn unsynced(&self, at: usize) -> bool {
+        self.frames[at].flags & UNSYNCED != 0
+    }
+
+    /// Whether what op `at` names is stored.
+    fn stored(&mut self, at: usize) -> Result<bool, E> {
+        if self.stored[at].is_none() {
+            let unsynced = self.unsynced(at);
+            self.stored[at] = Some((self.held)(&self.ops[at], unsynced)?);
+        }
+        Ok(self.stored[at] == Some(true))
+    }
+
+    /// Takes in op `at`, the ops before it taken in already; whether a
+    /// sync that saw to the ref transactions up to op `at` can have
+    /// ended there: the op of each workspace that last changed its
+    /// index names what is stored. A sync that began past such an op
+    /// did not see to it, and began where an earlier one ended, which
+    /// did: where the sync began makes no difference.
+    fn ends(&mut self, at: usize) -> Result<bool, E> {
+        let frame = self.frames[at];
+        if frame.workspace != [0; 8] && (frame.staged || frame.retired) {
+            self.last
+                .retain(|(workspace, _)| *workspace != frame.workspace);
+            self.last.push((frame.workspace, at));
+        }
+        for row in 0..self.last.len() {
+            let changed = self.last[row].1;
+            let changes = self.frames[changed].staged && !self.frames[changed].retired;
+            if changes && !self.stored(changed)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Where the first op starts, past the one refused and up to op
+    /// `to`, that a writer who syncs left with what it names stored.
+    fn keeps_to(&mut self, to: usize) -> Result<Option<u64>, E> {
+        while self.keeps.is_none() && self.looked <= to {
+            let at = self.looked;
+            if !self.unsynced(at) && self.stored(at)? {
+                self.keeps = Some(self.frames[at].at);
+            }
+            self.looked += 1;
+        }
+        Ok(self.keeps)
+    }
+}
 
 impl Log {
     /// Where the receipts start, past the first op of `cut`, that a
@@ -61,68 +151,52 @@ impl Log {
         Ok(found)
     }
 
-    /// For each op of `cut`, whether every sync that covers a frame past
-    /// it sees to it: a ref transaction, or a change of the index of a
-    /// workspace that no op after it replaces, nor may have replaced
-    /// before the log was last cut.
-    fn seen_to_by_all(&self, cut: &Discarded) -> Vec<bool> {
-        let mut later: Vec<[u8; 8]> = Vec::new();
-        let mut seen: Vec<bool> = Vec::new();
-        for frame in cut.ops.iter().rev().map(|op| op.frame) {
-            let Some(frame) = frame else {
-                seen.push(false);
-                continue;
-            };
-            let of_workspace = frame.workspace != [0; 8];
-            let replaced = later.contains(&frame.workspace);
-            let changes = of_workspace && frame.staged && !frame.retired;
-            let last = changes && !replaced && frame.at >= self.state.cut;
-            seen.push(frame.linked || last);
-            if of_workspace && (frame.staged || frame.retired) && !replaced {
-                later.push(frame.workspace);
-            }
-        }
-        seen.reverse();
-        seen
-    }
-
     /// Where the first frame starts, past the first op of `cut`, that a
     /// sync may have covered: a writer who syncs left it, `held` finds
-    /// what it names stored, and no op before it that every sync past
-    /// it sees to names what is not.
+    /// what it names stored, and a sync can have ended at it or past
+    /// it. `held` is asked of each op at most once.
     pub(super) fn kept_past<E: From<OpLogError>>(
         &self,
         cut: &Discarded,
-        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
+        held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<u64>, E> {
-        let seen_to = self.seen_to_by_all(cut);
-        // what the op refused names is not stored
-        if seen_to.first() != Some(&false) {
+        let Some(mut past) = Past::of(cut, held) else {
             return Ok(None);
-        }
+        };
         let receipts = self.receipts_past(cut)?;
-        let mut receipts = receipts.into_iter().peekable();
-        let ops = cut.ops.iter().zip(&seen_to).skip(1);
-        for (op, seen_to) in ops {
-            let Some(frame) = op.frame else {
-                continue;
-            };
-            if let Some(receipt) = receipts.next_if(|receipt| *receipt < frame.at) {
-                return Ok(Some(receipt));
+        // where the first ref transaction starts that names what is
+        // not stored: no sync ended at it or past it
+        let mut dangling = u64::MAX;
+        for at in 0..past.frames.len() {
+            let frame = past.frames[at];
+            if frame.linked && !past.stored(at)? {
+                dangling = frame.at;
+                break;
             }
-            // of the ops past the one refused, those are asked about
-            // that the answer turns on
-            let unsynced = frame.flags & UNSYNCED != 0;
-            if !seen_to && unsynced {
+            if !past.ends(at)? {
                 continue;
             }
-            match (held(op, unsynced)?, unsynced) {
-                (true, false) => return Ok(Some(frame.at)),
-                (false, _) if *seen_to => return Ok(None),
-                _ => {}
+            // a sync can have ended here, and covered all up to the
+            // next op
+            let next = past.frames.get(at + 1).map_or(u64::MAX, |next| next.at);
+            let receipt = receipts.iter().copied().find(|receipt| *receipt < next);
+            if let Some(kept) = [past.keeps_to(at)?, receipt].into_iter().flatten().min() {
+                return Ok(Some(kept));
             }
         }
-        Ok(receipts.next())
+        // A sync that ended among what a cut past the op refused took
+        // covered every frame before that cut, and saw to the ref
+        // transactions among them: the last such cut before which they
+        // all name what is stored.
+        let cuts = self.cuts_past(cut.from)?;
+        let Some(cut_past) = cuts.into_iter().find(|at| *at < dangling) else {
+            return Ok(None);
+        };
+        let before = past.frames.iter().filter(|frame| frame.at < cut_past);
+        let before = before.count();
+        let receipt = receipts.iter().copied().find(|receipt| *receipt < cut_past);
+        let op = past.keeps_to(before.saturating_sub(1))?;
+        Ok([op, receipt].into_iter().flatten().min())
     }
 
     /// Up to where the log is known synced to a writer about to cut it

@@ -39,6 +39,7 @@ mod v2_full_check;
 mod v2_holes;
 mod v2_image;
 mod v2_kept;
+mod v2_kept_ends;
 mod v2_kept_past;
 mod v2_kept_state;
 mod v2_ledger;

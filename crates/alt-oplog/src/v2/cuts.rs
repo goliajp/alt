@@ -10,8 +10,9 @@
 //! since the earliest frame it looked up, however many the log had before
 //! and however many frames it looks up after.
 
+use crate::OpLogError;
 use crate::v2::block::BLOCK_HEADER_LEN;
-use crate::v2::frame::{Ext, HEADER_LEN, KIND_CHECKPOINT};
+use crate::v2::frame::{Cut, Ext, HEADER_LEN, KIND_CHECKPOINT};
 use crate::v2::log::Log;
 
 /// The cuts of a log whose last one left the checkpoint at `last` under
@@ -32,11 +33,11 @@ pub(crate) struct Cuts {
 const CARRIED: usize = 256;
 
 impl Log {
-    /// What the checkpoint frame at `at` says of the cut before it: where
-    /// the checkpoint of that one starts and the generation of the frames
-    /// between the two. Its checksum is not held to: what is learned here
-    /// is a generation to try a frame under.
-    fn cut_before(&self, at: u64) -> std::io::Result<Option<(u64, u32)>> {
+    /// What the checkpoint frame at `at` says of the cut it was left by,
+    /// and of the one before: where the checkpoint of that one starts
+    /// and the generation of the frames between the two. Its checksum
+    /// is not held to.
+    fn cut_said(&self, at: u64) -> std::io::Result<Option<Cut>> {
         let Some(left) = self.state.end.checked_sub(at) else {
             return Ok(None);
         };
@@ -51,8 +52,26 @@ impl Log {
             return Ok(None);
         }
         let ext = said(HEADER_LEN + carried).and_then(|frame| Ext::decode(&frame[HEADER_LEN..]));
-        let cut = ext.and_then(|ext| ext.cut);
-        Ok(cut.map(|cut| (cut.after, cut.generation)))
+        Ok(ext.and_then(|ext| ext.cut))
+    }
+
+    /// Where the checkpoints start, past byte `from`, of the cuts that
+    /// took ops off the log, the last cut first. A cut of what a writer
+    /// left unfinished took nothing a sync can have ended at, and is
+    /// none of them.
+    pub(super) fn cuts_past(&self, from: u64) -> Result<Vec<u64>, OpLogError> {
+        let (mut at, mut found) = (self.state.cut, Vec::new());
+        while at > from {
+            let Some(cut) = self.cut_said(at)? else {
+                return Err(OpLogError::Format("oplog record corrupt"));
+            };
+            if cut.of_the_log {
+                found.push(at);
+            }
+            // each lies before the one that names it
+            at = if cut.after < at { cut.after } else { 0 };
+        }
+        Ok(found)
     }
 
     /// The generation the frame at `at` was written under, when it lies
@@ -74,11 +93,11 @@ impl Log {
         }
         while cuts.next > at {
             let cut = cuts.next;
-            cuts.next = match self.cut_before(cut)? {
-                Some((before, generation)) => {
-                    cuts.back.push((cut, generation));
+            cuts.next = match self.cut_said(cut)? {
+                Some(said) => {
+                    cuts.back.push((cut, said.generation));
                     // each lies before the one that names it
-                    if before < cut { before } else { 0 }
+                    if said.after < cut { said.after } else { 0 }
                 }
                 None => 0,
             };

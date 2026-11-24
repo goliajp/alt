@@ -82,7 +82,7 @@ fn a_receipt_a_sync_covered_is_kept_from_a_cut_wherever_past_the_op_refused_it_l
 /// What a look comes to that refuses the ops of the payloads `refused`,
 /// on a log of two synced ops and, left after them by another boot and
 /// by writers that sync, the ops `left`; with where each of those starts.
-fn left_by_another_boot(left: &[(&[u8], Meta)], refused: &[&[u8]]) -> (String, Vec<u64>) {
+pub fn left_by_another_boot(left: &[(&[u8], Meta)], refused: &[&[u8]]) -> (String, Vec<u64>) {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
     let mut log = new_log(dir.path());
