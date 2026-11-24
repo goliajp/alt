@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the transaction that publishes a segment is a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
