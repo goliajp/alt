@@ -32,7 +32,7 @@ fn run_git(dir: &Path, args: &[&str]) {
     );
 }
 
-fn build_fixture_alt(root: &Path, name: &str) -> PathBuf {
+pub(crate) fn build_fixture_alt(root: &Path, name: &str) -> PathBuf {
     let repo_dir = root.join(name);
     std::fs::create_dir_all(&repo_dir).unwrap();
     // We need a git source, then alt-import that into <repo_dir>/.alt.

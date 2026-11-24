@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use alt_bytes::BString;
-use alt_git_config::{Config, Entry, IncludeContext};
+use alt_git_config::{Config, Entry};
 
 mod applying;
 mod files;
@@ -100,26 +100,18 @@ fn unnamed(name: &str) -> Option<OsString> {
     (name == "GIT_CONFIG_NOSYSTEM").then(|| OsString::from("1"))
 }
 
-fn env_path(name: &str) -> Option<PathBuf> {
-    var(name).filter(|v| !v.is_empty()).map(PathBuf::from)
-}
-
 pub(crate) fn home() -> Option<PathBuf> {
-    env_path("HOME")
+    alt_repo::owned::home(&var)
 }
 
 /// The directory the user's git files are in: `$XDG_CONFIG_HOME/git`, or
 /// `~/.config/git`.
 pub(crate) fn user_dir() -> Option<PathBuf> {
-    env_path("XDG_CONFIG_HOME")
-        .or_else(|| home().map(|h| h.join(".config")))
-        .map(|config| config.join("git"))
+    alt_repo::owned::user_dir(&var)
 }
 
-/// The entries of the system's and the user's configuration, in the
-/// order git reads them: `/etc/gitconfig`, `$XDG_CONFIG_HOME/git/config`,
-/// `~/.gitconfig`. `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_SYSTEM` and
-/// `GIT_CONFIG_GLOBAL` are honoured as git honours them.
+/// The entries of the system's and the user's configuration, as the
+/// caller's variables place it.
 pub(crate) fn outer(git_dir: Option<PathBuf>, branch: Option<BString>) -> Res<Vec<Entry>> {
     Ok(outer_listed(git_dir, branch)?.0)
 }
@@ -130,45 +122,7 @@ pub(crate) fn outer_listed(
     git_dir: Option<PathBuf>,
     branch: Option<BString>,
 ) -> Res<(Vec<Entry>, Vec<PathBuf>)> {
-    let ctx = IncludeContext {
-        git_dir,
-        branch,
-        home: home(),
-    };
-    let no_system = var("GIT_CONFIG_NOSYSTEM").is_some_and(|v| {
-        let v = v.to_string_lossy().to_ascii_lowercase();
-        matches!(v.as_str(), "true" | "yes" | "on") || v.parse::<i64>().is_ok_and(|n| n != 0)
-    });
-    let mut files = Vec::new();
-    // a variable set to nothing names no file, and no other is read
-    // in its place
-    if !no_system {
-        files.push(match var("GIT_CONFIG_SYSTEM") {
-            Some(named) => PathBuf::from(named),
-            None => PathBuf::from("/etc/gitconfig"),
-        });
-    }
-    match var("GIT_CONFIG_GLOBAL") {
-        Some(only) => files.push(PathBuf::from(only)),
-        None => {
-            files.extend(user_dir().map(|dir| dir.join("config")));
-            files.extend(home().map(|h| h.join(".gitconfig")));
-        }
-    }
-    let mut entries = Vec::new();
-    let mut listed = Vec::new();
-    for file in files {
-        // as in git, a file the user may not read is passed over
-        let denied = |e: std::io::Error| e.kind() == std::io::ErrorKind::PermissionDenied;
-        if !file.is_file() || std::fs::File::open(&file).is_err_and(denied) {
-            listed.push(file);
-            continue;
-        }
-        let (read, from) = Config::load_listing(&file, &ctx)?;
-        entries.extend(read.entries);
-        listed.extend(from);
-    }
-    Ok((entries, listed))
+    Ok(alt_repo::owned::outer_listed(&var, git_dir, branch)?)
 }
 
 /// `repository`'s configuration on top of the system's and the user's.

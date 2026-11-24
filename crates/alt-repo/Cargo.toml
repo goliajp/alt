@@ -16,8 +16,8 @@ alt-git-config.workspace = true
 alt-git-pack.workspace = true
 alt-git-refs.workspace = true
 alt-bytes.workspace = true
+alt-os.workspace = true
 
 [dev-dependencies]
 alt-import.workspace = true
-alt-os.workspace = true
 alt-testutil.workspace = true

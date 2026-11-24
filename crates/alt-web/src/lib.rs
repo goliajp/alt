@@ -80,7 +80,23 @@ impl MultiRepo {
         if !path.join(".alt").is_dir() {
             return Err(ApiError::RepoNotFound(name.to_string()));
         }
-        Repository::discover(&path).map_err(|e| ApiError::RepoOpen(e.to_string()))
+        let repo = Repository::discover(&path).map_err(|e| ApiError::RepoOpen(e.to_string()))?;
+        // as git: the configuration of a repository of another user is
+        // not read, unless `safe.directory` names it
+        match alt_repo::owned::served_safe(&alt_repo::owned::process, &repo) {
+            Ok(true) => Ok(repo),
+            Ok(false) => {
+                eprint!(
+                    "{}",
+                    alt_repo::owned::dubious(alt_repo::owned::looked_at(&repo).0)
+                );
+                Err(ApiError::RepoOpen(
+                    "the repository belongs to another user, and safe.directory does not name it"
+                        .to_owned(),
+                ))
+            }
+            Err(e) => Err(ApiError::RepoOpen(e.to_string())),
+        }
     }
 }
 

@@ -12,6 +12,7 @@ pub mod kept_config;
 pub mod met;
 mod object_format;
 mod odb;
+pub mod owned;
 pub mod reflog;
 mod revspec;
 mod revwalk;
