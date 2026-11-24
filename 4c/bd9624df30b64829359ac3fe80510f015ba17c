@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: what the server of a push writes and reads has a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-wire/src/push.rs
+touched: crates/alt-wire/src/push/served.rs
