@@ -49,3 +49,32 @@ impl NativeRepo<'_> {
         Ok(Some((principal, sig_text)))
     }
 }
+
+/// The repository as a certificate of this push names it, where the server
+/// takes certificates: the address the push is sent to. A server that tells
+/// the addresses it is reached at takes a certificate for those only, so a
+/// push to another name of it ends here, before anything is packed or sent.
+pub(super) fn pushee(
+    ad: &alt_wire::V1RefAdvertisement,
+    transport: &alt_wire_http::GitTransport,
+) -> Res<Option<String>> {
+    let told = ad.cap_value(alt_wire::CAP_ALT_PUSHEE);
+    if told.is_none() && !ad.supports(alt_wire::CAP_ALT_PUSHEE) {
+        return Ok(None);
+    }
+    let pushee = transport.pushed_to()?;
+    if let Some(told) = told {
+        let at = |origin: &str| {
+            let behind = pushee.to_ascii_lowercase();
+            let behind = behind.strip_prefix(origin);
+            behind.is_some_and(|path| path.is_empty() || path.starts_with('/'))
+        };
+        if !told.split(',').any(at) {
+            return Err(format!(
+                "the server is reached at {told}, and this push goes to {pushee}: a signature for it would not be taken; push to the address the server names"
+            )
+            .into());
+        }
+    }
+    Ok(Some(pushee))
+}

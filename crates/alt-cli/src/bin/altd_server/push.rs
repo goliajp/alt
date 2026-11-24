@@ -195,10 +195,13 @@ pub(super) fn describe_sig(o: &SigOutcome) -> String {
 /// path on git-native clients).
 ///
 /// A signature is over a certificate that names the nonce this repository
-/// gave for one push and the repository itself, as the request `asked` for
-/// it by its `Host` header and its path. One without them, or with a nonce
-/// that was used, or for another repository, is a signature that could be
-/// sent again, here or elsewhere: it does not verify.
+/// gave for one push and the repository itself: at one of the addresses the
+/// server is told it is reached at, or where it is told none, as the request
+/// `asked` for it by its `Host` header; and by the path of the request. One
+/// without them, or with a nonce that was used, or for another repository,
+/// is a signature that could be sent again, here or elsewhere: it does not
+/// verify. A server that goes by the `Host` header takes what was signed
+/// for another server from whoever sends it on under that server's name.
 pub(super) fn verify_push_signature(
     writer: &WriteCoordinator,
     head: &alt_wire::push::PushHead,
@@ -229,10 +232,14 @@ pub(super) fn verify_push_signature(
     else {
         return bad("the signature names no nonce of this server and no repository");
     };
-    if !asked
-        .0
-        .is_some_and(|host| alt_wire::pushee_is(pushee, host, asked.1))
-    {
+    // against what the server is told it is reached at; where it is told
+    // nothing, against the name its client gave it
+    let here = &super::told::told().origins;
+    let this = match here.is_empty() {
+        true => (asked.0).is_some_and(|host| alt_wire::pushee_is(pushee, host, asked.1)),
+        false => alt_wire::pushee_is_at(pushee, here, asked.1),
+    };
+    if !this {
         return bad("the signature is for another repository than this one");
     }
     if !writer.nonces.consume(nonce) {

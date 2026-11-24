@@ -10,7 +10,8 @@ use crate::RefUpdate;
 use alt_git_codec::HashAlgo;
 
 /// Capability a server names where it takes signatures over [`push_certificate`],
-/// and that carries the repository pushed to, as [`pushee`] gives it, on a push.
+/// and that carries the repository pushed to, as the address it is sent to names
+/// it, on a push.
 pub const CAP_ALT_PUSHEE: &str = "alt-pushee";
 
 /// The bytes a push signature signs: the head of a Git push certificate, an empty
@@ -35,47 +36,55 @@ pub fn push_certificate(
     [head, lines.concat()].concat().into_bytes()
 }
 
-/// The address of a repository as a certificate names it: the URL that is pushed
-/// to, without the name and password it may carry, without a query, and without
-/// a slash at its end.
-pub fn pushee(url: &str) -> String {
-    let url = url.split(['?', '#']).next().unwrap_or(url);
-    let (scheme, rest) = match url.split_once("://") {
-        Some((scheme, rest)) => (Some(scheme), rest),
-        None => (None, url),
-    };
-    let (authority, path) = match rest.find('/') {
-        Some(at) => rest.split_at(at),
-        None => (rest, ""),
-    };
-    let host = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    let path = path.trim_end_matches('/');
-    match scheme {
-        Some(scheme) => format!("{scheme}://{host}{path}"),
-        None => format!("{host}{path}"),
-    }
-}
-
-/// Whether `pushee` is the repository a request with the `Host` header `host` and
-/// the path `path` is for: the same host, as the client named it, and the path
-/// that `path` has before the service it asks for.
-pub fn pushee_is(pushee: &str, host: &str, path: &str) -> bool {
-    let Some((_, rest)) = pushee.split_once("://") else {
-        return false;
-    };
+/// The scheme and the host of `pushee`, where it is the repository a push request
+/// with the path `path` is for: the path that `path` has before the service it
+/// asks for.
+fn server_of<'a>(pushee: &'a str, path: &str) -> Option<(&'a str, &'a str)> {
+    let (scheme, rest) = pushee.split_once("://")?;
     let (named, at) = match rest.find('/') {
         Some(at) => rest.split_at(at),
         None => (rest, ""),
     };
     let path = path.split('?').next().unwrap_or(path);
-    let Some(repository) = path.strip_suffix("/git-receive-pack") else {
-        return false;
+    let repository = path.strip_suffix("/git-receive-pack")?;
+    let same = at.trim_end_matches('/') == repository.trim_end_matches('/');
+    (same && !named.is_empty()).then_some((scheme, named))
+}
+
+/// Whether `pushee` is the repository a request with the `Host` header `host` and
+/// the path `path` is for: the same host, as the client named it, and the path
+/// that `path` has before the service it asks for. The header is the client's
+/// word, and a server that goes by it takes a push that was signed for another
+/// server and is sent on with that server's name: see [`pushee_is_at`].
+pub fn pushee_is(pushee: &str, host: &str, path: &str) -> bool {
+    server_of(pushee, path).is_some_and(|(_, named)| named.eq_ignore_ascii_case(host.trim()))
+}
+
+/// Whether `pushee` is the repository a request with the path `path` is for on
+/// the server that is reached at `origins`, each a scheme and a host as
+/// [`origin`] reads them.
+pub fn pushee_is_at(pushee: &str, origins: &[String], path: &str) -> bool {
+    server_of(pushee, path).is_some_and(|(scheme, named)| {
+        let at = format!("{scheme}://{named}").to_ascii_lowercase();
+        origins.contains(&at)
+    })
+}
+
+/// An address a server is told it is reached at, as certificates are compared
+/// with it: `http` or `https`, a host, and a port where it is not the one of
+/// the scheme; in lower case, and nothing behind it but a slash.
+pub fn origin(told: &str) -> Option<String> {
+    let (scheme, rest) = told.trim().split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let default = match scheme.as_str() {
+        "http" => ":80",
+        "https" => ":443",
+        _ => return None,
     };
-    !named.is_empty()
-        && named.eq_ignore_ascii_case(host.trim())
-        && at.trim_end_matches('/') == repository.trim_end_matches('/')
+    let host = rest.strip_suffix('/').unwrap_or(rest).to_ascii_lowercase();
+    let host = host.strip_suffix(default).unwrap_or(&host);
+    let plain = |byte: u8| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte);
+    (!host.is_empty() && host.bytes().all(plain)).then(|| format!("{scheme}://{host}"))
 }
 
 #[cfg(test)]
@@ -109,13 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repository_is_named_without_what_signs_in_to_it_and_is_the_one_a_request_is_for() {
-        assert_eq!(
-            pushee("https://alice:secret@Host.example:8443/team/repo/?x=1"),
-            "https://Host.example:8443/team/repo"
-        );
-        assert_eq!(pushee("http://127.0.0.1:4000/"), "http://127.0.0.1:4000");
-        assert_eq!(pushee("http://h/r.git#frag"), "http://h/r.git");
+    fn a_repository_is_the_one_a_request_is_for_by_its_host_and_its_path() {
         for (pushee, host, path, is) in [
             (
                 "http://127.0.0.1:4000",
@@ -181,5 +184,43 @@ mod tests {
         ] {
             assert_eq!(pushee_is(pushee, host, path), is, "{pushee} {host} {path}");
         }
+    }
+
+    #[test]
+    fn a_server_that_is_told_its_addresses_takes_a_certificate_for_one_of_them_only() {
+        for (told, read) in [
+            ("https://Alt.Example", Some("https://alt.example")),
+            ("https://alt.example:443/", Some("https://alt.example")),
+            ("http://alt.example:80", Some("http://alt.example")),
+            ("https://alt.example:80", Some("https://alt.example:80")),
+            (" http://[::1]:8080 ", Some("http://[::1]:8080")),
+            ("alt.example", None),
+            ("ssh://alt.example", None),
+            ("https://", None),
+            ("https://alt.example/team", None),
+            ("https://alice@alt.example", None),
+            ("https://alt.example?x", None),
+        ] {
+            assert_eq!(origin(told).as_deref(), read, "{told}");
+        }
+        let here = [
+            origin("https://alt.example").unwrap(),
+            origin("http://10.0.0.5:8090").unwrap(),
+        ];
+        let push = "/team/repo/git-receive-pack";
+        for (pushee, is) in [
+            ("https://alt.example/team/repo", true),
+            ("https://ALT.example/team/repo", true),
+            ("http://10.0.0.5:8090/team/repo", true),
+            // the other scheme, another port, another server, another repository
+            ("http://alt.example/team/repo", false),
+            ("https://alt.example:8443/team/repo", false),
+            ("https://other.example/team/repo", false),
+            ("https://alt.example/team/other", false),
+            ("alt.example/team/repo", false),
+        ] {
+            assert_eq!(pushee_is_at(pushee, &here, push), is, "{pushee}");
+        }
+        assert!(!pushee_is_at("https://alt.example/team/repo", &[], push));
     }
 }

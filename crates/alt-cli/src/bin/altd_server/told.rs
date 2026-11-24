@@ -33,6 +33,7 @@ ALT_SERVER_TEMP_DIR                     a directory on a disk for what is writte
   ALT_SERVER_MAX_CONNECTIONS              connections open at once (256)
   ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not of this host (a quarter)
   ALT_SERVER_LOCAL_PEERS                  the addresses and networks that are of this host, with commas between (127.0.0.0/8,::1)
+  ALT_SERVER_ORIGINS                      the addresses clients reach this server at, as https://host or http://host:port, with commas between: a signed push is taken for these only (unset: for the Host header of its request)
   ALT_SERVER_MAX_PUSH_BYTES               bytes of the body of a push (1 GiB)
   ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
   ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in, and as much on disk (3 pushes and 1 GiB)
@@ -88,6 +89,9 @@ pub(super) struct Told {
     /// and counted for no address, a proxy in front of the server among
     /// them; the loopback addresses unless it is set
     pub(super) here: &'static [super::http::Network],
+    /// `ALT_SERVER_ORIGINS`: the addresses the server is reached at, as
+    /// certificates of pushes are compared with them; none unless it is set
+    pub(super) origins: Vec<String>,
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
     pub(super) shutdown: Duration,
 }
@@ -131,6 +135,16 @@ impl Told {
                 Vec::leak(read.map_err(|why| format!("ALT_SERVER_LOCAL_PEERS={told:?}: {why}"))?)
             }
         };
+        let origins = match lookup("ALT_SERVER_ORIGINS") {
+            None => Vec::new(),
+            Some(told) => {
+                let expected = "https://host or http://host:port is expected, with commas between";
+                let unread = || format!("ALT_SERVER_ORIGINS={told:?}: {expected}");
+                let text = told.to_str().ok_or_else(unread)?;
+                let read = text.split(',').map(alt_wire::origin);
+                read.collect::<Option<Vec<_>>>().ok_or_else(unread)?
+            }
+        };
         Ok(Told {
             push_bytes,
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
@@ -150,6 +164,7 @@ impl Told {
                 spool: number(lookup, "ALT_SERVER_MAX_RECEIVING_BYTES", spool)?,
             },
             here,
+            origins,
             shutdown: Duration::from_millis(shutdown),
         })
     }
@@ -245,6 +260,23 @@ mod tests {
                 why.starts_with(&format!("ALT_SERVER_LOCAL_PEERS={value:?}: ")),
                 "{why}"
             );
+        }
+        assert!(unset.origins.is_empty());
+        let told = with(&[(
+            "ALT_SERVER_ORIGINS",
+            "https://Alt.Example/, http://10.0.0.5:8090",
+        )]);
+        let read = ["https://alt.example", "http://10.0.0.5:8090"];
+        assert_eq!(told.unwrap().origins, read);
+        for value in [
+            "",
+            "alt.example",
+            "https://a.example/alt",
+            "https://a.example,",
+        ] {
+            let why = with(&[("ALT_SERVER_ORIGINS", value)]).err().expect(value);
+            let named = format!("ALT_SERVER_ORIGINS={value:?}: ");
+            assert!(why.starts_with(&named), "{why}");
         }
         // the largest number there is counts on without wrapping
         let most = with(&[("ALT_SERVER_MAX_PUSH_BYTES", "18446744073709551615")]).unwrap();

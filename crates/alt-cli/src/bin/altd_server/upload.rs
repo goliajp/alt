@@ -200,8 +200,16 @@ pub(super) fn handle_info_refs(
                 "side-band-64k",
                 concat!("agent=", "alt-server/", env!("CARGO_PKG_VERSION")),
             ];
+            // with the addresses the server is reached at, where it is told
+            // them: a client then knows before it sends anything whether what
+            // it would sign is taken here
+            let here = &super::told::told().origins;
+            let pushee = match here.is_empty() {
+                true => alt_wire::CAP_ALT_PUSHEE.to_owned(),
+                false => format!("{}={}", alt_wire::CAP_ALT_PUSHEE, here.join(",")),
+            };
             if let Some(s) = nonce_cap.as_deref() {
-                caps_list.extend([s, alt_wire::CAP_ALT_PUSHEE]);
+                caps_list.extend([s, pushee.as_str()]);
             }
             alt_wire::push::encode_v1_ref_advertisement(
                 &mut body,

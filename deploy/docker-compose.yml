@@ -22,6 +22,9 @@ services:
       # holds it to no part of the connections and of the room for bodies
       # and responses, as it holds a proxy that reaches it over loopback.
       ALT_SERVER_LOCAL_PEERS: "127.0.0.0/8,::1,172.30.90.1"
+      # Where clients reach the server: a signed push is taken for this
+      # address and for no other.
+      ALT_SERVER_ORIGINS: "https://alt.golia.jp"
     volumes:
       # Read-write because altd-server / alt-web both need to write the
       # oplog `sync.lock` on open even for read-only operations. The

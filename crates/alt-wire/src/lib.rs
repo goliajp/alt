@@ -43,7 +43,7 @@ pub mod pkt;
 pub mod push;
 
 pub use caps::{CapabilityAd, parse_capability_advertisement};
-pub use certificate::{CAP_ALT_PUSHEE, push_certificate, pushee, pushee_is};
+pub use certificate::{CAP_ALT_PUSHEE, origin, push_certificate, pushee_is, pushee_is_at};
 pub use fetch::{
     FetchAck, FetchError, FetchPreamble, FetchRequest, ShallowInfo, WantedRef, drain_packfile,
     encode_fetch_request, read_fetch_preamble,

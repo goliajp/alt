@@ -141,6 +141,12 @@ fn main() {
         mode.describe()
     );
 
+    if told.origins.is_empty() {
+        eprintln!(
+            "altd-server: ALT_SERVER_ORIGINS is not set: a signed push is taken for the Host header of its request, also one that was signed for another server and is sent on under that server's name"
+        );
+    }
+
     let mode = Arc::new(mode);
     let mut handles = Vec::with_capacity(workers);
     for _ in 0..workers {
