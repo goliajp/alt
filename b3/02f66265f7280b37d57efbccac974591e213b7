@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: have no sync say of ops that were cut that they are synced
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle/settled.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/bound.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/reread.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_back.rs
+touched: crates/alt-oplog/tests/it/v2_reread.rs
+touched: crates/alt-oplog/tests/it/v2_sync_cut.rs
+touched: crates/alt-refs/src/lib.rs
+touched: crates/alt-refs/src/reading.rs
+touched: crates/alt-refs/src/settle.rs
+touched: crates/alt-refs/tests/it/main.rs
+touched: crates/alt-refs/tests/it/owed_sync.rs
+touched: crates/alt-refs/tests/it/v2.rs
