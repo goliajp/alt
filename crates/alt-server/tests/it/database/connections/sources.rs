@@ -41,6 +41,11 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
     std::thread::sleep(Duration::from_millis(300));
     let crowded = Some("HTTP/1.1 429 Too Many Requests".to_owned());
     assert_eq!(alive(&server, Some("203.0.113.9")), crowded);
+    // and is told when to come again
+    let told = answered(&server, Some("203.0.113.9"))
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(told.contains("\r\nretry-after: 1\r\n"), "{told}");
     let fine = Some("HTTP/1.1 200 OK".to_owned());
     assert_eq!(alive(&server, Some("203.0.113.10")), fine);
     // what the proxy names nobody for is the proxy's own, and has no limit

@@ -60,13 +60,18 @@ fn file(content_type: &str, file: std::fs::File, bytes: u64) -> Response<Respons
 }
 /// the answer to a request of an address that has as many under way as one may
 pub(super) fn crowded() -> Response<ResponseBody> {
-    failure(
+    let mut output = failure(
         429,
         ErrorCode::TemporarilyUnavailable,
         "Too many requests of this address are under way",
         None,
         Retry::SameRequest,
-    )
+    );
+    // a place is there again when any request of the address ends, and most
+    // end within the second
+    let soon = header::HeaderValue::from_static("1");
+    output.headers_mut().insert(header::RETRY_AFTER, soon);
+    output
 }
 pub(super) fn unknown() -> Response<ResponseBody> {
     failure(

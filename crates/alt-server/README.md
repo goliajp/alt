@@ -101,8 +101,12 @@ at once, a quarter of `connections` by default. A peer that is neither on this
 host nor a proxy named in `http.trusted_proxies` is counted by its connections,
 and one beyond that is closed unheard. The clients of a named proxy are counted by their requests under
 way, each for the address the proxy gives in `X-Forwarded-For`, and one beyond
-that is answered `429` with `retry: same_request`; a request the proxy names
-nobody for is the proxy's own and has no such limit.
+that is answered `429` with `retry: same_request` and `Retry-After`; a request
+the proxy names nobody for is the proxy's own and has no such limit. A clone, a
+fetch or a push of Git has one request under way at a time, so the default lets
+a quarter of `connections` such operations of one address go on at once and
+leaves the rest to other addresses. An address many people or build jobs share
+needs the key raised to what they do at once.
 
 A request keeps no worker while its body is received. One caller may have
 `http.receiving_each` bodies under way at once (an eighth of `connections` by
