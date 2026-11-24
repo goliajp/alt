@@ -27,6 +27,25 @@ fn directories<'c>(from: &'c [u8], to: &'c [u8]) -> Option<(&'c [u8], &'c [u8])>
     (f < from.len()).then_some((&from[..f], &to[..t]))
 }
 
+/// Whether a directory in `dir`, at any depth, holds nothing.
+fn holds_empty(dir: &Path) -> Res<bool> {
+    let mut within = vec![dir.to_owned()];
+    while let Some(dir) = within.pop() {
+        let mut entries = 0;
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            entries += 1;
+            if entry.file_type()?.is_dir() {
+                within.push(entry.path());
+            }
+        }
+        if entries == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn same_file(a: &Path, b: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     match (a.symlink_metadata(), b.symlink_metadata()) {
@@ -107,6 +126,11 @@ impl NativeRepo<'_> {
             // no directory is renamed to within itself
             let apart = !inside(to, from) && !inside(from, to);
             if files.is_empty() || !apart || !files.iter().all(goes) || expected != files.len() {
+                continue;
+            }
+            // a directory with nothing in it is no file of the checkout:
+            // renamed along, it would leave the place git leaves it in
+            if holds_empty(&self.abs(&BString::from(from))?)? {
                 continue;
             }
             if self.renamed(from, to, &mut listed)? {
