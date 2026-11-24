@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: clone and add a workspace where names meet, cut short a command that asks of names, and stop a merge over a name a file gives to a directory
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/casefold_left.rs
+touched: crates/alt-cli/tests/it/main.rs
