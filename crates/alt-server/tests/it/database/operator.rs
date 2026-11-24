@@ -4,6 +4,7 @@ mod observability;
 mod provision;
 mod schema_21;
 mod scrubbed;
+mod serving;
 mod unread;
 mod upgrade;
 use super::*;
