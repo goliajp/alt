@@ -23,12 +23,15 @@
 //! end under its lock takes back what the header tells. Until then the
 //! log ends at that place for whoever reads without cutting.
 //!
-//! These bytes are under no checksum, the header's does not cover them,
-//! and they are synced with the checkpoint, not before. After a power
-//! cut any of this may have reached the disk or not, and no handle is
-//! left that it would have to tell anything: whoever opens the log finds
-//! the cut in its frames. A place they name that is not one a cut could
-//! be made at, before where the log is synced, tells nothing.
+//! These bytes are under no checksum: the header's does not cover them.
+//! A cut syncs them before it writes its checkpoint, so that a part of
+//! the checkpoint is never on disk without them: after a power cut,
+//! what does not read at the place they name may be what a cut of ops
+//! laid there. A writer that takes them back does not sync that, and a
+//! power cut may bring them back over a log the cut never came to,
+//! which the next writer takes back again. A place they name that is
+//! not one a cut could be made at, before where the log is synced,
+//! tells nothing.
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;

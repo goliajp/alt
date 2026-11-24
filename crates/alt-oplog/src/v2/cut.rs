@@ -169,16 +169,16 @@ impl Log {
 
     /// Says where the log ends what `discarded` holds was cut, in a
     /// checkpoint of `generation` that is synced, and has the file end
-    /// with it; `looked` for ops of the log that a look refused.
+    /// with it; `of_the_log` where ops of the log may be among it.
     fn lay_cut(
         &mut self,
         discarded: &Discarded,
-        (generation, looked): (u32, bool),
+        (generation, of_the_log): (u32, bool),
     ) -> Result<(), OpLogError> {
         let cut = Cut {
             bytes: discarded.to - discarded.from,
             ops: discarded.ops.len() as u32,
-            of_the_log: looked,
+            of_the_log,
             after: self.state.cut,
             generation: self.state.generation,
         };
@@ -225,8 +225,11 @@ impl Log {
     ///
     /// The order holds through a power cut and through the death of this
     /// process alike. The header of the log first tells that it is cut
-    /// at `at`: the frames past it stay readable until the file is made
-    /// shorter, and are no log from the next step on. Then the log says
+    /// at `at`, and is synced: the frames past it stay readable until
+    /// the file is made shorter, and are no log from the next step on.
+    /// A cut of what does not read where the header tells a cut of may
+    /// be that cut made again, its checkpoint lost in part: it says of
+    /// itself that it took ops of the log. Then the log says
     /// what is cut, in a checkpoint under the next generation written
     /// over them and synced. Only then is the file made to end with that
     /// checkpoint. `tail` speaks of the log as it is once cut from the
@@ -246,11 +249,12 @@ impl Log {
         let synced = self.may_cut(at, noted, kept)?;
         let (pending, judged) = self.left_after(noted, at, looked);
         let generation = self.generation_cut()?;
+        let told = self.told()?;
+        let of_the_log = looked || (told.begun(self.state.generation) && told.at == at);
         if at != self.state.end {
             self.read_to(at)?;
             self.may_append()?;
         }
-        Mark { generation, at }.write(&self.file)?;
         // the checkpoint of the cut is of this boot: whoever begins at it
         // finds noted what is left to look at before it
         let mut tail = Tail {
@@ -262,9 +266,8 @@ impl Log {
             hidden: 0,
             ends: 0,
         };
-        tail.write(&self.beside(), &held)?;
-        cut_reached(1)?;
-        self.lay_cut(&discarded, (generation, looked))?;
+        self.tell_cut(Mark { generation, at }, &tail, &held)?;
+        self.lay_cut(&discarded, (generation, of_the_log))?;
         // the checkpoint is synced with the cut; of a frame this handle
         // wrote that was cut, its caller is told by the look
         (self.unsynced, self.cut_on_disk) = (false, self.state.end);
@@ -280,6 +283,17 @@ impl Log {
         }
         self.hidden = None;
         self.discarded.push(discarded);
+        Ok(())
+    }
+
+    /// The first step of a cut: the header of the log tells of it, on
+    /// disk before a byte of its checkpoint is, and `tail` speaks of
+    /// the log as it is once cut.
+    fn tell_cut(&self, cut: Mark, tail: &Tail, held: &Held) -> Result<(), OpLogError> {
+        cut.write(&self.file)?;
+        crate::v2::fsync(&self.file)?;
+        tail.write(&self.beside(), held)?;
+        cut_reached(1)?;
         Ok(())
     }
 }

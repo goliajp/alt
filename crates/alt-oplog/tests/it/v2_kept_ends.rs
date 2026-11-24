@@ -168,3 +168,48 @@ fn a_cut_of_what_a_writer_left_unfinished_keeps_no_frame_before_it() {
         assert_eq!((cut.at, cut.ops), (left, 2), "{lost}");
     }
 }
+
+#[test]
+fn a_cut_of_ops_made_again_where_its_checkpoint_does_not_read_keeps_what_that_cut_would_have() {
+    for torn in [false, true] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        let path = dir.path().join("log");
+        boot(1);
+        let mut log = new_log(dir.path());
+        grow(&mut log, "a", 2);
+        log.append("a", 3, b"left").unwrap();
+        let left = log.anchor().unwrap().start;
+        log.append_with("a", 3, b"dangling", &staged(1)).unwrap();
+        log.append("a", 3, b"tx").unwrap();
+        let kept = log.anchor().unwrap().start;
+        log.append_with("a", 3, b"gone", &retiring(1)).unwrap();
+        let gone = log.anchor().unwrap().start as usize;
+        drop(log);
+        // the op with which the workspace was gone is cut, and the cut
+        // dies with its checkpoint written and not synced
+        boot(2);
+        let before = std::fs::read(&path).unwrap();
+        let mut log = OpLog::open(dir.path()).unwrap();
+        alt_oplog::v2::cut_dies_after(Some(2));
+        let died = log.settle(but(&[b"gone"]));
+        alt_oplog::v2::cut_dies_after(None);
+        assert!(matches!(died, Err(OpLogError::Io(_))), "{died:?}");
+        std::mem::forget(log);
+        if torn {
+            // the power goes with twenty bytes of the checkpoint not on
+            // disk: what does not read there is cut as what it is, a
+            // cut of ops that a sync can have ended among
+            let mut bytes = std::fs::read(&path).unwrap();
+            assert_ne!(bytes[gone + 20..gone + 40], before[gone + 20..gone + 40]);
+            bytes[gone + 20..gone + 40].copy_from_slice(&before[gone + 20..gone + 40]);
+            std::fs::write(&path, bytes).unwrap();
+        }
+        boot(3);
+        let mut log = OpLog::open(dir.path()).unwrap();
+        log.refresh().unwrap();
+        assert_eq!(log.len(), 5, "torn: {torn}");
+        let refused = log.settle(but(&[b"left", b"dangling"]));
+        let said = format!("Err(Kept {{ unheld: {left}, kept: {kept} }})");
+        assert_eq!(format!("{refused:?}"), said, "torn: {torn}");
+    }
+}

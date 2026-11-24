@@ -90,3 +90,32 @@ fn a_writer_fsyncs_the_checkpoint_of_a_cut_that_died_unsynced_before_it_cuts_wha
     assert!(fsynced.first() == Some(&before));
     assert!(file_len(dir.path()) < before.len() as u64);
 }
+
+#[test]
+fn a_cut_has_the_header_of_the_log_tell_of_it_on_disk_before_a_byte_of_its_checkpoint_is_written() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut log = new_log(dir.path());
+    grow(&mut log, "a", 2);
+    let at = log.appended_len() as usize;
+    log.append("a", 3, b"left").unwrap();
+    drop(log);
+    boot(2);
+    let before = fs::read(dir.path().join("log")).unwrap();
+    let mut log = OpLog::open(dir.path()).unwrap();
+    let fsynced = fsynced_while(|| {
+        let cut = log.settle(|_| Ok::<_, OpLogError>(false)).unwrap().unwrap();
+        assert_eq!((cut.at, cut.ops), (at as u64, 1));
+    });
+    // the header alone differs when the file is first fsynced: it tells
+    // of the cut, and the frames the cut takes are all there
+    let told = |file: &[u8]| file[44..56].to_vec();
+    let cut_at = [&1u32.to_le_bytes()[..], &(at as u64).to_le_bytes()[..]].concat();
+    assert_eq!(told(&before), [0; 12]);
+    assert_eq!(told(&fsynced[0]), cut_at);
+    assert_eq!(fsynced[0][64..], before[64..]);
+    // then the checkpoint is, and then the file that ends with it
+    assert_ne!(fsynced[1][at..], before[at..]);
+    assert!(fsynced[2] == fs::read(dir.path().join("log")).unwrap());
+    assert_eq!(fsynced.len(), 3);
+}

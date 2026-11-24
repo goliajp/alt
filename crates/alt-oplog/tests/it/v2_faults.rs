@@ -166,9 +166,10 @@ fn a_cut_says_what_it_cuts_in_the_log_and_syncs_that_before_the_file_is_made_sho
     let said = all.last().unwrap();
     assert_eq!((said.0, said.2), (at, KIND_CHECKPOINT));
     let step = |what: &str, at: u64, len: u64| (what.to_owned(), at, len);
-    // the header of the log tells of the cut first
+    // the header of the log tells of the cut first, and is synced
     let expected = [
         step("pwrite", 44, 12),
+        step("fsync", 0, 0),
         step("pwrite", at, said.1 - at),
         step("fsync", 0, 0),
         step("truncate", said.1, 0),
@@ -263,25 +264,25 @@ fn boundary_sync_fails(dir: &Path) {
     assert_eq!(alt_oplog::bounded_in(dir), Some(len));
 }
 
-/// A cut whose first sync fails has said what it cuts and cut nothing:
-/// the file is as long as it was, and the next writer finishes it.
+/// A cut whose first sync fails has told of itself in the header of the
+/// log and cut nothing: the frames are all there, the log ends for a
+/// reader where the cut was begun, and the next writer cuts it.
 fn cut_sync_fails(dir: &Path) {
     let at = two_to_cut(dir);
-    let len = file_len(dir);
+    let before = fs::read(dir.join("log")).unwrap();
     boot(2);
     let mut log = OpLog::open(dir).unwrap();
     fail_syncs(dir, true);
     io_error(log.settle(but_gone));
-    assert!(file_len(dir) >= len, "nothing was cut off the file");
+    assert!(fs::read(dir.join("log")).unwrap()[64..] == before[64..]);
     fail_syncs(dir, false);
-    // the checkpoint of the cut lies in the block the file ends in: a
-    // read meets it and ends the log with it, whatever is noted beside
     let mut next = OpLog::open(dir).unwrap();
-    assert_eq!((next.len(), next.state().unwrap().generation), (3, 1));
+    assert_eq!((next.len(), next.state().unwrap().generation), (3, 0));
     assert!(next.passed_over());
+    assert_eq!(next.settle(but_gone).unwrap().unwrap().ops, 2);
     next.append("b", 9, b"next").unwrap();
     next.sync().unwrap();
-    assert_eq!(next.state().unwrap().generation, 2);
+    assert_eq!(next.state().unwrap().generation, 1);
     let (all, state) = frames(dir);
     let said = all.iter().find(|frame| frame.0 == at).unwrap();
     assert_eq!(said.3.unwrap().ops, 2, "what was cut is told once");
