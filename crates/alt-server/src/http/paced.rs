@@ -19,7 +19,7 @@ use std::{
     io,
     os::fd::AsRawFd,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, atomic::Ordering::Relaxed},
     task::{Context, Poll},
     time::Duration,
 };
@@ -117,6 +117,7 @@ impl<S: AsRawFd> Paced<S> {
             Poll::Ready(Ok(count)) => {
                 self.taken.wrote(now, count);
                 // a connection is not over while what is sent on it moves
+                self.life.taken.store(false, Relaxed);
                 self.life.moved();
                 Poll::Ready(Ok(count))
             }
@@ -130,6 +131,8 @@ impl<S: AsRawFd> Paced<S> {
                     let slow = io::Error::new(io::ErrorKind::TimedOut, "response read too slowly");
                     return Poll::Ready(Err(slow));
                 };
+                // nor while its peer takes what is sent as fast as it has to
+                self.life.taken.store(true, Relaxed);
                 self.look.as_mut().reset(look);
                 // the window ends while this write waits: it is looked at then
                 if self.look.as_mut().poll(cx).is_ready() {

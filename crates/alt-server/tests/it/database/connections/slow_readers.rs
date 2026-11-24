@@ -133,20 +133,20 @@ fn a_response_whose_reader_stops_is_given_up_when_its_time_to_move_in_is_over() 
     assert!(began.elapsed() < Duration::from_secs(60));
 }
 
-/// A response has to move 1 KiB a second over each window of two seconds. A
-/// reader takes 128 KiB a second, evenly, for eight windows from the first of the
-/// response on. The sockets hold megabytes, of which a third has to be free
-/// before the socket tells that it can be written to: a write succeeds less than
-/// once in a window. The server goes on all the same, and the rest comes whole.
-#[test]
-#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
-fn a_response_read_slowly_and_evenly_goes_on_though_no_write_succeeds_in_a_window() {
+/// A clone read `piece` bytes at a time with `rest` between two pieces, evenly
+/// from the first of the response on, for `long`; then the rest of it at once.
+/// The sockets hold megabytes, of which a third has to be free before the socket
+/// tells that it can be written to: a write succeeds less than once in a window.
+fn read_evenly(
+    (window, connection): (Duration, Duration),
+    (piece, rest): (usize, Duration),
+    long: Duration,
+) {
     use std::io::Read as _;
     let mut f = Fixture::new();
-    let window = Duration::from_secs(2);
     let server = start(&mut f, |_, options| {
         options.body_timeout = window;
-        options.connection_timeout = Duration::from_secs(120);
+        options.connection_timeout = connection;
     });
     let request = clone_request(&f, &server);
     let none = (usize::MAX, Duration::ZERO);
@@ -156,15 +156,38 @@ fn a_response_read_slowly_and_evenly_goes_on_though_no_write_succeeds_in_a_windo
     socket.write_all(&request).unwrap();
     let mut begun = [0u8; 12];
     socket.read_exact(&mut begun).unwrap();
-    let (mut buffer, mut all) = (vec![0; 32 << 10], begun.len());
+    let (mut buffer, mut all) = (vec![0; piece], begun.len());
     let began = std::time::Instant::now();
-    while began.elapsed() < 8 * window {
+    while began.elapsed() < long {
         let count = socket.read(&mut buffer).unwrap();
         assert_ne!(count, 0, "ended after {:?}", began.elapsed());
         all += count;
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(rest);
     }
     let mut rest = Vec::new();
     let _ = socket.read_to_end(&mut rest);
     assert_eq!(all + rest.len(), whole);
+}
+
+/// A response has to move 1 KiB a second over each window of two seconds. A
+/// reader takes 128 KiB a second for eight windows. The server goes on though no
+/// write succeeds in a window, and the rest comes whole.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_response_read_slowly_and_evenly_goes_on_though_no_write_succeeds_in_a_window() {
+    let times = (Duration::from_secs(2), Duration::from_secs(120));
+    let quarter = Duration::from_millis(250);
+    read_evenly(times, (32 << 10, quarter), Duration::from_secs(16));
+}
+
+/// The same where a connection on which nothing moves is over after three seconds,
+/// for thirty seconds: a write waits longer than that for the socket to have room
+/// again. The peer takes what a response has to move, so the connection is not
+/// one on which nothing moves.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_response_read_slowly_is_not_ended_as_a_connection_on_which_nothing_moves() {
+    let times = (Duration::from_secs(2), Duration::from_secs(3));
+    let quarter = Duration::from_millis(250);
+    read_evenly(times, (32 << 10, quarter), Duration::from_secs(30));
 }

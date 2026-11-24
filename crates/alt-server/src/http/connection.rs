@@ -43,6 +43,9 @@ pub(super) struct Life {
     until: Mutex<tokio::time::Instant>,
     /// the requests of the connection that have no answer yet
     asked: AtomicUsize,
+    /// What is sent waits for the peer to take more, and the peer takes enough:
+    /// whether it goes on taking is looked at window by window where it is sent
+    pub(super) taken: AtomicBool,
 }
 impl Life {
     pub(super) fn moved(&self) {
@@ -74,6 +77,7 @@ pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, s
         each: options.connection_timeout,
         until: Mutex::new(tokio::time::Instant::now() + options.connection_timeout),
         asked: AtomicUsize::new(0),
+        taken: AtomicBool::new(false),
     });
     let lives = life.clone();
     let mut builder = http1::Builder::new();
@@ -119,7 +123,8 @@ pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, s
             _ = &mut serving => break,
             _ = tokio::time::sleep_until(life.until()) => {
                 // how long a request is answered for is its handler's to bound
-                if life.asked.load(Ordering::Acquire) > 0 {
+                let taken = life.taken.load(Ordering::Acquire);
+                if life.asked.load(Ordering::Acquire) > 0 || taken {
                     life.moved();
                 } else if life.until() <= tokio::time::Instant::now() {
                     break;
