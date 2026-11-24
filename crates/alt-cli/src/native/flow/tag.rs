@@ -92,7 +92,9 @@ impl NativeRepo<'_> {
     }
 
     /// Stores the object of an annotated tag `name` on `target`, by the
-    /// caller as committer, as git writes it.
+    /// caller as committer, as git writes it: the message without the
+    /// lines that begin with `#`, the space at the end of a line and the
+    /// blank lines git takes out of the message of a tag.
     pub(in crate::native) fn store_tag(
         &mut self,
         name: &str,
@@ -107,16 +109,14 @@ impl NativeRepo<'_> {
             ObjectKind::Blob => "blob",
             ObjectKind::Tag => "tag",
         };
+        let message = &sequence_editor::cleanup(message);
         let tagger = self.committer()?;
         let (who, mail) = (tagger.name(), tagger.email());
         let (when, tz) = (tagger.when(), tagger.tz());
-        let mut bytes = format!(
+        let bytes = format!(
             "object {target}\ntype {kind}\ntag {name}\ntagger {who} <{mail}> {when} {tz}\n\n{message}"
         )
         .into_bytes();
-        if !message.ends_with('\n') {
-            bytes.push(b'\n');
-        }
         let object = ObjectId::hash_object(self.store.algo()?, ObjectKind::Tag, &bytes);
         self.store.odb.put(object, ObjectKind::Tag, &bytes)?;
         self.store.odb.flush()?;

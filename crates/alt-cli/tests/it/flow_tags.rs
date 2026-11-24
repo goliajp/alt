@@ -16,7 +16,7 @@ fn flow_pair() -> Pair {
 }
 
 /// Every tag with the object it names and the kind of that object.
-fn tags(repo: &Path) -> String {
+pub(crate) fn tags(repo: &Path) -> String {
     let exported;
     let repo = match repo.join(".alt").exists() {
         true => {
@@ -30,7 +30,7 @@ fn tags(repo: &Path) -> String {
 }
 
 /// A topic of `kind` named `1.0` with one commit, in both.
-fn started(kind: &str) -> Pair {
+pub(crate) fn started(kind: &str) -> Pair {
     let pair = flow_pair();
     let base = if kind == "hotfix" { "main" } else { "develop" };
     ok(alt(&pair.alt, &["flow", kind, "start", "1.0"]));
@@ -43,7 +43,7 @@ fn started(kind: &str) -> Pair {
 
 /// What git-flow does of a release or a hotfix in git: the topic into
 /// `main`, the tag on that merge, `main` into `develop`.
-fn finish_in_git(pair: &Pair, kind: &str, tag: Option<&[&str]>) {
+pub(crate) fn finish_in_git(pair: &Pair, kind: &str, tag: Option<&[&str]>) {
     let topic = format!("{kind}/1.0");
     ok(git(&pair.git, &["switch", "-q", "main"]));
     ok(git(&pair.git, &["merge", "-q", "--no-ff", &topic]));

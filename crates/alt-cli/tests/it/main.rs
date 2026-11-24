@@ -93,6 +93,7 @@ mod flow;
 mod flow_enforce;
 mod flow_kill;
 mod flow_release_hotfix;
+mod flow_tag_message;
 mod flow_tags;
 mod fsck;
 mod fsck_lost;
