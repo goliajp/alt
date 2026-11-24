@@ -1,0 +1,25 @@
+schema: alt-meta/1
+type: fix
+summary: take the note beside the oplog for gone where it names another log or a place past the file
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/bound.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/held.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/notes.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_notes.rs
+touched: crates/alt-oplog/tests/it/v2_features.rs
+touched: crates/alt-oplog/tests/it/v2_note_fields.rs
+touched: crates/alt-oplog/tests/it/v2_note_other.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_synced.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
