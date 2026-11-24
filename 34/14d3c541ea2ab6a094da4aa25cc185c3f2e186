@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: a file that gives way to a directory of its name is met with it alone in a tree
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/tests/it/fetch.rs
+touched: crates/alt-pack-segment/tests/it/kinds.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
