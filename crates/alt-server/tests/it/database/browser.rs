@@ -5,6 +5,7 @@ use alt_json::{Value, json};
 mod downloads;
 mod led_to;
 mod migration;
+mod migration_room;
 mod tree_pages;
 const ORIGIN: &str = "https://workbench.example.test";
 const PASSWORD: &str = "a private browser acceptance password";

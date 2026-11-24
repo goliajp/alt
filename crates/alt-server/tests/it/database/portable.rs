@@ -34,8 +34,9 @@ pub(super) fn publish(client: &Transport, payload: &Payload) {
         .unwrap();
     for (entry, bytes) in payload.manifest.entries.iter().zip(&payload.contents) {
         for chunk in &entry.chunks {
+            let (from, to) = (chunk.offset as usize, (chunk.offset + chunk.bytes) as usize);
             client
-                .upload_chunk(&payload.publication.key, chunk, bytes)
+                .upload_chunk(&payload.publication.key, chunk, &bytes[from..to])
                 .unwrap();
         }
         client

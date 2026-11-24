@@ -2,7 +2,7 @@
 //! token against forgery are asked of every upload.
 use super::*;
 
-fn migration_send(
+pub(super) fn migration_send(
     server: &Running,
     method: &str,
     path: &str,
@@ -82,9 +82,23 @@ fn migration_rejected_before_body(
     assert!(response.contains("application/json"), "{response}");
 }
 
+/// `bytes` in pieces of `each` at the most, as they are uploaded.
+fn chunks(bytes: &[u8], each: usize) -> Vec<Chunk> {
+    let piece = |(at, piece): (usize, &[u8])| Chunk {
+        offset: (at * each) as u64,
+        bytes: piece.len() as u64,
+        blake3: alt_hash::blake3::hash(piece).to_hex().to_string(),
+    };
+    bytes.chunks(each).enumerate().map(piece).collect()
+}
+
 fn migration_payload() -> Payload {
+    migration_payload_of(vec![b'x'; 65536])
+}
+
+/// A publication of one commit with one file, `blob_bytes`.
+pub(super) fn migration_payload_of(blob_bytes: Vec<u8>) -> Payload {
     let mut payload = Payload::new("browser-portable", None);
-    let blob_bytes = vec![b'x'; 65536];
     let blob = ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &blob_bytes);
     let mut tree_bytes = b"100644 migration.bin\0".to_vec();
     tree_bytes.extend_from_slice(blob.as_bytes());
@@ -107,11 +121,14 @@ fn migration_payload() -> Payload {
                 git_oid: Some(oid.to_string()),
                 blake3: blake3.clone(),
                 bytes: bytes.len() as u64,
-                chunks: vec![Chunk {
-                    offset: 0,
-                    bytes: bytes.len() as u64,
-                    blake3,
-                }],
+                chunks: match bytes.len() as u64 <= limits().chunk_bytes {
+                    true => vec![Chunk {
+                        offset: 0,
+                        bytes: bytes.len() as u64,
+                        blake3,
+                    }],
+                    false => chunks(bytes, limits().chunk_bytes as usize),
+                },
             }
         })
         .collect();
