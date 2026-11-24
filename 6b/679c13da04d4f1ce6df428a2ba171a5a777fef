@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: say which paths of an import came to be one file, and tell neither of them as gone
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/import_config.rs
+touched: crates/alt-worktree/src/walk/listing.rs
