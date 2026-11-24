@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: clean up the message of a tag as git cleans it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/flow/tag.rs
+touched: crates/alt-cli/tests/it/flow_tag_message.rs
+touched: crates/alt-cli/tests/it/flow_tags.rs
+touched: crates/alt-cli/tests/it/main.rs
