@@ -31,6 +31,28 @@ fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<
     Ok(peeled)
 }
 
+/// The commits among `said`, what the client says it has, that the tips of the
+/// refs the caller reads lead to. One that is in the segments and that none of
+/// them leads to, of a branch that was deleted or history that was replaced, is
+/// not acknowledged, and nothing is left out of a pack on the strength of it.
+fn held(
+    set: &SegmentSet,
+    tips: &KeyedIdSet<Oid>,
+    said: &[alt_git_codec::ObjectId],
+    remaining: &mut usize,
+    steps: usize,
+) -> Result<Vec<Oid>> {
+    let said: Vec<Oid> = said.iter().map(|oid| raw(*oid)).collect();
+    if said.is_empty() {
+        return Ok(said);
+    }
+    let mut heads = Vec::with_capacity(tips.len());
+    for tip in tips {
+        heads.push(peel(set, *tip, remaining)?.unwrap_or(*tip));
+    }
+    set.reached(&heads, &said, steps).map_err(segment_error)
+}
+
 pub(crate) fn read(
     limits: alt_remote_protocol::Limits,
     receive: bool,
@@ -131,12 +153,13 @@ pub(crate) fn read(
         return Err(Error::Unauthorized);
     }
     let set = &view.segments;
-    let haves: Vec<Oid> = request
-        .haves
-        .iter()
-        .map(|oid| raw(*oid))
-        .filter(|oid| set.commit(oid).is_some())
-        .collect();
+    let haves = held(
+        set,
+        &tips,
+        &request.haves,
+        &mut remaining,
+        limits.walk_steps,
+    )?;
     if !request.done {
         pkt::write_data(&mut output, b"acknowledgments\n")?;
         if haves.is_empty() {

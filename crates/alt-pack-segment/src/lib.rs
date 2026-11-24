@@ -19,6 +19,7 @@ mod mend;
 mod merge;
 mod object;
 mod plain;
+mod reach;
 mod readback;
 mod room;
 mod scan;
