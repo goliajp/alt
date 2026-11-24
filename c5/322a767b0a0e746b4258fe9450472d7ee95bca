@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: have a handle that reads the oplog anew keep what it looked at, and tell a cut made since by its generation
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/reread.rs
+touched: crates/alt-oplog/src/v2/source.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_anew.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
