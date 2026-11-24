@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a sync that failed is known of its repository though the request that met it was the last to have its writer
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/src/bin/altd_server/mode/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/mode/writer.rs
