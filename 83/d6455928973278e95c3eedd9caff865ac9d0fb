@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a sign-in that is not let wait for a place is told so before it is counted
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/hashers.rs
+touched: crates/alt-server/src/http/web/admission.rs
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
