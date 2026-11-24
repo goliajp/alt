@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: the walk of a fetch keeps the trees it read and goes through two trees in their order once
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/fetch.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/select.rs
+touched: crates/alt-pack-segment/src/set.rs
+touched: crates/alt-pack-segment/src/trees.rs
+touched: crates/alt-pack-segment/tests/it/fetch.rs
