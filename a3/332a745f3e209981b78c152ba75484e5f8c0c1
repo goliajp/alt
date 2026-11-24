@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: a delta of an object of another segment is read on the record it was verified on, and an index tells one way to each object
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/chosen.rs
+touched: crates/alt-pack-segment/src/descend.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/merge.rs
+touched: crates/alt-pack-segment/src/send.rs
+touched: crates/alt-pack-segment/src/set.rs
+touched: crates/alt-pack-segment/src/trees.rs
+touched: crates/alt-pack-segment/tests/it/across.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/reverted.rs
