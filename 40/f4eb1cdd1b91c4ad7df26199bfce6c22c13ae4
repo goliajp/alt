@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: a segment of a Cloud instance that does not give its objects back is indexed anew
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/cloud.rs
+touched: crates/alt-server-store/tests/it/database/cloud/scrubbed.rs
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
