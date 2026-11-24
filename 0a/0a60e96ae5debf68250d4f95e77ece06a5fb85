@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: device codes are counted apart from sign-ins, and whoever is refused for the count is told when to come again
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser.rs
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/src/device_login.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/telemetry.rs
+touched: crates/alt-server-store/tests/it/database/browser.rs
+touched: crates/alt-server-store/tests/it/database/browser/budgets.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/tests/it/database/connections/unknown_callers.rs
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
