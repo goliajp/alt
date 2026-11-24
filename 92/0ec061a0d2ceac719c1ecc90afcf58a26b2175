@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a signed push that came in by another account does not wait for the store it holds
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_certified.rs
+touched: crates/alt-cli/tests/it/altd_server_signed_in.rs
+touched: crates/alt-cli/tests/it/main.rs
