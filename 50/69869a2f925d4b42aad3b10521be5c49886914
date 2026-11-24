@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: a signed push is held to the policy of its signer and of the account it came in by
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/ref_tx.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_reads.rs
+touched: crates/alt-cli/tests/it/altd_server_recorded.rs
+touched: crates/alt-cli/tests/it/altd_server_unsynced_objects.rs
