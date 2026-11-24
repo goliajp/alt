@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a push onto a repository that had a branch deleted reads what it brought, not every tree the refs reach
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/publication/reached.rs
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server-store/tests/it/database/tasks/named.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git/led.rs
