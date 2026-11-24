@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a directory listing and a page of history are written within a bound
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/browse/history.rs
