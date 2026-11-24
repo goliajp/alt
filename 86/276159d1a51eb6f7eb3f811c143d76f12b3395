@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: what a fetch names is read for no longer than the fetch is gone on with
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/shallow.rs
