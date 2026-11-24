@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: take a note beside the log that is gone, as one that does not read, for having said that ops are left to look at, and write none back that was read and not changed
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/src/v2/tail.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
