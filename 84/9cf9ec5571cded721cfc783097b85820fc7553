@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a token that could not be taken back is told of, with tests of a commit that fails and of a database that gives no answer
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/device/exchange.rs
+touched: crates/alt-server/tests/it/database/device_exchange.rs
