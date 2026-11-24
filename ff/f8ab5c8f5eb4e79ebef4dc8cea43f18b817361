@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: leave callers of the oplog the scoped form of writing on a ticket alone, and end a ticket by its number
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/handle/settled.rs
+touched: crates/alt-oplog/src/lib.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/found.rs
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/ticket.rs
+touched: crates/alt-oplog/tests/it/v2_ticketed.rs
+touched: crates/alt-refs/src/record.rs
