@@ -120,16 +120,18 @@ fn a_revert_gone_on_with_writes_over_no_change_that_is_not_staged() {
     );
     // the one that was resolved is committed, and the other waits
     same(&pair);
-    // asked to go on once more, both end the sequence without the
-    // revert that was refused
+    // asked to go on once more, git ends the sequence without the
+    // revert it refused and says nothing; alt makes it
     ok(alt(&pair.alt, &["restore", "other"]));
     ok(crate::like_git::git(&pair.git, &["checkout", "other"]));
     both(&pair, &["revert", "--continue"]);
-    same(&pair);
+    let other = |dir: &std::path::Path| std::fs::read_to_string(dir.join("other")).unwrap();
     assert_eq!(
-        std::fs::read_to_string(pair.alt.join("other")).unwrap(),
-        "B\n"
+        (other(&pair.alt), other(&pair.git)),
+        ("base\n".into(), "B\n".into())
     );
+    let said = ok(alt(&pair.alt, &["log", "-n", "1"]));
+    assert!(said.contains("Revert \"B\""), "{said}");
     assert!(!pair.alt.join(".alt/REVERT_STATE").exists());
     let said = ok(alt(&pair.alt, &["status"]));
     assert!(

@@ -87,8 +87,8 @@ impl NativeRepo<'_> {
                     return Ok(true);
                 }
                 Reverted::Refused(why) => {
-                    // as git: the revert refused is not come back to
-                    let todo = rest_of(&todo, i + 1);
+                    // git forgets the revert it refused; it waits here
+                    let todo = rest_of(&todo, i);
                     self.save_revert_state(&RevertState { todo, ..left })?;
                     self.settle_state()?;
                     return Err(why);
