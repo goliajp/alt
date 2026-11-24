@@ -75,6 +75,44 @@ fn an_object_a_pack_holds_thousands_of_times_is_read_within_what_its_entries_bou
     }
 }
 
+/// The same pack read as one who lists a pack reads it: every entry, one
+/// after the other, from the pack opened once. The entries of the object are
+/// gone through by the first read that comes to its id, and each delta by id
+/// read after that comes to the one entry it was found in. Each of them once
+/// went through them all: a thousand times eleven thousand.
+#[test]
+fn the_entries_of_an_object_are_gone_through_once_for_all_the_deltas_made_of_it_by_id() {
+    let _ended = ended_within(900);
+    let (by_id, by_place) = (1000, 10_000);
+    let x = object(0);
+    let mut entries = vec![plain_entry(&x)];
+    let mut at = entries[0].len();
+    for _ in 0..by_place {
+        let entry = ofs_entry(at, &of(0, 0));
+        at += entry.len();
+        entries.push(entry);
+    }
+    entries.extend((0..by_id).map(|_| ref_entry(&blob(&x), &of(0, 0))));
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = written(&dir, &entries);
+    index_pack(&path, HashAlgo::Sha1, false).unwrap();
+    let pack = IndexedPack::open(&path, HashAlgo::Sha1).unwrap();
+    let mut work = ReadWork::default();
+    for i in 0..entries.len() as u32 {
+        let (oid, offset) = (pack.idx().oid_at(i), pack.idx().offset_at(i).unwrap());
+        let read = pack.read_at_counting(offset, &mut work).unwrap();
+        assert_eq!(
+            ObjectId::hash_object(HashAlgo::Sha1, read.kind, &read.data),
+            oid
+        );
+    }
+    assert!(work.ranged <= 2 * entries.len(), "{work:?}");
+    // and by its id, which is that of them all
+    let before = work.ranged;
+    pack.read_counting(&blob(&x), &mut work).unwrap().unwrap();
+    assert_eq!(work.ranged, before + 1);
+}
+
 /// Packs of thousands of entries made at random: of how many objects, how
 /// often each is there again, and how long the chains are differ from pack
 /// to pack. Those `index_pack` takes are read within the bounds.

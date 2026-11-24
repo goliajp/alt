@@ -99,6 +99,9 @@ pub struct IndexedPack {
     idx: PackIndex,
     pack: Pack,
     cache: Mutex<DeltaBaseCache>,
+    /// Of the ids the pack holds in several entries, by the place of the
+    /// first of them in the index: the entry a read found the object in.
+    found_in: Mutex<std::collections::HashMap<u32, u64>>,
 }
 
 impl IndexedPack {
@@ -109,6 +112,7 @@ impl IndexedPack {
             idx: PackIndex::open(&idx_path, algo)?,
             pack: Pack::open(pack_path, algo)?,
             cache: Mutex::new(DeltaBaseCache::new(cache::DEFAULT_BUDGET)),
+            found_in: Mutex::default(),
         })
     }
 

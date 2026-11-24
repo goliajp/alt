@@ -12,6 +12,12 @@
 //! - it goes through the entries of an id once at the most, and the ids
 //!   share no entry: `n` steps at the most, behind two searches of the
 //!   index for each delta by id it looked at;
+//! - the entry it found an id of several entries in is kept with the pack,
+//!   and the reads after it come to that entry alone: one who reads every
+//!   entry of a pack goes through the entries of an id once, not once for
+//!   each delta made of it. A read that fails by the entry kept is made
+//!   again without what is kept, so that it finds what it found before any
+//!   was;
 //! - it applies the deltas of the way it found, the shortest there is:
 //!   [`MAX_DELTA_DEPTH`] at the most, and an object further down is not read;
 //! - besides the object, one delta and what the cache keeps, it holds
@@ -51,6 +57,10 @@ struct Found {
     seen: Seen,
     /// the ids of several entries that were gone through, by their first
     gone_through: HashSet<u32>,
+    /// an id was taken for the one entry an earlier read found it in
+    kept: bool,
+    /// no id is taken so: every entry of each is gone through
+    anew: bool,
 }
 
 /// Where the entries looked at are: a few in a row, and a set once there
@@ -79,10 +89,13 @@ impl Seen {
 }
 
 impl Found {
-    fn entry(&mut self, offset: u64, under: u32) {
-        if self.seen.insert(offset) {
+    /// whether the entry was not found before
+    fn entry(&mut self, offset: u64, under: u32) -> bool {
+        let new = self.seen.insert(offset);
+        if new {
             self.entries.push((offset, under));
         }
+        new
     }
 }
 
@@ -109,9 +122,9 @@ impl IndexedPack {
         if all.is_empty() {
             return Ok(None);
         }
-        let mut found = Found::default();
-        self.all(&mut found, all, NONE, work)?;
-        self.resolve(found, work).map(Some)
+        let begin =
+            |found: &mut Found, work: &mut ReadWork| self.all(found, all.clone(), NONE, work);
+        self.read_from(&begin, Some(all.clone()), work).map(Some)
     }
 
     /// [`Self::read_at`], adding to `work` what it took.
@@ -120,9 +133,43 @@ impl IndexedPack {
         offset: u64,
         work: &mut ReadWork,
     ) -> Result<PackedObject, PackError> {
+        let begin = |found: &mut Found, _: &mut ReadWork| {
+            found.entry(offset, NONE);
+            Ok(())
+        };
+        self.read_from(&begin, None, work)
+    }
+
+    /// The object the entries `begin` finds make; `top` are those of its id,
+    /// where it is read by that.
+    fn read_from(
+        &self,
+        begin: &dyn Fn(&mut Found, &mut ReadWork) -> Result<(), PackError>,
+        top: Option<std::ops::Range<u32>>,
+        work: &mut ReadWork,
+    ) -> Result<PackedObject, PackError> {
         let mut found = Found::default();
-        found.entry(offset, NONE);
-        self.resolve(found, work)
+        begin(&mut found, work)?;
+        match self.resolve(&mut found, top.clone(), work) {
+            // the entry kept may be further down than another of its id is
+            Err(_) if found.kept => {
+                let mut found = Found {
+                    anew: true,
+                    ..Found::default()
+                };
+                begin(&mut found, work)?;
+                self.resolve(&mut found, top, work)
+            }
+            read => read,
+        }
+    }
+
+    /// Keeps that the object of the entries `all` was found in the one at
+    /// `offset`, where there are several.
+    fn keep(&self, all: std::ops::Range<u32>, offset: u64) {
+        if all.len() > 1 {
+            self.found_in.lock().unwrap().insert(all.start, offset);
+        }
     }
 
     /// Finds the entries `all` of one id, each a base of the entry `under`.
@@ -133,6 +180,18 @@ impl IndexedPack {
         under: u32,
         work: &mut ReadWork,
     ) -> Result<(), PackError> {
+        if all.len() > 1 && !found.anew {
+            let kept = self.found_in.lock().unwrap().get(&all.start).copied();
+            // the entry kept may be one this read came from: the object is
+            // then looked for in the others
+            if let Some(offset) = kept
+                && found.entry(offset, under)
+            {
+                found.kept = true;
+                work.ranged += 1;
+                return Ok(());
+            }
+        }
         // once is enough: whatever comes to this id again finds them found
         if all.len() > 1 && !found.gone_through.insert(all.start) {
             return Ok(());
@@ -145,7 +204,12 @@ impl IndexedPack {
     }
 
     /// The object one of the entries `found` begins with makes.
-    fn resolve(&self, mut found: Found, work: &mut ReadWork) -> Result<PackedObject, PackError> {
+    fn resolve(
+        &self,
+        found: &mut Found,
+        top: Option<std::ops::Range<u32>>,
+        work: &mut ReadWork,
+    ) -> Result<PackedObject, PackError> {
         let mut lacking = false;
         // where the entries one delta further down begin, and how far down these are
         let (mut further, mut depth) = (found.entries.len(), 0);
@@ -175,27 +239,35 @@ impl IndexedPack {
                     self.cache.lock().unwrap().put(cur, kind, data.clone());
                     break (kind, data);
                 }
-                EntryKind::OfsDelta { base_at } => found.entry(base_at, at as u32),
+                EntryKind::OfsDelta { base_at } => {
+                    found.entry(base_at, at as u32);
+                }
                 EntryKind::RefDelta { base } => {
                     // on-disk packs are self-contained; thin packs exist only
                     // on the wire
                     let all = self.idx.all_of(&base);
                     lacking |= all.is_empty();
-                    self.all(&mut found, all, at as u32, work)?;
+                    self.all(found, all, at as u32, work)?;
                 }
             }
             at += 1;
         };
         // apply the deltas back up, caching every intermediate result
-        let mut under = found.entries[at].1;
+        let (mut below, mut under) = found.entries[at];
         while under != NONE {
             let (offset, above) = found.entries[under as usize];
             let info = self.pack.entry_info(offset)?;
+            if let EntryKind::RefDelta { base } = &info.kind {
+                self.keep(self.idx.all_of(base), below);
+            }
             let raw_delta = self.pack.inflate(info.data_at, info.size)?;
             let out = Arc::new(delta::apply(&data, &raw_delta)?);
             self.cache.lock().unwrap().put(offset, kind, out.clone());
             work.applied += 1;
-            (data, under) = (out, above);
+            (data, below, under) = (out, offset, above);
+        }
+        if let Some(top) = top {
+            self.keep(top, below);
         }
         Ok(PackedObject { kind, data })
     }
