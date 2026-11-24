@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: make a merge of the base of a rebased branch again of the new base
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/rebase/merges.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/rebase_merges_base.rs
