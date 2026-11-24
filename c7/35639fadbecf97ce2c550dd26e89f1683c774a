@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: the segment of a verified pack is told anew behind other segments without the pack being read again
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/room.rs
+touched: crates/alt-pack-segment/src/settled.rs
+touched: crates/alt-pack-segment/tests/it/across.rs
