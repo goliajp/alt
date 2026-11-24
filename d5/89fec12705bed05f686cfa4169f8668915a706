@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: the actions of the operator, of a request and the routes of a repository in files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/administered.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/native.rs
+touched: crates/alt-server/src/native/request.rs
+touched: crates/alt-server/src/unconfigured.rs
+touched: crates/alt-server/src/web_route.rs
+touched: crates/alt-server/src/web_route/repository.rs
