@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: keep one more test of the oplog within fifty lines
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
