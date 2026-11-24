@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: the example tells what a tip leads to and the memory verifying takes beside what it is counted for
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/fetch.rs
