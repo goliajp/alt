@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: tell an address that has too many requests under way when to come again
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/tests/it/database/connections/sources.rs
+touched: self-hosted/README.md
