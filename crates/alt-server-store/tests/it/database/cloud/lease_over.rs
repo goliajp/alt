@@ -24,13 +24,16 @@ fn cloud_lease_expiring_inside_publication_rolls_back_all_visible_state() {
     f.store.mark_ready(&f.credential, &work, &graph).unwrap();
     f.client().batch_execute("CREATE FUNCTION delay_cloud_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(2); RETURN NEW; END $$; CREATE TRIGGER delay_cloud_commit BEFORE INSERT ON alt_refs FOR EACH ROW EXECUTE FUNCTION delay_cloud_commit()").unwrap();
     // The lease is to be good when the publication begins and over when its refs
-    // are written, two seconds later. A publication that begins under a lease
-    // that is over is rejected for good, which is another thing: so the lease is
-    // given last, with nothing but its installation before the publication.
+    // are written, two seconds later: so it is given last, with nothing but its
+    // installation before the publication.
     let mut short = service(3, 1, true);
     short.lease.expires_at_unix_ms = Counter(short.lease.issued_at_unix_ms.0 + 1500);
     f.store.refresh_cloud_service(&short).unwrap();
-    assert!(f.store.publish(&f.credential, &work, &graph).is_err());
+    // refused as what may come again as it is: 409 and `same_request` over HTTP
+    let refused = f.store.publish(&f.credential, &work, &graph);
+    assert!(
+        matches!(refused, Err(alt_server_store::Error::Precondition(why)) if why.contains("not currently authorized"))
+    );
     assert_eq!(f.counts(), (0, 0, 0));
     assert!(
         matches!(f.store.query(&f.credential,&payload.publication.key).unwrap(),RequestObservation::Recorded{result,..} if matches!(*result,RequestState::Ready{..}))
@@ -69,7 +72,11 @@ fn cloud_lease_over_before_publication_leaves_the_request_ready_for_the_next_lea
     short.lease.expires_at_unix_ms = Counter(short.lease.issued_at_unix_ms.0 + 1000);
     f.store.refresh_cloud_service(&short).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1500));
-    assert!(f.store.publish(&f.credential, &work, &graph).is_err());
+    // refused as what may come again as it is: 409 and `same_request` over HTTP
+    let refused = f.store.publish(&f.credential, &work, &graph);
+    assert!(
+        matches!(refused, Err(alt_server_store::Error::Precondition(why)) if why.contains("not currently authorized"))
+    );
     assert_eq!(f.counts(), (0, 0, 0));
     assert!(
         matches!(f.store.query(&f.credential,&payload.publication.key).unwrap(),RequestObservation::Recorded{result,..} if matches!(*result,RequestState::Ready{..}))
