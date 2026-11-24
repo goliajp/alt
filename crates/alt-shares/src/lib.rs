@@ -76,6 +76,11 @@ impl Shares {
         }
     }
 
+    /// the amount there is for all the takers
+    pub fn most(&self) -> u64 {
+        self.most
+    }
+
     /// what all the takers there are have between them
     pub fn held(&self) -> u64 {
         self.held.lock().expect("shares").all
