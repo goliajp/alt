@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: have a branch that is renamed take its log along, as git has it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-repo/src/reflog.rs
+touched: crates/alt-repo/src/reflog/derived.rs
