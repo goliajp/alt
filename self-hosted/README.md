@@ -67,6 +67,8 @@ python3 /path/to/bundle/manage.py operator --directory /srv/alt -- audit --limit
 
 Create repositories, grants and policy with the server's operator commands. For example, `operator ... -- repository-create example --quota-bytes 1073741824` creates a repository; the administrator still needs explicit repository grants to read or publish. Native endpoints and `/git/<repository>` share the same publication authority.
 
+The application removes nothing from the content store by itself. Content that no publication retains any more (uploads that were abandoned or expired, what a refused request brought, the content-store copies an upgrade released) and the segments it leaves empty stay on the data volume until `collect` is run for the repository: `operator ... -- collect example --limit 1000` removes up to that many unretained contents and reports the count as `removed`. Run it for every repository on a schedule, and again while it reports as many as its limit. Requests, sessions and credentials that are over, and pack segments that a merge replaced, are removed by the application.
+
 After the bootstrap token expires, generate a new private token and use `recover-local-token owner` with a reason and an expiry no more than one hour ahead. This requires physical access to the instance configuration/key/database, revokes old authority, and is audited. Do not extend an old token by changing its file.
 
 ## Backup, upgrade and restoration

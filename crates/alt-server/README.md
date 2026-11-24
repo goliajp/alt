@@ -436,6 +436,13 @@ retained content. Uploads in progress keep their content and continue under the
 new generation. The released copies leave the disk with the next garbage
 collection.
 
+`collect <repository> [--limit N]` is the only thing that removes content from
+the content store: up to `N` contents (100 by default, 1000 at most) that no
+publication or upload retains, and the segments they leave empty. The server
+does not run it. Without it the uploads that were abandoned, expired or refused
+stay on disk; run it for each repository on a schedule, and repeat while
+`removed` equals the limit.
+
 `scrub [repository] [--mend]` reads every object of the live pack segments, of
 one repository or of all, the way a fetch reads it, and holds what it reads
 against the object id. It answers with the count of segments and objects read
