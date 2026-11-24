@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the bodies one caller has received have a quarter of what the instance holds between them
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/body.rs
+touched: crates/alt-server/src/http/receiving.rs
