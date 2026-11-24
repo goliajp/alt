@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: leave a branch that a rebase or a bisect took HEAD off where it is and under its name
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/branch.rs
+touched: crates/alt-cli/src/native/branch/moved.rs
+touched: crates/alt-cli/src/native/switch.rs
+touched: crates/alt-cli/tests/it/held_branches.rs
+touched: crates/alt-cli/tests/it/main.rs
