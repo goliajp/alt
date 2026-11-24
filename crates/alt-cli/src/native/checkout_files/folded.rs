@@ -13,10 +13,15 @@ impl NativeRepo<'_> {
     /// `core.ignoreCase` says so, and where the file system of this
     /// working tree shows it. The configuration of an imported store was
     /// written on the file system of the git repository, and a parallel
-    /// workspace may lie on another than the store.
+    /// workspace may lie on another than the store. Asked once of a
+    /// command.
     pub(in crate::native) fn folds(&self) -> Res<bool> {
+        if let Some(known) = self.folded.get() {
+            return Ok(*known);
+        }
         let set = crate::git_settings::ignore_case(&self.settings()?)?;
-        Ok(set || import_config::folds_case(&self.root.join(".alt")))
+        let folds = set || import_config::folds_case(&self.root.join(".alt"));
+        Ok(*self.folded.get_or_init(|| folds))
     }
 
     /// Which file is at `path`, to the file system; `None` where none is.

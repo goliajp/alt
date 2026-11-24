@@ -28,3 +28,31 @@ impl NativeRepo<'_> {
         Ok(())
     }
 }
+
+/// The branch a fresh clone checks out, with its commit.
+pub(super) fn pick_clone_branch(repo: &NativeRepo) -> Res<Option<(String, ObjectId)>> {
+    // (1) `refs/remotes/origin/HEAD` symref written by our fetch path
+    if let Some(RefTarget::Symbolic(target)) = repo.store_refs_get("refs/remotes/origin/HEAD")
+        && let Some(branch) = target.strip_prefix("refs/remotes/origin/")
+        && let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&target)
+    {
+        return Ok(Some((branch.to_owned(), oid)));
+    }
+    // (2) common defaults
+    for cand in ["main", "master"] {
+        let r = format!("refs/remotes/origin/{cand}");
+        if let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&r) {
+            return Ok(Some((cand.to_owned(), oid)));
+        }
+    }
+    // (3) first remote-tracking branch in name order
+    for (name, target) in repo.store_refs_iter() {
+        if let Some(branch) = name.strip_prefix("refs/remotes/origin/")
+            && branch != "HEAD"
+            && let RefTarget::Oid(oid) = target
+        {
+            return Ok(Some((branch.to_owned(), oid)));
+        }
+    }
+    Ok(None)
+}

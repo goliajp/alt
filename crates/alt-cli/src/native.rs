@@ -462,7 +462,7 @@ pub fn clone(
     // pick the local branch to materialise: prefer the remote's HEAD
     // symref target (mirrored as `refs/remotes/origin/HEAD` during fetch),
     // falling back to `main` / `master` / the first remote-tracking head
-    let pick = pick_clone_branch(&repo)?;
+    let pick = remotes::pick_clone_branch(&repo)?;
     if let Some((branch, oid)) = pick {
         let local_ref = format!("refs/heads/{branch}");
         if repo.store_refs_get(&local_ref).is_none() {
@@ -524,33 +524,6 @@ fn derive_clone_dir(url: &str) -> Option<String> {
     }
 }
 
-fn pick_clone_branch(repo: &NativeRepo) -> Res<Option<(String, ObjectId)>> {
-    // (1) `refs/remotes/origin/HEAD` symref written by our fetch path
-    if let Some(RefTarget::Symbolic(target)) = repo.store_refs_get("refs/remotes/origin/HEAD")
-        && let Some(branch) = target.strip_prefix("refs/remotes/origin/")
-        && let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&target)
-    {
-        return Ok(Some((branch.to_owned(), oid)));
-    }
-    // (2) common defaults
-    for cand in ["main", "master"] {
-        let r = format!("refs/remotes/origin/{cand}");
-        if let Some(RefTarget::Oid(oid)) = repo.store_refs_get(&r) {
-            return Ok(Some((cand.to_owned(), oid)));
-        }
-    }
-    // (3) first remote-tracking branch in name order
-    for (name, target) in repo.store_refs_iter() {
-        if let Some(branch) = name.strip_prefix("refs/remotes/origin/")
-            && branch != "HEAD"
-            && let RefTarget::Oid(oid) = target
-        {
-            return Ok(Some((branch.to_owned(), oid)));
-        }
-    }
-    Ok(None)
-}
-
 /// The default workspace's name — its HEAD stays the bare `HEAD` ref and its
 /// index stays at `.alt/index`, so existing repos are unchanged.
 const DEFAULT_WORKSPACE: &str = "default";
@@ -597,6 +570,8 @@ pub struct NativeRepo<'a> {
     torn: recovery::TornIndex,
     /// what a command that begins, goes on with or ends an operation has done
     step: std::cell::RefCell<Option<in_progress::Tracked>>,
+    /// whether names that differ in case are one name in the working tree
+    folded: std::cell::OnceCell<bool>,
 }
 
 impl<'a> NativeRepo<'a> {
@@ -627,6 +602,7 @@ impl<'a> NativeRepo<'a> {
             recovery_checked: None,
             torn: recovery::TornIndex::default(),
             step: std::cell::RefCell::default(),
+            folded: std::cell::OnceCell::new(),
         }
     }
 
