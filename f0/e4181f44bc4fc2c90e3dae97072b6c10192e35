@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a request taken for publication while the lease of the service is over comes again as it is
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/cloud.rs
+touched: crates/alt-server-store/src/cloud/service.rs
+touched: crates/alt-server-store/src/publication/acquire.rs
+touched: crates/alt-server/tests/it/database/cloud.rs
+touched: crates/alt-server/tests/it/database/cloud/lease_over.rs
+touched: crates/alt-server/tests/it/database/cloud/platform.rs
