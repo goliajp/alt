@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a push sent back by moved segments is told anew, and holds the repository the fourth time
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_packs/made.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git/moved.rs
+touched: crates/alt-server/tests/it/database/git/moved/bounded.rs
