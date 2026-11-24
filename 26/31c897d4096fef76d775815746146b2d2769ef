@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: perf
+summary: list what tips reach with the name each object has, and read no file for it
+author-type: human
+author: doracawl
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/reach.rs
+touched: crates/alt-repo/tests/it/main.rs
+touched: crates/alt-repo/tests/it/reached.rs
