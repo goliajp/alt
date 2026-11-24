@@ -8,25 +8,26 @@ use super::super::*;
 use super::Moving;
 
 impl NativeRepo<'_> {
-    /// Whether the file `there`, at the new name `to`, is the source
-    /// `found` itself, and whether it is so as another spelling of its
-    /// name: two links to a file are two names, each listed as it is
-    /// spelled.
+    /// Whether the file `there`, at the new name of `moving`, is the
+    /// source `found` itself, and whether it is so as another spelling
+    /// of its name: two links to a file are two names, each listed as
+    /// it is spelled, and of one name spelled in two ways the directory
+    /// lists but one.
     pub(super) fn one_name(
         &self,
         found: &std::fs::Metadata,
         there: Option<&std::fs::Metadata>,
-        to: &BString,
-        folds: bool,
+        moving: &Moving,
     ) -> Res<(bool, bool)> {
         let one =
             |there: &std::fs::Metadata| (there.dev(), there.ino()) == (found.dev(), found.ino());
-        let one = there.is_some_and(one);
-        let mut listed = super::checkout_files::Listed::default();
-        Ok((
-            one,
-            one && folds && self.spelled_otherwise(to, &mut listed)?,
-        ))
+        if !there.is_some_and(one) {
+            return Ok((false, false));
+        }
+        let mut listed = super::super::checkout_files::Listed::default();
+        let mut otherwise = |path: &BString| self.spelled_otherwise(path, &mut listed);
+        let spelling = moving.folds && (otherwise(moving.to)? || otherwise(moving.from)?);
+        Ok((true, spelling))
     }
 
     /// As git, which renames the directory: the directories in `from`

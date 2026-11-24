@@ -164,10 +164,7 @@ impl NativeRepo<'_> {
     /// one to the other leaves both as they are.
     fn ensure_movable(&self, index: &Index, moving: &Moving) -> Res<(bool, bool)> {
         let Moving {
-            from,
-            to,
-            force,
-            folds,
+            from, to, force, ..
         } = *moving;
         let refused = |why: &str| -> Res<(bool, bool)> {
             let said = format!("{why}, source={from}, destination={to}");
@@ -183,7 +180,7 @@ impl NativeRepo<'_> {
         }
         let target = self.abs(to)?;
         let there = target.symlink_metadata();
-        let (one, spelling) = self.one_name(&found, there.as_ref().ok(), to, folds)?;
+        let (one, spelling) = self.one_name(&found, there.as_ref().ok(), moving)?;
         if found.is_dir() {
             let inside = |e: &&IndexEntry| beneath(&e.path, from);
             if !index.entries.iter().any(|e| inside(&e)) {
