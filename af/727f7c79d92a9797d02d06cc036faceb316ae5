@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: rename a file over the one it replaces, as mv -f does with git
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/tests/it/mv_rename.rs
