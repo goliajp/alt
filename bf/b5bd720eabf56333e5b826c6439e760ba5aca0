@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: have a cut made again die before the file is shorter, and whoever opens the oplog held to it once a handle it ended short for has looked
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_scenes.rs
