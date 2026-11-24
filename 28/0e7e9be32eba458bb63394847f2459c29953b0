@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: style
+summary: keep what holds the lock beside the log in one block, and its note as the others are written
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/tail.rs
