@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: the responses to fetches take no more of the disk between them than they are given
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_sending.rs
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
+touched: crates/alt-cli/tests/it/main.rs
