@@ -36,7 +36,9 @@ pub fn unacknowledged(socket: &impl AsRawFd) -> io::Result<u64> {
 
 /// Whether the peer of `socket` has closed its side with nothing left unread, or
 /// the connection is gone. Nothing is read and nothing is waited for; where the
-/// peer sent bytes that were not read yet, it is not known to have closed.
+/// peer sent bytes that were not read yet, it is not known to have closed. A
+/// peer that only sends no more and still reads is told as closed too: the two
+/// arrive as the same end of what is sent.
 pub fn peer_closed(socket: &impl AsRawFd) -> bool {
     let mut byte = 0u8;
     let flags = sys::MSG_PEEK | sys::MSG_DONTWAIT;
