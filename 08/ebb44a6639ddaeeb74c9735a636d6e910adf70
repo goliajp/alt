@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the native content route gives a git object no ref leads to where a published record names it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading/again.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server-store/tests/it/database/tasks.rs
+touched: crates/alt-server-store/tests/it/database/tasks/named.rs
