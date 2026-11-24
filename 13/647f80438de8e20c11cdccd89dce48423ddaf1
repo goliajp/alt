@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: import a branch git renamed to beneath its own name, or back from there
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/import_met.rs
+touched: crates/alt-repo/src/reflog.rs
+touched: crates/alt-repo/src/reflog/again.rs
