@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a segment held by its row is written out under a name of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs.rs
