@@ -90,11 +90,13 @@ impl NonceTable {
     }
 
     fn good_at(&self, nonce: &str, now: Instant) -> Option<Given> {
-        let digit = |at: usize| u8::from_str_radix(nonce.get(at..at + 2)?, 16).ok();
-        let bytes: Vec<u8> = (0..64).step_by(2).map(digit).collect::<Option<_>>()?;
-        if nonce.len() != 64 {
+        // as it was given: no sign before a digit, and no capital
+        let given = |digit: u8| digit.is_ascii_digit() || (b'a'..=b'f').contains(&digit);
+        if nonce.len() != 64 || !nonce.bytes().all(given) {
             return None;
         }
+        let digit = |at: usize| u8::from_str_radix(&nonce[at..at + 2], 16).ok();
+        let bytes: Vec<u8> = (0..64).step_by(2).map(digit).collect::<Option<_>>()?;
         let given = Given(
             u64::from_be_bytes(bytes[..8].try_into().expect("eight of them")),
             bytes[8..16].try_into().expect("eight of them"),
@@ -204,10 +206,13 @@ mod tests {
         );
         assert!(!t.spent_at(before) && t.spent_at(after));
         assert!(t.good_at(&old, after).is_none());
+        // good as it was given, and not written another way that reads as the same digits
+        let other = [new.to_uppercase(), new.replacen('0', "+", 1)];
+        assert!(other.iter().all(|other| *other != new && other.len() == 64));
+        assert!(other.iter().all(|other| t.good_at(other, before).is_none()));
         let given = t.good_at(&new, before).unwrap();
         assert!(t.spend_at(given, before));
         assert_eq!(t.inner.take().used.len(), 1);
-        assert!(t.good_at(&new, before).is_none());
         // past its day it is told by its age, and kept no more
         let other = Given(t.at(after), [7; 8]);
         assert!(t.spend_at(other, after));
