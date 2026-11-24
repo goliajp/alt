@@ -263,12 +263,32 @@ the chunks hold, not the lines around them. A
 slow peer keeps a connection and never one of the request handlers: the
 connections open at once are limited, and so are those of one address that
 is not the host itself. Behind a reverse proxy on the same host every
-client comes from the host, and the proxy is where the connections of one
-client are limited. Which peers are of the host is what `ALT_SERVER_LOCAL_PEERS`
+connection comes from the host, and the proxy is where the connections of one
+client are limited. What the
+requests hold, the bodies received and the responses to fetches, is counted
+for the address the proxy names in `X-Forwarded-For`: the last name there
+that is not of the host itself, as Caddy's `reverse_proxy` writes it without
+being told to. Which peers are of the host, and trusted to name whose a
+request is, is what `ALT_SERVER_LOCAL_PEERS`
 says, a list of addresses and networks, the loopback ones unless it is set: a
 server in a container sees the proxy on its host under the address the
 container's network gives the host, and has to be told that address, or all
-clients together are held to what one address may have. The response to a fetch is a file until its peer has
+clients together are held to what one address may have. What any other peer
+writes in that header is not read. Of what all hold between them one address
+has a quarter; a single body or response may pass the quarter as far as half,
+one such at a time, so that one slow client with one large thing leaves half
+to the others.
+
+A signed push (`alt push` with a sign policy) is signed over what Git has a
+pusher sign in a push certificate: the principal, the repository as the client
+names it (`pushee`, the URL without credentials), the nonce the server gave
+for this one push, and the ref updates. The server takes the signature only
+where the nonce is one it gave and has not seen used, and the repository is the
+one the request is for by its `Host` header and path; a proxy in front of the
+server has to pass both on as the client sent them, as Caddy does. A client
+from before this, which signs the updates alone or the nonce and the updates,
+is no longer taken as signed: where the policy requires signed pushes it is
+refused, elsewhere its push is recorded as not verified. The response to a fetch is a file until its peer has
 taken it, and those files together take no more than
 `ALT_SERVER_MAX_SENDING_BYTES`, half of what is free for temporary files
 when the server starts unless it is set: a fetch whose response has no room

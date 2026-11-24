@@ -185,16 +185,10 @@ pub(super) fn handle_info_refs(
                 .filter(|(name, _, _)| name != "HEAD")
                 .map(|(name, oid, _)| (name, oid))
                 .collect();
-            // issue a single-use nonce per advert and attach
-            // it as the `alt-nonce=<hex>` capability. A signing alt
-            // client will sign `nonce <hex>\n` + canonical payload and
-            // echo the same `alt-nonce=<hex>` capability back on its
-            // push, so the server can look the nonce up, verify the
-            // signature, and consume it. Anyone replaying the same
-            // captured push body gets refused on the second attempt.
-            //
-            // Read-only mode (no writer) doesn't issue nonces; pushes
-            // are refused before they ever get verified anyway.
+            // A nonce for one signed push, and that signatures are taken over a
+            // certificate that names it and this repository. A repository that
+            // is not written to gives none: a push to it is refused before
+            // its signature is looked at.
             let nonce_cap: Option<String> = writer.map(|w| {
                 let n = w.nonces.issue();
                 format!("{}={n}", alt_wire::CAP_ALT_NONCE)
@@ -207,7 +201,7 @@ pub(super) fn handle_info_refs(
                 concat!("agent=", "alt-server/", env!("CARGO_PKG_VERSION")),
             ];
             if let Some(s) = nonce_cap.as_deref() {
-                caps_list.push(s);
+                caps_list.extend([s, alt_wire::CAP_ALT_PUSHEE]);
             }
             alt_wire::push::encode_v1_ref_advertisement(
                 &mut body,

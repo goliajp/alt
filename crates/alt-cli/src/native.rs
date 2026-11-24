@@ -48,6 +48,7 @@ pub mod pathspec;
 mod prompt;
 mod push_pack;
 mod push_report;
+mod push_signed;
 use op_log::render_op_log_json;
 pub mod notes;
 mod object_format;
@@ -919,52 +920,6 @@ impl<'a> NativeRepo<'a> {
         f.sync_all()?;
         std::fs::File::open(sigs_path.parent().expect("oplog directory"))?.sync_all()?;
         Ok(())
-    }
-
-    /// When signing is enabled, return `Some((principal, sig_text))`
-    /// for the canonical push payload over `updates`; the caller appends
-    /// the pair to the wire capability list. Returns `Ok(None)` when
-    /// signing is off or the sec key isn't present (a sign-policy file
-    /// pointing at an absent principal isn't fatal — push still goes
-    /// out, just unsigned, same fall-through as `maybe_sign_op`).
-    fn maybe_sign_push(
-        &self,
-        updates: &[alt_wire::RefUpdate],
-        server_nonce: Option<&str>,
-    ) -> Res<Option<(String, String)>> {
-        let policy = SignPolicy::load(&self.store.alt_dir)?;
-        if !policy.enabled {
-            return Ok(None);
-        }
-        let principal = policy
-            .principal
-            .unwrap_or_else(|| self.id.principal.id.clone());
-        let sec_path = self
-            .store
-            .alt_dir
-            .join("identity")
-            .join(format!("{principal}.sec"));
-        let sec_text = match std::fs::read_to_string(&sec_path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        let sec = alt_sign::SecretKey::from_text(&sec_text)
-            .map_err(|e| format!("malformed sec key at {}: {e}", sec_path.display()))?;
-        // when the server advertised a single-use nonce in its
-        // info/refs caps, sign over `nonce <hex>\n` + canonical payload
-        // and echo the nonce back as a cap on the push. The server
-        // looks the nonce up and consumes it; a replay of the same
-        // captured push bytes hits a consumed/absent nonce and fails.
-        // Servers that didn't advertise a nonce (older ones) get the
-        // legacy payload — backward-compat.
-        let payload =
-            alt_wire::canonical_push_payload_with_nonce(updates, server_nonce, self.store.algo()?);
-        let sig = sec.sign(&payload);
-        // .to_text() includes a trailing newline; the wire cap list can
-        // not carry one, so strip it before declaring the cap
-        let sig_text = sig.to_text().trim().to_owned();
-        Ok(Some((principal, sig_text)))
     }
 
     /// When sign-policy is on and a sec key is on disk,
@@ -2719,12 +2674,12 @@ impl<'a> NativeRepo<'a> {
         if !ad.supports("report-status") {
             return Err("remote does not support report-status".into());
         }
-        // pick up the server-issued single-use nonce if it
-        // advertised one. `maybe_sign_push` will then sign over
-        // `nonce <hex>\n` + canonical payload, and we echo the same
-        // value back as `alt-nonce=<hex>` on the push capability list
-        // so the server can look it up.
+        // what a signature of this push is over: the nonce the server gave for
+        // it, and where the server takes them, the repository as it is named here
         let server_nonce: Option<String> = ad.cap_value(alt_wire::CAP_ALT_NONCE).map(str::to_owned);
+        let pushee =
+            (ad.supports(alt_wire::CAP_ALT_PUSHEE)).then(|| alt_wire::pushee(&rewritten_url));
+        let signed_for = server_nonce.as_deref().zip(pushee.as_deref());
 
         // resolve the refspecs to (local oid, remote ref name) pairs
         let parsed = if refspecs.is_empty() {
@@ -2812,13 +2767,15 @@ impl<'a> NativeRepo<'a> {
         // `alt-sig=alt-sig-ed25519:<sig>` to the cap list. Git's
         // receive-pack silently ignores unknown caps; an alt server
         // looks for the pair and verifies it against its trust store.
-        if let Some((principal, sig_text)) =
-            self.maybe_sign_push(&updates, server_nonce.as_deref())?
-        {
+        let nonce = server_nonce.as_deref();
+        if let Some((principal, sig_text)) = self.maybe_sign_push(&updates, nonce, signed_for)? {
             caps_owned.push(format!("{}={principal}", alt_wire::CAP_ALT_PRINCIPAL));
             caps_owned.push(format!("{}={sig_text}", alt_wire::CAP_ALT_SIG));
             if let Some(n) = &server_nonce {
                 caps_owned.push(format!("{}={n}", alt_wire::CAP_ALT_NONCE));
+            }
+            if let Some(pushee) = &pushee {
+                caps_owned.push(format!("{}={pushee}", alt_wire::CAP_ALT_PUSHEE));
             }
         }
         let caps_refs: Vec<&str> = caps_owned.iter().map(String::as_str).collect();

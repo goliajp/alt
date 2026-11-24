@@ -107,7 +107,9 @@ pub(super) fn handle_receive_pack(
     // signature is computed over the canonical push payload (head's
     // updates + algo); pack bytes don't participate, so we can decide
     // sig_block before reading them.
-    let sig_outcome = verify_push_signature(writer, &head)?;
+    let host = req.headers().iter().find(|h| h.field.equiv("Host"));
+    let asked = (host.map(|h| h.value.as_str()), req.url());
+    let sig_outcome = verify_push_signature(writer, &head, asked)?;
     let principal = pick_principal(&sig_outcome, auth_user);
     let require_signed = require_signed_for(store, &principal.0);
     let sig_block: Option<String> = match (&sig_outcome, require_signed) {
@@ -191,22 +193,26 @@ pub(super) fn describe_sig(o: &SigOutcome) -> String {
 /// Run the signature check against `<alt-dir>/trust/`. Returns
 /// `NoSignature` when the client didn't attach the pair (the common
 /// path on git-native clients).
+///
+/// A signature is over a certificate that names the nonce this repository
+/// gave for one push and the repository itself, as the request `asked` for
+/// it by its `Host` header and its path. One without them, or with a nonce
+/// that was used, or for another repository, is a signature that could be
+/// sent again, here or elsewhere: it does not verify.
 pub(super) fn verify_push_signature(
     writer: &WriteCoordinator,
     head: &alt_wire::push::PushHead,
+    asked: (Option<&str>, &str),
 ) -> Result<SigOutcome, Box<dyn std::error::Error>> {
-    let principal_id = head
-        .capabilities
-        .iter()
-        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_PRINCIPAL)));
-    let sig_text = head
-        .capabilities
-        .iter()
-        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_SIG)));
-    let (principal_id, sig_text) = match (principal_id, sig_text) {
-        (Some(p), Some(s)) => (p.to_owned(), s.to_owned()),
-        _ => return Ok(SigOutcome::NoSignature),
+    let cap = |name: &str| {
+        let prefix = format!("{name}=");
+        (head.capabilities.iter()).find_map(|c| c.strip_prefix(&prefix))
     };
+    let (principal_id, sig_text) =
+        match (cap(alt_wire::CAP_ALT_PRINCIPAL), cap(alt_wire::CAP_ALT_SIG)) {
+            (Some(p), Some(s)) => (p.to_owned(), s.to_owned()),
+            _ => return Ok(SigOutcome::NoSignature),
+        };
     let trust = {
         let guard = writer.store.take();
         guard.trust_keys()?
@@ -218,35 +224,25 @@ pub(super) fn verify_push_signature(
         Ok(s) => s,
         Err(e) => return Ok(SigOutcome::BadSignature(format!("{e}"))),
     };
-    // if the client echoed back an `alt-nonce=<hex>` cap, the
-    // signature is over `nonce <hex>\n` + canonical_payload. We must
-    // consume the nonce (single-use, anti-replay) and verify against
-    // the nonce-prefixed payload. No nonce echo = legacy payload,
-    // verified against the no-nonce form for backwards-compat with
-    // pre-nonce clients (the `require_nonce_on_sig` policy axis turns
-    // that compat off).
-    let echoed_nonce = head
-        .capabilities
-        .iter()
-        .find_map(|c| c.strip_prefix(&format!("{}=", alt_wire::CAP_ALT_NONCE)));
-    if let Some(nonce) = echoed_nonce {
-        if !writer.nonces.consume(nonce) {
-            return Ok(SigOutcome::BadSignature(
-                "alt-nonce echoed in push not active on this server (replay or expired)".into(),
-            ));
-        }
-        let payload =
-            alt_wire::canonical_push_payload_with_nonce(&head.updates, Some(nonce), HashAlgo::Sha1);
-        match pubkey.verify(&payload, &sig) {
-            Ok(()) => Ok(SigOutcome::Verified { principal_id }),
-            Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
-        }
-    } else {
-        let payload = alt_wire::canonical_push_payload(&head.updates, HashAlgo::Sha1);
-        match pubkey.verify(&payload, &sig) {
-            Ok(()) => Ok(SigOutcome::Verified { principal_id }),
-            Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
-        }
+    let bad = |why: &str| Ok(SigOutcome::BadSignature(why.into()));
+    let (Some(nonce), Some(pushee)) = (cap(alt_wire::CAP_ALT_NONCE), cap(alt_wire::CAP_ALT_PUSHEE))
+    else {
+        return bad("the signature names no nonce of this server and no repository");
+    };
+    if !asked
+        .0
+        .is_some_and(|host| alt_wire::pushee_is(pushee, host, asked.1))
+    {
+        return bad("the signature is for another repository than this one");
+    }
+    if !writer.nonces.consume(nonce) {
+        return bad("alt-nonce echoed in push not active on this server (replay or expired)");
+    }
+    let payload =
+        alt_wire::push_certificate(&principal_id, pushee, nonce, &head.updates, HashAlgo::Sha1);
+    match pubkey.verify(&payload, &sig) {
+        Ok(()) => Ok(SigOutcome::Verified { principal_id }),
+        Err(e) => Ok(SigOutcome::BadSignature(format!("{e}"))),
     }
 }
 

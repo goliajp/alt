@@ -463,7 +463,7 @@ where
     parse_report_status(&mut band1.as_slice())
 }
 
-fn zero_oid(algo: HashAlgo) -> ObjectId {
+pub(crate) fn zero_oid(algo: HashAlgo) -> ObjectId {
     let zeros = vec![0u8; algo.raw_len()];
     ObjectId::from_bytes(algo, &zeros).expect("zero oid is valid length")
 }
