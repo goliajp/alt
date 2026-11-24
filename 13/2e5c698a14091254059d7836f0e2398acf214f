@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: note nothing of the ops left in the oplog for a reader it ended short for
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/notes.rs
+touched: crates/alt-oplog/tests/it/v2_ended_short.rs
