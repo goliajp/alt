@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: a migration names the proxies its container is told of where the configuration names none
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/bounds/memory.rs
+touched: crates/alt-server/src/operator/bounds/proxies.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
