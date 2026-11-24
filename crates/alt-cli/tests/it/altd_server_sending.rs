@@ -84,8 +84,18 @@ fn a_fetch_whose_response_has_no_room_beside_one_being_sent_is_told_to_come_agai
     assert!(third.len() > BYTES, "{} bytes", third.len());
 }
 
+/// A server that is ended when this is let go of, however the test ends.
+struct Ended(std::process::Child);
+
+impl Drop for Ended {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// The server as [`spawn_server_with_env`] starts it, at every address of this host.
-fn spawn_at_every_address(env: &[(&str, &str)]) -> (std::process::Child, u16) {
+fn spawn_at_every_address(env: &[(&str, &str)]) -> (Ended, u16) {
     use std::io::BufRead;
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_altd-server"));
     command
@@ -95,8 +105,8 @@ fn spawn_at_every_address(env: &[(&str, &str)]) -> (std::process::Child, u16) {
     for (name, value) in env {
         command.env(name, value);
     }
-    let mut child = command.spawn().unwrap();
-    let mut said = std::io::BufReader::new(child.stderr.take().unwrap());
+    let mut child = Ended(command.spawn().unwrap());
+    let mut said = std::io::BufReader::new(child.0.stderr.take().unwrap());
     let mut line = String::new();
     while !line.contains("listening on ") {
         line.clear();
@@ -132,7 +142,7 @@ fn the_responses_one_address_lets_wait_leave_the_room_of_the_others() {
     let alt = crate::altd_server::alt;
     crate::altd_server::ok(alt(&origin, &["add", "."]));
     crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
-    let (mut server, port) = spawn_at_every_address(&[
+    let (_server, port) = spawn_at_every_address(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_MAX_SENDING_BYTES", "80000000"),
     ]);
@@ -156,6 +166,4 @@ fn the_responses_one_address_lets_wait_leave_the_room_of_the_others() {
         assert!(Instant::now() < until, "the room of an address is kept");
         std::thread::sleep(Duration::from_millis(200));
     }
-    server.kill().unwrap();
-    server.wait().unwrap();
 }
