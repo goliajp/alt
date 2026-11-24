@@ -118,9 +118,25 @@ pub(super) fn failure(
     }
     output
 }
+/// What a request the store refused is answered with, and after how many
+/// seconds it may be sent again where that is known.
 pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
-    // PostgreSQL/I/O details may contain internal paths, SQL, connection
-    // settings or credentials. Client messages are stable and redacted.
+    let again = match &error {
+        Error::Attempts(left) => Some(left.div_ceil(1000)),
+        // what it waited for is other pushes being verified: gone in less
+        Error::Busy(_) => Some(60),
+        _ => None,
+    };
+    let mut output = refused(error, key);
+    if let Some(seconds) = again {
+        let seconds = header::HeaderValue::from(seconds);
+        output.headers_mut().insert(header::RETRY_AFTER, seconds);
+    }
+    output
+}
+/// PostgreSQL/I/O details may contain internal paths, SQL, connection
+/// settings or credentials. Client messages are stable and redacted.
+fn refused(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
     match error {
         Error::AuthorityUnavailable => failure(
             503,
@@ -160,19 +176,8 @@ pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<R
             key,
             Retry::NewIntent,
         ),
-        Error::Attempts(left) => {
-            let mut output = failure(
-                409,
-                ErrorCode::PreconditionFailed,
-                "As many sign-ins were attempted in the minute as may be; retry when it is over",
-                key,
-                Retry::SameRequest,
-            );
-            let again = left.div_ceil(1000).into();
-            output.headers_mut().insert(header::RETRY_AFTER, again);
-            output
-        }
         Error::Precondition(_)
+        | Error::Attempts(_)
         | Error::Repository(alt_repository_service::Error::Precondition(_)) => failure(
             409,
             ErrorCode::PreconditionFailed,
