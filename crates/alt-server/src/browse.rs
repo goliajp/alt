@@ -1,5 +1,10 @@
+mod history;
+#[cfg(test)]
+use history::CommitSummary;
+pub use history::history;
+
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
-use alt_server_store::{Credential, Error, Page, Result, Store};
+use alt_server_store::{Credential, Error, Result, Store};
 use std::io::Read;
 
 const STRUCTURED: usize = 8 * 1024 * 1024;
@@ -126,6 +131,45 @@ fn display(bytes: &[u8]) -> String {
             .collect()
     }
 }
+/// The entries of `tree`, which is at `raw_path`. Each carries its whole path
+/// twice, so what a directory is listed in grows with the two multiplied: the
+/// listing is refused once what is written of it is past `bound`.
+fn listed(raw_path: &[u8], tree: Tree, bound: usize) -> Result<Vec<TreeEntry>> {
+    if tree.entries.len() > 10_000 {
+        return Err(Error::Limit("tree preview entries"));
+    }
+    let mut written = 0;
+    let mut entries = Vec::with_capacity(tree.entries.len());
+    for entry in tree.entries {
+        let mut path = raw_path.to_vec();
+        if !path.is_empty() {
+            path.push(b'/');
+        }
+        path.extend_from_slice(&entry.name);
+        let entry = TreeEntry {
+            name: display(&entry.name),
+            path: hex(&path),
+            display_path: display(&path),
+            oid: entry.oid.to_string(),
+            kind: if entry.mode.is_tree() {
+                "tree"
+            } else if entry.mode.is_gitlink() {
+                "gitlink"
+            } else if entry.mode.is_symlink() {
+                "symlink"
+            } else {
+                "blob"
+            },
+            bytes: None,
+        };
+        written += alt_json::to_vec(&entry)?.len();
+        if written > bound {
+            return Err(Error::Limit("tree preview bytes"));
+        }
+        entries.push(entry);
+    }
+    Ok(entries)
+}
 pub fn tree(
     store: &mut Store,
     credential: &Credential,
@@ -156,37 +200,7 @@ pub fn tree(
             oid = entry.oid;
         }
     }
-    let tree = reader.tree(oid)?;
-    if tree.entries.len() > 10_000 {
-        return Err(Error::Limit("tree preview entries"));
-    }
-    let entries = tree
-        .entries
-        .into_iter()
-        .map(|entry| {
-            let mut path = raw_path.clone();
-            if !path.is_empty() {
-                path.push(b'/');
-            }
-            path.extend_from_slice(&entry.name);
-            TreeEntry {
-                name: display(&entry.name),
-                path: hex(&path),
-                display_path: display(&path),
-                oid: entry.oid.to_string(),
-                kind: if entry.mode.is_tree() {
-                    "tree"
-                } else if entry.mode.is_gitlink() {
-                    "gitlink"
-                } else if entry.mode.is_symlink() {
-                    "symlink"
-                } else {
-                    "blob"
-                },
-                bytes: None,
-            }
-        })
-        .collect();
+    let entries = listed(&raw_path, reader.tree(oid)?, STRUCTURED)?;
     let parent = if raw_path.is_empty() {
         None
     } else {
@@ -245,77 +259,6 @@ pub fn blob(
         download_url: format!("/web/repositories/{repository}/objects/{oid}/download"),
     })
 }
-#[derive(alt_json::ToJson)]
-pub struct CommitSummary {
-    oid: String,
-    parents: Vec<String>,
-    author: String,
-    timestamp: String,
-    message: String,
-}
-/// First-parent history. The projection includes all parents so the caller can
-/// explicitly inspect other ancestry; it never hides this traversal choice.
-pub fn history(
-    store: &mut Store,
-    credential: &Credential,
-    repository: &str,
-    after: Option<ObjectId>,
-    limit: usize,
-) -> Result<Page<CommitSummary>> {
-    if limit == 0 || limit > 100 {
-        return Err(Error::Limit("history page size"));
-    }
-    let info = store.repository_info(credential, repository)?;
-    let start = match after {
-        Some(oid) => Some(oid),
-        None => info
-            .refs
-            .get(&info.default_branch)
-            .map(|id| id.parse().map_err(|_| Error::Integrity("default ref")))
-            .transpose()?,
-    };
-    let Some(start) = start else {
-        return Ok(Page {
-            items: vec![],
-            next: None,
-        });
-    };
-    let mut reader = Reader {
-        store,
-        credential,
-        repository,
-        remaining: WORK,
-    };
-    let mut pending = Some(start);
-    let mut items = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    while items.len() < limit {
-        let Some(oid) = pending else {
-            break;
-        };
-        if !seen.insert(oid) {
-            return Err(Error::Integrity("commit cycle"));
-        }
-        let (oid, commit) = reader.commit(oid)?;
-        let parents = commit.parents().collect::<Vec<_>>();
-        pending = parents.first().copied();
-        items.push(CommitSummary {
-            oid: oid.to_string(),
-            parents: parents.iter().map(ToString::to_string).collect(),
-            author: commit.author().map(|v| display(v)).unwrap_or_default(),
-            timestamp: commit
-                .committer_date()
-                .map(|v| v.to_string())
-                .unwrap_or_default(),
-            message: String::from_utf8_lossy(commit.message()).into_owned(),
-        });
-    }
-    Ok(Page {
-        items,
-        next: pending.map(|v| v.to_string()),
-    })
-}
-
 #[cfg(test)]
 mod json_tests {
     use alt_json_testkit::fixtures::{assert_stored, written_line};
@@ -372,5 +315,36 @@ mod json_tests {
             ),
             &lines,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn directory(entries: usize) -> Tree {
+        let mut raw = Vec::new();
+        for n in 0..entries {
+            raw.extend_from_slice(format!("100644 file-{n:05}\0").as_bytes());
+            raw.extend_from_slice(&[7; 20]);
+        }
+        Tree::parse(&raw, HashAlgo::Sha1).unwrap()
+    }
+
+    #[test]
+    fn a_directory_is_listed_within_what_a_listing_is_written_in_however_deep_it_is() {
+        let written = |entries: &[TreeEntry]| alt_json::to_vec(&entries).unwrap().len();
+        // as long a path as is taken, and as many entries as are listed
+        let deep = [b'd'; 4096];
+        let all = listed(&deep, directory(10_000), usize::MAX).unwrap();
+        assert!(written(&all) > 100 << 20, "{} bytes", written(&all));
+        drop(all);
+        let refused = listed(&deep, directory(10_000), STRUCTURED);
+        assert!(matches!(refused, Err(Error::Limit("tree preview bytes"))));
+        // the same directory near the root, and a small one at the same depth
+        let shallow = listed(b"src", directory(10_000), STRUCTURED).unwrap();
+        assert!(written(&shallow) <= STRUCTURED);
+        let few = listed(&deep, directory(300), STRUCTURED).unwrap();
+        assert_eq!(few.len(), 300);
     }
 }
