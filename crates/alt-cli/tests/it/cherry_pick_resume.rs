@@ -302,3 +302,46 @@ fn undo_takes_the_commit_of_a_continue_back_and_an_abort_too() {
     assert!(output(&at, &["undo"], false).status.success());
     assert_eq!(working_tree(&trees, "served"), stopped);
 }
+
+/// A pick stopped and resolved in a pair, the resolution staged.
+fn resolved_pick() -> crate::like_git::Pair {
+    let pair = crate::like_git::Pair::new();
+    pair.write("f", "a\n");
+    pair.commit_all("base");
+    pair.both(&["switch", "-c", "side"]);
+    pair.write("f", "s\n");
+    pair.commit_all("s");
+    pair.both(&["switch", "main"]);
+    pair.write("f", "m\n");
+    pair.commit_all("m");
+    let (ours, theirs) = pair.run(&["cherry-pick", "side"]);
+    assert_eq!(
+        (ours.status.code(), theirs.status.code()),
+        (Some(1), Some(1))
+    );
+    pair.write("f", "r\n");
+    pair.both(&["add", "f"]);
+    pair
+}
+
+#[test]
+fn a_soft_reset_and_a_checkout_of_a_branch_give_the_pick_up_as_by_git() {
+    let none = "error: no cherry-pick or revert in progress\n";
+    let pair = resolved_pick();
+    pair.both(&["reset", "--soft", "HEAD"]);
+    assert!(
+        pair.same_failure(&["cherry-pick", "--abort"], 128)
+            .starts_with(none)
+    );
+    pair.assert_same_state();
+    let pair = resolved_pick();
+    pair.both(&["checkout", "-b", "other"]);
+    assert!(
+        pair.same_failure(&["cherry-pick", "--continue"], 128)
+            .starts_with(none)
+    );
+    pair.assert_same_state();
+    // what was staged is committed as any change is, by whoever commits
+    pair.commit_all("by hand");
+    pair.assert_same_state();
+}

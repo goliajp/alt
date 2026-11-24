@@ -56,9 +56,12 @@ impl NativeRepo<'_> {
         self.ensure_resettable(mode)?;
         let moved = self.branch_move(branch, head, target)?;
         if mode == ResetMode::Soft {
+            // a pick that waits for its commit is given up with it too
+            self.clear_cherry_pick()?;
             if !moved.is_empty() {
                 self.commit_refs_only("reset", &moved)?;
             }
+            self.settle_state()?;
             return self.say_reset(target, mode, said, out);
         }
         let entries = match target {

@@ -130,6 +130,9 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         let full = format!("refs/heads/{name}");
         self.ensure_may_switch_to(name, &full)?;
+        // as git: a pick that waits for its commit is given up with the
+        // branch it was begun on
+        self.clear_cherry_pick()?;
         let current = self.head_branch()?;
         let mut follows = None;
         let there = self.store.refs.get(&full).is_some();
