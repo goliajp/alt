@@ -164,7 +164,7 @@ pub enum Command {
     /// Read or update git-style config keys (`user.name`, …)
     Config {
         #[command(flatten)]
-        args: crate::config_cmd::Args,
+        args: crate::config_cmd::Config,
     },
     /// List, create (lightweight or annotated), or delete tags
     Tag(sequence_args::Tag),

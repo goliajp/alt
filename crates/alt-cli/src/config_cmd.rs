@@ -17,9 +17,9 @@ use alt_repo::Repository;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// The arguments of `alt config`.
+/// The arguments of `alt config`, under the name its requests record.
 #[derive(alt_args::Args)]
-pub struct Args {
+pub struct Config {
     /// Dotted key (e.g. `user.name`). Omit when `--list` or
     /// `--unset` is set.
     #[arg(hint = "config-key")]
@@ -69,7 +69,7 @@ fn several(key: &str, set: bool) -> Box<dyn std::error::Error> {
     crate::native::said::refused(&said, 5)
 }
 
-pub fn run(repo: &Repository, args: &Args, out: &mut impl Write) -> Res<()> {
+pub fn run(repo: &Repository, args: &Config, out: &mut impl Write) -> Res<()> {
     let how = match (args.replace_all, args.add) {
         (true, _) => Several::Replaced,
         (_, true) => Several::Added,
