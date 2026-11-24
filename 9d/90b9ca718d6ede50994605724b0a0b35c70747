@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: pass the mark of a pack given up by value, and keep an answer on its way behind a pointer
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-pack-segment/src/ingest.rs
