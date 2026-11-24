@@ -38,6 +38,20 @@ pub struct Unread {
     pub kept_because: Option<String>,
 }
 
+impl Unread {
+    fn of(segment: &str, lost: &[(alt_pack_segment::Oid, alt_pack_segment::Error)]) -> Self {
+        Unread {
+            segment: segment.to_owned(),
+            objects: lost.len() as u64,
+            named: (lost.iter().take(NAMED))
+                .map(|(oid, error)| (alt_pack_segment::hex(oid), error.to_string()))
+                .collect(),
+            replaced_by: None,
+            kept_because: None,
+        }
+    }
+}
+
 /// What reading the live segments of one repository found.
 pub struct Scrubbed {
     pub repository: String,
@@ -119,15 +133,7 @@ impl Store {
                 older.push(Arc::clone(segment));
                 continue;
             }
-            let mut unread = Unread {
-                segment: part.0.clone(),
-                objects: lost.len() as u64,
-                named: (lost.iter().take(NAMED))
-                    .map(|(oid, error)| (alt_pack_segment::hex(oid), error.to_string()))
-                    .collect(),
-                replaced_by: None,
-                kept_because: None,
-            };
+            let mut unread = Unread::of(&part.0, &lost);
             let mut stands = Arc::clone(segment);
             if let Some(memory) = mend {
                 match self.index_anew(repository, part, segment, &before, memory) {
@@ -145,24 +151,28 @@ impl Store {
         Ok(scrubbed)
     }
 
-    /// How many objects of the live segments of the instance are not read, each
-    /// read as a scrub reads it. A backup holds the files of the segments to
-    /// their digests, and a file whose index leads to no object, or to another,
-    /// has the digest it was copied with: what is backed up and what was
-    /// restored is read through before it is taken for a copy of the instance.
-    pub fn unread_pack_objects(&mut self) -> Result<u64> {
+    /// The live segments of the instance that do not give back every object,
+    /// each with its repository, read as a scrub reads them. A backup holds the
+    /// files of the segments to their digests, and a file whose index leads to
+    /// no object, or to another, has the digest it was copied with: what is
+    /// backed up and what was restored is read through before it is taken for
+    /// a copy of the instance.
+    pub fn unread_packs(&mut self) -> Result<Vec<(String, Unread)>> {
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
         let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
         tx.commit()?;
-        let mut unread = 0;
+        let mut unread = Vec::new();
         for row in &rows {
-            let (_, set) = self.live_segments(row.get(0))?;
+            let repository: String = row.get(0);
+            let (ids, set) = self.live_segments(&repository)?;
             let mut older: Vec<Arc<Segment>> = Vec::new();
-            for segment in set.segments() {
+            for (part, segment) in ids.iter().zip(set.segments()) {
                 let lost = alt_pack_segment::unread(segment, &SegmentSet::new(older.clone()));
                 let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
-                unread += lost.len() as u64;
+                if !lost.is_empty() {
+                    unread.push((repository.clone(), Unread::of(&part.0, &lost)));
+                }
                 older.push(Arc::clone(segment));
             }
         }

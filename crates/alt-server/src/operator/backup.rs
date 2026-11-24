@@ -16,9 +16,11 @@ use std::{
 
 mod restore;
 mod tools;
+mod unread;
 mod verify;
 pub use restore::restore;
 use tools::{Process, checked, postgres_command};
+pub use unread::Unread;
 pub use verify::{VerifiedBackup, verify};
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
@@ -38,6 +40,10 @@ pub struct Manifest {
     pub catalog: SnapshotCatalog,
     pub files: BTreeMap<String, FileDigest>,
     pub payload: FileDigest,
+    /// the segments that did not give back all of their objects when the backup
+    /// was made, where it was made with such
+    #[json(default, skip_serializing_if = "Vec::is_empty")]
+    pub unread: Vec<Unread>,
 }
 #[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
@@ -97,11 +103,13 @@ fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
 /// Physical access to the configuration, receipt key and database is required;
 /// an HTTP administrator token alone cannot export passwords or signing keys.
 /// The recipient is a public age key. Keep its private identity off the server.
-/// what a backup or a restoration ends with where a segment has objects no read gives
-pub(super) const UNREAD: &str =
-    "pack segments hold objects that are not read: scrub the instance, with --mend";
-
-pub fn create(config: &Config, schema: u32, recipient: &str, output: &Path) -> Result<Manifest> {
+pub fn create(
+    config: &Config,
+    schema: u32,
+    recipient: &str,
+    output: &Path,
+    with_unread: bool,
+) -> Result<Manifest> {
     // The older schema cannot record maintenance events. Its signed
     // completion manifest remains the authority; never migrate just to back up.
     let mut store = if schema == alt_server_store::SCHEMA_VERSION {
@@ -109,17 +117,24 @@ pub fn create(config: &Config, schema: u32, recipient: &str, output: &Path) -> R
     } else {
         None
     };
-    // a copy of segments that do not give their objects back is no backup
-    if let Some(store) = &mut store
-        && store.unread_pack_objects()? != 0
-    {
-        return Err(Error::Config(UNREAD));
+    // a copy of segments that do not give their objects back is no backup,
+    // unless it is asked for as that
+    let unread = match &mut store {
+        Some(store) => unread::found(store)?,
+        None => Vec::new(),
+    };
+    if !unread.is_empty() && !with_unread {
+        return Err(unread::refused(
+            "backup_created",
+            &unread,
+            unread::BACKED_UP,
+        ));
     }
     let operation = alt_browser_auth::secret();
     if let Some(store) = &mut store {
         store.record_backup_event(&operation, alt_server_store::BackupEvent::Started)?;
     }
-    let result = create_inner(config, schema, recipient, output, &operation);
+    let result = create_inner(config, schema, recipient, output, (&operation, unread));
     if let Some(store) = &mut store {
         let event = if result.is_ok() {
             alt_server_store::BackupEvent::Created
@@ -139,7 +154,7 @@ fn create_inner(
     schema: u32,
     recipient: &str,
     output: &Path,
-    operation: &str,
+    (operation, unread): (&str, Vec<Unread>),
 ) -> Result<Manifest> {
     alt_server_store::check_backup_schema(schema).map_err(Error::Config)?;
     config.check_volume()?;
@@ -259,6 +274,7 @@ fn create_inner(
         catalog,
         files,
         payload: digest(&mut regular(&payload_path)?)?,
+        unread,
     };
     let encoded = alt_json::to_vec(&manifest).map_err(|_| Error::File)?;
     let signed = SignedManifest {

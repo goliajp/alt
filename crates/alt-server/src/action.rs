@@ -97,6 +97,10 @@ pub(crate) enum Action {
         recipient: String,
         #[arg(long)]
         output: PathBuf,
+        /// Back up an instance whose pack segments hold objects that are not
+        /// read, and name those segments in the manifest
+        #[arg(long)]
+        with_unread: bool,
     },
     /// Authenticate and decrypt every backup entry without restoring a database
     BackupVerify {
@@ -122,6 +126,10 @@ pub(crate) enum Action {
         /// Attest that the old instance is externally stopped and fenced
         #[arg(long)]
         source_fenced: bool,
+        /// Restore pack segments that hold objects that are not read, though
+        /// the backup does not name them
+        #[arg(long)]
+        with_unread: bool,
     },
     RepositoryCreate {
         id: String,

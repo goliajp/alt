@@ -84,10 +84,12 @@ fn execute(args: &Args) -> Result<Value> {
             schema,
             recipient,
             output,
+            with_unread,
         } => {
-            let manifest = operator::backup::create(&config, *schema, recipient, output)?;
+            let manifest =
+                operator::backup::create(&config, *schema, recipient, output, *with_unread)?;
             return Ok(
-                json!({"backup_created":true,"restored":false,"operation_id":manifest.operation_id,"output":output,"catalog":manifest.catalog,"payload":manifest.payload}),
+                json!({"backup_created":true,"restored":false,"operation_id":manifest.operation_id,"output":output,"catalog":manifest.catalog,"payload":manifest.payload,"unread":manifest.unread}),
             );
         }
         Action::Restore {
@@ -96,6 +98,7 @@ fn execute(args: &Args) -> Result<Value> {
             trusted_receipt_key,
             maximum_bytes,
             source_fenced,
+            with_unread,
         } => {
             if !source_fenced {
                 return Err(Error::Config(
@@ -109,9 +112,10 @@ fn execute(args: &Args) -> Result<Value> {
                 *maximum_bytes,
             )?;
             let digest = verified.manifest_digest.clone();
-            let catalog = operator::backup::restore(&config, verified, *source_fenced)?;
+            let (catalog, unread) =
+                operator::backup::restore(&config, verified, *source_fenced, *with_unread)?;
             return Ok(
-                json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true}),
+                json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true,"unread":unread}),
             );
         }
         _ => (),

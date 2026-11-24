@@ -60,7 +60,7 @@ pub(super) fn execute(args: &Args) -> Result<Option<Value>> {
                 .check_restored_backup(&spec.backup.manifest_digest)
                 .map_err(|_| Error::RestoreStage("existing recovery receipt"))?;
         } else {
-            operator::backup::restore(&config, verified, *source_fenced)?;
+            operator::backup::restore(&config, verified, *source_fenced, false)?;
         }
         return Ok(Some(
             json!({"restored":true,"instance":config.instance,"manifest_digest":spec.backup.manifest_digest,"old_credentials_revoked":true}),

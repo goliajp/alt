@@ -10,6 +10,8 @@ pub enum Error {
     Unsupported(&'static str),
     Unknown,
     RestoreStage(&'static str),
+    /// a restoration that failed before it was activated, and left nothing
+    RestoreUndone(&'static str),
     /// the HTTP service refused to start or ended on an error; nothing was written
     Serve(String),
     /// The action was done for a part of what it was asked for. What it found
@@ -32,6 +34,10 @@ impl std::fmt::Display for Error {
             Self::RestoreStage(v) => write!(
                 f,
                 "restoration incomplete at {v}; inspect the isolated destination before retrying"
+            ),
+            Self::RestoreUndone(v) => write!(
+                f,
+                "restoration failed at {v}; nothing is left of it in the destination, and it can be begun again"
             ),
             Self::Serve(v) => write!(f, "service stopped: {v}"),
             Self::Partly(..) => f.write_str("operator action failed for a part: see its output"),

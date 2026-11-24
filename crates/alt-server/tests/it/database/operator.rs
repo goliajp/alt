@@ -4,6 +4,7 @@ mod observability;
 mod provision;
 mod schema_21;
 mod scrubbed;
+mod unread;
 mod upgrade;
 use super::*;
 use alt_server::operator::{Config, HttpBounds};
