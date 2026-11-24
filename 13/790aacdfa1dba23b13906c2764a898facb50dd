@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a rule of the users file that does not read is an error of the file, at the start and for every request
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/auth.rs
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/tests/it/altd_server_users.rs
+touched: crates/alt-cli/tests/it/main.rs
