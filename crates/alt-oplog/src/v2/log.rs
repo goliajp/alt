@@ -157,8 +157,7 @@ impl Log {
             Some(told) => told,
             None => self.told()?,
         };
-        let of = (self.boot, told);
-        let loaded = load(&self.source(), &self.dir, &self.layout, of, all)?;
+        let loaded = load(&self.source(), &self.beside(), &self.layout, told, all)?;
         let Loaded {
             state,
             ops,
@@ -242,7 +241,7 @@ impl Log {
 
     /// What `tail` says in the running boot; its boundary is taken in.
     pub(super) fn tail(&mut self) -> Option<Tail> {
-        let tail = Tail::read(&self.dir, self.boot);
+        let tail = Tail::read(&self.beside());
         if let Some(tail) = &tail {
             self.synced = self.synced.max(tail.synced);
         }
@@ -250,7 +249,7 @@ impl Log {
     }
 
     pub fn bounded_to(&self) -> Option<u64> {
-        let tail = Tail::read(&self.dir, self.boot);
+        let tail = Tail::read(&self.beside());
         Some(self.synced.max(tail.map_or(0, |tail| tail.synced)))
     }
 

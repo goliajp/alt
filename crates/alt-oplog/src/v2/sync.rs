@@ -50,6 +50,7 @@ impl Log {
             file: self.file.try_clone()?,
             dir: self.dir.clone(),
             boot: self.boot,
+            id: self.layout.id,
             appended: self.deferred.clone(),
             named: self.named.clone(),
         })
@@ -106,13 +107,13 @@ impl Log {
         if cut || !self.holds_head(self.file.metadata()?.len())? {
             return Err(OpLogError::CutBack);
         }
-        let mut tail = Tail::noted_held(&self.dir, self.boot, &held).to_change();
+        let mut tail = Tail::noted_held(&self.beside(), &held).to_change();
         if tail.synced < target {
             self.file.sync_all()?;
             tail.generation = tail.generation.max(generation);
             tail.raise(target, Some(closes));
             tail.judged = tail.judged.max(target);
-            tail.write(&self.dir, self.boot, &held)?;
+            tail.write(&self.beside(), &held)?;
         }
         self.unsynced = false;
         self.synced = self.synced.max(target);

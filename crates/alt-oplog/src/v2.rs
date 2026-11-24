@@ -9,6 +9,7 @@
 
 mod append;
 pub mod block;
+mod bound;
 pub mod checkpoint;
 pub mod compose;
 mod cut;
@@ -16,6 +17,7 @@ mod cuts;
 mod ext;
 mod follow;
 pub mod frame;
+mod held;
 mod hooks;
 mod lift;
 mod locate;
@@ -117,7 +119,13 @@ pub fn create_with(dir: &Path, block_exp: u8) -> std::io::Result<()> {
         file.write_all(&header.encode())?;
         file.sync_all()?;
         // what is appended from now on is appended in this boot
-        tail::Tail::update(dir, running_boot(), |tail| {
+        let of = tail::Place {
+            dir,
+            boot: running_boot(),
+            id,
+            log: &file,
+        };
+        tail::Tail::update(&of, |tail| {
             *tail = tail::Tail {
                 judged: block::FILE_HEADER_LEN as u64,
                 ..tail::Tail::default()
@@ -137,5 +145,13 @@ pub fn running_boot() -> Option<[u8; 16]> {
 
 /// Up to where the log in `dir` is known synced in the running boot.
 pub(crate) fn bounded_in(dir: &Path) -> Option<u64> {
-    tail::Tail::read(dir, running_boot()).map(|tail| tail.synced)
+    let log = std::fs::File::open(dir.join("log")).ok()?;
+    let (header, _) = mark::header_of(&log).ok()?;
+    let of = tail::Place {
+        dir,
+        boot: running_boot(),
+        id: header.layout().id,
+        log: &log,
+    };
+    tail::Tail::read(&of).map(|tail| tail.synced)
 }

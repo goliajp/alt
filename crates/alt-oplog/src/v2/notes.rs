@@ -24,7 +24,7 @@ impl Log {
         if self.told()?.begun(generation) {
             return Ok(());
         }
-        Tail::update_held(&self.dir, self.boot, &held, |tail| {
+        Tail::update_held(&self.beside(), &held, |tail| {
             let other = tail.generation != generation && *tail != Tail::default();
             let further = unheld.is_some_and(|at| tail.judged > at || tail.synced > at);
             if other || tail.pending || further {
@@ -50,7 +50,7 @@ impl Log {
             return Ok(());
         }
         let (generation, synced, end) = (self.state.generation, self.synced, self.state.end);
-        Tail::update(&self.dir, self.boot, |tail| {
+        Tail::update(&self.beside(), |tail| {
             tail.stands(generation);
             tail.raise(synced, None);
             (tail.pending, tail.judged) = (false, end);
@@ -83,7 +83,7 @@ impl Log {
         }
         let (generation, synced) = (self.state.generation, self.synced);
         let judged = self.judged.get();
-        Tail::update(&self.dir, self.boot, |tail| {
+        Tail::update(&self.beside(), |tail| {
             // what was noted of the log before a cut tells of ops left
             // from where that log was synced
             let noted = tail.pending && tail.generation == generation;

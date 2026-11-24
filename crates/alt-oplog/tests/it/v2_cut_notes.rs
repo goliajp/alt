@@ -136,7 +136,7 @@ fn a_cut_the_log_tells_of_that_never_came_to_it_is_taken_back_by_the_next_writer
 fn note(dir: &Path, generation: u32, (hidden, ends): (u64, u64)) {
     let synced = alt_oplog::bounded_in(dir).unwrap();
     let fields = [synced, ends, hidden, ends];
-    let note = super::v2_note_fields::tail(1, generation, true, fields);
+    let note = super::v2_note_fields::tail(dir, 1, generation, true, fields);
     fs::write(dir.join("tail"), note).unwrap();
 }
 

@@ -207,7 +207,7 @@ impl Log {
         // neither a frame that must be known is cut nor the log after one
         self.may_append()?;
         let held = Held::take(&self.dir)?;
-        let noted = Tail::noted_held(&self.dir, self.boot, &held).says();
+        let noted = Tail::noted_held(&self.beside(), &held).says();
         let synced = noted.map_or(0, |tail| tail.synced).max(self.synced);
         self.synced = synced;
         if at < synced {
@@ -231,7 +231,7 @@ impl Log {
             hidden: 0,
             ends: 0,
         };
-        tail.write(&self.dir, self.boot, &held)?;
+        tail.write(&self.beside(), &held)?;
         cut_reached(1)?;
         self.lay_cut(&discarded, generation)?;
         self.unsynced = false;
@@ -239,7 +239,7 @@ impl Log {
             // with nothing left to look at, the checkpoint is covered too
             tail.judged = self.state.end;
         }
-        tail.write(&self.dir, self.boot, &held)?;
+        tail.write(&self.beside(), &held)?;
         if looked {
             self.judged.set(u64::MAX);
         }

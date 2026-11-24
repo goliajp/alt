@@ -197,7 +197,7 @@ fn a_note_of_a_log_of_another_generation_says_nothing_of_what_is_left_to_look_at
     let len = fs::metadata(dir.path().join("log")).unwrap().len();
     // as a writer leaves it that has looked at every op, of a log that
     // was cut five times
-    let note = super::v2_note_fields::tail(2, 5, false, [synced, len, 0, 0]);
+    let note = super::v2_note_fields::tail(dir.path(), 2, 5, false, [synced, len, 0, 0]);
     fs::write(dir.path().join("tail"), note).unwrap();
     for read_only in [true, false] {
         let opened = match read_only {

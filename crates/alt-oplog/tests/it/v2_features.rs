@@ -11,12 +11,14 @@ use alt_oplog::{Op, OpLog, OpLogError};
 use super::v2_full_check::appended_by_a_later_alt;
 use super::v2_log::{boot, grow, new_log};
 
-/// Puts `header` in place of the one the log in `dir` has.
+/// Puts `header` in place of the one the log in `dir` has; the note
+/// beside the log speaks of the log so named.
 pub fn with_header(dir: &Path, header: FileHeader) {
     let path = dir.join("log");
     let mut bytes = fs::read(&path).unwrap();
     bytes[..64].copy_from_slice(&header.encode());
     fs::write(path, bytes).unwrap();
+    super::v2_note_fields::renoted(dir);
 }
 
 fn refused(dir: &Path) -> &'static str {

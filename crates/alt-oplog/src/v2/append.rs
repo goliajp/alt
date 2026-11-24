@@ -250,7 +250,7 @@ impl Log {
         self.file.sync_all()?;
         let (generation, closes) = (self.state.generation, self.closes);
         let end = self.state.end;
-        Tail::update(&self.dir, self.boot, |tail| {
+        Tail::update(&self.beside(), |tail| {
             tail.stands(generation);
             tail.raise(upto, (end == upto).then_some(closes));
             (tail.pending, tail.judged) = (false, end);

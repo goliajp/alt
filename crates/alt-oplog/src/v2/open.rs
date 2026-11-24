@@ -10,8 +10,6 @@
 //! begins at a checkpoint within the synced part instead and goes through
 //! everything after it.
 
-use std::path::Path;
-
 use crate::scan::parse_body;
 use crate::v2::block::{FILE_HEADER_LEN, Layout};
 use crate::v2::frame::{KIND_OP, View};
@@ -22,7 +20,7 @@ use crate::v2::scan::{Located, Stop, Walk};
 pub(crate) use crate::v2::source::Source;
 use crate::v2::state::State;
 use crate::v2::stream::{ReadAt, walk_file};
-use crate::v2::tail::{Noted, Tail};
+use crate::v2::tail::{Noted, Place, Tail};
 use crate::{Framed, Op, OpLogError};
 
 /// The op an op frame at `at..end` holds.
@@ -242,21 +240,22 @@ impl Found {
     }
 }
 
-/// Reads the log `file` of `dir` as an open does; from its first frame
-/// when `all`. The caller holds a lock on the file, and `told` is what
-/// its header tells of a cut.
+/// Reads the log `of` as an open does; from its first frame when `all`.
+/// The caller holds a lock on the file, and `told` is what its header
+/// tells of a cut.
 pub(crate) fn load(
     source: &Source,
-    dir: &Path,
+    of: &Place,
     layout: &Layout,
-    (boot, told): (Option<[u8; 16]>, Mark),
+    told: Mark,
     all: bool,
 ) -> Result<Loaded, OpLogError> {
+    let (dir, boot) = (of.dir, of.boot);
     let meta = source.file.metadata()?;
     let size = crate::settle::read_end(&meta);
     let clamped = size < meta.len();
     let size = size.max(FILE_HEADER_LEN as u64);
-    let noted = Tail::noted(dir, boot);
+    let noted = Tail::noted(of);
     let tail = noted.says();
     let lens = (size, meta.len());
     let mut found = Found::up_to(source, layout, (boot, noted), lens, all)?;

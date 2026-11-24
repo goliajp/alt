@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::v2::log::Log;
 use crate::v2::mark::Mark;
-use crate::v2::tail::{Held, Tail};
+use crate::v2::tail::{Held, Place, Tail};
 use crate::{Op, OpLogError, SyncNamed};
 
 /// What a handle's appends reached when it last asked for them to be
@@ -70,13 +70,23 @@ pub(crate) struct Sink {
     pub(super) file: File,
     pub(super) dir: PathBuf,
     pub(super) boot: Option<[u8; 16]>,
+    pub(super) id: [u8; 16],
     pub(super) appended: Deferred,
     pub(super) named: Option<SyncNamed>,
 }
 
 impl Sink {
+    fn beside(&self) -> Place<'_> {
+        Place {
+            dir: &self.dir,
+            boot: self.boot,
+            id: self.id,
+            log: &self.file,
+        }
+    }
+
     fn covered(&self, target: u64) -> bool {
-        Tail::read(&self.dir, self.boot).is_some_and(|tail| tail.synced >= target)
+        Tail::read(&self.beside()).is_some_and(|tail| tail.synced >= target)
     }
 
     pub fn reached(&self) -> Result<Reached, OpLogError> {
@@ -97,7 +107,7 @@ impl Sink {
         }
         let held = Held::take(&self.dir)?;
         let mut closes = [0u8; 4];
-        let noted = Tail::noted_held(&self.dir, self.boot, &held);
+        let noted = Tail::noted_held(&self.beside(), &held);
         let mut tail = noted.to_change();
         let synced = tail.synced.max(reached.synced);
         let cut = Mark::read(&self.file)?.cuts(reached.generation, synced, reached.target);
@@ -122,7 +132,7 @@ impl Sink {
             tail.generation = tail.generation.max(reached.generation);
             tail.raise(reached.target, Some(reached.closes));
             tail.judged = tail.judged.max(reached.target);
-            tail.write(&self.dir, self.boot, &held)?;
+            tail.write(&self.beside(), &held)?;
         }
         let mut appended = self.appended.lock().unwrap();
         appended.synced = appended.synced.max(reached.target);
