@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: one server of an instance, backups that name unread segments, restorations begun again
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
