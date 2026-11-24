@@ -205,11 +205,16 @@ fn a_cut_of_ops_made_again_where_its_checkpoint_does_not_read_keeps_what_that_cu
             std::fs::write(&path, bytes).unwrap();
         }
         boot(3);
+        let said = format!("Err(Kept {{ unheld: {left}, kept: {kept} }})");
+        // a reader is refused as a writer is, before the cut is made
+        // again
+        let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+        let refused = reader.unconfirmed(but(&[b"left", b"dangling"]));
+        assert_eq!(format!("{refused:?}"), said, "a reader, torn: {torn}");
         let mut log = OpLog::open(dir.path()).unwrap();
         log.refresh().unwrap();
         assert_eq!(log.len(), 5, "torn: {torn}");
         let refused = log.settle(but(&[b"left", b"dangling"]));
-        let said = format!("Err(Kept {{ unheld: {left}, kept: {kept} }})");
         assert_eq!(format!("{refused:?}"), said, "torn: {torn}");
     }
 }

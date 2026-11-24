@@ -14,6 +14,7 @@ use crate::OpLogError;
 use crate::v2::block::BLOCK_HEADER_LEN;
 use crate::v2::frame::{Cut, Ext, HEADER_LEN, KIND_CHECKPOINT};
 use crate::v2::log::Log;
+use crate::v2::mark::Mark;
 
 /// The cuts of a log whose last one left the checkpoint at `last` under
 /// `generation`, as far back as they were read: where the checkpoint of
@@ -55,12 +56,29 @@ impl Log {
         Ok(ext.and_then(|ext| ext.cut))
     }
 
+    /// Whether the header tells of a cut begun where the log ends for
+    /// this handle, at what does not read: the checkpoint of a cut of
+    /// ops may lie there, lost in part when the power went, and the
+    /// writer that reads the log next makes that cut again.
+    fn cut_lost_here(&self) -> Result<bool, OpLogError> {
+        let told = Mark::read_unlocked(&self.file)?;
+        let (end, size) = (self.state.end, self.file.metadata()?.len());
+        if !told.begun(self.state.generation) || told.at != end || size <= end {
+            return Ok(false);
+        }
+        Ok(self.read_past(size)?.0.end == end)
+    }
+
     /// Where the checkpoints start, past byte `from`, of the cuts that
     /// took ops off the log, the last cut first. A cut of what a writer
     /// left unfinished took nothing a sync can have ended at, and is
-    /// none of them.
+    /// none of them. One whose checkpoint was lost is among them before
+    /// it is made again.
     pub(super) fn cuts_past(&self, from: u64) -> Result<Vec<u64>, OpLogError> {
         let (mut at, mut found) = (self.state.cut, Vec::new());
+        if self.cut_lost_here()? {
+            found.push(self.state.end);
+        }
         while at > from {
             let Some(cut) = self.cut_said(at)? else {
                 return Err(OpLogError::Format("oplog record corrupt"));

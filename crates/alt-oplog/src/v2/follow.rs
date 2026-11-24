@@ -17,7 +17,7 @@ use crate::{Discarded, Op, OpLogError};
 
 /// The log through frames read past the ones a handle holds, their ops,
 /// and what still reads after them where what follows is no frame.
-type Past = (State, Vec<Op>, Option<Salvaged>);
+pub(super) type Past = (State, Vec<Op>, Option<Salvaged>);
 
 impl Log {
     pub fn refresh(&mut self) -> Result<(), OpLogError> {
@@ -80,7 +80,7 @@ impl Log {
     /// The log through the frames that follow the ones held in a file of
     /// `size` bytes, their ops, and, where what follows them is no frame,
     /// what still reads after it.
-    fn read_past(&self, size: u64) -> Result<Past, OpLogError> {
+    pub(super) fn read_past(&self, size: u64) -> Result<Past, OpLogError> {
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
         let mut state = self.state.clone();
