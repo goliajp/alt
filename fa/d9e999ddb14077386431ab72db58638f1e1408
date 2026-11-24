@@ -1,0 +1,27 @@
+schema: alt-meta/1
+type: fix
+summary: the responses to fetches that are files take of one room on disk, and those of one address a quarter of it
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-cli/tests/it/task_remote/served.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/git_read.rs
+touched: crates/alt-server/src/git_response.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/file_body.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/observation.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/src/http/routes.rs
+touched: crates/alt-server/src/lib.rs
+touched: crates/alt-server/src/native.rs
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/sending.rs
+touched: crates/alt-server/tests/it/database/connections/slow_readers.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/running.rs
