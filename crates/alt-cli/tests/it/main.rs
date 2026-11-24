@@ -44,7 +44,6 @@ mod casefold_untracked;
 mod casefold_wider;
 mod charset;
 mod checkout_guess;
-mod checkout_moves;
 mod checkout_order;
 mod cherry_pick;
 mod cherry_pick_resume;
