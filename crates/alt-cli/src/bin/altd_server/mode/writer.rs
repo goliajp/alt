@@ -25,6 +25,31 @@ pub(in super::super) struct WriteCoordinator {
     pub(in super::super) nonces: Arc<NonceTable>,
     /// the directory of the repository, open for as long as this is
     _dir: std::fs::File,
+    /// the name and directory it is the writer of, and where the writers a
+    /// sync failed of are kept
+    of: (String, (u64, u64)),
+    stopped: Stopped,
+}
+
+/// The writers a sync failed of, by the name and directory of their
+/// repository. They are kept for as long as the server runs: whoever comes
+/// to the repository again, by whatever way, is given the writer that
+/// refuses.
+pub(in super::super) type Stopped =
+    Arc<std::sync::Mutex<HashMap<(String, (u64, u64)), Arc<WriteCoordinator>>>>;
+
+impl WriteCoordinator {
+    /// Has this writer kept where a sync of it failed. A request does so
+    /// when it is done with it: the repository may have been put aside
+    /// meanwhile, and the request be the last to have its writer in hand.
+    pub(in super::super) fn remember(self: &Arc<Self>) {
+        if self.group.failed().is_some() {
+            let mut stopped = self.stopped.lock().expect("no panic with it held");
+            stopped
+                .entry(self.of.clone())
+                .or_insert_with(|| Arc::clone(self));
+        }
+    }
 }
 
 /// Open the write store and build the write coordinator: turn on deferred
@@ -35,6 +60,8 @@ pub(in super::super) fn open_write_coordinator(
     alt_dir: std::path::PathBuf,
     nonces: Arc<NonceTable>,
     dir: std::fs::File,
+    of: (String, (u64, u64)),
+    stopped: Stopped,
 ) -> Result<Arc<WriteCoordinator>, Box<dyn std::error::Error>> {
     let mut store = Store::open(alt_dir)?;
     store.set_defer_durability(true);
@@ -45,5 +72,7 @@ pub(in super::super) fn open_write_coordinator(
         group: alt_cli::group_commit::GroupCommit::new(),
         nonces,
         _dir: dir,
+        of,
+        stopped,
     }))
 }

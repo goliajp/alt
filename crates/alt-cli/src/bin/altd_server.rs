@@ -372,7 +372,11 @@ fn dispatch(
                 respond_logged(req, r, log)?;
                 return Ok(());
             };
-            return handle_receive_pack(&repo, &writer, auth_user.as_deref(), req, log);
+            let answered = handle_receive_pack(&repo, &writer, auth_user.as_deref(), req, log);
+            // a sync that failed is known of the repository from here on,
+            // though this request be the last to have its writer in hand
+            writer.remember();
+            return answered;
         }
         // Path matched but method didn't — 405 Method Not Allowed.
         let mut r = Response::from_string(format!("method not allowed; allow={allow}"))

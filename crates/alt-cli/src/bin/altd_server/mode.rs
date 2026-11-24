@@ -36,9 +36,9 @@ pub(super) struct Opened {
     /// one writer it has. A writer keeps its directory open, so no other
     /// directory is taken for it.
     writers: HashMap<(String, (u64, u64)), std::sync::Weak<WriteCoordinator>>,
-    /// those a sync failed of, whose repository was put aside: kept, so
-    /// that the repository put back is not written to again
-    stopped: HashMap<(String, (u64, u64)), Arc<WriteCoordinator>>,
+    /// those a sync failed of: kept, so that a repository put aside and
+    /// put back is not written to again
+    stopped: writer::Stopped,
     clock: u64,
     most: usize,
 }
@@ -63,9 +63,8 @@ impl Opened {
             }
             Some(_) => {
                 let closed = self.repos.remove(name).expect("found there");
-                let stopped = |writer: &Arc<WriteCoordinator>| writer.group.failed().is_some();
-                if let Some(writer) = closed.handle.writer.filter(stopped) {
-                    self.stopped.insert((name.to_owned(), closed.dir.0), writer);
+                if let Some(writer) = closed.handle.writer {
+                    writer.remember();
                 }
                 None
             }
@@ -84,7 +83,8 @@ impl Opened {
     /// The writer there is of the repository `name` in `dir`.
     fn writer(&mut self, name: &str, dir: (u64, u64)) -> Option<Arc<WriteCoordinator>> {
         let key = (name.to_owned(), dir);
-        let stopped = self.stopped.get(&key).cloned();
+        let stopped = self.stopped.lock().expect("no panic with it held");
+        let stopped = stopped.get(&key).cloned();
         stopped.or_else(|| self.writers.get(&key)?.upgrade())
     }
 
@@ -146,7 +146,7 @@ impl Opened {
             repos: HashMap::new(),
             nonces: HashMap::new(),
             writers: HashMap::new(),
-            stopped: HashMap::new(),
+            stopped: Default::default(),
             clock: 0,
             most,
         })
@@ -173,7 +173,8 @@ fn opened(
     let writer = match (alt_dir.is_dir(), known) {
         (true, None) => {
             let nonces = cache.take().nonces(name, dir);
-            let opened = open_write_coordinator(alt_dir, nonces, open.try_clone()?)?;
+            let (of, stopped) = ((name.to_owned(), dir), Arc::clone(&cache.take().stopped));
+            let opened = open_write_coordinator(alt_dir, nonces, open.try_clone()?, of, stopped)?;
             Some(cache.take().written(name, dir, opened))
         }
         (_, known) => known,

@@ -72,3 +72,29 @@ fn the_writer_of_a_repository_that_was_closed_is_not_kept() {
     assert!(first.upgrade().is_none());
     assert_eq!(cache.take().repos.len(), 1);
 }
+
+/// A request has a repository in hand when it is put aside, and a sync of
+/// it fails only then. The request ends, nobody has the writer in hand any
+/// more, and the repository put back is still not written to.
+#[test]
+fn a_sync_that_failed_after_its_repository_was_put_aside_is_known_when_it_is_put_back() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let (served, aside) = (tmp.path().join("served"), tmp.path().join("aside"));
+    repository(&served);
+    let cache = Opened::of(4);
+    let open = || opened(&cache, "served", served.clone()).unwrap();
+    let in_hand = open().writer.unwrap();
+    std::fs::rename(&served, &aside).unwrap();
+    repository(&served);
+    // another is served under the name, and the one put aside is closed
+    assert!(!Arc::ptr_eq(&open().writer.unwrap(), &in_hand));
+    in_hand.group.fail("no room".to_owned());
+    // what a request does when it is done with its writer
+    in_hand.remember();
+    drop(in_hand);
+    assert_eq!(open().writer.unwrap().group.failed(), None);
+    std::fs::remove_dir_all(&served).unwrap();
+    std::fs::rename(&aside, &served).unwrap();
+    let back = open().writer.unwrap();
+    assert_eq!(back.group.failed().as_deref(), Some("no room"));
+}
