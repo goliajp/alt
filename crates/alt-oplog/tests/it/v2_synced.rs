@@ -216,7 +216,9 @@ fn deferred_then_another(dir: &Path) -> (OpLog, u64) {
     log.append("a", 2, b"deferred").unwrap();
     log.sync().unwrap();
     let end = log.appended_len();
+    // by a writer that does not sync: no sync may have covered it
     let mut other = OpLog::open(dir).unwrap();
+    let _unsynced = alt_os::durability::leave_unsynced(true);
     other.append("c", 3, b"other").unwrap();
     (log, end)
 }

@@ -99,7 +99,7 @@ impl Log {
 
     fn settle_locked<E: From<OpLogError>>(
         &mut self,
-        held: impl FnMut(&Op, bool) -> Result<bool, E>,
+        mut held: impl FnMut(&Op, bool) -> Result<bool, E>,
     ) -> Result<Option<Unconfirmed>, E> {
         match self.catch_up() {
             Err(OpLogError::CutBack) => {
@@ -116,7 +116,7 @@ impl Log {
         if from >= self.state.end {
             return Ok(None);
         }
-        let Some(cut) = self.first_unheld(from, held)? else {
+        let Some(cut) = self.first_unheld(from, &mut held)? else {
             self.note_settled().map_err(OpLogError::from)?;
             self.judged.set(u64::MAX);
             return Ok(None);
@@ -130,14 +130,15 @@ impl Log {
             },
             unread: 0,
         };
-        self.cut_at(cut.at, discarded, true)?;
+        let kept = self.kept_past(&discarded, held)?;
+        self.cut_at(cut.at, discarded, (true, kept))?;
         Ok(Some(cut))
     }
 
     /// Cuts off what follows the last frame held, which is no frame.
     /// Nobody looked at the ops before it for that.
     pub(super) fn cut_end(&mut self, discarded: Discarded) -> Result<(), OpLogError> {
-        self.cut_at(self.state.end, discarded, false)
+        self.cut_at(self.state.end, discarded, (false, None))
     }
 
     /// What `tail` says after a cut at `at` of the ops another boot left:
@@ -194,7 +195,17 @@ impl Log {
     /// Cuts the log at `at`, where a frame this handle holds starts or
     /// the last one ends, under the exclusive lock of the log. Nothing is
     /// cut that was recorded as synced. `looked` says that every op
-    /// before `at` was vouched for.
+    /// before `at` was vouched for, `kept` where the first frame past
+    /// `at` starts that a writer who syncs left with what it names
+    /// stored.
+    ///
+    /// How far the log is synced this boot knows from `tail`, where a
+    /// writer left one for this log, from the frames and from what this
+    /// handle synced itself. The last sync before the machine went down
+    /// is in none of them until a frame was written after it, nor is the
+    /// last sync of this boot once `tail` is gone. A frame such a sync
+    /// may have covered is not cut: the cut is refused
+    /// ([`OpLogError::Kept`]).
     ///
     /// The order holds through a power cut and through the death of this
     /// process alike. The header of the log first tells that it is cut
@@ -205,7 +216,12 @@ impl Log {
     /// checkpoint. `tail` speaks of the log as it is once cut from the
     /// first step on: it says nothing of the log before, and whoever
     /// reads that one takes its ops for left to be looked at.
-    fn cut_at(&mut self, at: u64, discarded: Discarded, looked: bool) -> Result<(), OpLogError> {
+    fn cut_at(
+        &mut self,
+        at: u64,
+        discarded: Discarded,
+        (looked, kept): (bool, Option<u64>),
+    ) -> Result<(), OpLogError> {
         self.may_write()?;
         // neither a frame that must be known is cut nor the log after one
         self.may_append()?;
@@ -221,6 +237,9 @@ impl Log {
         self.synced = synced;
         if at < synced {
             return Err(OpLogError::Lost { synced, holds: at });
+        }
+        if let Some(kept) = kept {
+            return Err(OpLogError::Kept { unheld: at, kept });
         }
         let (pending, judged) = self.left_after(noted, at, looked);
         let generation = self.generation_cut()?;

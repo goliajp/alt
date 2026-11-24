@@ -38,6 +38,8 @@ pub(crate) fn op_of(at: u64, end: u64, view: &View) -> Result<Op, OpLogError> {
         linked: view.ext.linked.is_some(),
         inverse_of: view.ext.inverse_of,
         request: view.ext.request,
+        staged: view.ext.index_after.is_some(),
+        retired: view.ext.retired,
     });
     Ok(op)
 }

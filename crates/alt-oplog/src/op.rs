@@ -15,6 +15,15 @@ pub enum OpLogError {
     },
     /// the log was cut back past records this handle read or wrote
     CutBack,
+    /// The op at byte `unheld` past where the log is known synced names
+    /// content that is not stored, and a frame after it, at byte `kept`,
+    /// was left by a writer that syncs, with what it names stored. A sync
+    /// may have covered that frame without seeing to the op at `unheld`,
+    /// and a command may have been answered for it. The log is not cut.
+    Kept {
+        unheld: u64,
+        kept: u64,
+    },
 }
 
 impl std::fmt::Display for OpLogError {
@@ -27,6 +36,12 @@ impl std::fmt::Display for OpLogError {
                 f,
                 "the operation log ends at byte {holds}, but records up to byte {synced} of \
                  it were committed and synced: committed operations are gone"
+            ),
+            Self::Kept { unheld, kept } => write!(
+                f,
+                "the operation at byte {unheld} of the operation log names content that is \
+                 not stored, and an operation to keep follows it at byte {kept} in the part \
+                 of the log that is not known to be synced: the log is left as it is"
             ),
             Self::CutBack => f.write_str(
                 "the operation log was cut back: operations that were never synced and \
@@ -106,6 +121,11 @@ pub struct Framed {
     /// the frame of the op this one undoes
     pub inverse_of: Option<u64>,
     pub request: Option<[u8; 16]>,
+    /// the frame says what closes the index of its workspace once the op
+    /// is done: the op changes that index
+    pub staged: bool,
+    /// the workspace is gone with this op
+    pub retired: bool,
 }
 
 impl Op {

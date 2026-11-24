@@ -155,8 +155,12 @@ fn the_full_check_takes_what_a_cut_left_past_its_checkpoint_for_no_part_of_the_l
         let mut log = OpLog::open(dir.path()).unwrap();
         grow(&mut log, "a", before);
         log.append("gone", 1, &vec![7; len]).unwrap();
-        for n in 0..12 {
-            log.append("a", n, &[n as u8; 150]).unwrap();
+        {
+            // by a writer that does not sync: no sync covered them
+            let _unsynced = alt_os::durability::leave_unsynced(true);
+            for n in 0..12 {
+                log.append("a", n, &[n as u8; 150]).unwrap();
+            }
         }
         drop(log);
         // the cut dies with its checkpoint synced and the file as long as it was

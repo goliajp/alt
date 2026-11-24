@@ -144,14 +144,15 @@ fn child() {
     }
 }
 
-/// In boot 1: three synced ops, then `gone` and one more left unsynced.
-/// Returns where `gone` starts.
+/// In boot 1: three synced ops, then `gone` and one more, of a writer
+/// that does not sync, left unsynced. Returns where `gone` starts.
 fn two_to_cut(dir: &Path) -> u64 {
     boot(1);
     let mut log = new_log(dir);
     grow(&mut log, "a", 3);
     log.append("a", 4, b"gone").unwrap();
     let at = log.anchor().unwrap().start;
+    let _unsynced = alt_os::durability::leave_unsynced(true);
     log.append("a", 5, b"after it").unwrap();
     at
 }

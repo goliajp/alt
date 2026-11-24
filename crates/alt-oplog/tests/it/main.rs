@@ -35,6 +35,7 @@ mod v2_format;
 mod v2_full_check;
 mod v2_holes;
 mod v2_image;
+mod v2_kept;
 mod v2_ledger;
 mod v2_log;
 mod v2_meanwhile;

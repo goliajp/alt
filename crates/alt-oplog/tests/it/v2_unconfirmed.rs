@@ -19,6 +19,13 @@ fn left_by_boot_1(dir: &Path, unsynced: &[&[u8]]) -> Vec<Anchor> {
     grow(&mut log, "synced", 3);
     let mut anchors = Vec::new();
     for payload in unsynced {
+        // what follows an op whose content is gone was left by a writer
+        // that does not sync: no sync may have covered it
+        let before = unsynced[..anchors.len()].iter();
+        let after_gone = before
+            .into_iter()
+            .any(|payload| payload.starts_with(b"gone"));
+        let _unsynced = after_gone.then(|| alt_os::durability::leave_unsynced(true));
         log.append("actor", 9, payload).unwrap();
         anchors.push(log.anchor().unwrap());
     }

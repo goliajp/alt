@@ -19,6 +19,7 @@ mod follow;
 pub mod frame;
 mod held;
 mod hooks;
+mod kept;
 mod lift;
 mod locate;
 mod log;

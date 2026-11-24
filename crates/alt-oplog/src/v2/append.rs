@@ -182,6 +182,8 @@ impl Log {
                 linked: meta.linked,
                 inverse_of: meta.inverse_of,
                 request: meta.request,
+                staged: meta.index_after.is_some(),
+                retired: meta.retired,
             }),
         };
         if let Some(full) = self.full.get_mut() {
