@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: the peers that are of the host are told to the server, and the compose file names the gateway its proxy comes from
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/peers.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers/sources.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: deploy/docker-compose.yml
