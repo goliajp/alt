@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: refuse to set or unset by one value a variable that has several, as git does, and take --add, --replace-all and --unset-all
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/classify.rs
+touched: crates/alt-cli/src/cli/command.rs
+touched: crates/alt-cli/src/cli/git.rs
+touched: crates/alt-cli/src/config_cmd.rs
+touched: crates/alt-cli/src/machine/bindings.rs
+touched: crates/alt-cli/tests/fixtures/args/help.txt
+touched: crates/alt-cli/tests/it/config_written.rs
