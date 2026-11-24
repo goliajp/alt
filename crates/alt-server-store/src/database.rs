@@ -26,6 +26,10 @@ impl Connection {
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)
     }
+    /// one statement outside any transaction block; how many rows it wrote
+    pub fn execute(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, Error> {
+        self.client.execute(sql, params)
+    }
     /// one statement outside any transaction block, planned for these parameter values
     pub fn query_one_for_values(
         &mut self,

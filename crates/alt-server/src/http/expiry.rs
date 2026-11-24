@@ -9,6 +9,10 @@
 //!
 //! The same rounds remove what has been over for long enough to be let go of:
 //! requests, sessions and credentials each have their time, which the store keeps.
+//!
+//! And the same rounds give the requests that ended before schema 22 the moment
+//! they ended, which the upgrade left to the server: so many in a round, until a
+//! round finds none.
 
 use super::*;
 use alt_server_store::RequestsSeen;
@@ -18,6 +22,11 @@ use alt_server_telemetry::BackgroundLog;
 const BATCH: u32 = 1000;
 /// the rows one rule removes in one round of removing what is over
 const REMOVED: u32 = 1000;
+/// the requests given their moment in one transaction
+const GIVEN: u32 = 1000;
+/// The transactions of one round that give requests their moment. The table is
+/// vacuumed after them, so it grows by no more than the rows of one round.
+const GIVINGS: u32 = 20;
 /// What is over is kept for days: it is looked for once in so many rounds, and
 /// in the next round as well while a round left some behind.
 const ROUNDS_TO_REMOVAL: u32 = 120;
@@ -44,6 +53,8 @@ impl Rounds {
 pub(super) async fn run(state: Arc<App>) {
     let log = BackgroundLog::current();
     let (mut seen, mut rounds) = (RequestsSeen::default(), Rounds::default());
+    // whether some request that is over may still be without its moment
+    let mut owed = true;
     loop {
         tokio::time::sleep(state.options.expiry_interval).await;
         let factory = (*state.factory).clone();
@@ -55,16 +66,24 @@ pub(super) async fn run(state: Arc<App>) {
             let mut one =
                 |repository: &str, error| told.failed("request expiry", repository, &error);
             store.expire_requests(BATCH, &mut one)?;
+            let owed = owed
+                && match store.give_earlier_requests_their_moment(GIVEN, GIVINGS) {
+                    Ok((_, more)) => more,
+                    Err(error) => {
+                        told.failed("moments of earlier requests", "", &error);
+                        true
+                    }
+                };
             if !removing {
-                return Ok((passed, false));
+                return Ok((passed, false, owed));
             }
             let mut rule = |name: &str, error| told.failed("removal of what is over", name, &error);
             let removed = store.remove_what_is_over(REMOVED, &mut passed, &mut rule);
-            Ok::<_, alt_server_store::Error>((passed, removed.more))
+            Ok::<_, alt_server_store::Error>((passed, removed.more, owed))
         });
         let mut more = false;
         match ended.await {
-            Ok(Ok((passed, left))) => (seen, more) = (passed, left),
+            Ok(Ok((passed, left, still))) => (seen, more, owed) = (passed, left, still),
             Ok(Err(error)) => log.failed("request expiry", "", &error),
             Err(_) => {}
         }

@@ -5,6 +5,8 @@ use super::maintenance::{encryption_key, prepare, publish};
 use super::upgrade::{copies, delivered_receipt, observed};
 use super::*;
 
+mod served;
+
 /// makes the database the schema 21 one it stands in for
 fn as_schema_21(db: &OperatorDb) {
     Client::connect(&db.dsn)
@@ -13,6 +15,7 @@ fn as_schema_21(db: &OperatorDb) {
             "DELETE FROM alt_schema WHERE version=22;
              ALTER TABLE alt_requests DROP CONSTRAINT IF EXISTS alt_requests_settled_at;
              DROP INDEX IF EXISTS alt_requests_settled;
+             DROP INDEX IF EXISTS alt_requests_unsettled;
              DROP INDEX IF EXISTS alt_requests_open;
              ALTER TABLE alt_requests DROP COLUMN IF EXISTS settled_at;
              ALTER TABLE alt_credentials DROP CONSTRAINT IF EXISTS alt_credentials_revoked_at;
@@ -107,7 +110,8 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(migrated["migrated"], true);
     assert_eq!(migrated["schema"], 22);
     assert_eq!(copies(&source.dsn), (22, 0, 0));
-    assert_eq!(moments(&source.dsn), Some((1, 0)));
+    // the request is given its moment by the server as it runs, and counted until then
+    assert_eq!(moments(&source.dsn), Some((0, 0)));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -120,6 +124,8 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
         "{}",
         String::from_utf8_lossy(&upgraded.stderr)
     );
+    let health: alt_json::Value = alt_json::from_slice(&upgraded.stdout).unwrap();
+    assert_eq!(health["requests_awaiting_settled_at"], 1);
     assert_eq!(
         observed(&source, &next, &admin, &key),
         (before, receipt.clone())
@@ -150,8 +156,12 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     );
     assert_eq!(copies(&target.dsn), (22, 0, 0));
     // the restore revoked every credential of the source, at its own moment
-    assert_eq!(moments(&target.dsn).map(|(requests, _)| requests), Some(1));
-    assert_eq!(target.ok(&["health"])["ready"], true);
+    assert_eq!(moments(&target.dsn).map(|(requests, _)| requests), Some(0));
+    let health = target.ok(&["health"]);
+    assert_eq!(
+        (&health["ready"], &health["requests_awaiting_settled_at"]),
+        (&alt_json::json!(true), &alt_json::json!(1))
+    );
     assert_eq!(
         delivered_receipt(&target, target.config.to_str().unwrap()),
         receipt

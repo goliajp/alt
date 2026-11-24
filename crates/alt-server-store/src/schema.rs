@@ -11,7 +11,7 @@ const VERSION_19: &str = include_str!("schema-v19.sql");
 const VERSION_20: &str = include_str!("schema-v20.sql");
 /// what takes schema 20 to 21; it has no data step
 const VERSION_21: &str = include_str!("schema-v21.sql");
-/// what takes schema 21 to 22; its data step is in the statements themselves
+/// what takes schema 21 to 22; the rows of requests are written later, as the server runs
 const VERSION_22: &str = include_str!("schema-v22.sql");
 
 /// The oldest schema this release reads: it upgrades an instance of that schema,
@@ -141,8 +141,10 @@ impl Store {
     /// version kept in the content store move into pack segments; see `schema_v19`.
     /// From 19 the stored state of committed requests and their outbox events give
     /// up their copy of the publication; see `schema_v20`. From 20 refs lose their
-    /// foreign key to the repository. From 21 requests and credentials are given
-    /// the moment they ended, from which what is over is kept for a time.
+    /// foreign key to the repository. From 21 requests and credentials have the
+    /// moment they ended, from which what is over is kept for a time: a revoked
+    /// credential is given it here, and a request by the server as it runs; see
+    /// `earlier_requests`.
     pub fn migrate(
         mut client: Client,
         bytes: ByteStore,
@@ -160,6 +162,9 @@ impl Store {
         let mut written = Vec::new();
         let migrated: Result<u64> = (|| {
             let mut tx = crate::database::Transaction::uncached(client.transaction()?);
+            // an index is built over every request there is, which takes the time
+            // it takes: the instance is stopped, and nothing waits for this
+            tx.batch_execute("SET LOCAL statement_timeout=0")?;
             tx.query_one("SELECT pg_advisory_xact_lock(715071909111)", &[])?;
             check(tx.raw_mut(), from as usize)?;
             tx.query_one(

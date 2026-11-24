@@ -2,6 +2,7 @@
 mod bytes;
 mod committed;
 mod database;
+mod earlier_requests;
 mod gc;
 mod jsonb;
 pub use jsonb::Jsonb;

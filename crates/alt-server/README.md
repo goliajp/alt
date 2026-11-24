@@ -419,13 +419,18 @@ repository. The database checked it once for every ref a push created, while a
 ref is only ever written under the lock of its repository's row and no
 repository is removed. No row changes.
 
-From schema 21 the transaction gives every request the moment it ended and every
-revoked credential the moment it was revoked, and adds three indexes. A
-committed request is given the moment in its receipt; a rejected or expired
-request and a revoked credential are given the moment of the upgrade, so nothing
-is removed sooner than it would have been. Every finished request row and every
-revoked credential row is written once; allow time in proportion to the number
-of requests.
+From schema 21 the transaction adds the moment a request ended and the moment a
+credential was revoked, and three indexes. A revoked credential is given the
+moment of the upgrade there. No request row is written: building the indexes
+reads each once, and the table keeps its size. The statements of `migrate` are
+not held to `database_statement_timeout_ms`. The running server gives the
+finished requests their moment afterwards, 1000 rows in a transaction and 20
+transactions every half minute, with a vacuum of the table after each round: a
+committed request the moment in its receipt, a rejected or expired one the
+moment the server comes to it. A request without its moment is not removed, so
+nothing is removed sooner than it would have been. `health` counts the requests
+still waiting as `requests_awaiting_settled_at`; it is 0 on an instance that
+was created at this schema and on one where the server is done.
 
 ## Retention
 

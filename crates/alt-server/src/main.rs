@@ -468,7 +468,7 @@ fn execute(args: &Args) -> Result<Value> {
         }
         Action::Health => {
             return Ok(
-                json!({"ready":true,"instance":store.spec(),"build":build_info(),"receipt_public_key":hex(config.signing_key()?.verifying_key().as_bytes())}),
+                json!({"ready":true,"instance":store.spec(),"build":build_info(),"receipt_public_key":hex(config.signing_key()?.verifying_key().as_bytes()),"requests_awaiting_settled_at":store.requests_without_moment()?}),
             );
         }
         Action::Bootstrap {

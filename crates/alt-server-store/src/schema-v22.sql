@@ -1,12 +1,15 @@
 -- What is over is removed after a time, counted from when it ended: a request
 -- from when it was committed, rejected or expired, a credential from when it was
--- revoked. Rows that ended before this version have no such moment recorded: a
--- committed request has the one in its receipt, and the others are given the
--- moment of the upgrade, so nothing is removed sooner than it would have been.
+-- revoked. A request that ended before this version has no such moment recorded,
+-- and is given none here: writing every row of the table in one transaction
+-- leaves a second copy of the table behind. The server gives each its moment as
+-- it runs, so many rows at a time, and a request without one is kept until then.
+-- alt_requests_unsettled holds the ones still to be given theirs, and nothing
+-- once that is done.
 ALTER TABLE alt_requests ADD COLUMN settled_at bigint;
-UPDATE alt_requests SET settled_at=CASE WHEN state='committed' THEN (result#>>'{receipt,body,committed_at_unix_ms}')::bigint ELSE floor(extract(epoch FROM clock_timestamp())*1000)::bigint END WHERE state IN ('committed','rejected','expired');
-ALTER TABLE alt_requests ADD CONSTRAINT alt_requests_settled_at CHECK ((settled_at IS NOT NULL) = (state IN ('committed','rejected','expired')));
+ALTER TABLE alt_requests ADD CONSTRAINT alt_requests_settled_at CHECK (settled_at IS NULL OR state IN ('committed','rejected','expired'));
 CREATE INDEX alt_requests_settled ON alt_requests(settled_at) WHERE settled_at IS NOT NULL;
+CREATE INDEX alt_requests_unsettled ON alt_requests(expires_at) WHERE settled_at IS NULL AND state IN ('committed','rejected','expired');
 -- the requests still open are few among all there ever were, and are looked for often
 CREATE INDEX alt_requests_open ON alt_requests(expires_at) WHERE state IN ('receiving','ready');
 ALTER TABLE alt_credentials ADD COLUMN revoked_at bigint;

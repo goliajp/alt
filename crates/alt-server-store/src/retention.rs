@@ -209,7 +209,7 @@ impl Store {
         Removed { more, ..removed }
     }
 
-    fn removing(&mut self) -> Result<(Transaction<'_>, u64)> {
+    pub(crate) fn removing(&mut self) -> Result<(Transaction<'_>, u64)> {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let time = now(&mut tx)?;

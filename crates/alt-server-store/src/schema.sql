@@ -82,12 +82,14 @@ CREATE TABLE alt_requests (
   fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
   worker_lease_until bigint NOT NULL DEFAULT 0,
   -- when it was committed, rejected or expired: a request that is over is kept
-  -- for a time from then, and its id is refused as a repetition for as long
+  -- for a time from then, and its id is refused as a repetition for as long. One
+  -- that ended before this was recorded is given it as the server runs.
   settled_at bigint,
   PRIMARY KEY(repository, epoch, actor_id, request_id),
-  CONSTRAINT alt_requests_settled_at CHECK ((settled_at IS NOT NULL) = (state IN ('committed','rejected','expired')))
+  CONSTRAINT alt_requests_settled_at CHECK (settled_at IS NULL OR state IN ('committed','rejected','expired'))
 );
 CREATE INDEX alt_requests_settled ON alt_requests(settled_at) WHERE settled_at IS NOT NULL;
+CREATE INDEX alt_requests_unsettled ON alt_requests(expires_at) WHERE settled_at IS NULL AND state IN ('committed','rejected','expired');
 CREATE INDEX alt_requests_open ON alt_requests(expires_at) WHERE state IN ('receiving','ready');
 -- State/verified updates of alt_blobs and alt_request_content do not change
 -- indexed keys. Their fillfactor reserves heap-page room for HOT updates rather
