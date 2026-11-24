@@ -6,6 +6,10 @@ use super::checkout_recovery::{CheckoutIntent, FileChange};
 use super::*;
 use recovery::canonical_index;
 
+mod in_the_way;
+
+pub(super) use in_the_way::Visible;
+
 /// The paths whose content and mode are the same in both trees. A checkout
 /// leaves them alone, whatever the working tree holds there.
 fn unchanged<'a>(
@@ -25,40 +29,7 @@ fn unchanged<'a>(
         .collect()
 }
 
-/// The files of the working tree that are not ignored, read when the first
-/// directory standing in a file's way has to be judged.
-#[derive(Default)]
-pub(super) struct Visible(Option<std::collections::HashSet<BString>>);
-
 impl NativeRepo<'_> {
-    /// The ignored files in the directory at `path`, which is about to
-    /// become a file: they go with the directory, as in git. An untracked
-    /// file that is not ignored refuses the checkout instead.
-    pub(super) fn ignored_in_the_way(
-        &self,
-        path: &BString,
-        tracked: &dyn Fn(&[u8]) -> bool,
-        visible: &mut Visible,
-    ) -> Res<Vec<BString>> {
-        let untracked: Vec<BString> = self
-            .files_beneath(path)?
-            .into_iter()
-            .filter(|f| !tracked(f))
-            .collect();
-        if untracked.is_empty() {
-            return Ok(untracked);
-        }
-        if visible.0.is_none() {
-            let scan = self.scan_tree(&self.index()?)?;
-            visible.0 = Some(scan.into_iter().map(|w| w.path).collect());
-        }
-        let seen = visible.0.as_ref().expect("just filled");
-        match untracked.iter().any(|f| seen.contains(f)) {
-            true => Err(holds_untracked(path)),
-            false => Ok(untracked),
-        }
-    }
-
     /// Ends the list of what a checkout changes: a file that a path
     /// which comes reaches by another spelling is not removed, and the
     /// ignored files in a directory that becomes a file are removed with
