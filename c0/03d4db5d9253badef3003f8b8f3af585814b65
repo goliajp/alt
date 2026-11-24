@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: only the proxies a server is told say whose a request is, apart from the peers that are of its host
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/peers.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers/sources.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/tests/it/altd_server_sending.rs
+touched: deploy/docker-compose.yml
