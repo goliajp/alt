@@ -493,6 +493,11 @@ not read the objects), it restores nothing, unless `--with-unread` is given: the
 instance is then restored as it is, the segments are told of, and `scrub --mend`
 is run on the restored instance.
 
+While `scrub`, `backup` and `restore` read the objects they write a line to
+standard error every ten seconds, such as `scrub: 204800 of 414247 objects of
+example read`; a reading that is done sooner writes none. What the command found
+is on standard output as before.
+
 From schema 19 the transaction changes how a committed publication is stored.
 That version kept the whole publication four times: in the request, in the
 receipt of the request's stored result, in the audit record and in the outbox

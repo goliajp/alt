@@ -26,9 +26,15 @@ pub struct Unread {
 pub(super) const BACKED_UP: &str = "pack segments hold objects that are not read: mend them (scrub --mend) and back up again; where a segment stays unread, --with-unread backs the instance up as it is and names the segment in the manifest";
 pub(super) const RESTORED: &str = "the restored pack segments hold objects that are not read, and the backup does not name them: nothing is left of this restoration, and it can be begun again; --with-unread restores the instance as it is, for scrub --mend to be run on it";
 
-/// The segments of the instance that do not give back all of their objects.
-pub(super) fn found(store: &mut alt_server_store::Store) -> Result<Vec<Unread>> {
-    let unread = store.unread_packs()?;
+/// The segments of the instance that do not give back all of their objects,
+/// read for `command`, which tells how far the reading has come.
+pub(super) fn found(
+    store: &mut alt_server_store::Store,
+    command: &'static str,
+) -> Result<Vec<Unread>> {
+    let mut reading = crate::operator::reading::Reading::by(command);
+    let mut read = |repository: &str, read, all| reading.read(repository, read, all);
+    let unread = store.unread_packs(&mut read)?;
     let told = |(repository, unread): (String, alt_server_store::Unread)| Unread {
         repository,
         segment: unread.segment,

@@ -28,14 +28,19 @@ fn cloud_segment_that_does_not_give_its_objects_back_is_indexed_anew() {
     turned(&mut bytes);
     planted(&f, &astray, sequence + 1, &bytes);
 
-    let found = f.store.scrub_packs(&f.credential, "repository", None);
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", None, &mut |_, _, _| ());
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (2, 4));
     assert_eq!(found.unread.len(), 1);
     assert_eq!(found.unread[0].segment, astray);
-    let mended = f
-        .store
-        .scrub_packs(&f.credential, "repository", Some(memory()));
+    let mended = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
     let anew = mended.unwrap().unread[0].replaced_by.clone().unwrap();
     let live = "live".to_owned();
     assert_eq!(
@@ -46,9 +51,12 @@ fn cloud_segment_that_does_not_give_its_objects_back_is_indexed_anew() {
             (astray, "retired".to_owned())
         ]
     );
-    let found = f
-        .store
-        .scrub_packs(&f.credential, "repository", Some(memory()));
+    let found = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
     assert!(found.unwrap().unread.is_empty());
     assert_eq!(
         f.store.repositories_to_scrub(&f.credential).unwrap(),

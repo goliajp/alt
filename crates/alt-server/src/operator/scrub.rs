@@ -22,8 +22,10 @@ pub fn read(
     };
     let mut scrubbed = Vec::with_capacity(repositories.len());
     let (mut failed, mut unknown) = (Vec::new(), false);
+    let mut reading = super::reading::Reading::by("scrub");
+    let mut read = |repository: &str, read, all| reading.read(repository, read, all);
     for repository in &repositories {
-        match store.scrub_packs(admin, repository, mend) {
+        match store.scrub_packs(admin, repository, mend, &mut read) {
             Ok(found) => scrubbed.push(found),
             Err(error) => {
                 unknown |= matches!(error, alt_server_store::Error::OutcomeUnknown);

@@ -18,7 +18,17 @@ const KEPT: usize = 256 << 20;
 /// before it. An object is made of its base once: a segment is read in the
 /// time its entries take, whatever the length of its chains.
 pub fn unread(segment: &Arc<Segment>, older: &SegmentSet) -> Result<Vec<(Oid, Error)>, Error> {
-    Ok(unread_holding(segment, older, KEPT)?.0)
+    unread_telling(segment, older, &mut || ())
+}
+
+/// `unread`, with `each` called once an object of the segment was read, or
+/// was not: whoever waits for a large segment is told how far it has come.
+pub fn unread_telling(
+    segment: &Arc<Segment>,
+    older: &SegmentSet,
+    each: &mut dyn FnMut(),
+) -> Result<Vec<(Oid, Error)>, Error> {
+    Ok(read_through(segment, older, KEPT, each)?.0)
 }
 
 /// `unread` with a chosen bound on the bytes of objects kept at once, which the
@@ -29,14 +39,26 @@ pub fn unread_holding(
     older: &SegmentSet,
     kept: usize,
 ) -> Result<(Vec<(Oid, Error)>, u64), Error> {
+    read_through(segment, older, kept, &mut || ())
+}
+
+fn read_through(
+    segment: &Arc<Segment>,
+    older: &SegmentSet,
+    kept: usize,
+    each: &mut dyn FnMut(),
+) -> Result<(Vec<(Oid, Error)>, u64), Error> {
     let mut all = older.segments().to_vec();
     all.push(Arc::clone(segment));
     let all = SegmentSet::new(all);
     let mut unread = Vec::new();
-    let applied = all.each_of_the_newest(kept, |record, read| match read {
-        Ok(data) if object_id(record.kind, data) == record.oid => {}
-        Ok(_) => unread.push((record.oid, Error::Corrupt("object differs from its id"))),
-        Err(error) => unread.push((record.oid, error)),
+    let applied = all.each_of_the_newest(kept, |record, read| {
+        match read {
+            Ok(data) if object_id(record.kind, data) == record.oid => {}
+            Ok(_) => unread.push((record.oid, Error::Corrupt("object differs from its id"))),
+            Err(error) => unread.push((record.oid, error)),
+        }
+        each();
     })?;
     unread.sort_unstable_by_key(|(oid, _)| *oid);
     Ok((unread, applied))

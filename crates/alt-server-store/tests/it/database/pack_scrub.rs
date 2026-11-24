@@ -60,7 +60,9 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let written: Vec<u8> = (row.get::<_, Option<Vec<u8>>>(2)).unwrap_or_else(|| {
         std::fs::read(f.store.pack_path("repository", &first).unwrap()).unwrap()
     });
-    let found = f.store.scrub_packs(&f.credential, "repository", None);
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", None, &mut |_, _, _| ());
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (1, 2));
     assert!(found.unread.is_empty());
@@ -70,9 +72,21 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let mut bytes = written.clone();
     turned(&mut bytes);
     planted(&f, &astray, sequence + 1, &bytes);
-    let found = f.store.scrub_packs(&f.credential, "repository", None);
+    let mut told = Vec::new();
+    let mut each = |repository: &str, read, all| told.push((repository.to_owned(), read, all));
+    let found = f
+        .store
+        .scrub_packs(&f.credential, "repository", None, &mut each);
     let found = found.unwrap();
     assert_eq!((found.segments, found.objects), (2, 4));
+    // told of as each object was read, the one that is not read among them
+    let each_object = (1..=4).map(|read| ("repository".to_owned(), read, 4));
+    assert_eq!(told, each_object.collect::<Vec<_>>());
+    let mut told = Vec::new();
+    let mut each = |repository: &str, read, all| told.push((repository.to_owned(), read, all));
+    assert_eq!(f.store.unread_packs(&mut each).unwrap().len(), 1);
+    assert_eq!(told.last(), Some(&("repository".to_owned(), 4, 4)));
+    assert_eq!(told.len(), 4);
     assert_eq!(found.unread.len(), 1);
     let unread = &found.unread[0];
     assert_eq!(
@@ -94,7 +108,9 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     );
 
     // a name that is no repository has no segments, and is not told of as sound
-    let none = f.store.scrub_packs(&f.credential, "repositry", None);
+    let none = f
+        .store
+        .scrub_packs(&f.credential, "repositry", None, &mut |_, _, _| ());
     let none = none.err().map(|error| error.to_string());
     let no_repository = format!("precondition failed: {}", alt_server_store::NO_REPOSITORY);
     assert_eq!(none, Some(no_repository));
@@ -103,7 +119,7 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let little = Box::leak(Box::new(alt_pack_segment::Memory::new(1 << 10)));
     let kept = f
         .store
-        .scrub_packs(&f.credential, "repository", Some(little));
+        .scrub_packs(&f.credential, "repository", Some(little), &mut |_, _, _| ());
     let kept = kept.unwrap();
     assert!(kept.unread[0].replaced_by.is_none());
     assert_eq!(
@@ -112,9 +128,12 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     );
 
     // asked to, the server puts the pack indexed anew in its place
-    let mended = f
-        .store
-        .scrub_packs(&f.credential, "repository", Some(memory()));
+    let mended = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
     let mended = mended.unwrap();
     assert_eq!(mended.unread.len(), 1);
     let anew = mended.unread[0].replaced_by.clone().unwrap();
@@ -128,9 +147,12 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     );
     let indexed = std::fs::read(f.store.pack_path("repository", &anew).unwrap()).unwrap();
     assert_eq!(indexed.len(), written.len());
-    let found = f
-        .store
-        .scrub_packs(&f.credential, "repository", Some(memory()));
+    let found = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
     assert!(found.unwrap().unread.is_empty());
 
     // a pack that is no longer what was taken in cannot be: it stays, and is told of
@@ -140,9 +162,12 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
     let pack = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap()) as usize;
     bytes[pack - 21] ^= 1;
     planted(&f, &changed, sequence + 2, &bytes);
-    let found = f
-        .store
-        .scrub_packs(&f.credential, "repository", Some(memory()));
+    let found = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
     let found = found.unwrap();
     assert_eq!(found.unread.len(), 1);
     let unread = &found.unread[0];

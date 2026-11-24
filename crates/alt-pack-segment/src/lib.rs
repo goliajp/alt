@@ -40,7 +40,7 @@ pub use build::{Builder, Built, Compress};
 pub use format::{CommitInfo, Delta, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_led, ingest_while_waited_for};
 pub use limits::Limits;
-pub use mend::{indexed_anew, unread, unread_holding};
+pub use mend::{indexed_anew, unread, unread_holding, unread_telling};
 pub use merge::{merge, stands_on};
 pub use reach::Led;
 pub use readback::UNREADABLE;

@@ -235,7 +235,7 @@ fn brought_in(
         )?
     };
     *stage = "restored objects read";
-    let unread = super::unread::found(&mut store)?;
+    let unread = super::unread::found(&mut store, "restore")?;
     if !with_unread && !super::unread::told_of(&unread, &backup.manifest.unread) {
         let hint = super::unread::RESTORED;
         return Err(super::unread::refused("restored", &unread, hint));

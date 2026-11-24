@@ -200,7 +200,9 @@ fn pushes_verified_before_the_segments_under_them_moved_are_published_as_they_th
         "of {} live segments",
         segments.len()
     );
-    let scrubbed = f.store.scrub_packs(&f.credential, "repository", None);
+    let scrubbed = f
+        .store
+        .scrub_packs(&f.credential, "repository", None, &mut |_, _, _| ());
     assert_eq!(scrubbed.unwrap().unread.len(), 0);
 
     let server = Running::start(&f);

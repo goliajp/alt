@@ -52,6 +52,10 @@ impl Unread {
     }
 }
 
+/// How far a reading of every object has come, told as each object was read:
+/// the repository, how many of its objects were read, and how many it has.
+pub type Reading<'a> = &'a mut dyn FnMut(&str, u64, u64);
+
 /// What reading the live segments of one repository found.
 pub struct Scrubbed {
     pub repository: String,
@@ -107,6 +111,7 @@ impl Store {
         admin: &Credential,
         repository: &str,
         mend: Option<&'static Memory>,
+        told: Reading<'_>,
     ) -> Result<Scrubbed> {
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
@@ -125,9 +130,14 @@ impl Store {
             unread: Vec::new(),
         };
         let mut older: Vec<Arc<Segment>> = Vec::with_capacity(ids.len());
+        let mut read = 0;
+        let mut each = || {
+            read += 1;
+            told(repository, read, scrubbed.objects)
+        };
         for (part, segment) in ids.iter().zip(set.segments()) {
             let before = SegmentSet::new(older.clone());
-            let lost = alt_pack_segment::unread(segment, &before)
+            let lost = alt_pack_segment::unread_telling(segment, &before, &mut each)
                 .map_err(|_| Error::Integrity("pack segment index"))?;
             if lost.is_empty() {
                 older.push(Arc::clone(segment));
@@ -157,7 +167,7 @@ impl Store {
     /// no object, or to another, has the digest it was copied with: what is
     /// backed up and what was restored is read through before it is taken for
     /// a copy of the instance.
-    pub fn unread_packs(&mut self) -> Result<Vec<(String, Unread)>> {
+    pub fn unread_packs(&mut self, told: Reading<'_>) -> Result<Vec<(String, Unread)>> {
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
         let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
@@ -167,8 +177,14 @@ impl Store {
             let repository: String = row.get(0);
             let (ids, set) = self.live_segments(&repository)?;
             let mut older: Vec<Arc<Segment>> = Vec::new();
+            let (mut read, all) = (0, set.objects());
+            let mut each = || {
+                read += 1;
+                told(&repository, read, all)
+            };
             for (part, segment) in ids.iter().zip(set.segments()) {
-                let lost = alt_pack_segment::unread(segment, &SegmentSet::new(older.clone()));
+                let before = SegmentSet::new(older.clone());
+                let lost = alt_pack_segment::unread_telling(segment, &before, &mut each);
                 let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
                 if !lost.is_empty() {
                     unread.push((repository.clone(), Unread::of(&part.0, &lost)));

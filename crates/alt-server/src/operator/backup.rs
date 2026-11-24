@@ -120,7 +120,7 @@ pub fn create(
     // a copy of segments that do not give their objects back is no backup,
     // unless it is asked for as that
     let unread = match &mut store {
-        Some(store) => unread::found(store)?,
+        Some(store) => unread::found(store, "backup")?,
         None => Vec::new(),
     };
     if !unread.is_empty() && !with_unread {
