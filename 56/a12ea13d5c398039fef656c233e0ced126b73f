@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: what a pack holds for each of its entries is taken out of the memory packs are verified in
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/room.rs
+touched: crates/alt-pack-segment/tests/it/bases.rs
+touched: crates/alt-pack-segment/tests/it/many_of_one.rs
