@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a migrated configuration has memory for packs that goes with its container, and the server starts with no more than the container has
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/bounds/memory.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
