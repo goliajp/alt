@@ -26,7 +26,7 @@ export type Review = {
   changes_truncated: boolean; original_changes_url: string;
   approved: boolean; eligible: boolean; reason: string;
 };
-export type Tree = { commit: string; path: string; display_path: string; parent: string | null; entries: { name: string; path: string; display_path: string; oid: string; kind: 'tree' | 'blob' | 'symlink' | 'gitlink'; bytes: number | null }[] };
+export type Tree = { commit: string; path: string; display_path: string; parent: string | null; entries: { name: string; path: string; display_path: string; oid: string; kind: 'tree' | 'blob' | 'symlink' | 'gitlink'; bytes: number | null }[]; next: string | null };
 export type Blob = { oid: string; bytes: string; text: string | null; truncated: boolean; download_url: string };
 export type Commit = { oid: string; parents: string[]; author: string; timestamp: string; message: string };
 export type RecordDetail = {

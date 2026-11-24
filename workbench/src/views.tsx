@@ -50,9 +50,14 @@ function RepositoryView({ repository, t, open, session }: Props & { repository: 
 }
 function TreeView({ document, t, open }: Props & { document: Extract<Document,{kind:'tree'}> }) {
   const [revision,refresh]=useState(0);
-  const resource=useResource<Tree>(repoPath(document.repository,'/tree')+query({commit:document.commit,path:document.path}),revision);
+  const directory=`${document.commit}/${document.path}`;
+  const [paging,setPaging]=useState({directory,cursors:['']});
+  const cursors=paging.directory===directory?paging.cursors:[''];
+  const turn=(cursors:string[])=>setPaging({directory,cursors});
+  const resource=useResource<Tree>(repoPath(document.repository,'/tree')+query({commit:document.commit,path:document.path,after:cursors.at(-1)||undefined}),revision);
   return <><Heading title={resource.value?.display_path||t.files} t={t} refresh={()=>refresh(value=>value+1)}/>{resource.value?.parent!==null&&resource.value?.parent!==undefined&&<Button small onClick={()=>open({...document,path:resource.value!.parent!})}>{t.back}</Button>}
-    {resource.error?<Failure error={resource.error} t={t} retry={()=>refresh(value=>value+1)}/>:!resource.value?<Loading t={t}/>:<><code className="commit-id">{resource.value.commit}</code><div className="resource-list">{resource.value.entries.map(entry=><button key={entry.path} className="resource-row" disabled={entry.kind==='gitlink'} onClick={()=>entry.kind==='tree'?open({...document,commit:resource.value!.commit,path:entry.path}):open({kind:'blob',repository:document.repository,oid:entry.oid,path:entry.display_path})}>{entry.kind==='tree'?<Folder size={16}/>:<File size={16}/>}<strong>{entry.name}</strong><span>{entry.kind}</span><span>{entry.bytes??''}</span></button>)}</div></>}
+    {resource.error?<Failure error={resource.error} t={t} retry={()=>refresh(value=>value+1)}/>:!resource.value?<Loading t={t}/>:<><code className="commit-id">{resource.value.commit}</code><div className="resource-list">{resource.value.entries.map(entry=><button key={entry.path} className="resource-row" disabled={entry.kind==='gitlink'} onClick={()=>entry.kind==='tree'?open({...document,commit:resource.value!.commit,path:entry.path}):open({kind:'blob',repository:document.repository,oid:entry.oid,path:entry.display_path})}>{entry.kind==='tree'?<Folder size={16}/>:<File size={16}/>}<strong>{entry.name}</strong><span>{entry.kind}</span><span>{entry.bytes??''}</span></button>)}</div>
+      {(cursors.length>1||resource.value.next)&&<div className="pagination"><Button disabled={cursors.length===1} onClick={()=>turn(cursors.slice(0,-1))}>{t.back}</Button><Button disabled={!resource.value.next} onClick={()=>turn([...cursors,resource.value!.next!])}>{t.next}</Button></div>}</>}
   </>;
 }
 function safeDownload(url: string) { return url.startsWith('/web/') && !url.startsWith('//') ? url : undefined; }

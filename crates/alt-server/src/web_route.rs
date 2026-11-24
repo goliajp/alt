@@ -3,6 +3,8 @@ use alt_remote_protocol::{RecordKind, RecordRoot, RequestKey, Scope};
 use alt_server_store::{Error, Result};
 use std::collections::BTreeMap;
 
+mod browse;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WebRoute {
     Portable(crate::PortableRoute),
@@ -31,7 +33,7 @@ pub enum WebRoute {
     Records(String, RecordKind, String),
     Record(String, RecordRoot),
     History(String, Option<ObjectId>),
-    Tree(String, ObjectId, String),
+    Tree(String, ObjectId, String, usize),
     Object(String, ObjectId, bool),
     Content(String, String),
     Review(RequestKey),
@@ -208,27 +210,8 @@ pub fn parse(
             root.validate()?;
             WebRoute::Record(identity(repo)?, root)
         }
-        ("GET", ["", "web", "repositories", repo, "commits"]) => {
-            let cursor = after()?;
-            WebRoute::History(
-                identity(repo)?,
-                if cursor.is_empty() {
-                    None
-                } else {
-                    Some(id(&cursor)?)
-                },
-            )
-        }
-        ("GET", ["", "web", "repositories", repo, "tree"]) => {
-            let mut args = arguments(query, &["commit", "path"])?;
-            WebRoute::Tree(
-                identity(repo)?,
-                id(&args
-                    .remove("commit")
-                    .ok_or(Error::Precondition("commit required"))?)?,
-                args.remove("path").unwrap_or_default(),
-            )
-        }
+        ("GET", ["", "web", "repositories", repo, "commits"]) => browse::history(repo, after()?)?,
+        ("GET", ["", "web", "repositories", repo, "tree"]) => browse::tree(repo, query)?,
         ("GET", ["", "web", "repositories", repo, "objects", oid]) => {
             none()?;
             WebRoute::Object(identity(repo)?, id(oid)?, false)

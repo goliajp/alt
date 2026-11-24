@@ -10,6 +10,8 @@ use std::io::Read;
 const STRUCTURED: usize = 8 * 1024 * 1024;
 const PREVIEW: usize = 512 * 1024;
 const WORK: u64 = 64 * 1024 * 1024;
+/// the entries of a directory in one page
+const ENTRIES: usize = 500;
 struct Reader<'a> {
     store: &'a mut Store,
     credential: &'a Credential,
@@ -68,6 +70,8 @@ pub struct TreePage {
     parent: Option<String>,
     display_path: String,
     entries: Vec<TreeEntry>,
+    /// where the page after this one begins, when this is not the last
+    next: Option<String>,
 }
 #[derive(alt_json::ToJson)]
 struct TreeEntry {
@@ -131,16 +135,26 @@ fn display(bytes: &[u8]) -> String {
             .collect()
     }
 }
-/// The entries of `tree`, which is at `raw_path`. Each carries its whole path
-/// twice, so what a directory is listed in grows with the two multiplied: the
-/// listing is refused once what is written of it is past `bound`.
-fn listed(raw_path: &[u8], tree: Tree, bound: usize) -> Result<Vec<TreeEntry>> {
-    if tree.entries.len() > 10_000 {
-        return Err(Error::Limit("tree preview entries"));
+/// A page of `tree`, which is at `raw_path`: up to `limit` entries from the one
+/// at `after` on, and where the next page begins when there is one. Each entry
+/// carries its whole path twice, so what a directory is listed in grows with the
+/// two multiplied: the page ends before the entry that would take what is written
+/// of it past `bound`. The first entry of a page is written whatever it takes, so
+/// every page goes on.
+fn listed(
+    raw_path: &[u8],
+    tree: Tree,
+    after: usize,
+    limit: usize,
+    bound: usize,
+) -> Result<(Vec<TreeEntry>, Option<usize>)> {
+    if after > tree.entries.len() {
+        return Err(Error::Precondition("tree page"));
     }
-    let mut written = 0;
-    let mut entries = Vec::with_capacity(tree.entries.len());
-    for entry in tree.entries {
+    // the brackets around the entries, and for each the comma after it
+    let mut written = 2;
+    let mut entries = Vec::new();
+    for (index, entry) in tree.entries.into_iter().enumerate().skip(after) {
         let mut path = raw_path.to_vec();
         if !path.is_empty() {
             path.push(b'/');
@@ -162,13 +176,13 @@ fn listed(raw_path: &[u8], tree: Tree, bound: usize) -> Result<Vec<TreeEntry>> {
             },
             bytes: None,
         };
-        written += alt_json::to_vec(&entry)?.len();
-        if written > bound {
-            return Err(Error::Limit("tree preview bytes"));
+        written += alt_json::to_vec(&entry)?.len() + 1;
+        if entries.len() == limit || (written > bound && !entries.is_empty()) {
+            return Ok((entries, Some(index)));
         }
         entries.push(entry);
     }
-    Ok(entries)
+    Ok((entries, None))
 }
 pub fn tree(
     store: &mut Store,
@@ -176,6 +190,7 @@ pub fn tree(
     repository: &str,
     commit: ObjectId,
     path: &str,
+    after: usize,
 ) -> Result<TreePage> {
     let raw_path = path_bytes(path)?;
     let mut reader = Reader {
@@ -200,7 +215,7 @@ pub fn tree(
             oid = entry.oid;
         }
     }
-    let entries = listed(&raw_path, reader.tree(oid)?, STRUCTURED)?;
+    let (entries, next) = listed(&raw_path, reader.tree(oid)?, after, ENTRIES, STRUCTURED)?;
     let parent = if raw_path.is_empty() {
         None
     } else {
@@ -215,6 +230,7 @@ pub fn tree(
         parent,
         display_path: display(&raw_path),
         entries,
+        next: next.map(|index| index.to_string()),
     })
 }
 #[derive(alt_json::ToJson)]
@@ -260,91 +276,6 @@ pub fn blob(
     })
 }
 #[cfg(test)]
-mod json_tests {
-    use alt_json_testkit::fixtures::{assert_stored, written_line};
-    use alt_json_testkit::rng::Rng;
-    use alt_json_testkit::support::Arbitrary;
-
-    use super::*;
-
-    fn any<T: Arbitrary>(rng: &mut Rng) -> T {
-        T::arbitrary(rng)
-    }
-
-    #[test]
-    fn responses_are_written_as_recorded() {
-        let mut rng = Rng::new(0xd700);
-        let rng = &mut rng;
-        let mut lines = String::new();
-        for _ in 0..40 {
-            lines += &written_line(&TreePage {
-                commit: any(rng),
-                path: any(rng),
-                parent: any(rng),
-                display_path: any(rng),
-                entries: (0..rng.below(3))
-                    .map(|_| TreeEntry {
-                        name: any(rng),
-                        path: any(rng),
-                        display_path: any(rng),
-                        oid: any(rng),
-                        kind: rng.pick(&["tree", "blob", "commit"]),
-                        bytes: any(rng),
-                    })
-                    .collect(),
-            });
-            lines += &written_line(&BlobPreview {
-                oid: any(rng),
-                bytes: any(rng),
-                text: any(rng),
-                truncated: any(rng),
-                download_url: any(rng),
-            });
-            lines += &written_line(&CommitSummary {
-                oid: any(rng),
-                parents: any(rng),
-                author: any(rng),
-                timestamp: any(rng),
-                message: any(rng),
-            });
-        }
-        assert_stored(
-            concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/tests/fixtures/json/browse-responses.txt"
-            ),
-            &lines,
-        );
-    }
-}
-
+mod json_tests;
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn directory(entries: usize) -> Tree {
-        let mut raw = Vec::new();
-        for n in 0..entries {
-            raw.extend_from_slice(format!("100644 file-{n:05}\0").as_bytes());
-            raw.extend_from_slice(&[7; 20]);
-        }
-        Tree::parse(&raw, HashAlgo::Sha1).unwrap()
-    }
-
-    #[test]
-    fn a_directory_is_listed_within_what_a_listing_is_written_in_however_deep_it_is() {
-        let written = |entries: &[TreeEntry]| alt_json::to_vec(&entries).unwrap().len();
-        // as long a path as is taken, and as many entries as are listed
-        let deep = [b'd'; 4096];
-        let all = listed(&deep, directory(10_000), usize::MAX).unwrap();
-        assert!(written(&all) > 100 << 20, "{} bytes", written(&all));
-        drop(all);
-        let refused = listed(&deep, directory(10_000), STRUCTURED);
-        assert!(matches!(refused, Err(Error::Limit("tree preview bytes"))));
-        // the same directory near the root, and a small one at the same depth
-        let shallow = listed(b"src", directory(10_000), STRUCTURED).unwrap();
-        assert!(written(&shallow) <= STRUCTURED);
-        let few = listed(&deep, directory(300), STRUCTURED).unwrap();
-        assert_eq!(few.len(), 300);
-    }
-}
+mod tests;

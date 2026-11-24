@@ -221,12 +221,13 @@ fn execute(
             after,
             40,
         )?),
-        WebRoute::Tree(repository, commit, path) => output(crate::browse::tree(
+        WebRoute::Tree(repository, commit, path, after) => output(crate::browse::tree(
             store,
             credential,
             &repository,
             commit,
             &path,
+            after,
         )?),
         WebRoute::Object(repository, oid, false) => {
             output(crate::browse::blob(store, credential, &repository, oid)?)
