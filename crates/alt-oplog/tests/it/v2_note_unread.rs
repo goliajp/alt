@@ -209,6 +209,20 @@ fn a_note_of_a_log_of_another_generation_says_nothing_of_what_is_left_to_look_at
 }
 
 #[test]
+fn a_log_made_where_no_note_is_has_nothing_left_to_look_at() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    // no note is beside a log before it is made, and none is gone
+    let mut log = new_log(dir.path());
+    assert!(!log.unsettled());
+    stage(&mut log, 3);
+    assert!(!log.unsettled(), "after its own appends");
+    assert!(!OpLog::open(dir.path()).unwrap().unsettled());
+    let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+    assert!(!reader.unsettled(), "a reader");
+}
+
+#[test]
 fn reading_a_note_that_does_not_read_makes_no_lock_beside_the_log() {
     for kept in [false, true] {
         let dir = alt_os::temp::tempdir().unwrap();
