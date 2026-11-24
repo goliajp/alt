@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a connection whose peer takes a response as fast as it has to is not one on which nothing moves
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/src/http/paced.rs
+touched: crates/alt-server/tests/it/database/connections/slow_readers.rs
