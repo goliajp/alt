@@ -151,3 +151,38 @@ fn a_sign_in_refused_for_how_many_there_were_waits_for_no_place_to_check_its_pas
         "{again:?}"
     );
 }
+
+/// No place to check a password in comes free, and a sign-in of an address
+/// waits for one. A second of the address is not let wait, and is told so before
+/// it is counted: it takes none of the attempts its address may make.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_sign_in_that_is_not_let_wait_is_not_counted_among_the_attempts_of_its_address() {
+    let mut f = Fixture::new();
+    let wait = Duration::from_secs(4);
+    let server = start(&mut f, |_, options| {
+        options.password_places = 0;
+        options.work_timeout = wait;
+    });
+    let counted = |f: &Fixture| -> Option<i32> {
+        let key = format!("network:{}", alt_browser_auth::digest("127.0.0.1"));
+        let sql = "SELECT attempts FROM alt_login_budgets WHERE key=$1";
+        let row = f.client().query_opt(sql, &[&key]).unwrap();
+        row.map(|row| row.get(0))
+    };
+    std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| answered(&server));
+        // the first is counted, and waits
+        let began = std::time::Instant::now();
+        while counted(&f).is_none() {
+            assert!(began.elapsed() < wait, "the first sign-in was not counted");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (status, message, taken, _) = answered(&server);
+        assert_eq!((status, message.as_str()), (503, "Sign-in service is busy"));
+        assert!(taken < wait / 2, "{taken:?}");
+        assert_eq!(counted(&f), Some(1));
+        let (status, _, taken, _) = waiting.join().unwrap();
+        assert!(status == 503 && taken >= wait, "{status} after {taken:?}");
+    });
+}

@@ -107,14 +107,21 @@ pub(super) async fn admitted(
             false => 0,
         };
         let (source, _) = receive(state, &caller, body, small).await?;
-        // a sign-in is counted, and refused where there were too many, before
-        // it waits for a place to have its password checked in
-        let attempt = match route {
-            WebRoute::Login => Some(let_in(state, browser, peer, source.path()).await?),
-            _ => None,
-        };
-        let (permit, hashing) = admit(state, &caller, password).await?;
-        return Ok((source, permit, hashing, attempt));
+        if *route != WebRoute::Login {
+            let (permit, hashing) = admit(state, &caller, password).await?;
+            return Ok((source, permit, hashing, None));
+        }
+        // A sign-in has a place, or the wait of its address for one, before it
+        // is counted; and is counted, and refused where there were too many,
+        // before it waits for a place to have its password checked in.
+        let line = state.passwords.line(&caller);
+        let line = line.ok_or_else(|| busy("Sign-in service is busy"))?;
+        let attempt = let_in(state, browser, peer, source.path()).await?;
+        let hashing = line.place(state.options.work_timeout).await;
+        let hashing = hashing.ok_or_else(|| busy("Sign-in service is busy"))?;
+        let worker = state.workers.clone().try_acquire_owned();
+        let worker = worker.map_err(|_| busy("Instance is busy"))?;
+        return Ok((source, worker, Some(hashing), Some(attempt)));
     };
     let (permit, hashing) = admit(state, &caller, password).await?;
     let bound = portable_bound(state, browser, selected.clone(), token.clone(), permit);

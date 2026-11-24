@@ -5,7 +5,10 @@
 //! for one, as long as a request may run, instead of being sent away at once:
 //! many people signing in at the same moment are all let in, one after the other.
 //! An address has one sign-in waiting at a time, so that whoever sends many of
-//! them from one address is not most of those that wait.
+//! them from one address is not most of those that wait. Whether a sign-in has a
+//! place, or the wait of its address, is settled before it is counted among the
+//! attempts: one that is sent away for the wait being taken costs its address
+//! none of the attempts it may make.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -26,6 +29,25 @@ impl Drop for Waiting<'_> {
     }
 }
 
+/// What a sign-in has before its password is checked: a place, or the wait of
+/// its address for one.
+pub(super) struct Line<'a> {
+    place: Option<OwnedSemaphorePermit>,
+    waiting: Option<Waiting<'a>>,
+}
+
+impl Line<'_> {
+    /// The place, waited for no longer than `wait`; none where none came free.
+    pub(super) async fn place(self, wait: Duration) -> Option<OwnedSemaphorePermit> {
+        let Some(waiting) = &self.waiting else {
+            return self.place;
+        };
+        let places = waiting.0.places.clone();
+        let waited = tokio::time::timeout(wait, places.acquire_owned());
+        waited.await.ok()?.ok()
+    }
+}
+
 impl Hashers {
     pub(super) fn new(places: usize) -> Self {
         Hashers {
@@ -34,24 +56,25 @@ impl Hashers {
         }
     }
 
+    /// A place for a sign-in of `caller`, or the wait of its address for one.
+    /// None where a sign-in of the caller waits already.
+    pub(super) fn line<'a>(&'a self, caller: &'a str) -> Option<Line<'a>> {
+        if let Ok(place) = self.places.clone().try_acquire_owned() {
+            let (place, waiting) = (Some(place), None);
+            return Some(Line { place, waiting });
+        }
+        let mut waiting = self.waiting.lock().expect("sign-ins");
+        waiting.insert(caller.to_owned()).then(|| Line {
+            place: None,
+            waiting: Some(Waiting(self, caller)),
+        })
+    }
+
     /// A place for a sign-in of `caller`, waited for no longer than `wait`. None
     /// where none came free in that time, or where a sign-in of the caller waits
     /// already.
     pub(super) async fn place(&self, caller: &str, wait: Duration) -> Option<OwnedSemaphorePermit> {
-        if let Ok(place) = self.places.clone().try_acquire_owned() {
-            return Some(place);
-        }
-        if !self
-            .waiting
-            .lock()
-            .expect("sign-ins")
-            .insert(caller.to_owned())
-        {
-            return None;
-        }
-        let _waiting = Waiting(self, caller);
-        let waited = tokio::time::timeout(wait, self.places.clone().acquire_owned());
-        waited.await.ok()?.ok()
+        self.line(caller)?.place(wait).await
     }
 }
 
@@ -82,17 +105,21 @@ mod tests {
                 let hashers = Arc::clone(&hashers);
                 tokio::spawn(async move { hashers.place(caller, long).await })
             };
+            // until so many wait, and no longer than a test may stand still
+            let waiting = async |many: usize| {
+                let began = std::time::Instant::now();
+                while hashers.waiting.lock().unwrap().len() < many {
+                    assert!(began.elapsed() < long, "{many} do not come to wait");
+                    tokio::task::yield_now().await;
+                }
+            };
             let (c, d) = (wait("c"), wait("d"));
-            while hashers.waiting.lock().unwrap().len() < 2 {
-                tokio::task::yield_now().await;
-            }
+            waiting(2).await;
             // one more of an address that waits is not taken into the wait
             assert!(hashers.place("c", long).await.is_none());
             // a wait that is given up leaves its address free to wait again
             let given_up = wait("e");
-            while hashers.waiting.lock().unwrap().len() < 3 {
-                tokio::task::yield_now().await;
-            }
+            waiting(3).await;
             given_up.abort();
             assert!(given_up.await.is_err());
             assert_eq!(hashers.waiting.lock().unwrap().len(), 2);
