@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold a new database to the schema 22 that writes no request
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/single_copy/baseline.rs
