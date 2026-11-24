@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: the mode of a tree entry is its number where trees are walked for a fetch, as where they are taken in
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/object.rs
+touched: crates/alt-pack-segment/src/trees.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/modes.rs
