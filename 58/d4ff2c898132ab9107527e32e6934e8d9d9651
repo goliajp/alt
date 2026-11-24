@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: the entries of an id a pack holds many times are gone through once for all the deltas made of it
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/src/read.rs
+touched: crates/alt-git-pack/tests/it/read_bounds.rs
