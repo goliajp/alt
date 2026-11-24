@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use super::http::Limits;
 
+mod work;
+
 /// How many times the bytes a push may bring its entries and objects may
 /// inflate to, all together, unless `ALT_SERVER_MAX_INFLATED_BYTES` says.
 ///
@@ -23,15 +25,16 @@ const INFLATED_TIMES: u64 = 128;
 /// being ended.
 const LINGER: Duration = Duration::from_secs(2);
 
-/// The numbers the environment may give, as `--help` tells them. Each is
-/// a whole number above zero.
+/// What else the environment may give, as `--help` tells it. Each but the
+/// first is a whole number above zero.
 pub(super) const HELP: &str = "  \
-ALT_SERVER_WORKERS                      requests handled at once (4)
+ALT_SERVER_TEMP_DIR                     a directory on a disk for what is written for a time (the temporary files of the host)
+  ALT_SERVER_WORKERS                      requests handled at once (4)
   ALT_SERVER_MAX_CONNECTIONS              connections open at once (256)
   ALT_SERVER_MAX_CONNECTIONS_PER_ADDRESS  of those, from one address that is not this host (a quarter)
   ALT_SERVER_MAX_PUSH_BYTES               bytes of the body of a push (1 GiB)
   ALT_SERVER_MAX_INFLATED_BYTES           bytes the pack of a push inflates to (128 times a push)
-  ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in (3 pushes and 1 GiB)
+  ALT_SERVER_MAX_INDEX_BYTES              memory the packs of pushes are indexed in, and as much on disk (3 pushes and 1 GiB)
   ALT_SERVER_MAX_INDEX_WAIT_MS            how long a push waits for that memory before a 503 (600000)
   ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes); a quarter for one address
   ALT_SERVER_MAX_SENDING_BYTES            bytes of responses to fetches written and not yet sent (half of what is free for temporary files); a quarter for one address
@@ -56,6 +59,11 @@ pub(super) struct Told {
     /// each indexed in under a minute where it is as large as a push may
     /// be: ten minutes is several times as long as they take together
     pub(super) index_wait: Duration,
+    /// The bases of deltas that memory has no room for, in files in the
+    /// directory this process has under `ALT_SERVER_TEMP_DIR` for what it
+    /// writes for a time: as much there as in memory. Nothing before the
+    /// process has made the directory
+    pub(super) bases: Option<alt_git_pack::BaseFiles>,
     /// `ALT_SERVER_MAX_SENDING_BYTES`: the bytes the responses to fetches
     /// take on the disk between them until they are sent. Not set, it is
     /// zero here and [`told`] makes it half of what is free
@@ -115,6 +123,7 @@ impl Told {
             inflated_bytes: number(lookup, "ALT_SERVER_MAX_INFLATED_BYTES", inflated)?,
             index_bytes: number(lookup, "ALT_SERVER_MAX_INDEX_BYTES", index)?,
             index_wait: Duration::from_millis(index_wait),
+            bases: None,
             sending_bytes: number(lookup, "ALT_SERVER_MAX_SENDING_BYTES", 0u64)?,
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections,
@@ -139,6 +148,10 @@ pub(super) fn told() -> &'static Told {
     TOLD.get_or_init(|| {
         let mut told =
             Told::read(&|name| std::env::var_os(name)).unwrap_or_else(|why| super::die(&why));
+        let made = work::open(std::env::var_os("ALT_SERVER_TEMP_DIR"))
+            .and_then(|work| alt_git_pack::BaseFiles::open(&work.join("bases"), told.index_bytes));
+        let unmade = |why| super::die(&format!("the directory for temporary files: {why}"));
+        told.bases = Some(made.unwrap_or_else(unmade));
         if told.sending_bytes == 0 {
             let free = super::sending::half_of_what_is_free();
             let unread = |why| super::die(&format!("what is free for temporary files: {why}"));

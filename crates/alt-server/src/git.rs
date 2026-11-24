@@ -211,6 +211,7 @@ pub(crate) struct Verifying {
     pub by: std::time::Instant,
     /// set once nobody waits for the answer: the pack is verified no further
     pub given_up: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub files: Option<&'static alt_pack_segment::BaseFiles>,
 }
 
 /// Held by whoever waits for the answer to a request. Dropped, when the answer is
@@ -232,6 +233,7 @@ pub(crate) fn pack_limits(
     alt_pack_segment::Limits {
         memory: room.map(|room| room.memory),
         memory_by: room.map(|room| room.by),
+        files: room.and_then(|room| room.files),
         ..alt_pack_segment::Limits::of(
             limits.graph_objects as u64,
             limits.object_bytes,

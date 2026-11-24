@@ -2,6 +2,9 @@
 //! listener takes from it.
 use super::*;
 
+/// under the directory of the stored bytes: what the serving process writes for a time
+const TEMPORARY: &str = "temporary";
+
 impl Config {
     pub fn validate(&self) -> Result<()> {
         use alt_remote_protocol::DeploymentMode;
@@ -147,6 +150,29 @@ impl Config {
         }
         Ok(())
     }
+    /// [`Self::http_options`] for the process that serves, called once before it
+    /// has a second thread. What the process writes for a time (request bodies,
+    /// responses to fetches, the bases of deltas) goes to `temporary` under the
+    /// directory of the stored bytes from here on, on the disk the bytes are on
+    /// and not among the temporary files of the host, which may be kept in
+    /// memory. The directory is its owner's alone, and what the process before
+    /// this one left in it is removed.
+    pub fn serving_options(&self) -> Result<HttpOptions> {
+        if self.instance.installation_id == TEMPORARY {
+            return Err(Error::Config("installation id"));
+        }
+        let directory = self.bytes_directory.join(TEMPORARY);
+        alt_os::temp::emptied(&directory).map_err(|_| Error::File)?;
+        // SAFETY: the caller is the one thread there is: nothing else reads or
+        // writes the environment
+        unsafe { std::env::set_var("TMPDIR", &directory) };
+        let mut options = self.http_options();
+        // as much in files as in memory
+        let bases = directory.join("bases");
+        let files = alt_pack_segment::BaseFiles::open(&bases, options.verifying.all());
+        options.base_files = Some(Box::leak(Box::new(files.map_err(|_| Error::File)?)));
+        Ok(options)
+    }
     pub fn http_options(&self) -> HttpOptions {
         let h = &self.http;
         HttpOptions {
@@ -180,6 +206,7 @@ impl Config {
                     None => crate::git::least_verifying_bytes(self.limits).max(4 << 30),
                 },
             ))),
+            base_files: None,
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,

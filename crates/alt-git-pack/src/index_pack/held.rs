@@ -39,9 +39,15 @@ impl Base {
         }
     }
 
-    /// The same bytes in a file that has no name any more.
-    pub(super) fn spill(&self) -> std::io::Result<Base> {
-        let dir = alt_os::temp::tempdir()?;
+    /// The same bytes in a file that has no name any more, made in
+    /// `directory` or among the temporary files of the host.
+    pub(super) fn spill(&self, directory: Option<&std::path::Path>) -> std::io::Result<Base> {
+        let mut private = alt_os::temp::Builder::new();
+        let private = private.owner_only();
+        let dir = match directory {
+            Some(directory) => private.tempdir_in(directory)?,
+            None => private.tempdir_in(std::env::temp_dir())?,
+        };
         let path = dir.path().join("base");
         let mut file = std::fs::File::options()
             .read(true)

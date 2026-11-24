@@ -3,7 +3,7 @@ use alt_server::change_links::ChannelConfig;
 use golia_change_link as link;
 use std::net::{IpAddr, Ipv4Addr};
 
-fn start(db: &OperatorDb) -> (ServerProcess, String) {
+pub(super) fn start(db: &OperatorDb) -> (ServerProcess, String) {
     let mut child = ServerProcess(
         db.command()
             .arg("serve")

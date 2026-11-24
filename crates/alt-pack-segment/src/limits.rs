@@ -1,6 +1,6 @@
 //! What verifying a received pack may take.
 
-use alt_git_pack::Memory;
+use alt_git_pack::{BaseFiles, Memory};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +22,9 @@ pub struct Limits {
     /// what the pack takes its memory out of, and until when it waits for it
     pub memory: Option<&'static Memory>,
     pub memory_by: Option<Instant>,
+    /// where the bases in files are written, and what all the packs take there
+    /// between them; among the temporary files of the host where this is not told
+    pub files: Option<&'static BaseFiles>,
 }
 
 impl Limits {
@@ -39,6 +42,7 @@ impl Limits {
             spill_bytes: 16 * (96 << 20),
             memory: None,
             memory_by: None,
+            files: None,
         }
     }
 }

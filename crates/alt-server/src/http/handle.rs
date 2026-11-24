@@ -131,6 +131,7 @@ pub(super) async fn handle(
             memory: state.options.verifying,
             by: std::time::Instant::now() + state.options.work_timeout / 2,
             given_up: waiting.0.clone(),
+            files: state.options.base_files,
         },
     };
     let result = tokio::time::timeout(

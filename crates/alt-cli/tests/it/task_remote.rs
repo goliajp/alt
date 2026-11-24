@@ -204,6 +204,7 @@ impl Server {
             expiry_interval: Duration::from_secs(30),
             password_places: 2,
             verifying: Box::leak(Box::new(alt_server::PackMemory::new(4 << 30))),
+            base_files: None,
             native: NativeOptions {
                 portable: None,
                 task_limits: task_limits(),

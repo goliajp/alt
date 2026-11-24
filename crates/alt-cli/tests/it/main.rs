@@ -28,6 +28,7 @@ mod altd_server_sending;
 mod altd_server_shallow;
 mod altd_server_signed_commits;
 mod altd_server_slow_peers;
+mod altd_server_temp;
 mod altd_server_thin;
 mod altd_server_told;
 mod altd_server_trees;

@@ -62,12 +62,13 @@ pub(super) fn resolve(
         Form::Ofs(base) => Of::Entry(*base),
         Form::Ref(base) => Of::Object(*base),
     }));
-    let budget = Budget::new(
+    let mut budget = Budget::new(
         (limits.object_bytes, limits.inflated_bytes),
         (limits.base_bytes, limits.spill_bytes),
         MAX_DELTA_DEPTH,
         scanned.inflated,
     );
+    budget.files = limits.files;
     let hashed = Hashed {
         pack,
         entries,

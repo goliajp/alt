@@ -1,5 +1,6 @@
-//! The requests an upgrade left without the moment they ended are given it by the
-//! server as it runs, with nobody asking, and by the server started after it.
+//! What a server does of itself: the requests an upgrade left without the moment
+//! they ended are given it as the server runs, and by the server started after
+//! it; and what a server writes for a time is on the disk of its bytes.
 use crate::database::{Duration, Fixture, Payload, Running};
 
 fn without_moment(f: &Fixture) -> i64 {
@@ -49,4 +50,31 @@ fn a_running_server_gives_the_requests_that_ended_before_it_their_moment() {
     f.client().batch_execute(as_upgraded).unwrap();
     let _server = serve(&f);
     given(&f);
+}
+
+/// The server that starts makes `temporary` under the directory of its bytes its
+/// own alone, removes what the server before it left there, and has the files of
+/// bases under it.
+#[test]
+#[ignore = "requires isolated PostgreSQL and real operator subprocesses; exercised by closing gate"]
+fn a_server_that_starts_has_what_it_writes_for_a_time_under_the_directory_of_its_bytes() {
+    use std::os::unix::fs::PermissionsExt;
+    let db = super::super::OperatorDb::new();
+    let (store, _, _) = super::super::maintenance::prepare(&db);
+    drop(store);
+    let temporary = db.root.path().join("bytes/temporary");
+    std::fs::create_dir_all(temporary.join("left")).unwrap();
+    std::fs::write(temporary.join("left/body"), b"left").unwrap();
+    std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let (_server, url) = super::super::change_links::start(&db);
+    let ready = ureq::get(&format!("{url}/healthz")).timeout(Duration::from_secs(5));
+    assert_eq!(ready.call().unwrap().status(), 200);
+    let mode = |path: &std::path::Path| path.metadata().unwrap().permissions().mode() & 0o777;
+    let within: Vec<_> = (std::fs::read_dir(&temporary).unwrap())
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(within, ["bases"]);
+    assert_eq!(mode(&temporary), 0o700);
+    assert_eq!(mode(&temporary.join("bases")), 0o700);
 }

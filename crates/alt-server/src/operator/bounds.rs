@@ -35,7 +35,9 @@ pub struct HttpBounds {
     pub receiving_megabytes: Option<u64>,
     /// How many megabytes the packs of pushes may take in memory while they are
     /// verified, all at once; 4096, or what one pack of the largest object there
-    /// may be takes where that is more, where it is not given.
+    /// may be takes where that is more, where it is not given. The bases of
+    /// deltas that memory has no room for are written to files, under
+    /// `temporary` in the directory of the stored bytes, and may take as much.
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub indexing_megabytes: Option<u64>,
 }

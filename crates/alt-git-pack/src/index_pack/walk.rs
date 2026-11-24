@@ -182,6 +182,9 @@ impl<'a, O: Objects> Walk<'a, O> {
         if let Some(data) = data {
             self.budget.held.fetch_sub(data.held(), Relaxed);
             self.budget.spilled.fetch_sub(data.spilled(), Relaxed);
+            if let Some(files) = self.budget.files {
+                files.give_back(data.spilled());
+            }
         }
     }
 
@@ -219,7 +222,9 @@ impl<'a, O: Objects> Walk<'a, O> {
     /// Makes room while the bases held pass their limit, in those nearest
     /// the plain entry first: they are the last to be needed again. One
     /// that deltas still wait for goes to a file while there is room in
-    /// those, and is otherwise let go of. The top frame keeps its own.
+    /// those, for this pack and for all the packs there are, and is
+    /// otherwise let go of; so is one whose file could not be written.
+    /// The top frame keeps its own.
     fn let_go(&mut self) -> Result<(), PackError> {
         let top = self.stack.len() - 1;
         let budget = self.budget;
@@ -234,8 +239,24 @@ impl<'a, O: Objects> Walk<'a, O> {
                 };
                 if waited_for && let Ok(before) = budget.spilled.try_update(Relaxed, Relaxed, room)
                 {
-                    budget.most_spilled.fetch_max(before + bytes, Relaxed);
-                    frame.data = Some(Arc::new(data.spill()?));
+                    let files = budget.files;
+                    let written = if files.is_none_or(|files| files.take(bytes)) {
+                        let written = data.spill(files.map(|files| files.directory()));
+                        if let (Err(_), Some(files)) = (&written, files) {
+                            files.give_back(bytes);
+                            files.failed();
+                        }
+                        written.ok()
+                    } else {
+                        None
+                    };
+                    match written {
+                        Some(written) => {
+                            budget.most_spilled.fetch_max(before + bytes, Relaxed);
+                            frame.data = Some(Arc::new(written));
+                        }
+                        None => _ = budget.spilled.fetch_sub(bytes, Relaxed),
+                    }
                 }
             }
             self.lowest += 1;

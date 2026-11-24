@@ -449,7 +449,7 @@ fn execute(args: &Args) -> Result<Value> {
         Action::Serve => {
             drop(store);
             let factory = config.factory()?;
-            let options = config.http_options();
+            let options = config.serving_options()?;
             let browser = config.browser_options()?;
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(config.http.workers.min(16))

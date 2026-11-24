@@ -140,6 +140,9 @@ pub struct HttpOptions {
     pub receiving_bytes: u64,
     /// the memory the packs of pushes are verified in, all at once
     pub verifying: &'static alt_pack_segment::Memory,
+    /// where the bases of deltas that memory has no room for are written, and what
+    /// the packs may take there; among the host's temporary files where not told
+    pub base_files: Option<&'static alt_pack_segment::BaseFiles>,
     /// how often requests whose time to upload ran out are ended
     pub expiry_interval: Duration,
     /// the passwords that are checked at once: each takes the memory of one hash

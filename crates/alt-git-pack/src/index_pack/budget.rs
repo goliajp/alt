@@ -19,6 +19,10 @@ pub struct Budget {
     /// set by whoever waits for the pack once it waits no longer: the walks end
     /// at the next delta they come to
     pub given_up: Option<Arc<AtomicBool>>,
+    /// where the bases in files are written, and what the packs indexed at
+    /// once may take there between them; among the temporary files of the
+    /// host, and no common amount, where this is not told
+    pub files: Option<&'static super::BaseFiles>,
     pub(super) inflated: AtomicU64,
     pub(super) held: AtomicUsize,
     pub(super) spilled: AtomicU64,
@@ -41,6 +45,7 @@ impl Budget {
             spill_bytes,
             depth,
             given_up: None,
+            files: None,
             inflated: AtomicU64::new(inflated),
             held: AtomicUsize::new(0),
             spilled: AtomicU64::new(0),

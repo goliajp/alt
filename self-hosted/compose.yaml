@@ -67,6 +67,9 @@ services:
       - ./secrets/database:/run/alt/database:ro
       - ./data:/var/lib/alt
       - socket:/var/run/postgresql:ro
+    # What the server writes for a time while it serves (request bodies, responses
+    # to fetches, the bases of deltas) is under /var/lib/alt/temporary, on the disk
+    # of the data: this is for the operator commands, and is memory of the container.
     tmpfs:
       - /tmp:mode=1777,size=${ALT_TEMP_BYTES:-4294967296}
     healthcheck:

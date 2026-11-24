@@ -232,7 +232,7 @@ fn verified(
         u32::from(limits.delta_depth),
         scanned.inflated,
     );
-    budget.given_up = given_up.cloned();
+    (budget.given_up, budget.files) = (given_up.cloned(), limits.files);
     let (walks, _memory) = room::resolving(limits, &mut scanned, memory)?;
     let mut work = IndexWork::default();
     let taken: Vec<AtomicBool> = (scanned.entries.iter())

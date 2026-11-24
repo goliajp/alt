@@ -55,7 +55,7 @@ pub(crate) fn distance(mut distance: usize) -> Vec<u8> {
 /// A chain of `depth` deltas, each named by the id of the one before it,
 /// and beside each link a delta by offset, which comes after the link:
 /// every object of the chain waits for it while the chain goes on.
-fn pack(depth: usize) -> Vec<u8> {
+pub(crate) fn pack(depth: usize) -> Vec<u8> {
     let mut pack = b"PACK".to_vec();
     pack.extend_from_slice(&2u32.to_be_bytes());
     pack.extend_from_slice(&(2 * depth as u32 + 1).to_be_bytes());

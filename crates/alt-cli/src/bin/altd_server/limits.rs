@@ -94,6 +94,7 @@ pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
         kept: false,
         memory: Some(INDEXING.get_or_init(|| alt_git_pack::Memory::new(told.index_bytes))),
         memory_by: Some(std::time::Instant::now() + told.index_wait),
+        files: told.bases.as_ref(),
         ..Default::default()
     }
 }

@@ -125,6 +125,10 @@ def prepare(args):
     config['bytes_directory'] = '/var/lib/alt'
     config['receipt_key_file'] = '/run/alt/receipt.key'
     config['browser'] = {'public_origin': public_origin, 'assets_directory': '/opt/alt/workbench', 'session_ttl_ms': 3_600_000}
+    # The memory packs of pushes are verified in is the largest thing the server
+    # takes, and the application container has 2g unless ALT_MEMORY says more:
+    # the least the limits above allow. Raise the two together.
+    config['http']['indexing_megabytes'] = 1376
     write(target / 'config/config.json', json.dumps(config, indent=2) + '\n', uid, gid)
     write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={args.https_port or origin.port or 443}\n', uid, gid)
     write(target / 'bundle-identity.json', json.dumps({'source_digest': manifest['source_digest'], 'architecture': manifest['architecture'], 'bundle_manifest_sha256': sha(source / 'bundle.json'), **local_images}, indent=2) + '\n', uid, gid)
