@@ -1,12 +1,13 @@
-//! The connections one address has in use at once: its own where it is the peer,
-//! and its requests under way where a proxy names it.
+//! The requests one address has under way at once where a proxy names it. A
+//! peer that is no proxy is counted by its connections, which no test here
+//! reaches: the service listens on this host, whose own peers have no limit.
 use super::bodies::connect;
 use super::*;
 use crate::database::sign_in_deadline::start;
 use std::io::{Read, Write};
 
 /// what `GET /livez` is answered with over a connection of its own, as `from`
-/// where a proxy is to have said so; nothing where the connection is ended
+/// where a proxy is to have said so
 fn alive(server: &Running, from: Option<&str>) -> Option<String> {
     let (mut socket, _) = connect(server);
     let named = from.map_or(String::new(), |from| format!("X-Forwarded-For: {from}\r\n"));
@@ -15,28 +16,6 @@ fn alive(server: &Running, from: Option<&str>) -> Option<String> {
     let mut answer = String::new();
     socket.read_to_string(&mut answer).ok()?;
     answer.lines().next().map(str::to_owned)
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
-fn a_peer_that_is_no_proxy_has_so_many_connections_and_no_more() {
-    let mut f = Fixture::new();
-    let server = start(&mut f, |_, options| {
-        options.trusted_proxies = vec![];
-        options.connections_each = 2;
-    });
-    let held: Vec<_> = (0..2).map(|_| connect(&server)).collect();
-    // those two are listened to
-    std::thread::sleep(Duration::from_millis(300));
-    for _ in 0..3 {
-        assert_eq!(alive(&server, None), None);
-    }
-    drop(held);
-    let until = std::time::Instant::now() + Duration::from_secs(10);
-    while alive(&server, None).as_deref() != Some("HTTP/1.1 200 OK") {
-        assert!(std::time::Instant::now() < until, "no place is given back");
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }
 
 #[test]

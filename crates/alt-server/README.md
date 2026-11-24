@@ -97,9 +97,9 @@ at startup, bounded and restricted to regular files. Restart after installing a
 new workbench build.
 
 One address has no more than `http.connections_each` of the connections in use
-at once, a quarter of `connections` by default. A peer that is no proxy named in
-`http.trusted_proxies` is counted by its connections, and one beyond that is
-closed unheard. The clients of a named proxy are counted by their requests under
+at once, a quarter of `connections` by default. A peer that is neither on this
+host nor a proxy named in `http.trusted_proxies` is counted by its connections,
+and one beyond that is closed unheard. The clients of a named proxy are counted by their requests under
 way, each for the address the proxy gives in `X-Forwarded-For`, and one beyond
 that is answered `429` with `retry: same_request`; a request the proxy names
 nobody for is the proxy's own and has no such limit.

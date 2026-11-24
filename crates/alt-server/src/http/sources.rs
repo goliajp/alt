@@ -5,7 +5,8 @@
 //! by connection where the address is the peer's own, and by request under way
 //! where the peer is a proxy the configuration names, which stands for all its
 //! clients and says in `X-Forwarded-For` whose each request is. A proxy that
-//! says nothing of a request has no limit for it.
+//! says nothing of a request has no limit for it, and neither has a peer on
+//! this host: the proxy in front of an instance is one, named or not.
 
 use super::{caller, receiving};
 use axum::http::HeaderMap;
@@ -52,10 +53,16 @@ impl Sources {
         Ok(Place { of, address })
     }
 
-    /// The place of a connection `peer` opens: none to take where it is a proxy,
-    /// and an error where its address has as many as one may.
+    /// The place of a connection `peer` opens: none to take where it is a proxy or
+    /// on this host, and an error where its address has as many as one may.
     pub(super) fn connected(self: &Arc<Self>, peer: SocketAddr) -> Result<Option<Place>, ()> {
-        match self.proxy(peer.ip()) {
+        let here = match peer.ip() {
+            IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+            }
+            IpAddr::V4(v4) => v4.is_loopback(),
+        };
+        match here || self.proxy(peer.ip()) {
             true => Ok(None),
             false => self.place(peer.ip()).map(Some),
         }
@@ -104,7 +111,7 @@ mod tests {
 
     #[test]
     fn an_address_has_so_many_connections_in_use_whether_it_is_a_peer_or_named_by_a_proxy() {
-        let proxies: Vec<caller::Network> = vec!["127.0.0.1".parse().unwrap()];
+        let proxies: Vec<caller::Network> = vec!["192.0.2.1".parse().unwrap()];
         let sources = Sources::new(2, &proxies);
         // a peer that is no proxy, by connection
         let held: Vec<_> = (0..2)
@@ -122,15 +129,21 @@ mod tests {
         assert!(six.iter().all(|place| place.is_ok()));
         assert!(sources.connected(peer("[2001:db8::9]")).is_err());
         assert!(sources.connected(peer("[2001:db8:0:1::9]")).is_ok());
-        drop(held);
+        drop((held, six));
         assert!(sources.connected(peer("203.0.113.7")).is_ok());
 
-        // the proxy has no limit of its own, and each address it names has one
-        let proxied: Vec<_> = (0..64)
-            .map(|_| sources.connected(peer("127.0.0.1")))
-            .collect();
-        assert!(proxied.iter().all(|place| matches!(place, Ok(None))));
-        let named = |from: &str| sources.asked(peer("127.0.0.1"), &forwarded(from));
+        // the proxy has no limit of its own, nor has a peer on this host, and
+        // each address the proxy names has one
+        for unlimited in ["192.0.2.1", "127.0.0.1", "[::1]", "[::ffff:127.0.0.1]"] {
+            let open: Vec<_> = (0..64)
+                .map(|_| sources.connected(peer(unlimited)))
+                .collect();
+            assert!(open.iter().all(|place| matches!(place, Ok(None))));
+        }
+        // a peer on this host that is no proxy names nobody
+        let own = sources.asked(peer("127.0.0.1"), &forwarded("198.51.100.1"));
+        assert!(own.unwrap().is_none());
+        let named = |from: &str| sources.asked(peer("192.0.2.1"), &forwarded(from));
         let under_way: Vec<_> = (0..2).map(|_| named("198.51.100.1").unwrap()).collect();
         assert!(under_way.iter().all(Option::is_some));
         assert!(named("198.51.100.1").is_err());
@@ -140,7 +153,7 @@ mod tests {
         // a request the proxy names nobody for is the proxy's own
         assert!(
             sources
-                .asked(peer("127.0.0.1"), &HeaderMap::new())
+                .asked(peer("192.0.2.1"), &HeaderMap::new())
                 .unwrap()
                 .is_none()
         );
