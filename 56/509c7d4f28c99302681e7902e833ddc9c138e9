@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: rename and remove the section of a branch in the copy of git's configuration too
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/config_cmd.rs
+touched: crates/alt-cli/tests/it/checkout_guess.rs
+touched: crates/alt-repo/src/kept_config.rs
+touched: crates/alt-repo/src/kept_config/own.rs
