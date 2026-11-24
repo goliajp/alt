@@ -8,6 +8,12 @@
 //! it whole. The store's own file is read on top of the copy, and an
 //! export gives the copy back with the store's own variables written
 //! into it.
+//!
+//! A program from before the copy was kept apart reads the store's own
+//! file and no other. An import therefore writes two things into that
+//! file and nothing else of it: an include of the copy at its head, and
+//! the variables of the copy that tell the format of the store, which
+//! are read before any include is followed.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -19,6 +25,8 @@ use crate::RepoError;
 
 const OWN: &str = "git-import/config";
 const SOURCE: &str = "git-import/source";
+/// the copy, from the directory of the store's own file
+const THROUGH: &str = "source/config";
 
 type Read = (Vec<Entry>, Vec<PathBuf>);
 
@@ -34,6 +42,48 @@ fn parsed(bytes: &Option<Vec<u8>>) -> Result<Vec<Entry>, RepoError> {
     Ok(alt_git_config::parse_file(
         bytes.as_deref().unwrap_or_default(),
     )?)
+}
+
+fn leads_to_copy(entry: &Entry) -> bool {
+    let path = entry.section == "include" && entry.subsection.is_none() && entry.key == "path";
+    path && entry
+        .value
+        .as_ref()
+        .is_some_and(|v| v.as_slice() == THROUGH.as_bytes())
+}
+
+/// Whether the variable tells how the store is laid out, which no user
+/// sets: the hash of its objects, the version of the format, an extension.
+fn tells_format(entry: &Entry) -> bool {
+    let version = entry.section == "core" && entry.key == "repositoryformatversion";
+    entry.subsection.is_none() && (entry.section == "extensions" || version)
+}
+
+/// `own` without what an import wrote into the store's own file: the
+/// include of the copy, and each variable of the format as `kept` has it.
+fn set_here(own: Vec<Entry>, kept: &[Entry]) -> Vec<Entry> {
+    let copied = |e: &Entry| {
+        let same = |k: &Entry| Name::of(k) == Name::of(e) && k.value == e.value;
+        tells_format(e) && kept.iter().any(same)
+    };
+    let written = |e: &Entry| leads_to_copy(e) || copied(e);
+    own.into_iter().filter(|e| !written(e)).collect()
+}
+
+/// What was read through the store's own file `own`, without what the
+/// include of the copy brought in: the copy is read on its own, as the
+/// git repository read it.
+fn past_copy(read: Vec<Entry>, own: &Path) -> Vec<Entry> {
+    let mut within = false;
+    let of_own = |e: &Entry| e.origin.as_ref().is_some_and(|o| &*o.file == own);
+    read.into_iter()
+        .filter(|entry| {
+            if of_own(entry) {
+                within = leads_to_copy(entry);
+            }
+            !within
+        })
+        .collect()
 }
 
 /// `config` of a git directory, and after it its `config.worktree` where
@@ -95,7 +145,8 @@ pub fn layers(control: &Path, ctx: &IncludeContext) -> Result<Read, RepoError> {
     match own.is_file() {
         true => {
             let (read, from) = Config::load_listing(&own, ctx)?;
-            entries.extend(read.entries);
+            let set = set_here(past_copy(read.entries, &own), &entries);
+            entries.extend(set);
             files.extend(from);
         }
         false => files.push(own),
@@ -124,10 +175,8 @@ pub fn for_git(
     let Some(kept) = read_file(&alt_dir.join(SOURCE).join("config"))? else {
         return Ok(own);
     };
-    Ok(Some(alt_git_config::overlay(
-        &through(&kept),
-        &parsed(&own)?,
-    )?))
+    let set = set_here(parsed(&own)?, &parsed(&Some(kept.clone()))?);
+    Ok(Some(alt_git_config::overlay(&through(&kept), &set)?))
 }
 
 /// The paths, from the git directory `dir`, of its configuration files:
@@ -187,6 +236,38 @@ pub fn take(dir: &Path, alt_dir: &Path) -> Result<(), RepoError> {
     if !files.is_empty() {
         fs::rename(&fresh, &kept)?;
     }
+    lead(alt_dir)
+}
+
+/// Has the store's own file lead to the copy an import kept and name the
+/// format the copy names, for a program that reads that file alone. The
+/// rest of the file stays as it is, and so does all of it once it leads.
+fn lead(alt_dir: &Path) -> Result<(), RepoError> {
+    let Some(kept) = read_file(&alt_dir.join(SOURCE).join("config"))? else {
+        return Ok(());
+    };
+    let own = alt_dir.join(OWN);
+    let was = read_file(&own)?;
+    let has = parsed(&was)?;
+    let mut bytes = Vec::new();
+    if !has.iter().any(leads_to_copy) {
+        bytes.extend_from_slice(format!("[include]\n\tpath = {THROUGH}\n").as_bytes());
+    }
+    bytes.extend_from_slice(was.as_deref().unwrap_or_default());
+    for entry in parsed(&Some(kept))?.iter().filter(|e| tells_format(e)) {
+        let name = || Name::of(entry);
+        let there = has.iter().filter(|h| Name::of(h) == name());
+        if there.map(|h| &h.value).eq([&entry.value]) {
+            continue;
+        }
+        let value = entry.value.as_ref().map_or(&b"true"[..], |v| v.as_slice());
+        bytes = alt_git_config::set(&bytes, name(), value)?;
+    }
+    if Some(&bytes) != was.as_ref() {
+        let fresh = alt_dir.join("git-import/config.new");
+        fs::write(&fresh, bytes)?;
+        fs::rename(fresh, own)?;
+    }
     Ok(())
 }
 
@@ -195,7 +276,8 @@ pub fn take(dir: &Path, alt_dir: &Path) -> Result<(), RepoError> {
 /// for each variable it sets itself, which would stand over `config`'s.
 pub fn give(alt_dir: &Path, dir: &Path) -> Result<(), RepoError> {
     let kept = alt_dir.join(SOURCE);
-    let own = parsed(&read_file(&alt_dir.join(OWN))?)?;
+    let copy = parsed(&read_file(&kept.join("config"))?)?;
+    let own = set_here(parsed(&read_file(&alt_dir.join(OWN))?)?, &copy);
     for path in files_of(&kept)? {
         if path == Path::new("config") {
             continue;

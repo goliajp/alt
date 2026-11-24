@@ -66,7 +66,10 @@ fn set_here_stands_over_the_next_import(daemon: bool) {
     let kept = imported.join(".alt/git-import/source/config");
     let theirs = || std::fs::read(source.join(".git/config")).unwrap();
     assert_eq!(std::fs::read(&kept).unwrap(), theirs());
-    assert!(!imported.join(".alt/git-import/config").exists());
+    // the store's own file leads to the copy and sets nothing yet
+    let led = "[include]\n\tpath = source/config\n[core]\n\trepositoryformatversion = 0\n";
+    let own = std::fs::read_to_string(imported.join(".alt/git-import/config")).unwrap();
+    assert_eq!(own, led);
 
     // one variable the git repository sets, one it does not
     ok(alt(&imported, &["config", "user.name", "Alt User"]));

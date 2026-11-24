@@ -71,8 +71,11 @@ fn full_import_migrates_objects_refs_head_and_config() {
     let src = std::fs::read(repo_dir.path().join(".git/config")).unwrap();
     let kept = std::fs::read(alt_dir.join("git-import/source/config")).unwrap();
     assert_eq!(src, kept);
-    // the store's own file is not the import's to write
-    assert!(!alt_dir.join("git-import/config").exists());
+    // of the store's own file the import writes what leads a program
+    // that reads no other file to the copy, and the format
+    let own = std::fs::read_to_string(alt_dir.join("git-import/config")).unwrap();
+    let led = "[include]\n\tpath = source/config\n[core]\n\trepositoryformatversion = 0\n";
+    assert_eq!(own, led);
 
     // exactly one op in the log
     assert_eq!(native.oplog().len(), 1);

@@ -49,13 +49,16 @@ fn the_one_file_of_an_older_import_is_the_store_s_own() {
         std::fs::read(&own).unwrap()
     );
 
-    // its next import keeps a copy beside the file and leaves the file
+    // its next import keeps a copy beside the file, and of the file
+    // changes the head alone, which leads to the copy
     git(&["config", "user.email", "two@user.invalid"]);
     git(&["config", "alias.st", "status"]);
     git(&["commit", "-q", "--allow-empty", "-m", "two"]);
     let before = std::fs::read(&own).unwrap();
     ok(run(&new, &source, &["import", target]));
-    assert_eq!(std::fs::read(&own).unwrap(), before);
+    let mut led = b"[include]\n\tpath = source/config\n".to_vec();
+    led.extend(before);
+    assert_eq!(std::fs::read(&own).unwrap(), led);
     assert_eq!(
         std::fs::read(&kept).unwrap(),
         std::fs::read(source.join(".git/config")).unwrap()
