@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a directory another server removed first does not stop a server that starts
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/work.rs
