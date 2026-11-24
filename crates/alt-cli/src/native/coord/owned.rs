@@ -71,16 +71,34 @@ pub fn discover_owned(start: &Path) -> Res<alt_repo::Repository> {
     Ok(repo)
 }
 
-/// The repository a server serves at `path`. One that is another
-/// user's is refused as by git, which serves it to no fetch and to no
-/// push; what git says goes to the log of the server, and the error,
-/// which goes to whoever asked, tells nothing of where the repository is.
+/// The repository a server serves at `path`, which is the repository
+/// itself: none is looked for above it, as git's servers look for none.
+/// One that is another user's is refused as by git, which serves it to
+/// no fetch and to no push, unless `safe.directory` names its working
+/// tree, as for any command, or its control directory, as git's servers
+/// want it named. What is wrong goes to the log of the server; the
+/// error, which goes to whoever asked, tells nothing of where the
+/// repository is.
 pub fn discover_served(path: &Path) -> Res<alt_repo::Repository> {
-    let repo = alt_repo::Repository::discover(path)?;
+    let hidden = "access denied or repository not exported";
+    let repo = match alt_repo::Repository::discover(path) {
+        Ok(repo) => repo,
+        Err(e) => {
+            eprintln!("{e}");
+            return Err(hidden.into());
+        }
+    };
     let (tree, paths) = looked_at(&repo);
-    if !owned_or_safe(tree, &paths)? {
+    if path.canonicalize()? != tree.canonicalize()? {
+        eprintln!(
+            "no repository at {}: one above it is not served",
+            path.display()
+        );
+        return Err(hidden.into());
+    }
+    if !owned_or_safe(tree, &paths)? && !listed_safe(repo.git_dir())? {
         eprint!("{}", dubious(tree));
-        return Err("access denied or repository not exported".into());
+        return Err(hidden.into());
     }
     Ok(repo)
 }

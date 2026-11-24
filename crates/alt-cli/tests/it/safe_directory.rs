@@ -195,11 +195,66 @@ fn a_repository_of_another_user_is_served_only_where_it_is_named_safe() {
     let said = String::from_utf8_lossy(&daemon.stderr).into_owned();
     assert!(said.starts_with(dubious), "{said}");
     assert!(!pair.alt.join(".alt/daemon.sock").exists());
-    // named safe, it is served again
+    // named by its control directory, as git's servers want it named
     let at = pair.alt.canonicalize().unwrap();
+    let control = at.join(".alt");
+    let named = format!("[safe]\n\tdirectory = {}\n", control.display());
+    std::fs::write(&global, named).unwrap();
+    let many = serve("ALT_SERVER_ROOT", above);
+    ok(asked(&format!("http://{}/alt/", many.addr)));
+    drop(many);
+    // named safe, it is served again
     std::fs::write(&global, format!("[safe]\n\tdirectory = {}\n", at.display())).unwrap();
     let many = serve("ALT_SERVER_ROOT", above);
     ok(asked(&format!("http://{}/alt/", many.addr)));
     let alone = serve("ALT_SERVER_REPO", &pair.alt);
     ok(asked(&format!("http://{}/", alone.addr)));
+}
+
+/// What the server at `addr` answers a request for the refs of `name`.
+fn answered(addr: &impl std::fmt::Display, name: &str) -> String {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(addr.to_string()).unwrap();
+    let request = format!("GET /{name}/info/refs?service=git-upload-pack HTTP/1.0\r\n\r\n");
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).unwrap();
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+#[test]
+fn a_server_of_many_serves_what_lies_right_under_its_root_and_tells_no_path() {
+    let pair = Pair::new();
+    pair.write("f", "f\n");
+    pair.commit_all("one");
+    // a root inside a repository, with a repository and a plain
+    // directory in it
+    let root = pair.alt.join("served");
+    std::fs::create_dir_all(root.join("plain/deeper")).unwrap();
+    std::fs::create_dir_all(root.join("held")).unwrap();
+    ok(crate::like_git::alt(&root.join("held"), &["init", "."]));
+    let env = [("ALT_SERVER_ROOT", root.to_str().unwrap())];
+    let mut many = crate::altd_server::spawn_server_with_env(&env);
+    let found = answered(&many.addr, "held");
+    assert!(
+        found.starts_with("HTTP/1.0 200") || found.starts_with("HTTP/1.1 200"),
+        "{found}"
+    );
+    // no repository above the one asked for is served in its place
+    let above = pair.alt.parent().unwrap().to_str().unwrap().to_owned();
+    for name in ["plain", ".", "plain/deeper", "none", ".alt", "%2e"] {
+        let refused = answered(&many.addr, name);
+        let head = refused.lines().next().unwrap_or_default().to_owned();
+        assert!(
+            head.contains(" 404") || head.contains(" 400"),
+            "{name}: {refused}"
+        );
+        assert!(!refused.contains(&above), "{name}: {refused}");
+        assert!(
+            !refused.contains("service=git-upload-pack\n"),
+            "{name}: {refused}"
+        );
+    }
+    let logged = many.drain_stderr();
+    assert!(logged.contains("one above it is not served"), "{logged}");
 }

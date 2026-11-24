@@ -619,7 +619,7 @@ fn resolve_repo(
                 Some(i) => (&trimmed[..i], &trimmed[i..]),
                 None => (trimmed, ""),
             };
-            if name.is_empty() || name.contains("..") || name.contains('\\') {
+            if name.is_empty() || name.starts_with('.') || name.contains('\\') {
                 return Err("invalid repo name in URL".into());
             }
             let mut cache_g = cache.take();
@@ -637,8 +637,7 @@ fn resolve_repo(
             if !repo_path.is_dir() {
                 return Err(format!("repo '{name}' not found under server root").into());
             }
-            // Probe once: surfaces "not a repo" errors right at cache
-            // insertion rather than on every request.
+            // probed once, where it enters the cache
             owned::discover_served(&repo_path)?;
             let alt_dir = repo_path.join(".alt");
             let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
@@ -705,7 +704,8 @@ fn dispatch(
     let (handle, suffix, repo_name) = match resolve_repo(mode, path) {
         Ok(v) => v,
         Err(e) => {
-            let r = Response::from_string(e.to_string()).with_status_code(StatusCode(404));
+            eprintln!("altd-server: {e}");
+            let r = Response::from_string("repository not found").with_status_code(StatusCode(404));
             respond_logged(req, r, log)?;
             return Ok(());
         }
