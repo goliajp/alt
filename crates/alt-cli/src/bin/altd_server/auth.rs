@@ -55,25 +55,20 @@ pub(super) fn action_from_request(method: &Method, path: &str, query: &str) -> O
     None
 }
 
+/// Whether `acl` lets `action` be done to `repo`. The rules that name the
+/// repository decide for it; `*` stands for the repositories that no rule
+/// names. A repository named with nothing allowed is closed, whatever `*`
+/// allows the others.
 pub(super) fn acl_allows(acl: &[AclRule], repo: &str, action: Action) -> bool {
-    for rule in acl {
-        if rule.repo != "*" && rule.repo != repo {
-            continue;
-        }
-        match action {
-            Action::Read => {
-                if rule.can_read {
-                    return true;
-                }
-            }
-            Action::Write => {
-                if rule.can_write {
-                    return true;
-                }
-            }
-        }
+    let allows = |rule: &AclRule| match action {
+        Action::Read => rule.can_read,
+        Action::Write => rule.can_write,
+    };
+    let mut named = acl.iter().filter(|rule| rule.repo == repo).peekable();
+    match named.peek() {
+        Some(_) => named.any(allows),
+        None => acl.iter().any(|rule| rule.repo == "*" && allows(rule)),
     }
-    false
 }
 
 fn parse_acl(field: &str) -> Vec<AclRule> {
@@ -204,6 +199,37 @@ fn read_users(path: &Path) -> std::io::Result<HashMap<String, UserEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rules_that_name_a_repository_decide_for_it_and_the_star_for_the_rest() {
+        let may = |acl: &str, repo: &str| {
+            let acl = parse_acl(acl);
+            (
+                acl_allows(&acl, repo, Action::Read),
+                acl_allows(&acl, repo, Action::Write),
+            )
+        };
+        assert_eq!(may("*:rw", "any"), (true, true));
+        assert_eq!(may("*:r", "any"), (true, false));
+        assert_eq!(may("alpha:rw beta:r", "alpha"), (true, true));
+        assert_eq!(may("alpha:rw beta:r", "beta"), (true, false));
+        assert_eq!(may("alpha:rw beta:r", "gamma"), (false, false));
+        // closed by name, in whatever order the rules stand
+        assert_eq!(may("secret:n *:rw", "secret"), (false, false));
+        assert_eq!(may("*:rw secret:n", "secret"), (false, false));
+        assert_eq!(may("*:rw secret:", "secret"), (false, false));
+        assert_eq!(may("secret:n *:rw", "other"), (true, true));
+        // narrowed by name, and widened
+        assert_eq!(may("*:rw docs:r", "docs"), (true, false));
+        assert_eq!(may("*:r docs:w", "docs"), (false, true));
+        assert_eq!(may("*:r docs:rw", "docs"), (true, true));
+        // two rules of one name allow what either does
+        assert_eq!(may("docs:r docs:w *:n", "docs"), (true, true));
+        // a rule that does not read is no rule
+        assert_eq!(may("docs:x *:r", "docs"), (true, false));
+        assert_eq!(may("docs", "docs"), (false, false));
+        assert_eq!(may("", "docs"), (false, false));
+    }
 
     /// The service a request for refs is held to is the one it is
     /// answered for: the first `service` of the query.
