@@ -11,3 +11,6 @@ alt-git-codec.workspace = true
 alt-hash.workspace = true
 alt-oplog.workspace = true
 alt-os.workspace = true
+
+[dev-dependencies]
+alt-oplog = { workspace = true, features = ["hooks"] }

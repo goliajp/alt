@@ -16,6 +16,7 @@ mod cuts;
 mod ext;
 mod follow;
 pub mod frame;
+mod hooks;
 mod lift;
 mod locate;
 mod log;
@@ -36,12 +37,14 @@ mod sync;
 mod tail;
 mod verify;
 
-use std::cell::{Cell, RefCell};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
-use std::sync::mpsc::{Receiver, Sender};
 
+pub(crate) use hooks::cut_reached;
+#[cfg(feature = "hooks")]
+#[doc(hidden)]
+pub use hooks::{cut_dies_after, cut_waits_after, in_boot, in_no_boot};
 pub(crate) use log::Log;
 pub use sink::Reached;
 pub(crate) use sink::Sink;
@@ -119,86 +122,11 @@ pub fn create_with(dir: &Path, block_exp: u8) -> std::io::Result<()> {
     created
 }
 
-/// What a thread takes for the boot it runs in.
-#[derive(Clone, Copy)]
-enum Told {
-    ByTheKernel,
-    This([u8; 16]),
-    Nothing,
-}
-
-thread_local! {
-    static BOOT: Cell<Told> = const { Cell::new(Told::ByTheKernel) };
-}
-
-/// Makes the handles this thread opens from now on take `boot` for the
-/// boot they run in, and the running one again with `None`: for a test
-/// of what a log is taken for after the machine went down.
-#[doc(hidden)]
-pub fn in_boot(boot: Option<[u8; 16]>) {
-    BOOT.set(boot.map_or(Told::ByTheKernel, Told::This));
-}
-
-/// Makes the handles this thread opens from now on run as on a system
-/// whose kernel tells no boot: for a test of that.
-#[doc(hidden)]
-pub fn in_no_boot() {
-    BOOT.set(Told::Nothing);
-}
-
-thread_local! {
-    static CUT_DIES: Cell<u8> = const { Cell::new(0) };
-}
-
-/// Makes a cut of a log on this thread end after step `step` of it as if
-/// its process had died there (1 the note in `tail`, 2 the checkpoint, 3
-/// its sync, 4 the file made shorter, 5 the sync of that), and every cut
-/// run through with `None`: for a test of what such a death leaves.
-#[doc(hidden)]
-pub fn cut_dies_after(step: Option<u8>) {
-    CUT_DIES.set(step.unwrap_or(0));
-}
-
-/// The step of a cut a test has it wait after, whom it tells that it is
-/// there, and who tells it to go on.
-type Waits = (u8, Sender<()>, Receiver<()>);
-
-thread_local! {
-    static CUT_WAITS: RefCell<Option<Waits>> = const { RefCell::new(None) };
-}
-
-/// Makes the next cut of a log on this thread stop after step `step` of
-/// it, with its locks held: it says so on `reached` and goes on when
-/// `go` is sent to or closed. For a test of what others find while a log
-/// is being cut.
-#[doc(hidden)]
-pub fn cut_waits_after(step: u8, reached: Sender<()>, go: Receiver<()>) {
-    CUT_WAITS.set(Some((step, reached, go)));
-}
-
-/// Fails where a test has the cut die after step `step`, and waits where
-/// a test has it wait there.
-pub(crate) fn cut_reached(step: u8) -> std::io::Result<()> {
-    if CUT_DIES.get() == step {
-        return Err(std::io::Error::other("the cut was made to die here"));
-    }
-    let waits = CUT_WAITS.with_borrow(|waits| waits.as_ref().is_some_and(|(at, ..)| *at == step));
-    if waits && let Some((_, reached, go)) = CUT_WAITS.take() {
-        let _ = reached.send(());
-        let _ = go.recv();
-    }
-    Ok(())
-}
-
 /// The boot a handle opened now on this thread runs in; `None` where the
 /// kernel tells none, and nothing a boot left in its cache is then taken
 /// on trust.
 pub fn running_boot() -> Option<[u8; 16]> {
-    match BOOT.get() {
-        Told::ByTheKernel => alt_os::boot::id(),
-        Told::This(boot) => Some(boot),
-        Told::Nothing => None,
-    }
+    hooks::running_boot()
 }
 
 /// Up to where the log in `dir` is known synced in the running boot.

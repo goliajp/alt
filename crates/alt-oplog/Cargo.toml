@@ -12,3 +12,10 @@ alt-marker.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 alt-os.workspace = true
+
+[features]
+# what tests have a log do that no machine does on its own (`v2/hooks.rs`)
+hooks = []
+
+[dev-dependencies]
+alt-oplog = { workspace = true, features = ["hooks"] }
