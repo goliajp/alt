@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: perf
+summary: the objects of a fetch are sent as deltas of the versions beside them
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server_versions.rs
+touched: crates/alt-cli/tests/it/main.rs
