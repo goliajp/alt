@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: count the files of the repositories kept open once the worker is done with the request before
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_many_repos.rs
