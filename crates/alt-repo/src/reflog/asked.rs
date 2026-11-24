@@ -9,6 +9,10 @@ impl Repository {
     /// before for `@{-N}`, else the first of git's lookup order there is.
     pub fn full_name(&self, named: &str) -> Result<Option<String>, RepoError> {
         if let Some((head, nth)) = named.strip_suffix('}').and_then(|n| n.rsplit_once("@{-")) {
+            // as git: `@{-N}` stands after no name, `HEAD` no more than another
+            if head == "HEAD" {
+                return Ok(None);
+            }
             let head = if head.is_empty() { "HEAD" } else { head };
             let Some(nth) = nth.parse::<usize>().ok().and_then(|nth| nth.checked_sub(1)) else {
                 return Ok(None);
@@ -44,6 +48,9 @@ impl Repository {
             plain.then(|| digits.parse::<usize>().ok()).flatten()
         };
         if let Some(nth) = asked.strip_prefix('-') {
+            if named == "HEAD" {
+                return Ok(None);
+            }
             let head = if named.is_empty() { "HEAD" } else { named };
             let Some(nth) = number(nth).and_then(|nth| nth.checked_sub(1)) else {
                 return Ok(None);

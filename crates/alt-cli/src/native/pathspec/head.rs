@@ -6,6 +6,8 @@
 pub fn at_head(head: &str, spec: &str) -> String {
     let follows = |rest: &str| rest.is_empty() || rest.starts_with(['~', '^', ':']);
     match (spec.strip_prefix("HEAD"), spec.strip_prefix('@')) {
+        // git has no `HEAD@{-N}`: it is left to name nothing
+        (Some(rest), _) if rest.starts_with("@{-") => spec.to_owned(),
         (Some(rest), _) if follows(rest) || rest.starts_with("@{") => format!("{head}{rest}"),
         (_, Some(rest)) if follows(rest) => format!("{head}{rest}"),
         // the log of the branch the workspace is on, not of its head
@@ -14,6 +16,9 @@ pub fn at_head(head: &str, spec: &str) -> String {
         {
             format!("{head}@{{.{}", &rest[1..])
         }
+        // the branch left: asked of the head of the default workspace
+        // as git writes it, with no name before it
+        (_, Some(rest)) if rest.starts_with("{-") && head == "HEAD" => spec.to_owned(),
         (_, Some(rest)) if rest.starts_with('{') => format!("{head}{spec}"),
         _ => spec.to_owned(),
     }
@@ -32,6 +37,9 @@ mod tests {
         assert_eq!(at("HEAD@{1}"), "workspaces/w/HEAD@{1}");
         assert_eq!(at("@{u}"), "workspaces/w/HEAD@{u}");
         assert_eq!(at("@{-1}"), "workspaces/w/HEAD@{-1}");
+        assert_eq!(at("HEAD@{-1}"), "HEAD@{-1}");
+        assert_eq!(at_head("HEAD", "@{-1}~1"), "@{-1}~1");
+        assert_eq!(at_head("HEAD", "@{u}"), "HEAD@{u}");
         // the log of the branch, not of the head
         assert_eq!(at("@{2}"), "workspaces/w/HEAD@{.2}");
         assert_eq!(at("@{2}~1"), "workspaces/w/HEAD@{.2}~1");

@@ -83,6 +83,43 @@ fn a_branch_a_switch_makes_where_the_head_is_is_logged_as_made_from_it() {
 }
 
 #[test]
+fn the_branch_left_is_asked_after_no_name_as_by_git() {
+    let pair = Pair::new();
+    for text in ["one", "two"] {
+        pair.write("f", text);
+        pair.commit_all(text);
+    }
+    pair.both(&["switch", "-c", "side"]);
+    pair.write("f", "three");
+    pair.commit_all("three");
+    pair.both(&["switch", "main"]);
+    for rev in ["@{-1}", "@{-1}@{0}", "@{-1}@{1}", "@{-1}~1", "@{-1}@{0}~1"] {
+        let args = ["rev-parse", rev];
+        assert_eq!(
+            ok(alt(&pair.alt, &args)),
+            ok(git(&pair.git, &args)),
+            "{rev}"
+        );
+    }
+    for rev in [
+        "HEAD@{-1}",
+        "main@{-1}",
+        "side@{-1}",
+        "@{-1}@{-1}",
+        "@{0}@{0}",
+        "main@{0}@{0}",
+        "@{-1}@{0}@{0}",
+        "HEAD@{-1}~1",
+    ] {
+        let said = pair.same_failure(&["rev-parse", rev], 128);
+        assert!(
+            said.contains(&format!("ambiguous argument '{rev}'")),
+            "{said}"
+        );
+    }
+}
+
+#[test]
 fn a_second_import_keeps_the_moves_git_never_saw() {
     let dir = alt_os::temp::tempdir().unwrap();
     let (source, to) = (dir.path().join("source"), dir.path().join("to"));
