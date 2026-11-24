@@ -62,9 +62,13 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
             (socket, reader)
         })
         .collect();
-    std::thread::sleep(Duration::from_millis(300));
+    // a third is answered for as long as the two are not both under way, and
+    // is itself done with once it is: it is refused from when they are
     let crowded = Some("HTTP/1.1 429 Too Many Requests".to_owned());
-    assert_eq!(alive(&server, Some("203.0.113.9")), crowded);
+    let until = std::time::Instant::now() + Duration::from_secs(120);
+    while alive(&server, Some("203.0.113.9")) != crowded {
+        assert!(std::time::Instant::now() < until, "a third is answered");
+    }
     // and is told when to come again
     let told = answered(&server, Some("203.0.113.9"))
         .unwrap()
@@ -142,9 +146,13 @@ fn a_peer_that_is_no_proxy_and_not_this_host_has_so_many_connections_and_no_more
     assert_eq!(alive(&server, None), fine);
     // two connections that say nothing are two all the same
     let silent: Vec<_> = (0..2).map(|_| connect(&server)).collect();
-    std::thread::sleep(Duration::from_millis(300));
-    // the third is closed unheard
-    assert!(closed_unheard(&server));
+    // A third is answered for as long as the server has not taken both, and is
+    // gone once it is answered: from when it has taken them, the third is
+    // closed unheard, however long the host took to come to them.
+    let until = std::time::Instant::now() + Duration::from_secs(120);
+    while !closed_unheard(&server) {
+        assert!(std::time::Instant::now() < until, "a third is answered");
+    }
     drop(silent);
     let until = std::time::Instant::now() + Duration::from_secs(10);
     while alive(&server, None) != fine {
