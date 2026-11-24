@@ -80,20 +80,15 @@ pub(super) fn publish(
     created: &mut Option<std::path::PathBuf>,
     published: &mut bool,
 ) -> Result<Option<RequestKey>> {
-    // A client may list refs it does not change. They take no part in the publication,
-    // but a stale expectation is still a conflict.
-    let mut changes = Vec::new();
-    for update in &head.updates {
-        if update.old != update.new {
-            changes.push(update);
-        } else if view.refs.get(&update.name) != update.old {
-            return Err(Error::Precondition("reference changed since it was read"));
-        }
-    }
+    let changes = changed(view, head)?;
     if changes.is_empty() {
         return Ok(None);
     }
     let limits = store.limits();
+    let gone = room.as_ref().map(|room| &*room.given_up);
+    let led = (view.unreachable)
+        .then(|| view.led(limits.walk_steps, gone))
+        .transpose()?;
     let mut behind = (view.segment_ids.clone(), view.segments.clone());
     let mut push = Push {
         view,
@@ -104,6 +99,7 @@ pub(super) fn publish(
         created,
         limits,
         verified: None,
+        led,
     };
     for _ in 0..MOVED_MOST {
         let fresh = fresh(store, repository)?;
@@ -151,6 +147,24 @@ pub(super) fn publish(
     })?;
     let made = last.expect("made where it was published");
     made.adopted(store, repository, published)
+}
+
+/// The updates of a push that change a ref. A client may list refs it does not
+/// change: they take no part in the publication, but a stale expectation is
+/// still a conflict.
+fn changed<'a>(
+    view: &PackView,
+    head: &'a alt_wire::push::PushHead,
+) -> Result<Vec<&'a alt_wire::push::RefUpdate>> {
+    let mut changes = Vec::new();
+    for update in &head.updates {
+        if update.old != update.new {
+            changes.push(update);
+        } else if view.refs.get(&update.name) != update.old {
+            return Err(Error::Precondition("reference changed since it was read"));
+        }
+    }
+    Ok(changes)
 }
 
 /// How often a push is published anew behind segments that moved before the

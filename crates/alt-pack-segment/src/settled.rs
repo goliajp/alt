@@ -9,12 +9,34 @@
 //! inflated and nothing hashed.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Oid, Record, SegmentSet,
+    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
     carried::Carried,
     format::{CommitRow, Delta},
-    ingest::Meta,
     scan::{Form, Raw},
 };
+
+/// what an entry of a pack makes
+pub(crate) struct Meta {
+    pub oid: Oid,
+    pub blake3: [u8; 32],
+    pub kind: Kind,
+    pub size: u64,
+    /// scan index of the entry of this pack the delta was resolved on, where
+    /// it was resolved on one
+    pub base: Option<usize>,
+}
+
+impl Meta {
+    pub(crate) fn plain(oid: Oid, blake3: [u8; 32], kind: Kind, size: u64) -> Self {
+        Meta {
+            oid,
+            blake3,
+            kind,
+            size,
+            base: None,
+        }
+    }
+}
 
 pub(crate) struct Resolved {
     /// the memory `metas` and `entries` are counted in, where packs have a bound

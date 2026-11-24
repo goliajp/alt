@@ -1,7 +1,7 @@
 //! What the objects of a pack say of other objects, taken in as each is verified.
 
 use crate::{
-    Error, Kind, Oid, SegmentSet,
+    Error, Kind, Led, Oid, SegmentSet,
     format::CommitRow,
     object::{self, Parsed},
     wanted::Wanted,
@@ -15,11 +15,16 @@ pub(crate) struct Told<'a> {
 }
 
 impl<'a> Told<'a> {
-    /// for a pack of `entries` entries received beside `existing`, whose commits
-    /// may name `parents_beside` parents beyond two for each entry
-    pub fn new(existing: &'a SegmentSet, entries: usize, parents_beside: usize) -> Self {
+    /// for a pack of `entries` entries received beside `existing` from one who is
+    /// led to `led` of it, whose commits may name `parents_beside` parents beyond
+    /// two for each entry
+    pub fn new(
+        (existing, led): (&'a SegmentSet, Option<&'a Led>),
+        entries: usize,
+        parents_beside: usize,
+    ) -> Self {
         Told {
-            wanted: Wanted::new(existing, entries),
+            wanted: Wanted::new(existing, led, entries),
             parents: AtomicUsize::new(0),
             most_parents: entries.saturating_mul(2).saturating_add(parents_beside),
         }
@@ -78,7 +83,7 @@ mod tests {
     fn the_commits_of_a_pack_name_two_parents_an_entry_and_some_beside() {
         let none = SegmentSet::default();
         // three entries, four parents beside: ten
-        let told = Told::new(&none, 3, 4);
+        let told = Told::new((&none, None), 3, 4);
         let row = told.object(0, &[1; 20], Kind::Commit, &commit(6)).unwrap();
         assert_eq!(row.unwrap().parents.len(), 6);
         told.object(1, &[2; 20], Kind::Commit, &commit(4)).unwrap();

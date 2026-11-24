@@ -1,7 +1,8 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
+pub(crate) use crate::settled::Meta;
 use crate::{
-    Error, Kind, Limits, Oid, Record, SegmentSet,
+    Error, Kind, Led, Limits, Oid, Record, SegmentSet,
     descend::{self, Root, Shared},
     format::{self, CommitRow},
     object_id, plain, room,
@@ -26,28 +27,6 @@ pub(crate) const KEEP: usize = 1 << 20;
 /// scan itself and inflated again where a delta needs it, so that the memory a pack
 /// takes does not grow with its size.
 pub(crate) const HELD: u64 = 256 << 20;
-
-pub(crate) struct Meta {
-    pub oid: Oid,
-    pub blake3: [u8; 32],
-    pub kind: Kind,
-    pub size: u64,
-    /// scan index of the entry of this pack the delta was resolved on, where
-    /// it was resolved on one
-    pub base: Option<usize>,
-}
-
-impl Meta {
-    pub(crate) fn plain(oid: Oid, blake3: [u8; 32], kind: Kind, size: u64) -> Self {
-        Meta {
-            oid,
-            blake3,
-            kind,
-            size,
-            base: None,
-        }
-    }
-}
 
 pub struct Ingested {
     records: Vec<Record>,
@@ -128,7 +107,7 @@ pub(crate) fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
 
 /// `pack` is the complete received pack including its trailer
 pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ingested, Error> {
-    verified(pack, existing, limits, HELD, None)
+    verified(pack, (existing, None), limits, HELD, None)
 }
 
 /// [`ingest`] for as long as it is waited for: once `given_up` is set, the work
@@ -139,7 +118,19 @@ pub fn ingest_while_waited_for(
     limits: &Limits,
     given_up: &Arc<AtomicBool>,
 ) -> Result<Ingested, Error> {
-    verified(pack, existing, limits, HELD, Some(given_up))
+    verified(pack, (existing, None), limits, HELD, Some(given_up))
+}
+
+/// [`ingest`] of a pack sent by one who is led to `led` of what `existing`
+/// holds: an object beyond that is none the pack may refer to, as the object
+/// of a tree or a commit or as the base of a delta, unless the pack carries it.
+pub fn ingest_led(
+    pack: &[u8],
+    (existing, led): (&SegmentSet, &Led),
+    limits: &Limits,
+    given_up: Option<&Arc<AtomicBool>>,
+) -> Result<Ingested, Error> {
+    verified(pack, (existing, Some(led)), limits, HELD, given_up)
 }
 
 /// `ingest` with a chosen bound on the inflated bytes kept in memory; the result does
@@ -151,12 +142,12 @@ pub fn ingest_holding(
     limits: &Limits,
     held: u64,
 ) -> Result<Ingested, Error> {
-    verified(pack, existing, limits, held, None)
+    verified(pack, (existing, None), limits, held, None)
 }
 
 fn verified(
     pack: &[u8],
-    existing: &SegmentSet,
+    (existing, led): (&SegmentSet, Option<&Led>),
     limits: &Limits,
     held: u64,
     given_up: Option<&Arc<AtomicBool>>,
@@ -169,7 +160,7 @@ fn verified(
     let said = pack.get(8..12).map_or(0, |count| {
         u32::from_be_bytes(count.try_into().expect("four bytes")) as usize
     });
-    let told = Told::new(existing, said, limits.parents_beside);
+    let told = Told::new((existing, led), said, limits.parents_beside);
     let mut memory = room::scanning(pack.len() as u64, said as u64, limits, (held, wait))?;
     let mut unkept: Vec<(usize, Meta)> = Vec::new();
     let mut commits: Vec<CommitRow> = Vec::new();
@@ -223,10 +214,11 @@ fn verified(
     // thin pack: bases that live in earlier segments, numbered behind the entries
     let mut outside = Vec::new();
     let mut outer = Vec::new();
-    let mut earlier = Vec::new();
     for named in deltas.by_object() {
         let base = named[0].0;
-        if let Some(record) = existing.base_record(&base)? {
+        if led.is_none_or(|led| led.to(&base))
+            && let Some(record) = existing.base_record(&base)?
+        {
             let entry = u32::try_from(entries.len() + outside.len());
             outer.push(Root {
                 entry: entry.map_err(|_| Error::Limit("objects"))?,
@@ -236,7 +228,6 @@ fn verified(
                 depth: record.depth,
             });
             outside.push(base);
-            earlier.push((base, record.depth));
             scanned.largest = scanned.largest.max(record.size);
         }
     }

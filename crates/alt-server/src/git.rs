@@ -250,19 +250,23 @@ pub(crate) fn pack_limits(
 }
 
 /// The pack of a push verified against the segments there are, for as long as
-/// its answer is waited for.
+/// its answer is waited for. `led` is what of the segments the one who pushes
+/// is led to, where that is not all they hold.
 pub(crate) fn verified(
     pack: &[u8],
     segments: &alt_pack_segment::SegmentSet,
     limits: alt_remote_protocol::Limits,
     room: Option<&Verifying>,
+    led: Option<&alt_pack_segment::Led>,
 ) -> Result<alt_pack_segment::Ingested> {
     let within = pack_limits(limits, room);
-    match room {
-        Some(room) => {
-            alt_pack_segment::ingest_while_waited_for(pack, segments, &within, &room.given_up)
+    let given_up = room.map(|room| &room.given_up);
+    match (led, given_up) {
+        (Some(led), _) => alt_pack_segment::ingest_led(pack, (segments, led), &within, given_up),
+        (None, Some(given_up)) => {
+            alt_pack_segment::ingest_while_waited_for(pack, segments, &within, given_up)
         }
-        None => alt_pack_segment::ingest(pack, segments, &within),
+        (None, None) => alt_pack_segment::ingest(pack, segments, &within),
     }
     .map_err(crate::git_packs::segment_error)
 }

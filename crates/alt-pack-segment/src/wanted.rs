@@ -6,8 +6,13 @@
 //! is known only when the last delta is resolved, so the ids wait, each once. They
 //! wait within a bound: an id no segment present holds has to be an object of the
 //! pack, and there are no more of those than the pack has entries.
+//!
+//! Segments keep what no ref names any more. Where the pack comes from one who
+//! is led to less than the segments hold, what they hold beyond that is not
+//! there for the pack: an id is no proof of having the object, and a ref that
+//! came to name it would hand it out.
 
-use crate::{Error, Kind, Oid, OidMap, SegmentSet, carried::Carried};
+use crate::{Error, Kind, Led, Oid, OidMap, SegmentSet, carried::Carried};
 use std::sync::{
     Mutex,
     atomic::{AtomicUsize, Ordering::Relaxed},
@@ -27,6 +32,8 @@ struct Shard {
 
 pub(crate) struct Wanted<'a> {
     existing: &'a SegmentSet,
+    /// what of `existing` the sender of the pack is led to, where not all of it
+    led: Option<&'a Led>,
     /// the entries of the pack
     entries: usize,
     shards: Vec<Mutex<Shard>>,
@@ -35,12 +42,21 @@ pub(crate) struct Wanted<'a> {
 }
 
 impl<'a> Wanted<'a> {
-    pub fn new(existing: &'a SegmentSet, entries: usize) -> Self {
+    pub fn new(existing: &'a SegmentSet, led: Option<&'a Led>, entries: usize) -> Self {
         Wanted {
             existing,
+            led,
             entries,
             shards: (0..SHARDS).map(|_| Mutex::default()).collect(),
             own: AtomicUsize::new(0),
+        }
+    }
+
+    /// the kind of an object the segments present hold for the sender of the pack
+    fn held(&self, oid: &Oid) -> Result<Option<Kind>, Error> {
+        match self.led {
+            Some(led) if !led.to(oid) => Ok(None),
+            _ => self.existing.kind(oid),
         }
     }
 
@@ -65,7 +81,7 @@ impl<'a> Wanted<'a> {
         }
         let mut own = 0;
         for (to, (kind, from)) in shard.fresh.drain() {
-            if self.existing.kind(&to)? != Some(kind) {
+            if self.held(&to)? != Some(kind) {
                 shard.own.insert(to, (kind, from));
                 own += 1;
             }
@@ -79,7 +95,6 @@ impl<'a> Wanted<'a> {
     /// Fails unless every object referred to is carried or held by a segment
     /// present, as the kind it is referred to as. `of` is the id of an entry.
     pub fn check(self, carried: &Carried, of: impl Fn(u32) -> Oid + Sync) -> Result<(), Error> {
-        let existing = self.existing;
         alt_threads::try_for_each(&self.shards, 1, |shard| {
             let shard = shard.lock().expect("wanted");
             for (to, (kind, from)) in &shard.own {
@@ -90,7 +105,7 @@ impl<'a> Wanted<'a> {
             for (to, (kind, from)) in &shard.fresh {
                 let found = match carried.kind(to) {
                     Some(found) => Some(found),
-                    None => existing.kind(to)?,
+                    None => self.held(to)?,
                 };
                 if found != Some(*kind) {
                     return Err(Error::Dangling(of(*from), *to));
@@ -116,7 +131,7 @@ mod tests {
         let none = SegmentSet::default();
         let from = id(u32::MAX);
         // as many as a pack of this many entries can carry, each named many times
-        let wanted = Wanted::new(&none, 3 * TOGETHER);
+        let wanted = Wanted::new(&none, None, 3 * TOGETHER);
         for _ in 0..4 {
             for n in 0..3 * TOGETHER as u32 {
                 wanted.want(9, &from, id(n), Kind::Blob).unwrap();
@@ -137,7 +152,7 @@ mod tests {
         let all = Carried::new((0..3 * TOGETHER as u32).map(|n| (id(n), Kind::Blob)));
         let but_one = Carried::new((1..3 * TOGETHER as u32).map(|n| (id(n), Kind::Blob)));
         let wanted = |carried: &Carried| {
-            let wanted = Wanted::new(&none, 3 * TOGETHER);
+            let wanted = Wanted::new(&none, None, 3 * TOGETHER);
             for n in 0..3 * TOGETHER as u32 {
                 wanted.want(n, &from, id(n), Kind::Blob).unwrap();
             }
@@ -149,7 +164,7 @@ mod tests {
 
         // more ids that no segment has than the pack has entries: refused when the
         // ids are looked up, and not when the last object was resolved
-        let wanted = Wanted::new(&none, TOGETHER - 1);
+        let wanted = Wanted::new(&none, None, TOGETHER - 1);
         let refused =
             (0..TOGETHER as u32).try_for_each(|n| wanted.want(9, &from, id(n), Kind::Blob));
         assert!(matches!(refused, Err(Error::Dangling(a, _)) if a == from));

@@ -23,7 +23,8 @@ impl Store {
     /// The segments of a repository whose history was replaced, or that had a
     /// branch deleted, hold objects no ref leads to. Such a repository gives by
     /// digest what `led` says and nothing else; in any other, every object of
-    /// the segments is reached.
+    /// the segments is reached. What the refs lead to is kept for the next
+    /// that asks it of the same refs and segments.
     pub(super) fn open_published_git_content(
         &mut self,
         credential: &Credential,
@@ -42,17 +43,7 @@ impl Store {
             let Some((oid, ..)) = found else {
                 return Err(Error::Unauthorized);
             };
-            let id = |oid: &alt_git_codec::ObjectId| -> alt_pack_segment::Oid {
-                oid.as_bytes().try_into().expect("sha1 object id")
-            };
-            let tips: Vec<_> = view.refs.values().map(|oid| id(&oid)).collect();
-            let steps = self.limits.walk_steps;
-            let reached = view.segments.select_while(&tips, &[], steps, None);
-            let reached = reached.map_err(|error| match error {
-                alt_pack_segment::Error::Limit(_) => Error::Limit("objects the refs reach"),
-                _ => Error::Integrity("objects the refs reach"),
-            })?;
-            if !reached.objects().contains(&oid) {
+            if !view.led(self.limits.walk_steps, None)?.to(&oid) {
                 return Err(Error::Unauthorized);
             }
         }

@@ -9,6 +9,7 @@ use crate::{
 use alt_pack_segment::SegmentSet;
 use alt_remote_protocol::Scope;
 
+mod led;
 mod statements;
 use statements::{VIEW_ALL, VIEW_BOUNDED, VIEW_MANY_TIPS, VIEW_NOTHING, VIEW_PREFIXES, VIEW_TIPS};
 

@@ -27,6 +27,11 @@ pub(super) struct Push<'a> {
     pub(super) limits: alt_remote_protocol::Limits,
     /// the pack as it was verified, once it was
     pub(super) verified: Option<alt_pack_segment::Ingested>,
+    /// What the refs the one who pushes reads lead to, where the segments hold
+    /// more than that. The pack and the updates refer to nothing beyond it
+    /// that the pack does not carry: what a deleted branch held is not had
+    /// back by its id.
+    pub(super) led: Option<Arc<alt_pack_segment::Led>>,
 }
 
 /// What a push publishes behind given segments.
@@ -57,6 +62,40 @@ impl Made {
 }
 
 impl Push<'_> {
+    /// The updates of the push as a publication has them, each told whether it
+    /// is forced, behind `set`.
+    fn updates(&self, set: &SegmentSet) -> Result<Vec<RefUpdate>> {
+        if let Some(led) = &self.led {
+            let carried = |oid: &Oid| {
+                self.verified
+                    .as_ref()
+                    .is_some_and(|pack| pack.contains(oid))
+            };
+            let news = self.changes.iter().filter_map(|update| update.new);
+            if news.map(raw).any(|new| !carried(&new) && !led.to(&new)) {
+                return Err(Error::Integrity("pack references an unavailable object"));
+            }
+        }
+        let mut remaining = self.limits.walk_steps;
+        let mut refs = Vec::new();
+        for update in self.changes.iter().copied() {
+            let force = match (update.old, update.new) {
+                (Some(old), Some(new)) => {
+                    update.name.starts_with("refs/tags/")
+                        || !ancestor(set, &raw(old), &raw(new), &mut remaining)?
+                }
+                _ => false,
+            };
+            refs.push(RefUpdate {
+                name: update.name.clone(),
+                expected: update.old.map(|oid| oid.to_string()),
+                new: update.new.map(|oid| oid.to_string()),
+                force,
+            });
+        }
+        Ok(refs)
+    }
+
     /// The segment of the pack behind the segments `behind`, written, and the
     /// publication of the updates with it. The pack is verified the first time
     /// and told anew behind other segments after that: what its entries make
@@ -81,7 +120,7 @@ impl Push<'_> {
                 none => {
                     let decode = alt_server_telemetry::Phase::Decode;
                     let verified = alt_server_store::telemetry::observe(decode, || {
-                        crate::git::verified(pack, behind.1, limits, self.room)
+                        crate::git::verified(pack, behind.1, limits, self.room, self.led.as_deref())
                     })?;
                     none.insert(verified)
                 }
@@ -142,23 +181,7 @@ impl Push<'_> {
             }
         }
         let set = SegmentSet::new(segments);
-        let mut remaining = limits.walk_steps;
-        let mut refs = Vec::new();
-        for update in self.changes.iter().copied() {
-            let force = match (update.old, update.new) {
-                (Some(old), Some(new)) => {
-                    update.name.starts_with("refs/tags/")
-                        || !ancestor(&set, &raw(old), &raw(new), &mut remaining)?
-                }
-                _ => false,
-            };
-            refs.push(RefUpdate {
-                name: update.name.clone(),
-                expected: update.old.map(|oid| oid.to_string()),
-                new: update.new.map(|oid| oid.to_string()),
-                force,
-            });
-        }
+        let refs = self.updates(&set)?;
         let key = RequestKey {
             scope: view.scope.clone(),
             actor_id: view.actor_id.clone(),
