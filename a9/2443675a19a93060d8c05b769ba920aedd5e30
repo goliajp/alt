@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: have an oplog sync asked without a ticket answer for no frame while the handle writes on one
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_ticketed.rs
+touched: crates/alt-refs/src/record.rs
+touched: crates/alt-refs/tests/it/owed_tickets.rs
