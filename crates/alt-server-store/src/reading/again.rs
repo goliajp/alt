@@ -104,19 +104,22 @@ impl Store {
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
-        twice(|| self.open_published_content_once(credential, scope, digest, Led::RefsOrRecords))
+        let led = (Led::RefsOrRecords, None);
+        twice(|| self.open_published_content_once(credential, scope, digest, led))
     }
 
     /// [`Self::open_published_content`] for a caller that is shown the
     /// repository by its refs alone: a Git object is given where a ref leads
-    /// to it.
+    /// to it. What the refs lead to is looked for no longer once `gone` is set.
     pub fn open_reached_content(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
+        gone: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<(u64, crate::StoredReader)> {
-        twice(|| self.open_published_content_once(credential, scope, digest, Led::Refs))
+        let led = (Led::Refs, gone);
+        twice(|| self.open_published_content_once(credential, scope, digest, led))
     }
 
     /// Early admission for Git receive-pack before reading a potentially large

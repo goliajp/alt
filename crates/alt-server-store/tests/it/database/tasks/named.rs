@@ -133,10 +133,58 @@ fn what_a_deleted_ref_led_to_is_given_where_a_published_record_names_it_and_not_
     for payload in [&named, &unnamed] {
         let reached = f
             .store
-            .open_reached_content(&f.credential, &scope, &commit(payload));
+            .open_reached_content(&f.credential, &scope, &commit(payload), None);
         assert!(matches!(
             reached,
             Err(alt_server_store::Error::Unauthorized)
         ));
     }
+}
+
+/// What the refs of a repository lead to is found by reading every tree they
+/// reach. It is kept for whoever asks it of the same refs and segments, and
+/// found anew once a segment is added; and it is looked for no longer than the
+/// one who asked waits for it, which one who finds it kept does not notice.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn what_the_refs_lead_to_is_kept_and_looked_for_no_longer_than_it_is_waited_for() {
+    use std::sync::{Arc, atomic::AtomicBool};
+    let mut f = Fixture::new();
+    let scope = Payload::new("scope", None).publication.key.scope;
+    let gone_one = Payload::new("the-branch-that-goes", None);
+    gone_one.publish_new(&mut f.store, &f.credential);
+    deleted(&mut f, "remove-it", gone_one.commit);
+    let kept = Payload::new("the-branch-that-stays", None);
+    kept.publish_new(&mut f.store, &f.credential);
+    let steps = f.store.limits().walk_steps;
+    let (gone, waited) = (AtomicBool::new(true), AtomicBool::new(false));
+    let view = |f: &mut Fixture| f.store.pack_view(&f.credential, "repository").unwrap();
+    let digest = &kept.manifest.entries[1].blake3;
+
+    // nobody waits: neither for the objects, nor for one of them by its digest
+    let busy = |found: std::result::Result<(), alt_server_store::Error>| {
+        assert!(matches!(found, Err(alt_server_store::Error::Busy(_))));
+    };
+    busy(view(&mut f).led(steps, Some(&gone)).map(drop));
+    busy(
+        (f.store)
+            .open_reached_content(&f.credential, &scope, digest, Some(&gone))
+            .map(drop),
+    );
+    let first = view(&mut f).led(steps, Some(&waited)).unwrap();
+    assert!(first.to(kept.commit.as_bytes().try_into().unwrap()));
+    assert!(!first.to(gone_one.commit.as_bytes().try_into().unwrap()));
+    // kept: the same answer, and nothing that could be given up
+    let again = view(&mut f).led(steps, Some(&gone)).unwrap();
+    assert!(Arc::ptr_eq(&first, &again));
+    (f.store)
+        .open_reached_content(&f.credential, &scope, digest, Some(&gone))
+        .unwrap();
+    // a segment more: found anew
+    deleted(&mut f, "remove-the-other", kept.commit);
+    let back = Payload::new("the-branch-that-comes", None);
+    back.publish_new(&mut f.store, &f.credential);
+    busy(view(&mut f).led(steps, Some(&gone)).map(drop));
+    let anew = view(&mut f).led(steps, None).unwrap();
+    assert!(!Arc::ptr_eq(&first, &anew));
 }

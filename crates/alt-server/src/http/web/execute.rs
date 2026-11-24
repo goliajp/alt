@@ -18,6 +18,8 @@ pub(super) struct Call {
     pub(super) reviews: Arc<crate::web_review::Reviews>,
     /// of the room responses have on disk, for what is written out to be sent
     pub(super) sending: alt_shares::Share,
+    /// set once nobody waits for the answer
+    pub(super) gone: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Call {
     /// the output and, when the session changes, the cookie to set
@@ -36,6 +38,7 @@ impl Call {
             attempt,
             reviews,
             sending,
+            gone,
         } = self;
         let mut source = source;
         source.as_file_mut().rewind()?;
@@ -184,7 +187,8 @@ impl Call {
                 let page = crate::web_review::inspect(&mut store, &credential, &options, &key)?;
                 Ok((output(page)?, None))
             }
-            route => execute(&mut store, &credential, &options, route, &raw).map(|out| (out, None)),
+            route => execute(&mut store, &credential, (&options, &gone), route, &raw)
+                .map(|out| (out, None)),
         }
     }
 }
@@ -207,7 +211,7 @@ fn output(value: impl alt_json::ToJson) -> Result<Output> {
 fn execute(
     store: &mut Store,
     credential: &Credential,
-    options: &NativeOptions,
+    (options, gone): (&NativeOptions, &std::sync::atomic::AtomicBool),
     route: WebRoute,
     raw: &[u8],
 ) -> Result<Output> {
@@ -247,14 +251,7 @@ fn execute(
             &within,
         )?),
         WebRoute::Content(repository, digest) => {
-            let scope = store.repository_info(credential, &repository)?.scope;
-            let (bytes, file) = store.open_reached_content(credential, &scope, &digest)?;
-            Ok(Output::File {
-                bytes,
-                digest,
-                file,
-                held: None,
-            })
+            super::content::given(store, credential, &repository, digest, gone)
         }
         WebRoute::Records(repository, kind, after) => output(crate::records::list(
             store,

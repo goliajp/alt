@@ -222,7 +222,7 @@ impl Store {
         credential: &Credential,
         scope: &Scope,
         digest: &str,
-        led: Led,
+        led: (Led, Option<&std::sync::atomic::AtomicBool>),
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         let mut tx = reading::transaction(&mut self.client, &self.spec)?;

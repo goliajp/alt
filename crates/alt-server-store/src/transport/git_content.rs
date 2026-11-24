@@ -24,13 +24,14 @@ impl Store {
     /// branch deleted, hold objects no ref leads to. Such a repository gives by
     /// digest what `led` says and nothing else; in any other, every object of
     /// the segments is reached. What the refs lead to is kept for the next
-    /// that asks it of the same refs and segments.
+    /// that asks it of the same refs and segments, and is looked for no
+    /// longer once the mark that comes with `led` is set.
     pub(super) fn open_published_git_content(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
-        led: Led,
+        (led, gone): (Led, Option<&std::sync::atomic::AtomicBool>),
     ) -> Result<(u64, crate::StoredReader)> {
         let view = self.pack_view(credential, &scope.repository_instance_id)?;
         if &view.scope != scope {
@@ -43,7 +44,7 @@ impl Store {
             let Some((oid, ..)) = found else {
                 return Err(Error::Unauthorized);
             };
-            if !view.led(self.limits.walk_steps, None)?.to(&oid) {
+            if !view.led(self.limits.walk_steps, gone)?.to(&oid) {
                 return Err(Error::Unauthorized);
             }
         }

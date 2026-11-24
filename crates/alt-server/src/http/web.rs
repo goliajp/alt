@@ -1,5 +1,6 @@
 mod admission;
 mod cloud_login;
+mod content;
 mod execute;
 mod input;
 mod login;
@@ -203,6 +204,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         Err(refusal) => return *refusal,
     };
     let claim = Arc::new(login::Claim::default());
+    let waiting = crate::git::Waiting::default();
     let call = execute::Call {
         factory: state.factory.clone(),
         options: state.options.native.clone(),
@@ -213,6 +215,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         attempt,
         reviews: state.reviews.clone(),
         sending: state.options.sending.share(alt_shares::address(peer)),
+        gone: waiting.0.clone(),
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
