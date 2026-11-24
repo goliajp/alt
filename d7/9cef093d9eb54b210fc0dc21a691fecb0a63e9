@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: feat
+summary: check-users tells of every line the server does not read or passes over
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/check.rs
