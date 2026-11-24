@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: test
+summary: hold the cuts of the driven oplog sequences to where a sync can have ended, and count those refused by whether a sync covered a frame
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_coverable.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_properties.rs
+touched: crates/alt-oplog/tests/it/v2_refusals.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
