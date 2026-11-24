@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: an address has its part of the nonces of a repository, taken from the generator of the system
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
