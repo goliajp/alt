@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: the pages of a directory in the workbench are turned on and back
+author-type: human
+author: doracawl
+touched: workbench/src/documents.test.ts
+touched: workbench/src/documents.ts
+touched: workbench/src/views.tsx
