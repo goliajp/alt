@@ -6,12 +6,16 @@
 //! address have a part between them and no more: one address with many
 //! slow connections then leaves the rest to the others.
 //!
-//! One taker is given more than that: the only one of its address is given
-//! what the amount still has, so that what is larger than a part can still
-//! be sent and received. Where the amount is one that a single taker may
-//! pass ([`Shares::passed_by_one_alone`]), a taker that is alone on the
-//! server is given whatever it needs: a repository larger than the amount
-//! can still be cloned.
+//! One taker is given more than that: the only one of its address may pass
+//! the part, so that what is larger than a part can still be sent and
+//! received. It is the one large taker there is then, and has half of the
+//! amount at the most: a second that would pass its part is refused until
+//! the first is gone, and the other half stays for those that keep within
+//! theirs. A single slow peer with one large thing holds half, not all.
+//! Where the amount is one that a single taker may pass
+//! ([`Shares::passed_by_one_alone`]), a taker that is alone on the server is
+//! given whatever it needs: a repository larger than the amount can still be
+//! cloned.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -25,6 +29,8 @@ struct Held {
     all: u64,
     /// what the takers of each address that is counted have between them
     by: HashMap<IpAddr, u64>,
+    /// one taker of an address has more than a part
+    large: bool,
 }
 
 pub struct Shares {
@@ -40,6 +46,8 @@ pub struct Share {
     /// the address it counts for; none for this host
     from: Option<IpAddr>,
     bytes: u64,
+    /// the one that has more than a part
+    large: bool,
 }
 
 /// there is no room for what a taker asked for
@@ -59,8 +67,13 @@ impl Shares {
 
     /// A taker for the address `from`, which has nothing yet.
     pub fn share(self: &Arc<Self>, from: Option<IpAddr>) -> Share {
-        let (of, bytes) = (Arc::clone(self), 0);
-        Share { of, from, bytes }
+        let (of, bytes, large) = (Arc::clone(self), 0, false);
+        Share {
+            of,
+            from,
+            bytes,
+            large,
+        }
     }
 
     /// what all the takers there are have between them
@@ -109,18 +122,27 @@ impl Share {
     /// Takes `bytes` more, or nothing where they are not there to be taken.
     pub fn take(&mut self, bytes: u64) -> Result<(), Full> {
         let mut held = self.of.held.lock().expect("shares");
+        let (most, part) = (self.of.most, self.of.most / PARTS);
         let mine = self.bytes + bytes;
         let all = held.all + bytes;
-        if all > self.of.most && !(self.of.alone && all == mine) {
+        let alone = self.of.alone && all == mine;
+        if all > most && !alone {
             return Err(Full);
         }
+        let mut large = self.large;
         if let Some(from) = self.from {
-            let theirs = held.by.entry(from).or_insert(0);
-            if *theirs + bytes > self.of.most / PARTS && *theirs + bytes > mine {
+            let theirs = held.by.get(&from).copied().unwrap_or(0) + bytes;
+            if theirs > part && theirs > mine {
                 return Err(Full);
             }
-            *theirs += bytes;
+            large = mine > part;
+            if large && !alone && (mine > most / 2 || (held.large && !self.large)) {
+                return Err(Full);
+            }
+            held.by.insert(from, theirs);
         }
+        held.large |= large;
+        self.large = large;
         held.all = all;
         self.bytes = mine;
         Ok(())
@@ -131,6 +153,9 @@ impl Drop for Share {
     fn drop(&mut self) {
         let mut held = self.of.held.lock().expect("shares");
         held.all -= self.bytes;
+        if self.large {
+            held.large = false;
+        }
         if let Some(from) = self.from
             && let Some(theirs) = held.by.get_mut(&from)
         {
@@ -180,21 +205,30 @@ mod tests {
     }
 
     #[test]
-    fn the_only_taker_of_an_address_has_what_is_left_and_one_alone_whatever_it_needs() {
+    fn one_taker_at_a_time_passes_its_part_and_has_half_and_one_alone_whatever_it_needs() {
         let shares = Shares::of(1000);
         let other = taker(&shares, 2, 100).unwrap();
-        // past its quarter, as far as the amount goes
-        let mut only = taker(&shares, 1, 600).unwrap();
-        only.take(300).unwrap();
+        // the only taker of its address: past its quarter, as far as half
+        let mut only = taker(&shares, 1, 300).unwrap();
+        only.take(200).unwrap();
         assert!(only.take(1).is_err());
         // while it has that, a second of its address has nothing
         assert!(taker(&shares, 1, 1).is_err());
-        drop(other);
-        // alone on the server it has the amount and no more
-        only.take(100).unwrap();
+        // and no other passes its part, though there is room: within it, it takes
+        assert!(taker(&shares, 3, 251).is_err());
+        let third = taker(&shares, 3, 250).unwrap();
+        // four addresses of one slow taker each do not have it all between them
+        let fourth = taker(&shares, 4, 150).unwrap();
+        assert_eq!(shares.held(), 1000);
+        drop((other, third, fourth));
+        // alone on the server it still has half and no more
         assert!(only.take(1).is_err());
         drop(only);
+        // the next may pass its part once the one that did is gone
+        let next = taker(&shares, 3, 251).unwrap();
+        drop(next);
         assert_eq!(shares.held(), 0);
+        assert!(!shares.held.lock().unwrap().large);
         // unless the amount is one that a taker alone may pass
         let shares = Shares::passed_by_one_alone(1000);
         let mut only = taker(&shares, 1, 5000).unwrap();
@@ -203,7 +237,9 @@ mod tests {
         drop(only);
         let other = taker(&shares, 2, 1).unwrap();
         assert!(taker(&shares, 1, 1000).is_err());
-        drop(other);
+        assert!(taker(&shares, 1, 501).is_err());
+        let large = taker(&shares, 1, 500).unwrap();
+        drop((other, large));
         assert_eq!(shares.held(), 0);
     }
 
