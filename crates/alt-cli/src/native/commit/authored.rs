@@ -122,7 +122,9 @@ impl NativeRepo<'_> {
             syntax: alt_regex::Syntax::Basic,
             ignore_case: true,
             newline: true,
-            ..Default::default()
+            // a letter of several bytes is one character where git, by
+            // the locale, takes the names for UTF-8
+            utf8: crate::git_settings::utf8_locale(),
         };
         let pattern = alt_regex::Regex::with_options(text.as_bytes(), options)
             .map_err(|e| settings::fatal(format!("command line, '{text}': {e}")))?;

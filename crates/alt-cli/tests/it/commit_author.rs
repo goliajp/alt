@@ -121,3 +121,55 @@ fn a_text_names_the_author_git_finds_by_it_among_all_refs() {
         of_late::same_failure(&pair, &args, 128, &said);
     }
 }
+
+/// A commit with `--author=<text>` in both, in the locale `locale`.
+fn commit_in(pair: &Pair, locale: &str, text: &str) -> [std::process::Output; 2] {
+    let named = format!("--author={text}");
+    let mut ours = crate::alt_command();
+    ours.env("ALT_NO_DAEMON", "1").current_dir(&pair.alt);
+    let mut theirs = Command::new("git");
+    theirs
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .current_dir(&pair.git);
+    [ours, theirs].map(|mut command| {
+        command
+            .envs(crate::like_git::SIGNING)
+            .env("LC_ALL", locale)
+            .args(["commit", "--allow-empty", "-m", "found", &named]);
+        command.output().unwrap()
+    })
+}
+
+#[test]
+fn a_text_matches_a_name_by_its_characters_where_the_locale_is_utf8() {
+    let pair = Pair::new();
+    commit_by(&pair, "a", "J\u{f6}rg M\u{fc}ller <j@x>", 1_700_000_100);
+    let utf8 = if cfg!(target_os = "macos") {
+        "en_US.UTF-8"
+    } else {
+        "C.UTF-8"
+    };
+    // a dot is one letter of two bytes, and case is that of the letter
+    for text in ["j.rg", "J\u{d6}RG", "m[\u{fc}]ller", "^j\u{f6}rg m.ller <"] {
+        let [ours, theirs] = commit_in(&pair, utf8, text);
+        assert!(theirs.status.success(), "git does not match {text}");
+        ok(ours);
+        let raw = same_head(&pair, text);
+        assert!(
+            raw.contains("\nauthor J\u{f6}rg M\u{fc}ller <j@x> "),
+            "{text}: {raw}"
+        );
+    }
+    // by its bytes in the locale C, as by git there
+    for text in ["j.rg", "J\u{d6}RG", "j..rg"] {
+        let [ours, theirs] = commit_in(&pair, "C", text);
+        assert_eq!(ours.status.code(), theirs.status.code(), "{text}");
+        let (said, git_said) = (
+            String::from_utf8_lossy(&ours.stderr),
+            String::from_utf8_lossy(&theirs.stderr),
+        );
+        assert!(said.starts_with(git_said.as_ref()), "{text}: {said}");
+        same_head(&pair, text);
+    }
+}
