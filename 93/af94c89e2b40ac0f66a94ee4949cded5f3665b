@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: a signed push is taken for the addresses the server is told it is reached at, and names the address it is sent to
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/push_signed.rs
+touched: crates/alt-cli/tests/it/altd_server_certified.rs
+touched: crates/alt-wire-http/src/lib.rs
+touched: crates/alt-wire/src/certificate.rs
+touched: crates/alt-wire/src/lib.rs
+touched: deploy/docker-compose.yml
