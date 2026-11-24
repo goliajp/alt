@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a request that waited for another's asking of the platform goes by what that one was told
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/cloud.rs
+touched: crates/alt-server/src/cloud/asking.rs
