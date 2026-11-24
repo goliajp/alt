@@ -1,83 +1,17 @@
 //! Bounded native HTTP transport. Caller owns durable intents, origin/key
 //! trust, local publication previews and all decisions to resume a request.
+mod agents;
 pub mod change_links;
+mod error;
 pub mod portable;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
 use alt_json::{FromJson, ToJson};
 use alt_remote_protocol::*;
+pub use error::{Error, Result};
 use std::{
     io::{Read, Write},
     time::Duration,
 };
-
-#[derive(Debug)]
-pub enum Error {
-    Portable(alt_portable::Error),
-    Protocol(alt_remote_protocol::Error),
-    Invalid(&'static str),
-    Limit(&'static str),
-    Rejected {
-        status: u16,
-        failure: Option<Box<Failure>>,
-    },
-    Unavailable,
-    OutcomeUnknown {
-        key: Box<RequestKey>,
-    },
-    Io(std::io::Error),
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Portable(e) => write!(f, "portable protocol: {e}"),
-            Self::Protocol(e) => write!(f, "native protocol: {e}"),
-            Self::Invalid(what) => write!(f, "invalid native connection or response: {what}"),
-            Self::Limit(what) => write!(f, "native transfer limit: {what}"),
-            Self::Rejected { status, .. } => write!(f, "native HTTP request failed ({status})"),
-            Self::Unavailable => f.write_str("native transport unavailable"),
-            Self::OutcomeUnknown { .. } => {
-                f.write_str("native write outcome is unknown; query the original request")
-            }
-            Self::Io(e) => write!(f, "local transfer I/O: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Portable(e) => Some(e),
-            Self::Protocol(e) => Some(e),
-            Self::Io(e) => Some(e),
-            Self::Invalid(_)
-            | Self::Limit(_)
-            | Self::Rejected { .. }
-            | Self::Unavailable
-            | Self::OutcomeUnknown { .. } => None,
-        }
-    }
-}
-
-impl From<alt_portable::Error> for Error {
-    fn from(e: alt_portable::Error) -> Self {
-        Self::Portable(e)
-    }
-}
-
-impl From<alt_remote_protocol::Error> for Error {
-    fn from(e: alt_remote_protocol::Error) -> Self {
-        Self::Protocol(e)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Copy)]
 pub struct Options {
@@ -178,46 +112,6 @@ impl Transport {
                 .timeout(options.timeout)
                 .build(),
         })
-    }
-    pub fn issue_agent(
-        &self,
-        request: &delegation::DelegationRequest,
-    ) -> Result<delegation::DelegationInfo> {
-        request.validate()?;
-        self.json("POST", "/v1/delegations", &self.encode(request)?, None)
-    }
-    pub fn agent_delegation(&self, credential_id: &str) -> Result<delegation::DelegationInfo> {
-        digest(credential_id)?;
-        self.json(
-            "GET",
-            &format!("/v1/delegations/{credential_id}"),
-            &[],
-            None,
-        )
-    }
-    pub fn agent_delegations(&self, after: Option<&str>) -> Result<delegation::DelegationPage> {
-        let path = if let Some(after) = after {
-            digest(after)?;
-            format!("/v1/delegations?after={after}")
-        } else {
-            "/v1/delegations".into()
-        };
-        self.json("GET", &path, &[], None)
-    }
-    pub fn revoke_agent(&self, credential_id: &str) -> Result<()> {
-        digest(credential_id)?;
-        let value: alt_json::Value = self.json(
-            "POST",
-            &format!("/v1/delegations/{credential_id}/revoke"),
-            &[],
-            None,
-        )?;
-        if value.get("revoked").and_then(|v| v.as_bool()) != Some(true)
-            || value.get("credential_id").and_then(|v| v.as_str()) != Some(credential_id)
-        {
-            return Err(Error::Invalid("delegation revocation response"));
-        }
-        Ok(())
     }
     pub fn origin(&self) -> &str {
         &self.origin
