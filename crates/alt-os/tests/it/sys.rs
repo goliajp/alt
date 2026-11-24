@@ -287,6 +287,27 @@ fn poll_reports_readable_data() {
     assert_eq!(fds[0].revents & sys::POLLIN, sys::POLLIN);
 }
 
+fn a_peer_that_closed_is_known_once_what_it_sent_is_read() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut peer = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut socket, _) = listener.accept().unwrap();
+    assert!(!alt_os::socket::peer_closed(&socket));
+    peer.write_all(b"x").unwrap();
+    drop(peer);
+    // the byte it sent is there to be read: the close behind it is not seen yet
+    let mut byte = [0u8];
+    let began = std::time::Instant::now();
+    while socket.peek(&mut byte).unwrap() == 0 {
+        assert!(began.elapsed() < std::time::Duration::from_secs(30));
+    }
+    assert!(!alt_os::socket::peer_closed(&socket));
+    // looking took nothing of it
+    socket.read_exact(&mut byte).unwrap();
+    assert_eq!(&byte, b"x");
+    assert!(alt_os::socket::peer_closed(&socket));
+}
+
 fn setsockopt_accepts_a_receive_buffer_size() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let size: sys::c_int = 4096;
@@ -352,6 +373,7 @@ tests![
     close_on_exec_keeps_the_descriptor_out_of_a_child,
     filesystem_statistics_are_filled,
     poll_reports_readable_data,
+    a_peer_that_closed_is_known_once_what_it_sent_is_read,
     setsockopt_accepts_a_receive_buffer_size,
     setrlimit_caps_open_files,
 ];

@@ -25,6 +25,8 @@ pub const CODESET: c_int = 0;
 pub const RLIMIT_NOFILE: rlimit_resource_t = 8;
 
 pub const SOL_SOCKET: c_int = 0xffff;
+/// `recv` waits for nothing
+pub const MSG_DONTWAIT: c_int = 0x80;
 pub const SO_RCVBUF: c_int = 0x1002;
 /// the option of a socket that tells the bytes in its send buffer
 pub const SO_NWRITE: c_int = 0x1024;

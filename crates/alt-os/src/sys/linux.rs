@@ -31,6 +31,8 @@ pub const CODESET: c_int = 14;
 pub const RLIMIT_NOFILE: rlimit_resource_t = 7;
 
 pub const SOL_SOCKET: c_int = 1;
+/// `recv` waits for nothing
+pub const MSG_DONTWAIT: c_int = 0x40;
 pub const SO_RCVBUF: c_int = 8;
 /// the request of `ioctl` for the bytes of a socket not yet acknowledged
 pub const SIOCOUTQ: c_ulong = 0x5411;

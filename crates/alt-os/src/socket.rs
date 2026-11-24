@@ -1,4 +1,5 @@
-//! What a connected socket still holds of what was written to it.
+//! What a connected socket still holds of what was written to it, and whether
+//! its peer is still there to write.
 
 use crate::sys;
 use std::io;
@@ -31,4 +32,19 @@ pub fn unacknowledged(socket: &impl AsRawFd) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     Ok(held.max(0) as u64)
+}
+
+/// Whether the peer of `socket` has closed its side with nothing left unread, or
+/// the connection is gone. Nothing is read and nothing is waited for; where the
+/// peer sent bytes that were not read yet, it is not known to have closed.
+pub fn peer_closed(socket: &impl AsRawFd) -> bool {
+    let mut byte = 0u8;
+    let flags = sys::MSG_PEEK | sys::MSG_DONTWAIT;
+    // SAFETY: the buffer is one byte, as its length says
+    let read = unsafe { sys::recv(socket.as_raw_fd(), (&raw mut byte).cast(), 1, flags) };
+    match read {
+        0 => true,
+        read if read > 0 => false,
+        _ => io::Error::last_os_error().kind() != io::ErrorKind::WouldBlock,
+    }
 }
