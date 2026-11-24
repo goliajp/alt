@@ -61,13 +61,7 @@ fn whenever_the_power_goes_during_a_cut_the_log_holds_what_was_to_be_cut_or_says
     let note = &after[at..];
     let all = (before.len() - at) as u64;
     assert!(before.len() > at + 2 * 4096 && note.len() < 400);
-    let whole = Cut {
-        bytes: all,
-        ops: 41,
-        of_the_log: true,
-        after: 0,
-        generation: 0,
-    };
+    let whole = super::v2_image::first_cut(all, 41);
 
     // nothing of the cut reached the disk: the ops are looked at again
     assert_eq!(told_after_a_writer_came(&before), [whole]);
