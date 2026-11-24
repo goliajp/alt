@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: fix
+summary: have a second import leave what git did not change since the store last met it: a stash, a branch or the notes made here
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/import_met.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-export/src/lib.rs
+touched: crates/alt-export/src/met.rs
+touched: crates/alt-import/src/kept.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-import/src/refs.rs
+touched: crates/alt-repo/src/lib.rs
+touched: crates/alt-repo/src/met.rs
+touched: crates/alt-repo/src/reflog/again.rs
