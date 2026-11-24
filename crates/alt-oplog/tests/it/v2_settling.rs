@@ -87,17 +87,37 @@ impl Run {
     /// log: it is told its ops were cut. After the first step the log
     /// holds them still, and tells of the cut in its header alone.
     pub fn cut_begun(&mut self) {
-        // what is not synced is another boot's to look at
-        for _ in 0..2 {
+        // what is not synced is another boot's to look at: some ops, or
+        // enough of them to lie before where a handle begins to read
+        let mut first = None;
+        for _ in 0..2 + self.also.below(7) {
             let (index, op) = (self.writer(), self.op());
-            self.put(index, op, true, false);
+            let put = self.put(index, op.clone(), true, false);
+            first = first.or(put.then_some(op.1));
         }
         self.reboot(true);
+        // somebody has looked at them all, so that a handle opened after
+        // begins to read where the log ends, and whoever cuts, with no
+        // note beside the log, does not find what the first names; or
+        // nobody has looked, and what one of them names is gone
+        let looked = self.beside != super::v2_beside::Beside::Kept && self.also.one_in(2);
+        let vouched = looked && {
+            let first = self.open(false);
+            self.settle(first, None, false)
+        };
+        self.to_defer = self.also.one_in(2);
         let held = self.open(false);
+        self.to_defer = false;
+        let _ = vouched && std::fs::remove_file(self.path().join("tail")).is_ok();
         let cutter = self.open(false);
         let (step, died) = (1 + self.also.below(5) as u8, self.died);
         let (ops, held_to) = (self.ledger.ops.len(), self.handles[held].log.appended_len());
-        self.settle(cutter, Some(step), true);
+        match first.filter(|_| vouched) {
+            Some(first) => {
+                _ = self.refused_while(&first, |run| _ = run.settle(cutter, Some(step), false))
+            }
+            None => _ = self.settle(cutter, Some(step), true),
+        }
         // it died, of a cut of ops, at a place the handle holds ops
         // past: the log may have ended for it before, where an earlier
         // cut was begun and never made
@@ -139,11 +159,12 @@ impl Run {
         }
         let synced = self.sync_through(held, way - 2, &[]);
         self.by_sink = false;
-        match synced {
-            Err(OpLogError::Unjudged { at }) => self.unjudged(held, at),
+        match &synced {
+            Ok(()) | Err(OpLogError::CutBack) => {}
+            Err(OpLogError::Unjudged { at }) => self.unjudged(held, *at),
             // what an op it has seen to names is gone
             Err(OpLogError::Io(_)) if self.lacked_now() => return,
-            _ => {}
+            Err(other) => panic!("a handle past where a cut died syncs: {other:?}"),
         }
         // one that leaves its syncs to a sink learns nothing by that
         let handle = &self.handles[held];
