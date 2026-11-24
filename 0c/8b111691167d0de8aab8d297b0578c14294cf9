@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the old server gives the repository of a request back before it answers it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/readers.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_reads.rs
