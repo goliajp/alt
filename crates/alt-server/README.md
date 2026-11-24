@@ -410,7 +410,8 @@ alt-server --config server.json migrate --from-schema 19 --output-config server-
 alt-server --config server-next.json health
 ```
 
-From schema 18 every version in between is applied in the same transaction.
+`migrate` refuses the configuration of a Cloud instance, whose schema moves with
+its platform generation. From schema 18 every version in between is applied in the same transaction.
 An instance at schema 17 or older is first upgraded to schema 18 with the last
 release that carries the migrations for schemas 1–17, and backed up again
 there. This release refuses such an instance, and a backup taken at schema 17

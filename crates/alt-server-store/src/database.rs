@@ -58,7 +58,9 @@ impl Connection {
     /// more often than once in [`CLOCK_STEP`] on a connection. Where another
     /// transaction has the row, that one records the clock and this statement
     /// leaves it alone. The read then holds the clock to what is recorded like
-    /// every transaction.
+    /// every transaction. So what is recorded may be behind by that step and by
+    /// as long as the transaction that has the row takes to commit: a clock set
+    /// back by less than that is not noticed by a read.
     pub fn reading(&mut self, cloud: bool) -> Result<Transaction<'_>, Error> {
         if cloud && self.clock_moved.is_none_or(|at| at.elapsed() >= CLOCK_STEP) {
             self.client.execute("WITH free AS (SELECT singleton FROM alt_cloud_binding WHERE singleton FOR UPDATE SKIP LOCKED) UPDATE alt_cloud_binding b SET clock_high_water=t.now FROM free,(SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS now) t WHERE b.singleton AND b.clock_high_water<t.now", &[])?;
