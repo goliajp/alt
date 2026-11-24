@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: altd-server check-users tells the lines of a users file that give all, or less than they did
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/auth.rs
+touched: crates/alt-cli/src/bin/altd_server/check.rs
+touched: crates/alt-cli/tests/it/altd_server_users.rs
