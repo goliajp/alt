@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: what a client behind Caddy is told of a body that is refused, and where a server is reached
+author-type: human
+author: doracawl
+touched: README.md
