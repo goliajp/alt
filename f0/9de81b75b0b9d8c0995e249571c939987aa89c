@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a device code whose token is not taken back is asked for again
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/device_exchange.rs
