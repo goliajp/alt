@@ -18,7 +18,8 @@ use alt_cli::held::Held;
 use alt_git_codec::ObjectId;
 use alt_repo::Repository;
 
-use super::WriteCoordinator;
+use super::log::{LogCtx, respond_logged};
+use super::{WriteCoordinator, http};
 
 /// The handles of one repository that no request reads through now.
 pub(super) type Readers = Arc<Held<Vec<Repository>>>;
@@ -138,6 +139,25 @@ impl RepoHandle {
             repo: Some(repo),
             readers: Arc::clone(&self.readers),
         })
+    }
+}
+
+impl Reading {
+    /// Answers the request the repository was read for, the repository
+    /// given back first. The peer sends its next request when it has the
+    /// answer, and that request is to find this handle: one opened anew
+    /// for it waits for a push that is writing its objects. A handler takes
+    /// its `Reading` as its last argument, which is dropped before the
+    /// request is, for the same to hold of a request it lets go of
+    /// unanswered.
+    pub(super) fn answer<R: std::io::Read + Send + 'static>(
+        self,
+        req: http::Request,
+        resp: http::Response<R>,
+        log: &mut LogCtx,
+    ) -> std::io::Result<()> {
+        drop(self);
+        respond_logged(req, resp, log)
     }
 }
 

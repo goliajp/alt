@@ -54,14 +54,14 @@ pub(super) fn header(name: &str, value: &str) -> Header {
 /// header is identical (`command=<x>\n` + optional `object-format=…`),
 /// only the args section differs — sniff the first frame to route.
 pub(super) fn handle_upload_pack(
-    repo: &Repository,
     mut req: http::Request,
     log: &mut LogCtx,
+    repo: Reading,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     if let Err(e) = read_body_capped(&mut req, &mut body, max_command_bytes()) {
         let r = Response::from_string(format!("{e}")).with_status_code(limits::refusal(&*e));
-        respond_logged(req, r, log)?;
+        repo.answer(req, r, log)?;
         return Ok(());
     }
     let cmd = sniff_command(&body)?;
@@ -71,7 +71,7 @@ pub(super) fn handle_upload_pack(
         "ls-refs" => {
             let (lsr_req, _fmt) =
                 alt_wire::ls_refs::parse_ls_refs_request(&mut Cursor::new(&body))?;
-            let refs = read_refs(repo, &lsr_req)?;
+            let refs = read_refs(&repo, &lsr_req)?;
             alt_wire::ls_refs::encode_ls_refs_response(&mut out, &refs)?;
         }
         "fetch" => {
@@ -79,7 +79,7 @@ pub(super) fn handle_upload_pack(
                 Ok((fetch_req, _fmt)) => fetch_req,
                 Err(e) => {
                     let r = Response::from_string(e.to_string()).with_status_code(StatusCode(400));
-                    return respond_logged(req, r, log).map_err(Into::into);
+                    return repo.answer(req, r, log).map_err(Into::into);
                 }
             };
             let (room, from) = (sending::Room::shared(), req.from());
@@ -87,28 +87,28 @@ pub(super) fn handle_upload_pack(
                 by: Some(std::time::Instant::now() + super::told::told().fetch),
                 gone: Some(req.given_up()),
             };
-            let sent = match fetch::response(repo, &fetch_req, room, from, &until) {
+            let sent = match fetch::response(&repo, &fetch_req, room, from, &until) {
                 Ok(sent) => sent,
                 Err(e) if e.downcast_ref() == Some(&fetch::Stopped::Late) => {
                     let r = Response::from_string(format!("{e}")).with_status_code(503);
-                    return respond_logged(req, r, log).map_err(Into::into);
+                    return repo.answer(req, r, log).map_err(Into::into);
                 }
                 Err(e) if limits::refusal(&*e) == 503 => {
                     let mut r = Response::from_string(format!("{e}")).with_status_code(503);
                     r.add_header(header("Retry-After", "60"));
-                    return respond_logged(req, r, log).map_err(Into::into);
+                    return repo.answer(req, r, log).map_err(Into::into);
                 }
                 Err(e) => return Err(e),
             };
             let mut resp = Response::sized(sent.length(), sent);
             resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
             resp.add_header(header("Cache-Control", "no-cache"));
-            return Ok(respond_logged(req, resp, log)?);
+            return Ok(repo.answer(req, resp, log)?);
         }
         other => {
             let r = Response::from_string(format!("unknown command={other}"))
                 .with_status_code(StatusCode(400));
-            respond_logged(req, r, log)?;
+            repo.answer(req, r, log)?;
             return Ok(());
         }
     }
@@ -116,7 +116,7 @@ pub(super) fn handle_upload_pack(
     let mut resp = Response::from_data(out);
     resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
     resp.add_header(header("Cache-Control", "no-cache"));
-    respond_logged(req, resp, log)?;
+    repo.answer(req, resp, log)?;
     Ok(())
 }
 
@@ -154,11 +154,11 @@ pub(super) fn trim_newline(b: &[u8]) -> &[u8] {
 }
 
 pub(super) fn handle_info_refs(
-    repo: &Repository,
     writer: Option<&WriteCoordinator>,
     query: &str,
     req: http::Request,
     log: &mut LogCtx,
+    repo: Reading,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let service = parse_query(query, "service")
         .ok_or("info/refs missing ?service= query parameter")?
@@ -229,7 +229,7 @@ pub(super) fn handle_info_refs(
         }
         _ => {
             let r = Response::from_string("unknown service").with_status_code(StatusCode(400));
-            respond_logged(req, r, log)?;
+            repo.answer(req, r, log)?;
             return Ok(());
         }
     };
@@ -237,7 +237,7 @@ pub(super) fn handle_info_refs(
     let mut resp = Response::from_data(body);
     resp.add_header(header("Content-Type", &content_type));
     resp.add_header(header("Cache-Control", "no-cache"));
-    respond_logged(req, resp, log)?;
+    repo.answer(req, resp, log)?;
     Ok(())
 }
 

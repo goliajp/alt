@@ -75,7 +75,7 @@ use log::*;
 use mode::*;
 use nonces::*;
 use push::*;
-use readers::RepoHandle;
+use readers::{Reading, RepoHandle};
 use upload::*;
 
 const AGENT: &str = concat!("alt-server/", env!("CARGO_PKG_VERSION"));
@@ -379,21 +379,20 @@ fn dispatch(
         }
         if method == Method::Get && suffix.ends_with("/info/refs") {
             let repo = handle.open_repo()?;
-            return handle_info_refs(&repo, handle.writer.as_deref(), query, req, log);
+            return handle_info_refs(handle.writer.as_deref(), query, req, log, repo);
         }
         if method == Method::Post && suffix.ends_with("/git-upload-pack") {
             let repo = handle.open_repo()?;
-            return handle_upload_pack(&repo, req, log);
+            return handle_upload_pack(req, log, repo);
         }
         if method == Method::Post && suffix.ends_with("/git-receive-pack") {
             let repo = handle.open_repo()?;
             let Some(writer) = handle.writer else {
                 let r = Response::from_string("repo is read-only (no .alt write store)")
                     .with_status_code(StatusCode(403));
-                respond_logged(req, r, log)?;
-                return Ok(());
+                return Ok(repo.answer(req, r, log)?);
             };
-            let answered = handle_receive_pack(&repo, &writer, auth_user.as_deref(), req, log);
+            let answered = handle_receive_pack(&writer, auth_user.as_deref(), req, log, repo);
             // a sync that failed is known of the repository from here on,
             // though this request be the last to have its writer in hand
             writer.remember();

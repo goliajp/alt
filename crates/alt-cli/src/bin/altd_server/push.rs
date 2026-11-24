@@ -70,11 +70,11 @@ pub(super) fn report_status(
 /// atomic op-log entry (mirrors the local-commit path). Reply with a
 /// `report-status` body.
 pub(super) fn handle_receive_pack(
-    repo: &Repository,
     writer: &WriteCoordinator,
     auth_user: Option<&str>,
     mut req: http::Request,
     log: &mut LogCtx,
+    repo: Reading,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let store = &writer.store;
     let max = max_body_bytes();
@@ -85,7 +85,7 @@ pub(super) fn handle_receive_pack(
         Ok(t) => t,
         Err((status, reason)) => {
             let r = Response::from_string(reason).with_status_code(StatusCode(status));
-            respond_logged(req, r, log)?;
+            repo.answer(req, r, log)?;
             return Ok(());
         }
     };
@@ -121,7 +121,7 @@ pub(super) fn handle_receive_pack(
     if pack_bytes_streamed > max {
         let r = Response::from_string(format!("payload too large: pack body exceeds cap {max}"))
             .with_status_code(StatusCode(413));
-        respond_logged(req, r, log)?;
+        repo.answer(req, r, log)?;
         return Ok(());
     }
 
@@ -140,7 +140,7 @@ pub(super) fn handle_receive_pack(
         None => match receive::take_in(store, pack, &head.updates, &principal, &writer.group) {
             Ok(report) => report,
             Err(e) if receive::busy(&*e) => {
-                return Ok(respond_logged(req, limits::busy(), log)?);
+                return Ok(repo.answer(req, limits::busy(), log)?);
             }
             Err(e) => return Err(e),
         },
@@ -164,8 +164,7 @@ pub(super) fn handle_receive_pack(
         "application/x-git-receive-pack-result",
     ));
     resp.add_header(header("Cache-Control", "no-cache"));
-    respond_logged(req, resp, log)?;
-    let _ = repo; // borrow keepalive across response
+    repo.answer(req, resp, log)?;
     Ok(())
 }
 

@@ -142,3 +142,49 @@ fn a_fetch_behind_requests_that_read_no_object_does_not_wait_for_a_push_either()
     assert!(during.contains("refs/heads/main"), "{during}");
     assert!(!during.contains("refs/heads/new"), "{during}");
 }
+
+/// Many fetches one after another while the push is held where it is. A
+/// peer sends each request when it has the answer to the one before it,
+/// and each is to read through the repository that one gave back: one
+/// that found none would open the repository anew, and wait for the push.
+#[test]
+fn the_requests_of_fetches_one_after_another_wait_for_no_push_either() {
+    let (origin, seed) = seeded();
+    let alt_dir = origin.path().join(".alt");
+    let server = spawn_server(origin.path());
+    let url = format!("http://{}/", server.addr);
+    let clones = alt_os::temp::tempdir().unwrap();
+    let before = fetched(&url, &clones.path().join("before"));
+    assert!(before.contains("refs/heads/main"), "{before}");
+
+    let new = commit_object(&seed, 1_700_000_000, "", "new");
+    let (_dir, pack) = prepared(&pack_of(std::slice::from_ref(&new)));
+    let updates = [creation("refs/heads/new", &new.0.to_string())];
+    let principal = pusher("anonymous");
+    let push = Push {
+        pack: Some(&pack),
+        checked: None,
+        updates: &updates,
+        principal: &principal,
+        signed_in: None,
+        sig_label: "none",
+    };
+    let mut store = Store::open(alt_dir.clone()).unwrap();
+    let rounds = std::cell::Cell::new(0);
+    let written = |step| {
+        if step == Step::Written {
+            assert!(!free(&alt_dir, "odb.lock"));
+            for round in 0..48 {
+                let listed = match round % 4 {
+                    0 => fetched(&url, &clones.path().join(format!("during-{round}"))),
+                    _ => asked(&url, None),
+                };
+                assert!(listed.contains("refs/heads/main"), "{listed}");
+                assert!(!listed.contains("refs/heads/new"), "{listed}");
+                rounds.set(round + 1);
+            }
+        }
+    };
+    let landed = receive::land_observed(&mut store, &push, &written).unwrap();
+    assert_eq!((landed, rounds.get()), (Landed::Moved, 48));
+}
