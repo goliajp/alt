@@ -138,3 +138,54 @@ fn a_pack_nobody_waits_for_is_verified_no_further() {
     let stopped = stopped.map(|ingested| ingested.objects());
     assert!(matches!(stopped, Err(Error::GivenUp)), "{stopped:?}");
 }
+
+/// A chain as deep as a pack may have, and beneath its last object one more
+/// delta. Where that delta makes an object of the chain, which has a way with
+/// fewer deltas, the pack is taken and the object read by that way; where it
+/// makes an object of its own, the pack is too deep.
+#[test]
+fn a_delta_beneath_the_deepest_object_that_makes_one_had_by_a_shorter_way_refuses_no_pack() {
+    const DEPTH: usize = 3;
+    let limits = Limits {
+        delta_depth: DEPTH as u16,
+        ..Limits::of(1 << 20, 1 << 20, 1 << 30)
+    };
+    let pack = |beneath: usize| {
+        let mut pack = b"PACK".to_vec();
+        pack.extend_from_slice(&2u32.to_be_bytes());
+        pack.extend_from_slice(&(DEPTH as u32 + 2).to_be_bytes());
+        pack.extend(header(3, BYTES));
+        pack.extend(zlib(&object(0)));
+        for (made, of) in (1..=DEPTH).map(|n| (n, n - 1)).chain([(beneath, DEPTH)]) {
+            let script = delta(made);
+            pack.extend(header(7, script.len()));
+            pack.extend_from_slice(&id(&object(of)));
+            pack.extend(zlib(&script));
+        }
+        let trailer = alt_hash::sha1(&pack);
+        pack.extend_from_slice(&trailer);
+        pack
+    };
+    let none = SegmentSet::default();
+    let deeper = ingest(&pack(DEPTH + 1), &none, &limits).map(|taken| taken.objects());
+    assert!(
+        matches!(deeper, Err(Error::Limit("delta depth"))),
+        "{deeper:?}"
+    );
+    let again = pack(1);
+    let taken = ingest(&again, &none, &limits).unwrap();
+    assert_eq!(taken.objects(), DEPTH + 1);
+    let work = alt_os::temp::tempdir().unwrap();
+    let path = work.path().join("again.seg");
+    let mut file = std::fs::File::create(&path).unwrap();
+    std::io::Write::write_all(&mut file, &again).unwrap();
+    taken.write_index(&mut file).unwrap();
+    let set = SegmentSet::new(vec![Arc::new(
+        alt_pack_segment::Segment::open(&path).unwrap(),
+    )]);
+    for n in 0..=DEPTH {
+        let record = set.record(&id(&object(n))).unwrap().unwrap();
+        assert_eq!(usize::from(record.depth), n);
+        assert_eq!(set.read(&id(&object(n))).unwrap().1, object(n));
+    }
+}
