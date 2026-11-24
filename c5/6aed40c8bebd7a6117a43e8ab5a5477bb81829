@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a sync that failed in the last push of a repository put aside is known when it is put back
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/failed_sync_put_aside.rs
+touched: crates/alt-cli/tests/it/main.rs
