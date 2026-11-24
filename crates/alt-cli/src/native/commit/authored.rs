@@ -85,21 +85,26 @@ impl NativeRepo<'_> {
     }
 
     /// The name and the address `--author` gives: written out as
-    /// `Name <email>`, or those of the latest commit HEAD has whose
-    /// author holds the text. Each is written as any name or address
-    /// is: without what cannot stand in the line of a commit that names
-    /// its author.
+    /// `Name <email>`, or those of the first commit git's `log --all`
+    /// comes to whose author the text, read as a pattern, matches. Each
+    /// is written as any name or address is: without what cannot stand
+    /// in the line of a commit that names its author.
     fn author_named(&self, text: &str) -> Res<(String, String)> {
-        let parts = |written: &str| {
-            let (name, rest) = written.split_once('<')?;
-            Some((name.to_owned(), rest.split_once('>')?.0.to_owned()))
+        let found;
+        let written = match text.contains('>') {
+            true => text,
+            false => {
+                found = self.author_matching(text)?;
+                &found
+            }
         };
-        let (name, email) = match parts(text) {
-            Some(written) => written,
-            None => self.author_holding(text)?,
+        let split = written.split_once('<');
+        let split = split.and_then(|(name, rest)| Some((name, rest.split_once('>')?.0)));
+        let Some((name, email)) = split else {
+            return Err(settings::fatal("malformed --author parameter".to_owned()));
         };
-        let email = signature::clean(&email).unwrap_or_default();
-        match signature::clean(&name) {
+        let email = signature::clean(email).unwrap_or_default();
+        match signature::clean(name) {
             Some(name) => Ok((name, email)),
             None => Err(settings::fatal(format!(
                 "empty ident name (for <{email}>) not allowed"
@@ -107,30 +112,59 @@ impl NativeRepo<'_> {
         }
     }
 
-    fn author_holding(&self, text: &str) -> Res<(String, String)> {
-        let wanted = text.to_lowercase();
-        let mut latest: Option<(i64, String, String)> = None;
-        let head = self.store.refs.resolve(&self.head_branch()?)?;
-        for commit in self.ancestry(&head.into_iter().collect::<Vec<_>>())?.keys() {
-            let stored = self.store.odb.get(commit)?;
+    /// The author, as `Name <email>`, of the first commit whose author
+    /// `text` matches as git's `log --all -i --author=<text>` matches
+    /// it: a basic regular expression, with no regard to case. The
+    /// commits come newest first by the dates they were committed at,
+    /// from every ref and then from HEAD.
+    fn author_matching(&self, text: &str) -> Res<String> {
+        let options = alt_regex::Options {
+            syntax: alt_regex::Syntax::Basic,
+            ignore_case: true,
+            newline: true,
+            ..Default::default()
+        };
+        let pattern = alt_regex::Regex::with_options(text.as_bytes(), options)
+            .map_err(|e| settings::fatal(format!("command line, '{text}': {e}")))?;
+        let mut tips = Vec::new();
+        let refs = self.store.refs.iter().map(|(name, _)| name.to_owned());
+        let refs = refs.filter(|name| name.starts_with("refs/"));
+        for name in refs.chain(["HEAD".to_owned()]) {
+            tips.extend(self.commit_named(&name)?);
+        }
+        // newest first; of equal dates the one that came first
+        let mut waiting: Vec<(i64, ObjectId)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut wait = |repo: &Self, commit: ObjectId, waiting: &mut Vec<(i64, ObjectId)>| {
+            if seen.insert(commit) {
+                let at = repo.committer_time(commit)?;
+                let behind = waiting.partition_point(|(date, _)| *date >= at);
+                waiting.insert(behind, (at, commit));
+            }
+            Res::Ok(())
+        };
+        for tip in tips {
+            wait(self, tip, &mut waiting)?;
+        }
+        while !waiting.is_empty() {
+            let (_, commit) = waiting.remove(0);
+            let stored = self.store.odb.get(&commit)?;
             let stored = stored.ok_or("commit missing from store")?;
             let parsed = alt_git_codec::Commit::parse(&stored.data)?;
-            let Some(Ok(line)) = parsed.author().map(|line| line.to_str()) else {
-                continue;
-            };
-            let by = parse_sig(line)?;
-            let who = format!("{} <{}>", by.name, by.email);
-            let made = parsed.committer_date().unwrap_or(0);
-            let later = latest.as_ref().is_none_or(|(at, ..)| made > *at);
-            if later && who.to_lowercase().contains(&wanted) {
-                latest = Some((made, by.name.to_owned(), by.email.to_owned()));
+            if let Some(line) = parsed.author() {
+                // the name and the address, without the date behind them
+                let by = line.iter().rposition(|b| *b == b'>');
+                let by = &line[..by.map_or(line.len(), |at| at + 1)];
+                if pattern.is_match(by) {
+                    return Ok(String::from_utf8_lossy(by).into_owned());
+                }
+            }
+            for parent in parsed.parents() {
+                wait(self, parent, &mut waiting)?;
             }
         }
-        match latest {
-            Some((_, name, email)) => Ok((name, email)),
-            None => Err(settings::fatal(format!(
-                "--author '{text}' is not 'Name <email>' and matches no existing author"
-            ))),
-        }
+        Err(settings::fatal(format!(
+            "--author '{text}' is not 'Name <email>' and matches no existing author"
+        )))
     }
 }
