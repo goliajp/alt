@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: go on with the revert that was refused, where git drops it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/tests/it/sequence_resumed.rs
