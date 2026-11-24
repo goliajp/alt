@@ -97,6 +97,15 @@ pub struct Create<'a> {
     pub over: bool,
 }
 
+/// Says of each path what is left at it that differs from the commit
+/// switched to; a command that answers in JSON has no place for it.
+fn say_left(changes: &[(char, BString)], json: bool, out: &mut impl Write) -> Res<()> {
+    for (letter, path) in changes.iter().filter(|_| !json) {
+        writeln!(out, "{letter}\t{path}")?;
+    }
+    Ok(())
+}
+
 impl NativeRepo<'_> {
     /// `alt switch` as the command of that name: refused while a
     /// cherry-pick is under way, as by git, which `checkout` is not.
@@ -138,10 +147,10 @@ impl NativeRepo<'_> {
         let there = self.store.refs.get(&full).is_some();
         let (result, human) = if let Some(create) = create.filter(|c| c.over && there) {
             let changes = self.switch_reset(name, &full, &current, create.start)?;
-            if !json {
-                for (letter, path) in changes {
-                    writeln!(out, "{letter}\t{path}")?;
-                }
+            say_left(&changes, json, out)?;
+            // as git: put at a branch of a remote, it follows that one
+            if let Some(start) = create.start {
+                follows = self.followed(start)?;
             }
             match full == current {
                 true => ("reset", format!("Reset branch '{name}'")),
@@ -152,11 +161,7 @@ impl NativeRepo<'_> {
                 None => self.switch_create(name, &full, &current)?,
                 Some(start) => {
                     let changes = self.switch_create_at(name, &full, &current, start)?;
-                    if !json {
-                        for (letter, path) in changes {
-                            writeln!(out, "{letter}\t{path}")?;
-                        }
-                    }
+                    say_left(&changes, json, out)?;
                     follows = self.followed(start)?;
                 }
             }
@@ -171,11 +176,7 @@ impl NativeRepo<'_> {
             ("already_on", format!("Already on '{name}'"))
         } else {
             let changes = self.switch_to(&full, &current, None)?;
-            if !json {
-                for (letter, path) in changes {
-                    writeln!(out, "{letter}\t{path}")?;
-                }
-            }
+            say_left(&changes, json, out)?;
             ("switched", format!("Switched to branch '{name}'"))
         };
         // emit either the human line or `{schema_version, branch, result}`

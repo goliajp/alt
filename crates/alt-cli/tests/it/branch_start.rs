@@ -255,3 +255,46 @@ fn the_daemon_and_a_parallel_workspace_start_branches_alike() {
     let mut lines = listed.lines();
     assert_eq!(lines.next(), lines.next());
 }
+
+#[test]
+fn a_branch_a_switch_puts_at_a_branch_of_a_remote_follows_it() {
+    let both = cloned();
+    let upstream = |branch: &str| {
+        let name = format!("{branch}@{{u}}");
+        let args = ["rev-parse", "--abbrev-ref", name.as_str()];
+        let (ours, theirs) = (alt(&both.alt, &args), git(&both.git, &args));
+        assert_eq!(ours.status.code(), theirs.status.code(), "{branch}");
+        assert_eq!(ours.stdout, theirs.stdout, "{branch}");
+        String::from_utf8_lossy(&theirs.stdout).into_owned()
+    };
+    // one it is not on, then the one it is on
+    for on in ["main", "side"] {
+        ok(alt(&both.alt, &["switch", on]));
+        ok(git(&both.git, &["switch", "-q", on]));
+        let said = ok(alt(&both.alt, &["switch", "-C", "side", "origin/topic"]));
+        let git_said = ok(git(&both.git, &["switch", "-C", "side", "origin/topic"]));
+        assert_eq!(git_said, format!("branch 'side' {TRACKS}"));
+        assert!(said.ends_with(&git_said), "{said}");
+        both.assert_same_state();
+        assert_eq!(upstream("side"), "origin/topic\n");
+        // put at a branch of its own, it follows what it followed
+        ok(alt(&both.alt, &["switch", "-C", "side", "main~1"]));
+        ok(git(&both.git, &["switch", "-q", "-C", "side", "main~1"]));
+        both.assert_same_state();
+        assert_eq!(upstream("side"), "origin/topic\n");
+        ok(alt(&both.alt, &["switch", "-C", "side", "origin/main"]));
+        ok(git(
+            &both.git,
+            &["switch", "-q", "-C", "side", "origin/main"],
+        ));
+        assert_eq!(upstream("side"), "origin/main\n");
+        // and nothing where none is named
+        for key in ["branch.side.remote", "branch.side.merge"] {
+            ok(alt(&both.alt, &["config", "--unset", key]));
+            ok(git(&both.git, &["config", "--unset", key]));
+        }
+        ok(alt(&both.alt, &["switch", "-C", "side"]));
+        ok(git(&both.git, &["switch", "-q", "-C", "side"]));
+        assert_eq!(upstream("side"), "");
+    }
+}
