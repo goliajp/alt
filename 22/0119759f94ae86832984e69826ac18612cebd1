@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: keep in the log of a ref, across a second import, the moves git never saw, and end it with the import
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/reflog_kept.rs
+touched: crates/alt-export/src/logs.rs
+touched: crates/alt-import/src/kept.rs
+touched: crates/alt-import/src/lib.rs
+touched: crates/alt-repo/src/reflog.rs
+touched: crates/alt-repo/src/reflog/again.rs
