@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a public key of small order is no key
+author-type: human
+author: doracawl
+touched: crates/alt-sign/src/lib.rs
