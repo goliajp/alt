@@ -3,7 +3,7 @@
 use super::workspace::parse_workspace_marker;
 use super::*;
 
-mod owned;
+pub mod owned;
 
 pub use owned::discover_owned;
 

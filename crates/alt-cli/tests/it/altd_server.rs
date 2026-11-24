@@ -34,8 +34,7 @@ pub(crate) fn ok(o: Output) -> String {
 
 mod served;
 
-use served::spawn_server_with_env;
-pub(crate) use served::{Server, spawn_server};
+pub(crate) use served::{Server, spawn_server, spawn_server_with_env};
 
 #[test]
 fn altd_server_info_refs_serves_what_git_ls_remote_expects() {

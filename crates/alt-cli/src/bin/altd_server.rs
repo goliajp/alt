@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use alt_cli::held::Held;
-use alt_cli::native::{Principal, PrincipalKind, Store};
+use alt_cli::native::{Principal, PrincipalKind, Store, owned};
 use alt_cli::receive;
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_repo::Repository;
@@ -513,7 +513,7 @@ struct RepoHandle {
 
 impl RepoHandle {
     fn open_repo(&self) -> Result<Repository, Box<dyn std::error::Error>> {
-        Ok(Repository::discover(&self.repo_path)?)
+        owned::discover_served(&self.repo_path)
     }
 }
 
@@ -540,7 +540,7 @@ impl ServeMode {
         // Fail-fast: probe the repo once at boot so a misconfigured
         // ALT_SERVER_REPO surfaces immediately rather than on the first
         // request. We drop the handle; per-request opens are cheap.
-        Repository::discover(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}")));
+        owned::discover_served(&repo_path).unwrap_or_else(|e| die(&format!("opening repo: {e}")));
         let alt_dir = repo_path.join(".alt");
         let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
             Some(
@@ -639,7 +639,7 @@ fn resolve_repo(
             }
             // Probe once: surfaces "not a repo" errors right at cache
             // insertion rather than on every request.
-            Repository::discover(&repo_path)?;
+            owned::discover_served(&repo_path)?;
             let alt_dir = repo_path.join(".alt");
             let writer: Option<Arc<WriteCoordinator>> = if alt_dir.is_dir() {
                 Some(open_write_coordinator(alt_dir)?)

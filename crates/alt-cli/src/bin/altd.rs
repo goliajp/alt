@@ -79,6 +79,7 @@ mod unix {
         if alt_odb::reading_past_damage() {
             return Err("altd holds its store open for writers: unset ALT_READ_PAST_DAMAGE".into());
         }
+        alt_cli::native::owned::ensure_store_owned(&alt_dir)?;
         let sock_path = alt_dir.join("daemon.sock");
 
         let listener = bind(&sock_path)?;

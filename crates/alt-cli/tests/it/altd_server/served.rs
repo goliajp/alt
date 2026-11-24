@@ -22,7 +22,7 @@ impl Server {
     /// stderr fd stays open until the process exits, and a blocking
     /// `read_to_string` would otherwise deadlock waiting for EOF.
     #[allow(dead_code)]
-    pub(super) fn drain_stderr(&mut self) -> String {
+    pub(crate) fn drain_stderr(&mut self) -> String {
         // tiny_http writes the response back from a worker thread; the
         // access-log JSON line is emitted right after, but the OS may
         // schedule the parent's drain in between the response and the
@@ -60,7 +60,7 @@ pub(crate) fn spawn_server(repo_dir: &Path) -> Server {
     spawn_server_with_env(&[("ALT_SERVER_REPO", repo_dir.to_str().unwrap())])
 }
 
-pub(super) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
+pub(crate) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
     let bin = env!("CARGO_BIN_EXE_altd-server");
     let temporary = alt_os::temp::tempdir().unwrap();
     let mut cmd = Command::new(bin);

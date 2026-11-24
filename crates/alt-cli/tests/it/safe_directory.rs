@@ -76,3 +76,95 @@ fn a_repository_of_another_user_is_opened_only_where_it_is_named_safe() {
         fails(run(program, repo, &global, &["status"]), 128);
     }
 }
+
+/// What `git ls-remote` of `url` ends with and says.
+fn asked(url: &str) -> Output {
+    Command::new("git")
+        .args(["ls-remote", url])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap()
+}
+
+#[test]
+#[ignore = "needs root: gives a repository to another user"]
+fn a_repository_of_another_user_is_served_only_where_it_is_named_safe() {
+    let pair = Pair::new();
+    pair.write("f", "f\n");
+    pair.commit_all("one");
+    let above = pair.alt.parent().unwrap();
+    let global = above.join("global");
+    std::fs::write(&global, "").unwrap();
+    let env = |root: &'static str, at: &Path| {
+        [
+            (root, at.to_str().unwrap().to_owned()),
+            ("GIT_CONFIG_NOSYSTEM", "1".to_owned()),
+            ("GIT_CONFIG_GLOBAL", global.to_str().unwrap().to_owned()),
+        ]
+    };
+    let serve = |root: &'static str, at: &Path| {
+        let env = env(root, at);
+        let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        crate::altd_server::spawn_server_with_env(&env)
+    };
+    let many = serve("ALT_SERVER_ROOT", above);
+    let url = format!("http://{}/{}/", many.addr, "alt");
+    assert_eq!(pair.alt.file_name().unwrap(), "alt");
+    ok(asked(&url));
+    // git looks at the directory it serves, which is the one inside
+    for repo in [&pair.alt, &pair.git, &pair.git.join(".git")] {
+        std::os::unix::fs::chown(repo, Some(65534), None).unwrap();
+    }
+    // git serves it to no one: not to a fetch, not to a push
+    let dubious = "fatal: detected dubious ownership in repository at";
+    for service in ["upload-pack", "receive-pack"] {
+        let git = Command::new("git")
+            .args([service, "--advertise-refs", pair.git.to_str().unwrap()])
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env_remove("SUDO_UID")
+            .output()
+            .unwrap();
+        assert!(fails(git, 128).starts_with(dubious), "git {service}");
+    }
+    // nor does a server that was serving it, and it tells the one who
+    // asks nothing of where the repository is
+    let refused = asked(&url);
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr).into_owned();
+    assert!(!said.contains(above.to_str().unwrap()), "{said}");
+    let mut many = many;
+    let logged = many.drain_stderr();
+    assert!(logged.contains(dubious), "{logged}");
+    // one started on it alone does not start
+    let alone = Command::new(env!("CARGO_BIN_EXE_altd-server"))
+        .args(["--bind", "127.0.0.1:0"])
+        .envs(env("ALT_SERVER_REPO", &pair.alt))
+        .env_remove("SUDO_UID")
+        .output()
+        .unwrap();
+    assert!(!alone.status.success());
+    let said = String::from_utf8_lossy(&alone.stderr).into_owned();
+    assert!(said.starts_with(dubious), "{said}");
+    // and no daemon holds its store
+    let daemon = Command::new(env!("CARGO_BIN_EXE_altd"))
+        .arg(pair.alt.join(".alt"))
+        .env("ALT_DAEMON_IDLE_MS", "100")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", &global)
+        .env_remove("SUDO_UID")
+        .output()
+        .unwrap();
+    assert!(!daemon.status.success());
+    let said = String::from_utf8_lossy(&daemon.stderr).into_owned();
+    assert!(said.starts_with(dubious), "{said}");
+    assert!(!pair.alt.join(".alt/daemon.sock").exists());
+    // named safe, it is served again
+    let at = pair.alt.canonicalize().unwrap();
+    std::fs::write(&global, format!("[safe]\n\tdirectory = {}\n", at.display())).unwrap();
+    let many = serve("ALT_SERVER_ROOT", above);
+    ok(asked(&format!("http://{}/alt/", many.addr)));
+    let alone = serve("ALT_SERVER_REPO", &pair.alt);
+    ok(asked(&format!("http://{}/", alone.addr)));
+}
