@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: say in the checkpoint of an oplog cut whether it took ops of the log or what an append left unfinished
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/ext.rs
+touched: crates/alt-oplog/tests/it/v2_cuts.rs
+touched: crates/alt-oplog/tests/it/v2_format.rs
+touched: crates/alt-oplog/tests/it/v2_image.rs
