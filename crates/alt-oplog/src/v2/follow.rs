@@ -203,6 +203,11 @@ impl Log {
             None if size > end => self.take_in(self.read_past(size)?, noted)?,
             None => None,
         };
+        // a frame of this handle past where the log ended for it is found
+        // now or is gone, before the handle cuts anything by itself
+        if self.hidden.is_none() && self.account.lock().unwrap().unsure {
+            self.owed_looked()?;
+        }
         self.cut_fsynced(cut)?;
         // a cut is said in a frame appended where the log is cut
         let cuts = cut && self.knows_all()?;
@@ -222,11 +227,6 @@ impl Log {
             let _held = Held::take(&self.dir)?;
             crate::v2::cut_taken_back(&self.dir);
             Mark::default().write(&self.file)?;
-        }
-        // a frame of this handle past where the log ended for it is
-        // found now, or is gone
-        if self.hidden.is_none() && self.account.lock().unwrap().unsure {
-            self.owed_looked()?;
         }
         Ok(())
     }
