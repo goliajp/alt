@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the sweep of segment files is a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server-store/src/pack_sweep.rs
