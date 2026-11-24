@@ -10,7 +10,10 @@
 //! before, and where another is asking and the platform answered last time, it
 //! waits for that one. What that one was told is what the one that waited goes
 //! by: it looks at the lease again where the platform answered, goes on as one
-//! whose asking failed where it did not, and asks in neither case.
+//! whose asking failed where it did not, and asks in neither case. It waits
+//! for that one and for no other: a request that comes when that one has
+//! ended, and asks in its turn, is not waited for by those who were there
+//! before it.
 
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -21,8 +24,12 @@ const MOST: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 struct State {
-    /// what is being asked for now: the service, or an account by its credential
-    under_way: Vec<Option<String>>,
+    /// what is being asked for now: the service, or an account by its
+    /// credential, each with which asking it is of all there were
+    under_way: Vec<(Option<String>, u64)>,
+    askings: u64,
+    /// the requests that wait for one that asks
+    waiting: usize,
     unanswered: u32,
     again: Option<Instant>,
 }
@@ -43,7 +50,7 @@ pub(crate) struct Asking {
 /// [`Turn::answered`], the platform is taken to have given no answer.
 pub(crate) struct Turn<'a> {
     asking: &'a Asking,
-    of: Option<String>,
+    of: (Option<String>, u64),
     over: bool,
 }
 
@@ -68,13 +75,15 @@ impl Asking {
     fn turn_at(&self, credential: Option<&str>, over: bool, now: Instant) -> Asked<'_> {
         let mut state = self.state.lock().unwrap();
         let of = credential.map(str::to_owned);
-        if state.under_way.contains(&of) {
+        if let Some(one) = state.under_way.iter().find(|one| one.0 == of).cloned() {
             // a platform that answered last time is waited for
             if !over || state.unanswered > 0 {
                 return Asked::No;
             }
-            let asked = |state: &mut State| state.under_way.contains(&of);
-            let state = self.ended.wait_while(state, asked).unwrap();
+            state.waiting += 1;
+            let asked = |state: &mut State| state.under_way.contains(&one);
+            let mut state = self.ended.wait_while(state, asked).unwrap();
+            state.waiting -= 1;
             // the one waited for got no answer: nor would this one
             return match state.unanswered > 0 {
                 true => Asked::No,
@@ -84,6 +93,8 @@ impl Asking {
         if !over && state.waits(now) {
             return Asked::No;
         }
+        state.askings += 1;
+        let of = (of, state.askings);
         state.under_way.push(of.clone());
         Asked::Turn(Turn {
             asking: self,
@@ -149,6 +160,13 @@ mod tests {
         }
     }
 
+    /// Returns once `count` requests wait for one that asks.
+    fn parked(asking: &Asking, count: usize) {
+        while asking.state.lock().unwrap().waiting != count {
+            std::thread::yield_now();
+        }
+    }
+
     #[test]
     fn one_asks_for_a_thing_at_a_time_and_nobody_for_a_while_after_no_answer() {
         let asking = Asking::default();
@@ -201,9 +219,7 @@ mod tests {
         let first = turn(&asking, None, true, now).unwrap();
         std::thread::scope(|scope| {
             let waiting = scope.spawn(|| matches!(asking.turn_at(None, true, now), Asked::Look));
-            // the one that waits is parked, or is yet to come: both end with the answer
-            std::thread::sleep(Duration::from_millis(50));
-            assert!(!waiting.is_finished());
+            parked(&asking, 1);
             first.answered();
             assert!(waiting.join().unwrap());
         });
@@ -232,8 +248,7 @@ mod tests {
                     Asked::No => "no",
                 };
                 let waiting: Vec<_> = (0..16).map(|_| scope.spawn(wait)).collect();
-                std::thread::sleep(Duration::from_millis(50));
-                assert!(waiting.iter().all(|waiting| !waiting.is_finished()));
+                parked(&asking, 16);
                 match answered {
                     true => first.answered(),
                     false => drop(first),
@@ -245,6 +260,50 @@ mod tests {
             assert_eq!(told, [expected; 16], "answered: {answered}");
             assert!(asking.state.lock().unwrap().under_way.is_empty());
         }
+    }
+
+    /// Four requests wait for one that asks. That one gets no answer, and
+    /// before any of the four has looked, a request that came later has the
+    /// turn. The four do not wait for that one as well: they go on as the
+    /// one they waited for does, while the later one is still asking.
+    #[test]
+    fn those_that_waited_for_one_do_not_wait_for_the_one_that_asks_after_it() {
+        let asking = Asking::default();
+        let now = Instant::now();
+        let first = turn(&asking, None, true, now).unwrap();
+        std::thread::scope(|scope| {
+            let wait = || matches!(asking.turn_at(None, true, now), Asked::No);
+            let waiting: Vec<_> = (0..4).map(|_| scope.spawn(wait)).collect();
+            parked(&asking, 4);
+            // the first ends without an answer and the next has the turn,
+            // under the one lock: none of those that wait looks in between
+            let later = {
+                let mut state = asking.state.lock().unwrap();
+                state.under_way.retain(|one| *one != first.of);
+                state.unanswered += 1;
+                state.askings += 1;
+                let of = (None, state.askings);
+                state.under_way.push(of.clone());
+                of
+            };
+            std::mem::forget(first);
+            asking.ended.notify_all();
+            let until = Instant::now() + Duration::from_secs(30);
+            while asking.state.lock().unwrap().waiting != 0 && Instant::now() < until {
+                std::thread::yield_now();
+            }
+            let left = asking.state.lock().unwrap().waiting;
+            // the later one ends: whoever still waited for it is let go
+            asking
+                .state
+                .lock()
+                .unwrap()
+                .under_way
+                .retain(|one| *one != later);
+            asking.ended.notify_all();
+            assert_eq!(left, 0, "they wait for the one that came after them");
+            assert!(waiting.into_iter().all(|waiting| waiting.join().unwrap()));
+        });
     }
 
     /// A turn given up before the platform was asked changes nothing of when
