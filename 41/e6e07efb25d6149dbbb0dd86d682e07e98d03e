@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: the references are read once for all the names a fetch is not to deepen past
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/shallow.rs
