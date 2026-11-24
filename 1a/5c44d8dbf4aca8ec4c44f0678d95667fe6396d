@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: each segment is read by its own records behind those before it
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/tests/it/across.rs
