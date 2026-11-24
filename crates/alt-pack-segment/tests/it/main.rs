@@ -5,6 +5,7 @@ mod build;
 mod fetch;
 mod many_of_one;
 mod merge;
+mod readable;
 mod waiting;
 
 use alt_pack_segment::{Limits, Segment, SegmentSet, ingest};

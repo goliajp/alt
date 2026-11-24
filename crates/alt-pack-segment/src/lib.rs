@@ -9,6 +9,7 @@
 
 mod build;
 mod carried;
+mod chosen;
 mod descend;
 mod format;
 mod generation;

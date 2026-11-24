@@ -32,7 +32,6 @@ pub(crate) struct Meta {
     pub blake3: [u8; 32],
     pub kind: Kind,
     pub size: u64,
-    pub depth: u16,
     /// scan index of the base inside this pack
     pub base: Option<usize>,
     pub outside: bool,
@@ -45,7 +44,6 @@ impl Meta {
             blake3,
             kind,
             size,
-            depth: 0,
             base: None,
             outside: false,
         }
@@ -229,7 +227,8 @@ fn verified(
     let mut budget = Budget::new(
         (limits.object_bytes, limits.inflated_bytes),
         (limits.base_bytes, limits.spill_bytes),
-        u32::from(limits.delta_depth),
+        // how deep an object is is known when every entry that makes it is
+        u32::MAX,
         scanned.inflated,
     );
     let memory = memory.resolving(limits, &mut scanned)?;
@@ -268,19 +267,13 @@ fn verified(
     });
     let metas: Vec<Meta> = resolved.collect::<Result<_, Error>>()?;
 
-    // records sorted by oid, first occurrence wins
-    let mut order: Vec<usize> = (0..metas.len()).collect();
-    order.sort_unstable_by(|a, b| metas[*a].oid.cmp(&metas[*b].oid).then(a.cmp(b)));
-    let mut flags = 0;
-    let mut kept: Vec<usize> = Vec::with_capacity(order.len());
-    let mut position = vec![0u32; metas.len()];
-    for index in order {
-        match kept.last() {
-            Some(last) if metas[*last].oid == metas[index].oid => flags |= FLAG_DUPLICATES,
-            _ => kept.push(index),
-        }
-        position[index] = (kept.len() - 1) as u32;
-    }
+    let chosen = crate::chosen::choose(&metas, entries, existing, limits.delta_depth)?;
+    let (kept, position) = (&chosen.kept, &chosen.position);
+    let mut flags = if chosen.duplicates {
+        FLAG_DUPLICATES
+    } else {
+        0
+    };
     // every reference resolves inside the pack or in the segments already present
     let carried = Carried::new(
         kept.iter()
@@ -288,7 +281,7 @@ fn verified(
     );
     told.wanted
         .check(&carried, |from| metas[from as usize].oid)?;
-    if alt_threads::any(&kept, 1024, |index| {
+    if alt_threads::any(kept, 1024, |index| {
         existing.locate(&metas[*index].oid).is_some()
     }) {
         flags |= FLAG_OVERLAP;
@@ -300,7 +293,8 @@ fn verified(
     crate::generation::assign(&mut commits, existing)?;
     let records = kept
         .iter()
-        .map(|index| {
+        .zip(&chosen.depth)
+        .map(|(index, depth)| {
             let (meta, raw) = (&metas[*index], &entries[*index]);
             Record {
                 oid: meta.oid,
@@ -316,7 +310,7 @@ fn verified(
                     (_, true) => Delta::Outside,
                     (_, false) => Delta::Inside,
                 },
-                depth: meta.depth,
+                depth: *depth,
             }
         })
         .collect();

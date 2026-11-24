@@ -78,7 +78,7 @@ impl Objects for Verified<'_> {
         self.shared.taken[delta as usize].swap(true, Relaxed)
     }
 
-    fn made(&mut self, delta: u32, of: u32, depth: u32, object: &[u8]) -> Result<Oid, Error> {
+    fn made(&mut self, delta: u32, of: u32, _depth: u32, object: &[u8]) -> Result<Oid, Error> {
         let (shared, kind) = (self.shared, self.kind);
         let (oid, blake3) = digest(kind, object);
         let row = shared.told.object(delta, &oid, kind, object)?;
@@ -89,7 +89,6 @@ impl Objects for Verified<'_> {
             blake3,
             kind,
             size: object.len() as u64,
-            depth: depth as u16,
             base,
             outside: base.is_none(),
         };
