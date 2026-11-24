@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: the token of a device code nobody was handed it for is revoked, and a code whose request left is left unspent
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/device_login.rs
+touched: crates/alt-server-store/tests/it/database/browser/device.rs
+touched: crates/alt-server-store/tests/it/database/cloud.rs
+touched: crates/alt-server/src/http/device.rs
+touched: crates/alt-server/src/http/device/exchange.rs
+touched: crates/alt-server/tests/it/database/device_exchange.rs
