@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: put the note of a shorter log beside a log, where its id alone tells it apart
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_note_other.rs
