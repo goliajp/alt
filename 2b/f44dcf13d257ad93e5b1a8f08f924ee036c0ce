@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the idle connections of a server are counted beside the session of its lock
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections.rs
