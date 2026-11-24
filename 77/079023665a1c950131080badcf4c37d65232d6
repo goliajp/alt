@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a fetch acknowledges, and leaves out for, only what the refs its caller reads lead to
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/reach.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/reach.rs
+touched: crates/alt-server/src/git_read.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/said.rs
