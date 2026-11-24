@@ -79,11 +79,14 @@ impl Pace {
     }
 }
 
-/// Whether `error` is that of a read or a write that waited its time out.
-fn waited_out(error: &io::Error) -> bool {
+/// Whether `error` is that of a read or a write that is to be made again: one
+/// that waited its time out, or one a signal broke into. A read with a time to
+/// wait is not begun again by the system after a signal, whatever was asked
+/// for when the signal's handler was set, nor after a signal nothing handles.
+fn again(error: &io::Error) -> bool {
     matches!(
         error.kind(),
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut | io::ErrorKind::Interrupted
     )
 }
 
@@ -169,7 +172,7 @@ impl Source {
             let read = self.stream.read(&mut self.held[had..]);
             self.held.truncate(had + *read.as_ref().unwrap_or(&0));
             match read {
-                Err(error) if waited_out(&error) => {}
+                Err(error) if again(&error) => {}
                 read => return read,
             }
         }
@@ -192,7 +195,7 @@ impl Source {
             let wait = sent.0.wait(&self.limits)?;
             self.stream.set_write_timeout(Some(wait))?;
             let wrote = match self.stream.write(rest) {
-                Err(error) if waited_out(&error) => continue,
+                Err(error) if again(&error) => continue,
                 wrote => wrote?,
             };
             if wrote == 0 {
@@ -219,6 +222,7 @@ impl Source {
             }
             match self.stream.read(&mut taken) {
                 Ok(read) if read > 0 => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                 _ => break,
             }
         }
@@ -249,49 +253,4 @@ impl Sent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const LIMITS: Limits = Limits {
-        grace: Duration::from_secs(20),
-        window: Duration::from_secs(30),
-        floor: 30 << 10,
-        linger: Duration::from_secs(2),
-        each: 64,
-        spool: 4 << 30,
-    };
-
-    #[test]
-    fn a_body_goes_on_while_it_moves_and_is_over_in_the_window_in_which_it_does_not() {
-        let mut pace = Pace::new(false);
-        assert!(pace.wait(&LIMITS).unwrap() <= LIMITS.window);
-        // a window that ends with enough moved in it begins another, and
-        // that for as long as the peer keeps it up: a day of windows here
-        for _ in 0..2880 {
-            pace.moved = LIMITS.floor;
-            pace.since = Instant::now() - LIMITS.window;
-            let left = pace.wait(&LIMITS).unwrap();
-            assert!(left > Duration::from_secs(29) && pace.moved == 0);
-        }
-        // within a window nothing is asked of what moved
-        pace.since = Instant::now() - Duration::from_secs(29);
-        assert!(pace.wait(&LIMITS).unwrap() <= Duration::from_secs(1));
-        // one byte short at the end of one is the end
-        pace.moved = LIMITS.floor - 1;
-        pace.since = Instant::now() - LIMITS.window;
-        assert_eq!(
-            pace.wait(&LIMITS).unwrap_err().kind(),
-            io::ErrorKind::TimedOut
-        );
-    }
-
-    #[test]
-    fn what_comes_of_a_head_buys_it_no_time() {
-        let mut pace = Pace::new(true);
-        pace.moved = 1 << 30;
-        pace.since = Instant::now() - Duration::from_secs(19);
-        assert!(pace.wait(&LIMITS).unwrap() <= Duration::from_secs(1));
-        pace.since = Instant::now() - Duration::from_secs(21);
-        assert!(pace.wait(&LIMITS).is_err());
-    }
-}
+mod tests;
