@@ -4,6 +4,7 @@ mod budget;
 mod build;
 mod fetch;
 mod many_of_one;
+mod mend;
 mod merge;
 mod readable;
 mod waiting;

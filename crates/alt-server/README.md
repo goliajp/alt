@@ -436,6 +436,18 @@ retained content. Uploads in progress keep their content and continue under the
 new generation. The released copies leave the disk with the next garbage
 collection.
 
+`scrub [repository] [--mend]` reads every object of the live pack segments, of
+one repository or of all, the way a fetch reads it, and holds what it reads
+against the object id. It answers with the count of segments and objects read
+and, for each segment that does not give all of its objects back, the first
+sixteen of them with what their read ended in; `unread_objects` counts those
+that are still not read when the command ends. With `--mend` such a segment is
+replaced by its own pack with an index made anew, in one transaction as a merge
+replaces segments, and is then read again; a segment whose pack does not verify
+is left in place and named with `kept_because`. Versions before this one could
+take in a pack whose index then led reads of some objects down a delta chain
+longer than is read; run `scrub` once after upgrading from them.
+
 From schema 19 the transaction changes how a committed publication is stored.
 That version kept the whole publication four times: in the request, in the
 receipt of the request's stored result, in the audit record and in the outbox

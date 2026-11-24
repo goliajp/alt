@@ -425,17 +425,11 @@ fn execute(args: &Args) -> Result<Value> {
             actor,
             login,
             display_name,
-            password_file,
+            password_file: path,
             administrator,
         } => {
-            let raw = operator::read_regular(password_file, 1025, true)?;
-            let password = std::str::from_utf8(&raw)
-                .map_err(|_| Error::Config("password encoding"))?
-                .strip_suffix('\n')
-                .unwrap_or(
-                    std::str::from_utf8(&raw).map_err(|_| Error::Config("password encoding"))?,
-                );
-            json!({"user":store.create_local_user(&admin, actor, login, display_name, password, *administrator)?})
+            let password = password_file(path)?;
+            json!({"user":store.create_local_user(&admin, actor, login, display_name, &password, *administrator)?})
         }
         Action::UserResetPassword {
             actor,
@@ -450,6 +444,9 @@ fn execute(args: &Args) -> Result<Value> {
         }
         Action::Collect { repository, limit } => {
             json!({"repository":repository,"removed":store.collect_orphans(&admin,repository,*limit)?})
+        }
+        Action::Scrub { repository, mend } => {
+            operator::scrub::read(&mut store, &admin, repository.as_deref(), *mend)?
         }
         _ => return Err(Error::Config("unsupported operator action")),
     };

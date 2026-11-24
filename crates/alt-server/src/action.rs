@@ -212,6 +212,13 @@ pub(crate) enum Action {
         #[arg(long, default_value = "100")]
         limit: u32,
     },
+    /// Read every object of the live pack segments; one repository, or all
+    Scrub {
+        repository: Option<String>,
+        /// Replace a segment that does not give its objects back by its pack indexed anew
+        #[arg(long)]
+        mend: bool,
+    },
 }
 #[derive(Clone, ValueEnum)]
 pub(crate) enum SecretKind {

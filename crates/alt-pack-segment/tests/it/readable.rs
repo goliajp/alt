@@ -6,7 +6,7 @@ use alt_pack_segment::{Error, Limits, Segment, SegmentSet, ingest};
 use std::{io::Write, sync::Arc};
 
 /// what an entry makes `object(n)` of
-enum Of {
+pub(super) enum Of {
     Nothing,
     /// the object, named by its id
     Object(usize),
@@ -14,7 +14,7 @@ enum Of {
     Entry(usize),
 }
 
-fn pack(entries: &[(usize, Of)]) -> Vec<u8> {
+pub(super) fn pack(entries: &[(usize, Of)]) -> Vec<u8> {
     let mut pack = b"PACK".to_vec();
     pack.extend_from_slice(&2u32.to_be_bytes());
     pack.extend_from_slice(&(entries.len() as u32).to_be_bytes());
@@ -91,24 +91,29 @@ fn read_back(pack: &[u8], limits: &Limits, objects: &[usize]) -> Result<Vec<u8>,
 /// deep and past what is read.
 #[test]
 fn an_object_two_entries_make_is_read_from_the_one_its_depth_is_told_of() {
-    const CHAIN: usize = 2000;
+    let objects: Vec<usize> = (0..=3 * 2000).collect();
+    let limits = Limits::of(1 << 20, 1 << 20, 1 << 32);
+    read_back(&pack(&three_chains(2000)), &limits, &objects).unwrap();
+}
+
+/// The entries of the pack the test above is of: three chains of `links` deltas,
+/// and the object each ends in once more.
+pub(super) fn three_chains(links: usize) -> Vec<(usize, Of)> {
     let mut entries = vec![(0, Of::Nothing)];
     for chain in 0..3 {
-        let first = chain * CHAIN + 1;
+        let first = chain * links + 1;
         entries.push(match chain {
             0 => (first, Of::Entry(0)),
             _ => (first, Of::Object(first - 1)),
         });
-        for n in first + 1..first + CHAIN {
+        for n in first + 1..first + links {
             entries.push((n, Of::Entry(entries.len() - 1)));
         }
     }
     for chain in 1..=3 {
-        entries.push((chain * CHAIN, Of::Entry(0)));
+        entries.push((chain * links, Of::Entry(0)));
     }
-    let objects: Vec<usize> = (0..=3 * CHAIN).collect();
-    let limits = Limits::of(1 << 20, 1 << 20, 1 << 32);
-    read_back(&pack(&entries), &limits, &objects).unwrap();
+    entries
 }
 
 fn noise(state: &mut u64) -> usize {

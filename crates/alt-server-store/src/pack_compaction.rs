@@ -92,24 +92,8 @@ impl Store {
         let (older, parts) = set.segments().split_at(start);
         let content = alt_pack_segment::merge(parts, &SegmentSet::new(older.to_vec()))
             .map_err(|_| Error::Integrity("pack segments do not merge"))?;
-        let mut nonce = [0u8; 16];
-        alt_os::random::fill(&mut nonce);
-        let id: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-        let path = self.pack_path(repository, &id)?;
+        let (id, path) = self.write_segment(repository, &content)?;
         let inline = content.len() <= INLINE_SEGMENT_BYTES;
-        {
-            use std::{io::Write, os::unix::fs::OpenOptionsExt};
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)?;
-            file.write_all(&content)?;
-            if !inline {
-                file.sync_all()?;
-                std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
-            }
-        }
         let published = self.publish_merge(repository, &ids[start..], &id, &content, &path, inline);
         match published {
             Ok(Some(segment)) => {
@@ -131,7 +115,7 @@ impl Store {
 
     /// Replaces the rows of `parts` with the row of the merged segment. None when a
     /// part is no longer live: another merge got there first.
-    fn publish_merge(
+    pub(crate) fn publish_merge(
         &mut self,
         repository: &str,
         parts: &[(String, bool)],

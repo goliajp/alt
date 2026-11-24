@@ -18,6 +18,7 @@ mod bounds;
 mod change_links;
 mod error;
 pub mod provision;
+pub mod scrub;
 mod validate;
 pub use bounds::HttpBounds;
 pub use error::{Error, Result};

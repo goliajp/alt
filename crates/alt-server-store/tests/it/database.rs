@@ -10,6 +10,7 @@ mod expiry;
 mod faults;
 mod json;
 mod maintenance;
+mod pack_scrub;
 mod pack_sweep;
 mod pack_view;
 mod provenance;
