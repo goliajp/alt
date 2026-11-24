@@ -32,6 +32,8 @@ pub const RLIMIT_NOFILE: rlimit_resource_t = 7;
 
 pub const SOL_SOCKET: c_int = 1;
 pub const SO_RCVBUF: c_int = 8;
+/// the request of `ioctl` for the bytes of a socket not yet acknowledged
+pub const SIOCOUTQ: c_ulong = 0x5411;
 
 pub const RENAME_NOREPLACE: c_uint = 1;
 
@@ -154,6 +156,7 @@ unsafe extern "C" {
     #[link_name = "__errno_location"]
     pub fn errno_location() -> *mut c_int;
 
+    pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
     pub fn renameat2(
         olddirfd: c_int,
         oldpath: *const c_char,

@@ -33,6 +33,7 @@ pub mod heap;
 pub mod locale;
 pub mod map;
 pub mod random;
+pub mod socket;
 pub mod stack;
 pub mod stdio;
 pub mod sys;

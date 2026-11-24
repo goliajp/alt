@@ -132,3 +132,39 @@ fn a_response_whose_reader_stops_is_given_up_when_its_time_to_move_in_is_over() 
     assert!(found < whole, "{found} of {whole}");
     assert!(began.elapsed() < Duration::from_secs(60));
 }
+
+/// A response has to move 1 KiB a second over each window of two seconds. A
+/// reader takes 128 KiB a second, evenly, for eight windows from the first of the
+/// response on. The sockets hold megabytes, of which a third has to be free
+/// before the socket tells that it can be written to: a write succeeds less than
+/// once in a window. The server goes on all the same, and the rest comes whole.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_response_read_slowly_and_evenly_goes_on_though_no_write_succeeds_in_a_window() {
+    use std::io::Read as _;
+    let mut f = Fixture::new();
+    let window = Duration::from_secs(2);
+    let server = start(&mut f, |_, options| {
+        options.body_timeout = window;
+        options.connection_timeout = Duration::from_secs(120);
+    });
+    let request = clone_request(&f, &server);
+    let none = (usize::MAX, Duration::ZERO);
+    let whole = read(&server, &request, (1 << 20, Duration::ZERO), none);
+    assert!(whole >= FILES * FILE, "{whole}");
+    let (mut socket, _) = connect(&server);
+    socket.write_all(&request).unwrap();
+    let mut begun = [0u8; 12];
+    socket.read_exact(&mut begun).unwrap();
+    let (mut buffer, mut all) = (vec![0; 32 << 10], begun.len());
+    let began = std::time::Instant::now();
+    while began.elapsed() < 8 * window {
+        let count = socket.read(&mut buffer).unwrap();
+        assert_ne!(count, 0, "ended after {:?}", began.elapsed());
+        all += count;
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let mut rest = Vec::new();
+    let _ = socket.read_to_end(&mut rest);
+    assert_eq!(all + rest.len(), whole);
+}
