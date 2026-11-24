@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: what a fetch brought is taken in and reported in a file of its own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/fetched.rs
