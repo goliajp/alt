@@ -18,6 +18,7 @@ use alt_wire::fetch::{
 
 use super::sending::{Room, Sent, Written};
 use super::shallow::{self, Shallow};
+pub(super) use super::until::{Stopped, Until};
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -79,7 +80,8 @@ fn parse_filter_spec(raw: Option<&str>) -> FilterSpec {
     out
 }
 
-fn read(repo: &Repository, oid: &ObjectId) -> Res<alt_git_codec::RawObject> {
+fn read(repo: &Repository, oid: &ObjectId, until: &Until) -> Res<alt_git_codec::RawObject> {
+    until.go_on()?;
     let read = repo.read_object(oid)?;
     Ok(read.ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?)
 }
@@ -91,7 +93,7 @@ fn read(repo: &Repository, oid: &ObjectId) -> Res<alt_git_codec::RawObject> {
 /// What a clone and a fetch ask for are the objects the refs point at,
 /// and those are told without a walk. The objects a partial clone left
 /// out are asked for one by one, and are looked for from the refs down.
-fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
+fn unreached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Option<ObjectId>> {
     let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
     let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
     let mut sought: KeyedIdSet<ObjectId> = req.wants.iter().copied().collect();
@@ -102,6 +104,7 @@ fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
         if sought.is_empty() {
             break;
         }
+        until.go_on()?;
         let Some(object) = repo.read_object(&oid)? else {
             continue;
         };
@@ -139,7 +142,7 @@ fn unreached(repo: &Repository, req: &FetchRequest) -> Res<Option<ObjectId>> {
 /// reaches. One that is in the store and under no ref is taken as one
 /// the server does not know: left out of the pack as a commit both
 /// sides have, it would tell its sender that it is there.
-fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
+fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<ObjectId>> {
     let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
     let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
     let mut sought: KeyedIdSet<ObjectId> = req.haves.iter().copied().collect();
@@ -159,6 +162,7 @@ fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
         if sought.is_empty() {
             break;
         }
+        until.go_on()?;
         let Some(object) = repo.read_object(&oid)? else {
             continue;
         };
@@ -192,12 +196,14 @@ fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
 /// may be less than a longer negotiation would have found.
 ///
 /// The file is written within the room responses have between them, and has
-/// its part of it until it is sent.
+/// its part of it until it is sent. It is written for as long as `until`
+/// says, and the error is a [`Stopped`] where that is over.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
     room: &Room,
     from: Option<std::net::IpAddr>,
+    until: &Until,
 ) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
@@ -205,15 +211,15 @@ pub(super) fn response(
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };
-    if let Some(oid) = unreached(repo, req)? {
+    if let Some(oid) = unreached(repo, req, until)? {
         refused(&mut framed, &format!("not our ref {oid}"))?;
     } else {
-        let common = reached(repo, req)?;
+        let common = reached(repo, req, until)?;
         let ready = !req.wait_for_done && !common.is_empty();
         if !req.done && !ready {
             encode_acknowledgments(&mut framed, &common, false)?;
         } else {
-            match shallow::ends(repo, req)? {
+            match shallow::ends(repo, req, until)? {
                 Err(why) => refused(&mut framed, &why)?,
                 Ok(shallow) => {
                     if !req.done {
@@ -222,7 +228,7 @@ pub(super) fn response(
                     if let Some(told) = &shallow.told {
                         encode_shallow_info(&mut framed, told)?;
                     }
-                    pack(repo, req, &shallow, &common, dir.path(), &mut framed)?;
+                    pack(repo, req, &shallow, &common, dir.path(), &mut framed, until)?;
                 }
             }
         }
@@ -251,10 +257,15 @@ fn pack(
     common: &[ObjectId],
     dir: &std::path::Path,
     framed: &mut impl Write,
+    until: &Until,
 ) -> Res<()> {
     let mut roots = req.wants.clone();
     roots.extend(&shallow.parents);
-    let outgoing = repo.reachable_named_between(&roots, common, &shallow.ends)?;
+    let go_on = || until.go_on().is_ok();
+    let outgoing = repo.reachable_named_while(&roots, common, &shallow.ends, &go_on);
+    // why it was stopped, where it was
+    until.go_on()?;
+    let outgoing = outgoing?;
     let filter = parse_filter_spec(req.filter.as_deref());
     // only a limit on the size of blobs has an object read to tell
     // whether it goes
@@ -263,7 +274,7 @@ fn pack(
     let mut going = Vec::new();
     for at in outgoing {
         let bytes = match sized && at.kind == ObjectKind::Blob {
-            true => read(repo, &at.oid)?.data.len(),
+            true => read(repo, &at.oid, until)?.data.len(),
             false => 0,
         };
         // what is asked for by its id goes whatever the filter: it is how
@@ -280,7 +291,7 @@ fn pack(
     let mut writer =
         alt_git_pack::PackWriter::create_with_deltas(dir, repo.algo()?, count, DELTAS)?;
     for at in going {
-        writer.add(at.oid, at.kind, &read(repo, &at.oid)?.data)?;
+        writer.add(at.oid, at.kind, &read(repo, &at.oid, until)?.data)?;
     }
     let pack = File::open(writer.finish()?.pack_path)?;
     // the file is this request's own and is not written to again

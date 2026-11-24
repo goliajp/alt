@@ -15,6 +15,8 @@ use alt_hash::{KeyedIdMap, KeyedIdSet};
 use alt_repo::{Ends, Repository};
 use alt_wire::fetch::{Depth, FetchRequest, ShallowInfo};
 
+use super::fetch::Until;
+
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 type Ids = KeyedIdSet<ObjectId>;
 
@@ -37,6 +39,8 @@ struct Node {
 struct History<'a> {
     repo: &'a Repository,
     nodes: KeyedIdMap<ObjectId, Option<Rc<Node>>>,
+    /// how long the fetch is gone on with: looked at before a commit is read
+    until: &'a Until<'a>,
 }
 
 impl History<'_> {
@@ -46,6 +50,7 @@ impl History<'_> {
         if let Some(known) = self.nodes.get(&oid) {
             return Ok(known.clone());
         }
+        self.until.go_on()?;
         let node = match self.repo.read_object(&oid)? {
             Some(object) if object.kind == ObjectKind::Commit => {
                 let commit = Commit::parse(&object.data)?;
@@ -181,8 +186,12 @@ fn named(history: &mut History, refs: &Refs, name: &str) -> Res<Option<ObjectId>
 
 /// The ends of the history `req` is given, or why it is given none: what
 /// `git upload-pack` dies of.
-pub(super) fn ends(repo: &Repository, req: &FetchRequest) -> Res<Result<Shallow, String>> {
-    ends_of(repo, req, &mut || Ok(repo.list_refs()?))
+pub(super) fn ends(
+    repo: &Repository,
+    req: &FetchRequest,
+    until: &Until,
+) -> Res<Result<Shallow, String>> {
+    ends_of(repo, req, until, &mut || Ok(repo.list_refs()?))
 }
 
 /// The refs of a repository, as [`Repository::list_refs`] gives them.
@@ -193,6 +202,7 @@ type Refs = Vec<(String, ObjectId, Option<String>)>;
 fn ends_of(
     repo: &Repository,
     req: &FetchRequest,
+    until: &Until,
     listed: &mut dyn FnMut() -> Res<Refs>,
 ) -> Res<Result<Shallow, String>> {
     let depth: &Depth = &req.depth;
@@ -215,6 +225,7 @@ fn ends_of(
     let mut history = History {
         repo,
         nodes: KeyedIdMap::default(),
+        until,
     };
     let mut tips = Vec::new();
     for want in &req.wants {
@@ -300,7 +311,7 @@ mod tests {
                 ..FetchRequest::default()
             };
             let mut read = 0;
-            let ends = ends_of(&repo, &req, &mut || {
+            let ends = ends_of(&repo, &req, &Until::whenever(), &mut || {
                 read += 1;
                 Ok(repo.list_refs()?)
             });
@@ -321,7 +332,7 @@ mod tests {
             ..FetchRequest::default()
         };
         let mut read = 0;
-        let ends = ends_of(&repo, &none, &mut || {
+        let ends = ends_of(&repo, &none, &Until::whenever(), &mut || {
             read += 1;
             Ok(repo.list_refs()?)
         });

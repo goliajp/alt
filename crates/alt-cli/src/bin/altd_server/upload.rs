@@ -83,8 +83,16 @@ pub(super) fn handle_upload_pack(
                 }
             };
             let (room, from) = (sending::Room::shared(), req.from());
-            let sent = match fetch::response(repo, &fetch_req, room, from) {
+            let until = fetch::Until {
+                by: Some(std::time::Instant::now() + super::told::told().fetch),
+                gone: Some(req.given_up()),
+            };
+            let sent = match fetch::response(repo, &fetch_req, room, from, &until) {
                 Ok(sent) => sent,
+                Err(e) if e.downcast_ref() == Some(&fetch::Stopped::Late) => {
+                    let r = Response::from_string(format!("{e}")).with_status_code(503);
+                    return respond_logged(req, r, log).map_err(Into::into);
+                }
                 Err(e) if limits::refusal(&*e) == 503 => {
                     let mut r = Response::from_string(format!("{e}")).with_status_code(503);
                     r.add_header(header("Retry-After", "60"));

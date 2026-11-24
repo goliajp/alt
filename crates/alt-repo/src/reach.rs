@@ -43,7 +43,7 @@ impl Repository {
         excludes: &[ObjectId],
         ends: &Ends,
     ) -> Result<Vec<(ObjectId, ObjectKind)>, RepoError> {
-        let reached = self.walk(roots, excludes, ends, true)?;
+        let reached = self.walk(roots, excludes, ends, true, &|| true)?;
         Ok(reached.into_iter().map(|at| (at.oid, at.kind)).collect())
     }
 
@@ -56,7 +56,20 @@ impl Repository {
         excludes: &[ObjectId],
         ends: &Ends,
     ) -> Result<Vec<Reached>, RepoError> {
-        self.walk(roots, excludes, ends, false)
+        self.walk(roots, excludes, ends, false, &|| true)
+    }
+
+    /// [`Self::reachable_named_between`] for as long as `go_on` says, which
+    /// is asked before each object is read: [`RepoError::Stopped`] once it
+    /// says no.
+    pub fn reachable_named_while(
+        &self,
+        roots: &[ObjectId],
+        excludes: &[ObjectId],
+        ends: &Ends,
+        go_on: &dyn Fn() -> bool,
+    ) -> Result<Vec<Reached>, RepoError> {
+        self.walk(roots, excludes, ends, false, go_on)
     }
 
     fn walk(
@@ -65,6 +78,7 @@ impl Repository {
         excludes: &[ObjectId],
         ends: &Ends,
         files_read: bool,
+        go_on: &dyn Fn() -> bool,
     ) -> Result<Vec<Reached>, RepoError> {
         let unnamed = |oid: &ObjectId| Under {
             oid: *oid,
@@ -76,6 +90,9 @@ impl Repository {
         while let Some(at) = stack.pop() {
             if !uninteresting.insert(at.oid) || (at.file && !files_read) {
                 continue;
+            }
+            if !go_on() {
+                return Err(RepoError::Stopped);
             }
             if let Some(obj) = self.read_object(&at.oid)? {
                 stack.extend(children(&obj, at.oid, &ends.held)?);
@@ -98,6 +115,9 @@ impl Repository {
                 let kind = ObjectKind::Blob;
                 out.push(Reached { oid, kind, name });
                 continue;
+            }
+            if !go_on() {
+                return Err(RepoError::Stopped);
             }
             let Some(obj) = self.read_object(&oid)? else {
                 // a root pointing at a missing object is the caller's bug
