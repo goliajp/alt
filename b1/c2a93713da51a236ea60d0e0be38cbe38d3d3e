@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: expect git's words where no pick is under way, with an older build too
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/mixed_versions/abort.rs
