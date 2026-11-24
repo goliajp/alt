@@ -24,6 +24,7 @@ impl Run {
     pub fn unsettled_before(&mut self, end: u64) -> Vec<Laid> {
         self.calls();
         let log = self.log();
+        self.cuts_seen = log.cuts.clone();
         let claimed = self.claimed(&log);
         self.model.synced_to(&log, claimed);
         let left = self.model.unsettled(&log);
@@ -141,9 +142,11 @@ impl Run {
             .unconfirmed(says(&stored, &mut asked));
         // a reader is refused as a writer is, short of the end of the log
         if let Err(why @ OpLogError::Kept { .. }) = &found {
+            // what it holds of the log may be less than a writer would
             let begun = self.ledger.begun;
+            self.looks_behind = end != self.log().end;
             self.cut_refused(&refused_of(&asked), &asked, why, &[]);
-            self.ledger.begun = begun;
+            (self.ledger.begun, self.looks_behind) = (begun, false);
             return;
         }
         if let Some(found) = self.took(index, found, false) {

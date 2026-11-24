@@ -63,8 +63,9 @@ pub struct Reference {
     pub cut: (u32, u64),
     /// its receipts: where each ends, and the request it is of
     pub receipts: Vec<(u64, [u8; 16])>,
-    /// where the last frame starts that says the log was cut before it
-    pub cut_at: u64,
+    /// where each frame starts that says the log was cut before it, of
+    /// a cut that took ops
+    pub cuts: Vec<u64>,
 }
 
 pub fn reference(dir: &Path) -> Reference {
@@ -76,10 +77,13 @@ pub fn reference(dir: &Path) -> Reference {
         strict: true,
     };
     let (mut state, mut ops, mut cut_end) = (State::empty(), Vec::new(), 0);
-    let (mut receipts, mut cut_at) = (Vec::new(), 0);
+    let (mut receipts, mut cuts) = (Vec::new(), Vec::new());
     let walked = walk.run(&mut state, &mut |at, end, view| {
-        if view.ext.cut.is_some() {
-            (cut_at, cut_end) = (at, end);
+        if let Some(cut) = view.ext.cut {
+            cut_end = end;
+            if cut.of_the_log {
+                cuts.push(at);
+            }
         }
         if view.head.kind == KIND_RECEIPT {
             let receipt = Receipt::decode(view.body).expect("a receipt reads");
@@ -106,7 +110,7 @@ pub fn reference(dir: &Path) -> Reference {
         said_synced: state.synced,
         cut: (state.generation, cut_end),
         receipts,
-        cut_at,
+        cuts,
     }
 }
 
@@ -158,12 +162,10 @@ pub struct Model {
     pub stored: Stored,
     /// unless a sync saw to the op: what these name stays
     pub durable: HashSet<Vec<u8>>,
-    /// up to where the log was ever recorded as synced, in any boot
-    pub covered: u64,
-    /// the ops, and the receipts by their requests, that a sync
-    /// answered a caller for as synced
-    pub answered: HashSet<Vec<u8>>,
-    pub answered_receipts: HashSet<[u8; 16]>,
+    /// the ops, and the receipts by their requests, that the log was
+    /// ever recorded as synced over, in any boot
+    pub covered: HashSet<Vec<u8>>,
+    pub covered_receipts: HashSet<[u8; 16]>,
 }
 
 impl Model {
@@ -196,7 +198,10 @@ impl Model {
             );
         }
         self.synced = claimed;
-        self.covered = self.covered.max(claimed);
+        let ops = log.ops.iter().filter(|op| op.end <= claimed);
+        self.covered.extend(ops.map(|op| op.payload.clone()));
+        let receipts = log.receipts.iter().filter(|(end, _)| *end <= claimed);
+        self.covered_receipts.extend(receipts.map(|(_, of)| *of));
     }
 
     /// The machine went down and came up: what its last boot knew beside

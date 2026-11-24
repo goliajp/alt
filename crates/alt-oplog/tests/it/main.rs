@@ -19,6 +19,7 @@ mod v2_bounds;
 mod v2_checks;
 mod v2_claims;
 mod v2_counts;
+mod v2_coverable;
 mod v2_cut_back;
 mod v2_cut_chain;
 mod v2_cut_damage;

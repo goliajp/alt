@@ -4,20 +4,21 @@
 //! The answers a look is given come from what became of the content each
 //! op names (`Model::stored`): it is on disk from when the op is
 //! appended, for good once a sync saw to the op, and may be gone when the
-//! machine goes down before that. Nothing here follows the rule by which
-//! the log decides. What it is held to is what it promises:
+//! machine goes down before that. What the log is held to:
 //!
-//! - no cut takes a frame that a writer who syncs left, that a sync
-//!   answered its caller for, and whose content is stored;
+//! - no cut takes a frame that a writer who syncs left, that the log
+//!   was recorded as synced over, and whose content is stored;
+//! - a cut is refused for a frame to keep where a sync can have covered
+//!   such a frame past the op refused, and made where none can
+//!   (`v2_coverable`): the log neither keeps what no sync covered nor
+//!   cuts what one may have;
 //! - a cut that is refused within where the log is synced is one of an
-//!   op there, and one refused for a frame to keep names a frame a
-//!   writer who syncs left with its content stored, past no op that
-//!   every sync would have seen to and whose content is gone.
+//!   op there.
 //!
-//! A cut refused for a frame to keep is counted by whether a frame past
-//! the op was promised to anybody, and where none was, by what the frame
-//! is that the log could not tell from one: never covered by a sync,
-//! covered by one that no caller was answered by, or a receipt.
+//! A cut refused for a frame to keep is counted by whether the log was
+//! ever recorded as synced over a frame past the op that is one to
+//! keep: where it was, the log had to refuse; where it was not, a sync
+//! can have covered one, and the log cannot tell that none did.
 
 use std::sync::atomic::Ordering;
 
@@ -62,10 +63,10 @@ impl Run {
     /// whoever tells whether what ops name is stored is to vouch for an
     /// op within where the log is synced, and does not always know.
     pub fn lose_unsynced(&mut self) {
-        let covered = self.model.covered;
         let mut lost = Vec::new();
         for op in &self.ledger.ops {
-            let one_in = if op.end <= covered { 8 } else { 2 };
+            let covered = self.model.covered.contains(&op.payload);
+            let one_in = if covered { 8 } else { 2 };
             if !self.model.durable.contains(&op.payload) && self.also.one_in(one_in) {
                 lost.push(name(&op.payload));
                 self.model.stored.lock().unwrap().remove(&op.payload);
@@ -77,16 +78,16 @@ impl Run {
     }
 
     /// Whether op `index` of the log is one somebody was promised: a
-    /// writer who syncs left it, a sync answered its caller for it, and
-    /// what it names is stored.
+    /// writer who syncs left it, the log was recorded as synced over
+    /// it, and what it names is stored.
     fn promised(&self, index: usize) -> bool {
         let op = &self.ledger.ops[index];
-        !op.unsynced && self.model.answered.contains(&op.payload) && self.stores(&op.payload)
+        !op.unsynced && self.model.covered.contains(&op.payload) && self.stores(&op.payload)
     }
 
     /// Whether a receipt past op `index` was promised: a writer who
-    /// syncs left it, a sync answered its caller for it, and none of
-    /// the ops of its request is cut with that op.
+    /// syncs left it, the log was recorded as synced over it, and none
+    /// of the ops of its request is cut with that op.
     fn receipt_promised(&self, index: usize) -> bool {
         let ops = &self.ledger.ops;
         let from = ops[index].at;
@@ -94,7 +95,7 @@ impl Run {
         let promised = |(_, synced, request, end): &(usize, bool, [u8; 16], u64)| {
             *end > from
                 && *synced
-                && self.model.answered_receipts.contains(request)
+                && self.model.covered_receipts.contains(request)
                 && !cut(*request)
         };
         self.ledger.receipts.iter().any(promised)
@@ -109,31 +110,23 @@ impl Run {
         if let Some(taken) = (index + 1..ops.len()).find(|index| self.promised(*index)) {
             panic!(
                 "a cut from op {} on took op {}, which a writer who syncs left, a sync \
-                 answered for, and whose content is stored",
+                 covered, and whose content is stored",
                 ops[index].n, ops[taken].n
             );
         }
         assert!(
             !self.receipt_promised(index),
             "a cut from op {} on took a receipt a writer who syncs left, of a request \
-             whose ops are in the log, which a sync answered for",
+             whose ops are in the log, which a sync covered",
+            ops[index].n
+        );
+        // the cut is made by now: where the log was last cut before it
+        assert!(
+            self.to_keep(index, &self.cuts_seen) == (None, None),
+            "a cut from op {} on took a frame a sync can have covered",
             ops[index].n
         );
         self.ledger.cut_from(payload, self.model.synced)
-    }
-
-    /// Whether every sync that covers a frame past op `index` sees to
-    /// that op: a ref transaction, or a change of an index that no op
-    /// after it replaces, in a log that was not cut past it; it was
-    /// last cut at `cut_at`.
-    fn seen_to_by_all(&self, index: usize, cut_at: u64) -> bool {
-        let ops = &self.ledger.ops;
-        let op = &ops[index];
-        let changes = op.staged && op.workspace.is_some() && !op.retired;
-        let replaces =
-            |later: &Entry| later.workspace == op.workspace && (later.staged || later.retired);
-        let last = !ops[index + 1..].iter().any(replaces) && op.at >= cut_at;
-        op.linked || (changes && last)
     }
 
     /// A writer's look came to a cut that the log refused with `why`:
@@ -179,62 +172,39 @@ impl Run {
         }
     }
 
-    /// A cut from op `index` on was refused for the frame at `kept`:
-    /// that is a frame a writer who syncs left, an op whose content is
-    /// stored or a receipt of a request whose ops stay, and no op from
-    /// `index` up to it is one every sync would have seen to whose
-    /// content is gone. Counted by whether the log had to refuse.
-    fn kept_for(&mut self, index: usize, kept: u64) {
+    /// A cut from op `index` on was refused for the frame at `kept`: a
+    /// sync can have covered a frame past that op which a writer who
+    /// syncs left with what it names stored, and `kept` is the first
+    /// such frame. Counted by whether the log had to refuse.
+    fn kept_for(&self, index: usize, kept: u64) {
         let ops = &self.ledger.ops;
-        let op = ops.iter().position(|op| op.at == kept);
-        let up_to = match op {
-            Some(found) => {
-                assert!(
-                    found > index && !ops[found].unsynced && self.stores(&ops[found].payload),
-                    "a cut is refused for the frame at {kept}: no writer who syncs left it \
-                     with what it names stored"
-                );
-                found
-            }
-            // a receipt: after the ops that start before it
-            None => {
-                let before = ops.iter().take_while(|op| op.at < kept).count();
-                let from = ops[index].at;
-                let cut = |of: [u8; 16]| ops[index..].iter().any(|op| op.request == Some(of));
-                let mut receipts = self.ledger.receipts.iter();
-                assert!(
-                    kept > from
-                        && receipts.any(|(_, synced, of, end)| *synced && *end > kept && !cut(*of)),
-                    "a cut is refused for the frame at {kept}: no receipt a writer who \
-                     syncs left lies there"
-                );
-                before
-            }
+        // the look that was refused cut nothing
+        let found = match self.to_keep(index, &self.log().cuts) {
+            _ if self.looks_behind => true,
+            (Some(op), receipt) if receipt.is_none_or(|end| op < end) => kept == op,
+            (_, Some(end)) => kept < end && ops.iter().all(|op| op.at != kept),
+            (_, None) => false,
         };
-        // as far as the file tells where the log was last cut: the look
-        // that was refused cut nothing
-        let cut_at = self.log().cut_at;
-        let gone = |at: &usize| self.seen_to_by_all(*at, cut_at) && !self.stores(&ops[*at].payload);
-        if let Some(gone) = (index..up_to).find(gone) {
-            panic!(
-                "a cut is refused for the frame at {kept}: every sync that covered it saw \
-                 to op {} first, whose content is gone",
-                ops[gone].n
-            );
-        }
-        // whether a frame past the op was promised to anybody; where
-        // none was, what the frame is that could not be told from one
+        assert!(
+            found,
+            "a cut is refused for the frame at {kept}: it is not the first frame past op {} \
+             that a sync can have covered and a writer who syncs left with what it names stored",
+            ops[index].n
+        );
+        self.kept_counted(index);
+    }
+
+    /// Counts a cut from op `index` on that was refused for a frame to
+    /// keep, by whether the log was recorded as synced over one.
+    fn kept_counted(&self, index: usize) {
+        let ops = &self.ledger.ops;
         let needed =
             (index + 1..ops.len()).any(|at| self.promised(at)) || self.receipt_promised(index);
-        let covered = op.is_some_and(|found| ops[found].end <= self.model.covered);
-        let counts = self.counts;
-        let of = match (needed, op.is_some(), covered) {
-            (true, ..) => &counts.kept_needed,
-            (false, false, _) => &counts.kept_receipt,
-            (false, true, false) => &counts.kept_uncovered,
-            (false, true, true) => &counts.kept_unanswered,
+        let of = match needed {
+            true => &self.counts.kept_needed,
+            false => &self.counts.kept_uncovered,
         };
         of.fetch_add(1, Ordering::Relaxed);
-        counts.kept_refused.fetch_add(1, Ordering::Relaxed);
+        self.counts.kept_refused.fetch_add(1, Ordering::Relaxed);
     }
 }

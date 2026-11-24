@@ -93,9 +93,7 @@ fn held(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
     // one of the kinds the log cannot tell from that; those are fewer
     let count = |of: &std::sync::atomic::AtomicU64| of.load(Ordering::Relaxed);
     let needed = count(&counts.kept_needed);
-    let unneeded = count(&counts.kept_uncovered)
-        + count(&counts.kept_unanswered)
-        + count(&counts.kept_receipt);
+    let unneeded = count(&counts.kept_uncovered);
     assert_eq!(needed + unneeded, count(&counts.kept_refused));
     assert!(
         unneeded < needed,

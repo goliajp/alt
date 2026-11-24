@@ -42,14 +42,11 @@ pub struct Counts {
     /// cuts refused before a frame to keep, and within what is synced
     pub kept_refused: AtomicU64,
     pub lost_refused: AtomicU64,
-    /// of the cuts refused before a frame to keep: those where a frame
-    /// past the op was one somebody was answered for; and of the rest,
-    /// by what the frame kept is: an op no sync ever covered, an op a
-    /// sync covered that nobody was answered for, or a receipt
+    /// of the cuts refused before a frame to keep: those where the log
+    /// was recorded as synced over a frame past the op that is one to
+    /// keep, and those where it never was
     pub kept_needed: AtomicU64,
     pub kept_uncovered: AtomicU64,
-    pub kept_unanswered: AtomicU64,
-    pub kept_receipt: AtomicU64,
     pub meanwhile: AtomicU64,
     pub meanwhile_cuts: AtomicU64,
     pub receipts: AtomicU64,
@@ -98,8 +95,6 @@ impl Counts {
             lost_refused: AtomicU64::new(0),
             kept_needed: AtomicU64::new(0),
             kept_uncovered: AtomicU64::new(0),
-            kept_unanswered: AtomicU64::new(0),
-            kept_receipt: AtomicU64::new(0),
             meanwhile: AtomicU64::new(0),
             meanwhile_cuts: AtomicU64::new(0),
             receipts: AtomicU64::new(0),
@@ -205,15 +200,13 @@ impl Counts {
             ),
             ("cuts refused before a frame to keep", &self.kept_refused),
             (
-                "of them with a frame past the op that a caller was answered for",
+                "of them with a frame to keep past the op that a sync covered",
                 &self.kept_needed,
             ),
-            ("and for an op no sync ever covered", &self.kept_uncovered),
             (
-                "for an op a sync covered that no caller was answered for",
-                &self.kept_unanswered,
+                "and with none that a sync ever covered",
+                &self.kept_uncovered,
             ),
-            ("for a receipt nobody was answered for", &self.kept_receipt),
             (
                 "cuts refused within where the log is synced",
                 &self.lost_refused,

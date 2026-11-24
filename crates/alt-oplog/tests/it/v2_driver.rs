@@ -69,6 +69,10 @@ pub struct Run {
     pub to_defer: bool,
     /// the next op appended is written on a ticket
     pub to_ticket: bool,
+    /// a look is made by a handle that has not read the log to its end
+    pub looks_behind: bool,
+    /// where the log was cut of ops, before the call a handle is in
+    pub cuts_seen: Vec<u64>,
     /// a handle was refused for an op nobody looked at, since this
     /// was last asked
     pub to_look: bool,
@@ -159,6 +163,8 @@ impl Run {
             by_sink: false,
             to_defer: false,
             to_ticket: false,
+            looks_behind: false,
+            cuts_seen: Vec::new(),
             to_look: false,
             lacked: false,
             trace: Vec::new(),
