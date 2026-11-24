@@ -32,7 +32,12 @@ trap 'exit 143' TERM
 as_owner "$bin/initdb" -D "$run/data" -U alt_test --auth=trust --no-locale > "$run/initdb.log"
 # This dedicated, mode-0700 socket directory is the only listener. PostgreSQL's
 # TCP listener is disabled; the randomly allocated path isolates concurrent runs.
-as_owner "$bin/pg_ctl" -D "$run/data" -l "$run/server.log" -o "-h '' -k $run -c max_connections=60" -w start
+# Each test makes a database of its own, and a transaction that makes or drops the
+# tables of one holds a lock for every table, index and sequence of it. With the
+# tests of sixteen threads doing so at once the table of locks PostgreSQL sizes
+# for its connections by default is filled, and whichever statement asks for the
+# next lock fails with "out of shared memory".
+as_owner "$bin/pg_ctl" -D "$run/data" -l "$run/server.log" -o "-h '' -k $run -c max_connections=60 -c max_locks_per_transaction=512" -w start
 started=1
 "$bin/postgres" --version
 ALT_SERVER_TEST_ADMIN_DSN="host=$run user=alt_test dbname=postgres connect_timeout=5"
