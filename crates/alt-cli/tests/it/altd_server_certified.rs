@@ -25,7 +25,7 @@ fn curl(dir: &Path, args: &[&str]) -> String {
 
 /// What the repository at `url` tells before a push: the nonce it gives, and
 /// the commit `main` is at.
-fn told(url: &str, dir: &Path) -> (String, String) {
+pub(crate) fn told(url: &str, dir: &Path) -> (String, String) {
     let advert = curl(dir, &[&format!("{url}info/refs?service=git-receive-pack")]);
     assert!(advert.contains(" alt-pushee"), "{advert}");
     let after = |mark: &str| advert.split_once(mark).unwrap().1.to_owned();
@@ -37,7 +37,7 @@ fn told(url: &str, dir: &Path) -> (String, String) {
 }
 
 /// Pushes the creation of `branch` at `at` with `caps` and no objects; the report.
-fn pushed(url: &str, dir: &Path, branch: &str, at: &str, caps: &str) -> String {
+pub(crate) fn pushed(url: &str, dir: &Path, branch: &str, at: &str, caps: &str) -> String {
     pushed_as(url, dir, (branch, at), caps, None)
 }
 

@@ -61,12 +61,12 @@ pub fn take_in<T>(
     if updates.is_empty() {
         return Ok((Ok(()), Ok(None)));
     }
-    let trust = match signed::trust_for(&store.take(), principal)? {
-        None => match signed_in {
-            Some(signed_in) => signed::trust_for(&store.take(), signed_in)?,
-            None => None,
-        },
-        trust => trust,
+    // each in a statement of its own: the store is let go of between them,
+    // and taken a second time while it is held it is waited for without end
+    let trust = signed::trust_for(&store.take(), principal)?;
+    let trust = match (trust, signed_in) {
+        (None, Some(signed_in)) => signed::trust_for(&store.take(), signed_in)?,
+        (trust, _) => trust,
     };
     let checked = match trust {
         Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
