@@ -2,7 +2,12 @@
 use super::*;
 use alt_wire_http::native::{Options, Transport};
 
-fn named(request: &str, name: &str, parent: Option<ObjectId>, commit: &str) -> Payload {
+pub(in crate::database) fn named(
+    request: &str,
+    name: &str,
+    parent: Option<ObjectId>,
+    commit: &str,
+) -> Payload {
     let mut payload = Payload::new(commit, parent);
     payload.publication.key.request_id = request.into();
     payload.publication.refs[0].name = name.into();
@@ -10,7 +15,7 @@ fn named(request: &str, name: &str, parent: Option<ObjectId>, commit: &str) -> P
     payload
 }
 
-fn without_content(mut payload: Payload) -> Payload {
+pub(in crate::database) fn without_content(mut payload: Payload) -> Payload {
     payload.manifest.entries.clear();
     payload.contents.clear();
     payload.publication.content_manifest = payload.manifest.id(limits()).unwrap();
@@ -36,6 +41,25 @@ fn brought(client: &Transport, payload: &Payload) {
     }
 }
 
+/// a client of the native protocol with the token of the owner
+pub(in crate::database) fn client(server: &Running, token: &str) -> Transport {
+    let options = Options {
+        timeout: Duration::from_secs(15),
+        response_bytes: 1_000_000,
+        chunk_bytes: 1_000_000,
+        content_bytes: 100_000_000,
+        allow_loopback_http: true,
+    };
+    Transport::new(&server.url, token.to_owned(), options).unwrap()
+}
+
+/// whether the server published the request, begun and brought to it
+pub(in crate::database) fn sent(client: &Transport, payload: &Payload) -> bool {
+    begun(client, payload);
+    brought(client, payload);
+    published(client, payload)
+}
+
 /// whether the server published the request once it was asked to
 fn published(client: &Transport, payload: &Payload) -> bool {
     let key = &payload.publication.key;
@@ -57,19 +81,8 @@ fn published(client: &Transport, payload: &Payload) -> bool {
 fn a_native_publication_refers_to_what_the_refs_lead_to_or_brings_it() {
     let f = Fixture::new();
     let server = Running::start(&f);
-    let options = Options {
-        timeout: Duration::from_secs(15),
-        response_bytes: 1_000_000,
-        chunk_bytes: 1_000_000,
-        content_bytes: 100_000_000,
-        allow_loopback_http: true,
-    };
-    let client = Transport::new(&server.url, f.token.clone(), options).unwrap();
-    let sent = |payload: &Payload| {
-        begun(&client, payload);
-        brought(&client, payload);
-        published(&client, payload)
-    };
+    let client = client(&server, &f.token);
+    let sent = |payload: &Payload| sent(&client, payload);
     let gone = Payload::new("the-branch-that-goes", None);
     assert!(sent(&gone));
     let mut deletion = without_content(Payload::new("remove-it", Some(gone.commit)));

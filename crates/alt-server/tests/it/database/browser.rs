@@ -7,6 +7,7 @@ mod led_to;
 mod migration;
 mod migration_room;
 mod tree_pages;
+mod unwaited;
 const ORIGIN: &str = "https://workbench.example.test";
 const PASSWORD: &str = "a private browser acceptance password";
 fn start(f: &mut Fixture) -> Running {

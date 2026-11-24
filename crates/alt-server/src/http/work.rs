@@ -141,18 +141,31 @@ impl Work {
                 }
                 Ok(output)
             }
-            _ => {
-                // a native publication stores its Git objects as a segment too
-                let published = match &route {
-                    Route::Request(key, _) => Some(key.scope.repository_instance_id.clone()),
-                    _ => None,
-                };
-                let output = execute_native(store, &self.credential, &self.options, route, source)?;
-                if let Some(repository) = published {
-                    self.compaction.published(&repository);
-                }
-                Ok(output)
-            }
+            route => self.native(store, route, source),
         }
+    }
+
+    /// A route of the native protocol.
+    fn native(
+        self,
+        store: &mut Store,
+        route: Route,
+        source: &mut std::fs::File,
+    ) -> alt_server_store::Result<Output> {
+        if let Route::Content(scope, digest) = route {
+            let gone = Some(&*self.verifying.given_up);
+            let asked = (scope, digest);
+            return crate::native::content(store, &self.credential, asked, source, gone);
+        }
+        // a native publication stores its Git objects as a segment too
+        let published = match &route {
+            Route::Request(key, _) => Some(key.scope.repository_instance_id.clone()),
+            _ => None,
+        };
+        let output = execute_native(store, &self.credential, &self.options, route, source)?;
+        if let Some(repository) = published {
+            self.compaction.published(&repository);
+        }
+        Ok(output)
     }
 }

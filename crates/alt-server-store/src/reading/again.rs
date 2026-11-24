@@ -104,7 +104,19 @@ impl Store {
         scope: &Scope,
         digest: &str,
     ) -> Result<(u64, crate::StoredReader)> {
-        let led = (Led::RefsOrRecords, None);
+        self.open_published_content_while(credential, scope, digest, None)
+    }
+
+    /// [`Self::open_published_content`], with what the refs lead to looked
+    /// for no longer once `gone` is set.
+    pub fn open_published_content_while(
+        &mut self,
+        credential: &Credential,
+        scope: &Scope,
+        digest: &str,
+        gone: Option<&std::sync::atomic::AtomicBool>,
+    ) -> Result<(u64, crate::StoredReader)> {
+        let led = (Led::RefsOrRecords, gone);
         twice(|| self.open_published_content_once(credential, scope, digest, led))
     }
 

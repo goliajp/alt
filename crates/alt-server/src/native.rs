@@ -81,6 +81,24 @@ pub(crate) fn empty(source: &mut dyn Read) -> Result<()> {
     }
     Ok(())
 }
+/// A published payload by the digest of its content. What it takes to tell
+/// whether the caller is given a Git object is given up once `gone` is set.
+pub(crate) fn content(
+    store: &mut Store,
+    credential: &Credential,
+    (scope, digest): (alt_remote_protocol::Scope, String),
+    source: &mut dyn Read,
+    gone: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Output> {
+    empty(source)?;
+    let (bytes, file) = store.open_published_content_while(credential, &scope, &digest, gone)?;
+    Ok(Output::File {
+        bytes,
+        digest,
+        file,
+        held: None,
+    })
+}
 pub fn execute_native(
     store: &mut Store,
     credential: &Credential,
@@ -162,16 +180,7 @@ pub fn execute_native(
                 options.upload_ttl_ms,
             )?)
         }
-        Route::Content(scope, digest) => {
-            empty(source)?;
-            let (bytes, file) = store.open_published_content(credential, &scope, &digest)?;
-            Ok(Output::File {
-                bytes,
-                digest,
-                file,
-                held: None,
-            })
-        }
+        Route::Content(scope, digest) => content(store, credential, (scope, digest), source, None),
         Route::Bundles(scope, root, after) => {
             empty(source)?;
             json(&store.bundles_for_record(credential, &scope, &root, after.as_deref(), 20)?)
