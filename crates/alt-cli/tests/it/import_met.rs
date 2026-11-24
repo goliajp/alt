@@ -277,3 +277,30 @@ fn what_an_export_left_is_named_where_it_cannot_be_read() {
         "{said}"
     );
 }
+
+#[test]
+fn a_branch_git_renamed_to_beneath_its_own_name_or_back_is_imported() {
+    let (_dir, source, to) = imported();
+    let at = |rev: &str| ok(alt(&to, &["rev-parse", rev]));
+    let logged = |branch: &str| ok(alt(&to, &["reflog", branch])).lines().count();
+    ok(git(&source, &["branch", "topic"]));
+    import(&source, &to);
+    let lines = logged("topic");
+    assert!(lines > 0);
+    // the name the store has a branch at is a directory of refs in git
+    ok(git(&source, &["branch", "-m", "topic", "topic/a"]));
+    import(&source, &to);
+    assert_eq!(at("topic/a"), ok(git(&source, &["rev-parse", "topic/a"])));
+    assert_eq!(at("topic"), at("topic/a"));
+    assert_eq!(logged("topic"), lines);
+    let beneath = logged("topic/a");
+    assert!(beneath > 0);
+    // and back: the branch of the store lies beneath a ref of git
+    ok(git(&source, &["branch", "-m", "topic/a", "topic"]));
+    import(&source, &to);
+    assert_eq!(at("topic"), ok(git(&source, &["rev-parse", "topic"])));
+    assert_eq!(logged("topic/a"), beneath);
+    assert!(logged("topic") > 0);
+    import(&source, &to);
+    assert_eq!(logged("topic/a"), beneath);
+}

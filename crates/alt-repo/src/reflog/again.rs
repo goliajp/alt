@@ -108,6 +108,13 @@ pub(super) fn keep_ours(alt_dir: &Path, ours: Carried, algo: HashAlgo) -> Result
                 said: Some(format!("import: moving to {new}").into_bytes()),
             });
         }
+        // git has refs beneath this name, or a ref above it: the log
+        // has no place among git's
+        let above = path.ancestors().skip(1).take_while(|at| *at != kept);
+        let path = match path.is_dir() || above.clone().any(|at| at.is_file()) {
+            true => super::apart(alt_dir, &name),
+            false => path,
+        };
         fs::create_dir_all(path.parent().expect("a file under the directory"))?;
         fs::write(path, write(&lines, algo))?;
     }

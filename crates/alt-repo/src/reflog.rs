@@ -29,6 +29,16 @@ pub use again::{Carried, carried, was_at};
 const KEPT: &str = "git-import/logs";
 /// The file that names the last op of the store when they were kept.
 const KEPT_AT: &str = "git-import/logs.at";
+/// The logs of the store that have no place among those kept of git:
+/// a ref of the store whose name is, in git, a directory of refs, or
+/// lies beneath what is a ref there. Each in a file named by the ref.
+const APART: &str = "git-import/logs-apart";
+
+/// The file under [`APART`] for the log of the ref `name`.
+fn apart(alt_dir: &Path, name: &str) -> PathBuf {
+    let file = name.replace('%', "%25").replace('/', "%2F");
+    alt_dir.join(APART).join(file)
+}
 
 /// One line of the log of a ref.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +81,9 @@ fn read(path: &Path) -> Result<Option<Vec<u8>>, RepoError> {
     match fs::read(path) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => Ok(None),
-        // a name with a ref beneath it is a directory there
+        // a name with a ref beneath it is a directory there, and one
+        // beneath a ref has a file above it
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Ok(None),
         Err(_) if path.is_dir() => Ok(None),
         Err(e) => Err(e.into()),
     }
@@ -91,6 +103,11 @@ fn logged(logs: &Path, name: &str) -> Result<Vec<Move>, RepoError> {
         said: Said::Kept(line.said),
     };
     Ok(parse(&log).into_iter().map(kept).collect())
+}
+
+fn file_of(path: &Path) -> String {
+    let name = path.file_name().unwrap_or_default();
+    name.to_string_lossy().into_owned()
 }
 
 fn op_id(hex: &str) -> Option<OpId> {
@@ -124,8 +141,10 @@ pub fn take(
     ours: (Carried, alt_git_codec::HashAlgo),
 ) -> Result<(), RepoError> {
     let kept = alt_dir.join(KEPT);
-    if kept.exists() {
-        fs::remove_dir_all(&kept)?;
+    for left in [&kept, &alt_dir.join(APART)] {
+        if left.exists() {
+            fs::remove_dir_all(left)?;
+        }
     }
     let mut todo = vec![PathBuf::new()];
     while let Some(under) = todo.pop() {
@@ -168,7 +187,10 @@ impl Repository {
         let since = derived::derived(alt.refs()?, name, is_head(name), after)?;
         let mut moves = match since.anew {
             true => Vec::new(),
-            false => logged(&alt.alt_dir.join(KEPT), name)?,
+            false => match apart(&alt.alt_dir, name) {
+                held if held.is_file() => logged(&alt.alt_dir.join(APART), &file_of(&held))?,
+                _ => logged(&alt.alt_dir.join(KEPT), name)?,
+            },
         };
         moves.extend(since.moves);
         Ok(moves)
