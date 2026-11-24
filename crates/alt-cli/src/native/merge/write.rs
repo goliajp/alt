@@ -77,6 +77,12 @@ impl NativeRepo<'_> {
                     ignored.extend(self.ignored_in_the_way(&r.path, &tracked, &mut visible)?);
                 }
                 Ok(m) if !m.is_dir() && !was.contains_key(&r.path) => {
+                    let leaves = |r: &&&Resolved| {
+                        !r.conflicted && r.entry.is_none() && was.contains_key(&r.path)
+                    };
+                    if self.respells(&r.path, changed.iter().filter(leaves).map(|r| &r.path))? {
+                        continue;
+                    }
                     let path = &r.path;
                     let why = format!("untracked working tree file '{path}' would be overwritten");
                     return Err(crate::machine::Failure::refusal("precondition_failed", why).into());
@@ -164,6 +170,13 @@ impl NativeRepo<'_> {
                 });
             }
         }
+        let come = resolved
+            .iter()
+            .filter(|r| r.worktree.is_some() || r.entry.is_some());
+        let come = come
+            .map(|r| &r.path)
+            .filter(|path| !was.contains_key(*path));
+        self.keep_respelled(&mut changes, come)?;
         let algo = self.store.algo()?;
         let index = Index {
             version: 2,

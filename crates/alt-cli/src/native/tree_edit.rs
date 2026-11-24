@@ -126,6 +126,11 @@ impl NativeRepo<'_> {
                 });
             }
         }
+        let come = edit
+            .files
+            .iter()
+            .filter(|(_, put)| !matches!(put, Put::Nothing));
+        self.keep_respelled(&mut changes, come.map(|(path, _)| path))?;
         let algo = self.store.algo()?;
         let index_after = self.snapshot(&canonical_index(index, algo))?;
         *self.planned.borrow_mut() = Some(tree_state::Planned {

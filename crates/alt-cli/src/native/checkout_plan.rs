@@ -79,11 +79,16 @@ impl NativeRepo<'_> {
                     self.ignored_in_the_way(&entry.path, &tracked, &mut visible)?;
                 }
                 Some(m) if !m.is_dir() && !old_paths.contains(entry.path.as_slice()) => {
-                    return Err(format!(
-                        "untracked working tree file '{}' would be overwritten",
-                        entry.path
-                    )
-                    .into());
+                    let stays: std::collections::HashSet<&BString> =
+                        target.iter().map(|e| &e.path).collect();
+                    let leaving = old.iter().map(|e| &e.path).filter(|p| !stays.contains(p));
+                    if !self.respells(&entry.path, leaving)? {
+                        return Err(format!(
+                            "untracked working tree file '{}' would be overwritten",
+                            entry.path
+                        )
+                        .into());
+                    }
                 }
                 _ => {}
             }
@@ -169,6 +174,11 @@ impl NativeRepo<'_> {
                 });
             }
         }
+        let come = target.iter().map(|e| &e.path);
+        self.keep_respelled(
+            &mut files,
+            come.filter(|p| !old_paths.contains(p.as_slice())),
+        )?;
         // ignored files in a directory that becomes a file are removed with
         // it, and recorded so that an undo brings them back
         for path in ignored {

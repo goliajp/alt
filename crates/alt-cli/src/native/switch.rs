@@ -241,7 +241,17 @@ impl NativeRepo<'_> {
             // nothing is beneath a tracked file or symlink that gives way
             let beneath_tracked = self.validate_path_among(&entry.path, &tracked)?;
             let found = self.abs(&entry.path)?.symlink_metadata();
-            if !beneath_tracked && found.is_ok_and(|m| !m.is_dir()) {
+            let leaving = || {
+                let stays: HashSet<&BString> = kept.iter().map(|e| &e.path).collect();
+                staged
+                    .keys()
+                    .copied()
+                    .filter(move |path| !stays.contains(path))
+            };
+            if !beneath_tracked
+                && found.is_ok_and(|m| !m.is_dir())
+                && !self.respells(&entry.path, leaving())?
+            {
                 in_the_way.push(entry.path.clone());
             }
         }

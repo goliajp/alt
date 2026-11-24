@@ -6,6 +6,7 @@ use super::checkout_recovery::{CheckoutIntent, FileChange, FileState};
 use super::*;
 use recovery::hash;
 
+mod folded;
 mod moves;
 mod paths;
 
