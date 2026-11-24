@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a fetch whose time is over chooses no further and gives its worker back, over a connection
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/given_up.rs
