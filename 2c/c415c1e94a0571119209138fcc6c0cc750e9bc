@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: keep the last byte of a checkpoint the power took from being the one that was there
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_cuts.rs
