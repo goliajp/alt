@@ -83,7 +83,13 @@ pub struct IndexLimits {
     pub base_bytes: usize,
     /// the bytes of delta bases written to files of their own, to be read
     /// again, when memory has no room for them while their deltas are
-    /// resolved
+    /// resolved. The packs of histories keep a few megabytes of bases
+    /// waiting at once and write none; the files are for a pack whose
+    /// objects are large. By default they hold sixteen times what memory
+    /// does, a gigabyte and a half: the largest object a push may bring
+    /// by default and half again, and all that one push takes of the
+    /// disk beside its pack. Past them a base is made again when it is
+    /// come back to
     pub spill_bytes: u64,
     /// whether the pack is kept: its index is synced then before it
     /// takes its name. One that is read and removed again needs no sync
