@@ -45,7 +45,8 @@ impl Run {
             return false;
         }
         let head = self.handles[index].log.anchor().unwrap();
-        self.appended("driver", payload, &meta, head);
+        self.handles[index].own.push(head);
+        self.appended("driver", payload, (&meta, unsynced), head);
         // a writer that syncs appends after nothing that is not seen to
         if let Some(op) = unsettled.first().filter(|_| !unsynced && !seen_to) {
             panic!(
@@ -87,6 +88,9 @@ impl Run {
         drop(left);
         self.meanwhile_done(&unsettled);
         if self.took(index, appended, false).is_some() {
+            let after = self.ledger.ops.len();
+            self.ledger.receipts.push((after, !unsynced, request));
+            self.handles[index].receipts.push(request);
             self.request += 1;
             self.ledger.begun = None;
             self.counts.receipts.fetch_add(1, Ordering::Relaxed);

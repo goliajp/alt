@@ -13,6 +13,18 @@ pub struct Counts {
     pub cut_back_begun: AtomicU64,
     /// of them, those told by their sinks, of what the sinks were left
     pub told_by_sink: AtomicU64,
+    /// of them, those told by a sync of an op they wrote and never had
+    /// synced, with the ops they hold in the log
+    pub lost_told: AtomicU64,
+    /// syncs left to a sink that the sink synced, and that it told of
+    /// as cut
+    pub left_synced: AtomicU64,
+    pub left_told: AtomicU64,
+    /// syncs that were not left to a sink over what it still owed
+    pub refused_over: AtomicU64,
+    /// cuts refused before a frame to keep, and within what is synced
+    pub kept_refused: AtomicU64,
+    pub lost_refused: AtomicU64,
     pub meanwhile: AtomicU64,
     pub meanwhile_cuts: AtomicU64,
     pub receipts: AtomicU64,
@@ -42,6 +54,12 @@ impl Counts {
             cut_back: AtomicU64::new(0),
             cut_back_begun: AtomicU64::new(0),
             told_by_sink: AtomicU64::new(0),
+            lost_told: AtomicU64::new(0),
+            left_synced: AtomicU64::new(0),
+            left_told: AtomicU64::new(0),
+            refused_over: AtomicU64::new(0),
+            kept_refused: AtomicU64::new(0),
+            lost_refused: AtomicU64::new(0),
             meanwhile: AtomicU64::new(0),
             meanwhile_cuts: AtomicU64::new(0),
             receipts: AtomicU64::new(0),
@@ -80,6 +98,21 @@ impl Counts {
             ("handles told their ops were cut", &self.cut_back),
             (told_begun, &self.cut_back_begun),
             (told_by_sink, &self.told_by_sink),
+            (
+                "of them told by a sync of an op they wrote, the ops held in the log",
+                &self.lost_told,
+            ),
+            ("syncs left to a sink that it synced", &self.left_synced),
+            ("that it told of as cut", &self.left_told),
+            (
+                "syncs not left to a sink over what it still owed",
+                &self.refused_over,
+            ),
+            ("cuts refused before a frame to keep", &self.kept_refused),
+            (
+                "cuts refused within where the log is synced",
+                &self.lost_refused,
+            ),
             ("handles past a cut that died after step 1", came(1)),
             ("after step 2", came(2)),
             ("after step 3", came(3)),

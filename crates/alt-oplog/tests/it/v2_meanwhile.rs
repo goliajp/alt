@@ -35,7 +35,15 @@ pub enum Outcome {
     Appended {
         meta: Meta,
         payload: Vec<u8>,
+        unsynced: bool,
         head: Anchor,
+        told: Vec<Discarded>,
+    },
+    /// a look that came to a cut the log refused
+    Refused {
+        refused: Option<Vec<u8>>,
+        asked: Vec<(Vec<u8>, bool)>,
+        why: OpLogError,
         told: Vec<Discarded>,
     },
     Looked {
@@ -84,6 +92,7 @@ impl Meanwhile {
                     Ok(_) => Outcome::Appended {
                         meta,
                         payload,
+                        unsynced,
                         head: log.anchor().unwrap(),
                         told: log.take_discarded(),
                     },
@@ -99,6 +108,14 @@ impl Meanwhile {
                         cut,
                         told: log.take_discarded(),
                     },
+                    Err(why @ (OpLogError::Kept { .. } | OpLogError::Lost { .. })) => {
+                        Outcome::Refused {
+                            refused,
+                            asked,
+                            why,
+                            told: log.take_discarded(),
+                        }
+                    }
                     Err(error) => Outcome::Failed(format!("{error:?}")),
                 }
             }

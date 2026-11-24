@@ -9,7 +9,7 @@ use alt_oplog::{Anchor, Meta, OpLog, OpLogSink, SyncNamed};
 
 use super::v2_beside::{Beside, meddled};
 use super::v2_counts::Counts;
-use super::v2_ledger::{Entry, Ledger};
+use super::v2_ledger::Ledger;
 use super::v2_log::file_len;
 use super::v2_meanwhile::Meanwhile;
 use super::v2_model::{Model, Reference, Rng, reference};
@@ -24,10 +24,15 @@ pub struct Handle {
     pub sink: Option<OpLogSink>,
     /// how long the file was each time the handle read it as an open does
     pub seen: Vec<u64>,
-    /// What its sink was left to sync when the handle last asked for
-    /// that: the op that was its last then, and where its frames ended.
-    /// Its sink tells of a cut of these, whatever the handle holds since.
-    pub left: Option<(Option<Anchor>, u64)>,
+    /// The syncs it left to its sink that the sink has given no answer
+    /// for: for each, the op that was the handle's last then, and where
+    /// its frames ended. The sink syncs them or tells of their cut,
+    /// whatever the handle holds since.
+    pub left: Vec<(Option<Anchor>, u64)>,
+    /// the ops it appended that no sync of it has answered for, and the
+    /// requests whose receipts it appended
+    pub own: Vec<Anchor>,
+    pub receipts: Vec<[u8; 16]>,
 }
 
 impl Handle {
@@ -36,7 +41,7 @@ impl Handle {
     pub fn leaves(&mut self) {
         let end = self.log.appended_len();
         if end > 64 {
-            self.left = Some((self.log.anchor(), end));
+            self.left.push((self.log.anchor(), end));
         }
     }
 }
@@ -65,6 +70,9 @@ pub struct Run {
     pub died: u64,
     /// what the call taken in next came to, its sink told
     pub by_sink: bool,
+    /// the handle of the call taken in next was told of a cut for what
+    /// its sink still owed an answer for
+    pub owed_told: bool,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -141,6 +149,7 @@ impl Run {
             cut_synced: false,
             died: 0,
             by_sink: false,
+            owed_told: false,
             trace: Vec::new(),
             counts,
         }
@@ -163,6 +172,7 @@ impl Run {
     pub fn adopt(&mut self, mut log: OpLog, read_only: bool) -> usize {
         if self.handles.len() == 4 {
             let gone = self.rng.below(4) as usize;
+            self.trace.push(format!("handle {gone} is closed"));
             self.handles.remove(gone);
         }
         let meanwhile = (self.meanwhile.clone(), self.path().to_owned());
@@ -181,7 +191,9 @@ impl Run {
             read_only,
             sink,
             seen: vec![self.file_len()],
-            left: None,
+            left: Vec::new(),
+            own: Vec::new(),
+            receipts: Vec::new(),
         });
         self.handles.len() - 1
     }
@@ -258,31 +270,14 @@ impl Run {
     }
 
     /// Takes in an op `actor` had a handle append, which that handle
-    /// holds as its last, at `head`.
-    pub fn appended(&mut self, actor: &str, payload: Vec<u8>, meta: &Meta, head: Anchor) {
+    /// holds as its last, at `head`; `unsynced` for a writer that does
+    /// not sync.
+    pub fn appended(&mut self, actor: &str, payload: Vec<u8>, of: (&Meta, bool), head: Anchor) {
         let log = (self.dir.path(), self.block);
-        self.ledger.appended(log, (actor, &payload), meta, head);
+        self.ledger.appended(log, (actor, &payload), of, head);
         self.model.written.insert(payload, self.model.boot);
         // it read the log to its end under the lock: a cut that was
         // begun and never came to the log is forgotten
         self.ledger.begun = None;
-    }
-
-    /// An answer for whoever is asked whether what an op names is stored:
-    /// yes to all, or to all but one op past where the log is synced;
-    /// with `surely`, to all but one wherever there is one.
-    pub fn refusal(&mut self, surely: bool) -> Option<Vec<u8>> {
-        let synced = self.model.synced;
-        let past: Vec<&Entry> = self
-            .ledger
-            .ops
-            .iter()
-            .filter(|op| op.at >= synced)
-            .collect();
-        match past.len() {
-            0 => None,
-            _ if !surely && self.rng.one_in(2) => None,
-            some => Some(past[self.rng.below(some as u64) as usize].payload.clone()),
-        }
     }
 }

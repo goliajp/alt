@@ -26,6 +26,13 @@ pub struct Entry {
     pub end: u64,
     pub linked: bool,
     pub request: Option<[u8; 16]>,
+    /// its writer was one that does not sync
+    pub unsynced: bool,
+    /// the workspace it is of, whether it changes the index of that one,
+    /// and whether the workspace is gone with it
+    pub workspace: Option<[u8; 8]>,
+    pub staged: bool,
+    pub retired: bool,
 }
 
 /// The number an op was appended under, which its payload begins with.
@@ -95,6 +102,10 @@ pub struct Ledger {
     /// ends there, in a file of any length and in any boot, until a
     /// writer reads it to its end.
     pub begun: Option<u64>,
+    /// The receipts appended: how many ops the log held then, whether
+    /// the writer was one that syncs, and the request. One a power cut
+    /// took may still be told here.
+    pub receipts: Vec<(usize, bool, [u8; 16])>,
 }
 
 impl Ledger {
@@ -107,7 +118,7 @@ impl Ledger {
         &mut self,
         (dir, block): (&Path, u64),
         (actor, payload): (&str, &[u8]),
-        meta: &Meta,
+        (meta, unsynced): (&Meta, bool),
         told: Anchor,
     ) {
         let (parent, after) = self
@@ -140,6 +151,10 @@ impl Ledger {
             end,
             linked: meta.linked,
             request: meta.request,
+            unsynced,
+            workspace: meta.workspace,
+            staged: meta.index_after.is_some(),
+            retired: meta.retired,
         });
     }
 
@@ -161,6 +176,7 @@ impl Ledger {
 
     fn went(&mut self, from: usize, synced: u64) -> Vec<Entry> {
         let gone = self.ops.split_off(from);
+        self.receipts.retain(|(after, ..)| *after <= from);
         for op in &gone {
             assert!(
                 op.end > synced,
@@ -187,6 +203,12 @@ impl Ledger {
     pub fn lost_from(&mut self, byte: u64, synced: u64) {
         let from = self.ops.iter().position(|op| op.end > byte);
         self.went(from.unwrap_or(self.ops.len()), synced);
+    }
+
+    /// Whether the receipt of `request` is among those the log holds, as
+    /// far as cuts took none after it.
+    pub fn receipt_of(&self, request: [u8; 16]) -> bool {
+        self.receipts.iter().any(|(.., of)| *of == request)
     }
 
     /// Where the first op of `request` starts, and how many ops it has.

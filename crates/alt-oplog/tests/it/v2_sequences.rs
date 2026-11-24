@@ -46,7 +46,7 @@ impl Run {
                 })
             }
             1 => Some(Plan::Look {
-                refused: self.refusal(true),
+                refused: self.refusal(true, true),
             }),
             _ => None,
         };
@@ -80,24 +80,12 @@ impl Run {
             .push(format!("handle {index} syncs (way {how}), fails: {fails}"));
         self.plan_meanwhile();
         self.refuses.store(fails, Ordering::Relaxed);
-        let handle = &mut self.handles[index];
-        let mut synced = match how {
-            0 => handle.log.sync(),
-            _ => handle.log.bound_now(),
-        };
-        if let (Ok(()), Some(sink)) = (&synced, &handle.sink) {
-            synced = sink.fsync();
-            self.by_sink = true;
-            if how == 0 {
-                self.handles[index].leaves();
-            }
-        }
+        let synced = self.sync_through(index, how, &unsettled);
         if how != 0 && !matches!(synced, Err(OpLogError::CutBack)) {
             // it read the log to its end under the lock first
             self.ledger.begun = None;
         }
         self.refuses.store(false, Ordering::Relaxed);
-        self.meanwhile_done(&unsettled);
         self.took(index, synced, fails);
     }
 
@@ -109,7 +97,7 @@ impl Run {
         }
         let end = self.handles[index].log.appended_len();
         let unsettled = self.unsettled_before(end);
-        let refused = self.refusal(surely);
+        let refused = self.refusal(surely, false);
         let refuses = refused.as_deref().map(name);
         self.trace
             .push(format!("handle {index} looks, refusing {refuses:?}"));

@@ -44,26 +44,18 @@ impl Run {
                     "  it is told its ops were cut (by its sink: {by_sink})"
                 ));
                 let len = self.file_len();
-                let handle = &mut self.handles[index];
-                // a handle is told of the ops it holds, its sink of what
-                // it was left to sync; either way that is not told again
-                let (last, end) = match (by_sink, handle.left.take()) {
-                    (false, _) => (handle.log.anchor(), handle.log.appended_len()),
-                    (true, Some(left)) => left,
-                    (true, None) => panic!("the sink of handle {index} was left nothing to sync"),
-                };
-                let begun = self.ledger.begun.is_some_and(|at| at < end);
-                let held = self.ledger.holds(last);
-                assert!(
-                    begun || !held,
-                    "handle {index} is told its ops were cut: the log holds them"
-                );
+                // its sink tells of what it was left to sync, which is
+                // held to that where it answered; a handle is told of
+                // the ops it holds, of one it wrote and never had
+                // synced, or of what its sink still owes an answer for
+                let owed = std::mem::take(&mut self.owed_told);
                 if by_sink {
                     self.counts.told_by_sink.fetch_add(1, Ordering::Relaxed);
-                } else if held {
-                    let begun = &self.counts.cut_back_begun;
-                    begun.fetch_add(1, Ordering::Relaxed);
+                } else if !owed {
+                    self.handle_told(index);
                 }
+                self.forget_gone(index);
+                let handle = &mut self.handles[index];
                 handle.log.reopen().expect("the log reads anew");
                 handle.seen.push(len);
                 assert!(self.ledger.holds(handle.log.anchor()));
@@ -117,6 +109,8 @@ impl Run {
     ) -> bool {
         let gone = asked.iter().any(|(_, held)| !held).then(|| {
             let refused = refused.as_ref().expect("an op was refused");
+            let index = self.ledger.ops.iter().position(|op| op.payload == *refused);
+            self.cut_kept_nothing(index.expect("the op to cut is in the log"));
             self.ledger.cut_from(refused, self.model.synced)
         });
         let cut_at = gone.as_ref().map(|gone| (gone[0].at, gone.len()));
@@ -144,14 +138,21 @@ impl Run {
                 Outcome::Appended {
                     meta,
                     payload,
+                    unsynced,
                     head,
                     told,
                 } => {
                     self.trace
                         .push(format!("  meanwhile {} is appended", name(&payload)));
                     self.cuts_told(&told, None);
-                    self.appended("meanwhile", payload, &meta, head);
+                    self.appended("meanwhile", payload, (&meta, unsynced), head);
                 }
+                Outcome::Refused {
+                    refused,
+                    asked,
+                    why,
+                    told,
+                } => self.cut_refused(&refused, &asked, &why, &told),
                 Outcome::Looked {
                     refused,
                     asked,

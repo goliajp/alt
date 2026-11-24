@@ -38,7 +38,7 @@ impl Run {
     /// it as if the process had died.
     pub fn settle(&mut self, index: usize, dies: Option<u8>, surely: bool) -> bool {
         let unsettled = self.unsettled_before(u64::MAX);
-        let refused = self.refusal(surely);
+        let refused = self.refusal(surely, true);
         let refuses = refused.as_deref().map(name);
         self.trace.push(format!(
             "handle {index} settles, refusing {refuses:?}, dies: {dies:?}"
@@ -59,11 +59,28 @@ impl Run {
             return false;
         }
         let told = self.handles[index].log.take_discarded();
+        if let Err(why @ (OpLogError::Kept { .. } | OpLogError::Lost { .. })) = &cut {
+            self.cut_refused(&refused, &asked, why, &told);
+            return false;
+        }
         let Some(cut) = self.took(index, cut, false) else {
             return false;
         };
+        let before: Vec<_> = self.ledger.ops.iter().map(|op| op.id).collect();
+        let receipts = self.handles[index].receipts.clone();
+        let had: Vec<_> = receipts
+            .into_iter()
+            .filter(|of| self.ledger.receipt_of(*of))
+            .collect();
         let cut = self.settled(&unsettled, &refused, &asked, (cut, told));
         self.counts.cuts.fetch_add(cut as u64, Ordering::Relaxed);
+        // of the ops it cut itself the handle was told by its look
+        let cut_now = &before[self.ledger.ops.len().min(before.len())..];
+        let (ledger, handle) = (&self.ledger, &mut self.handles[index]);
+        handle.own.retain(|own| !cut_now.contains(&own.op));
+        handle
+            .receipts
+            .retain(|of| !had.contains(of) || ledger.receipt_of(*of));
         let len = self.file_len();
         self.handles[index].seen.push(len);
         true
@@ -102,17 +119,12 @@ impl Run {
             "handle {held} comes upon the cut that died after step {step} (way {way})"
         ));
         let handle = &mut self.handles[held];
-        let mut did = match way {
+        let did = match way {
             0 => handle.log.follow(),
             1 => handle.log.refresh(),
-            2 => handle.log.sync(),
-            _ => handle.log.bound_now(),
+            2 => self.sync_through(held, 0, &[]),
+            _ => self.sync_through(held, 1, &[]),
         };
-        if let (2, Ok(()), Some(sink)) = (way, &did, &handle.sink) {
-            did = sink.fsync();
-            self.by_sink = true;
-            self.handles[held].leaves();
-        }
         assert!(
             matches!(did, Err(OpLogError::CutBack)),
             "a handle that holds ops past where a cut died after step {step} is told {did:?}"
