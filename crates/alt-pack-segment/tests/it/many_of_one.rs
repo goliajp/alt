@@ -97,6 +97,19 @@ fn what_is_told_of_each_delta_is_within_the_memory_of_the_pack() {
         matches!(refused, Err(Error::Limit("index memory"))),
         "{refused:?}"
     );
+    // a pack that says it has a million entries is refused for what they would
+    // take, before anything is set aside for them
+    let mut said = base();
+    said[8..12].copy_from_slice(&1_000_000u32.to_be_bytes());
+    let limits = Limits {
+        memory: Some(Box::leak(Box::new(Memory::new(1 << 20)))),
+        ..LIMITS
+    };
+    let refused = ingest_holding(&said, &none, &limits, 0).map(|ingested| ingested.objects());
+    assert!(
+        matches!(refused, Err(Error::Limit("index memory"))),
+        "{refused:?}"
+    );
 }
 
 #[test]
