@@ -3,9 +3,11 @@
 pub(crate) use crate::settled::Meta;
 use crate::{
     Error, Kind, Led, Limits, Oid, Record, SegmentSet,
-    descend::{self, Root, Shared},
+    descend::Root,
     format::{self, CommitRow},
-    object_id, plain, room,
+    object_id,
+    passes::Passes,
+    plain, room,
     scan::{self, Form},
     settled::Resolved,
     told::Told,
@@ -207,12 +209,13 @@ fn verified(
                 oid: meta.oid,
                 kind: meta.kind,
                 depth: 0,
+                way: Vec::new(),
             });
         }
         metas[index] = Some(meta);
     }
     // thin pack: bases that live in earlier segments, numbered behind the entries
-    let mut outside = Vec::new();
+    let (mut outside, mut below) = (Vec::new(), Vec::new());
     let mut outer = Vec::new();
     for named in deltas.by_object() {
         let base = named[0].0;
@@ -226,45 +229,34 @@ fn verified(
                 kind: record.kind,
                 // the chain goes on below the base, in the segment that holds it
                 depth: record.depth,
+                way: Vec::new(),
             });
             outside.push(base);
+            below.push(record.depth);
             scanned.largest = scanned.largest.max(record.size);
         }
     }
     let mut budget = Budget::new(
         (limits.object_bytes, limits.inflated_bytes),
         (limits.base_bytes, limits.spill_bytes),
-        // how deep an object is is known when every entry that makes it is
-        u32::MAX,
+        u32::from(limits.delta_depth) + 1,
         scanned.inflated,
     );
     let memory = memory.resolving(limits, &mut scanned)?;
     memory.told_to(&mut budget, limits.files);
-    let mut work = IndexWork::default();
-    let taken: Vec<AtomicBool> = (scanned.entries.iter())
-        .map(|_| AtomicBool::new(false))
-        .collect();
-    for pass in [roots, outer] {
-        let shared = Shared {
-            pack,
-            entries: &scanned.entries,
-            existing,
-            told: &told,
-            deltas: &deltas,
-            budget: &budget,
-            outside: &outside,
-            taken: &taken,
-        };
-        let made = descend::below(&shared, pass, memory.walks)?;
-        commits.extend(made.commits);
-        work.inflated += made.work.inflated;
-        work.applied += made.work.applied;
-        work.hashed += made.work.hashed;
-        for (index, meta) in made.metas {
-            metas[index].get_or_insert(meta);
-        }
-    }
-    (work.held, work.spilled) = budget.most();
+    let passes = Passes {
+        pack,
+        entries: &scanned.entries,
+        existing,
+        told: &told,
+        deltas: &deltas,
+        budget: &budget,
+        outside: &outside,
+        below: &below,
+        walks: memory.walks,
+        depth: limits.delta_depth,
+    };
+    let work = passes.resolve((roots, outer), &mut metas, &mut commits)?;
     let resolved = metas.into_iter().zip(&scanned.entries).map(|(meta, raw)| {
         meta.ok_or(match raw.form {
             Form::Reference(base) => Error::MissingBase(base),

@@ -41,6 +41,10 @@ impl<'a> Objects<'a> {
     }
 }
 
+/// The bases one pack has in files at once. Each is a file and a mapping, and
+/// a pack of many small objects that wait would have as many as it has bases.
+pub const SPILL_FILES: usize = 1024;
+
 /// What the walks of one pack may take, and what they have between them.
 pub struct Budget<'a> {
     /// the most bytes one object may have
@@ -50,6 +54,8 @@ pub struct Budget<'a> {
     /// the bytes of bases held in memory, and in files of their own
     pub base_bytes: usize,
     pub spill_bytes: u64,
+    /// the bases of the pack in files of their own at once, whatever their bytes
+    pub spill_files: usize,
     /// the deepest a delta may lie below a plain entry
     pub depth: u32,
     /// where the bases in files are written, and what the packs indexed at
@@ -66,6 +72,8 @@ pub struct Budget<'a> {
     pub(super) inflated: AtomicU64,
     pub(super) held: AtomicUsize,
     pub(super) spilled: AtomicU64,
+    pub(super) spilled_files: AtomicUsize,
+    pub(super) most_spilled_files: AtomicUsize,
     pub(super) most_held: AtomicUsize,
     pub(super) most_spilled: AtomicU64,
 }
@@ -83,6 +91,7 @@ impl Budget<'_> {
             inflated_bytes,
             base_bytes,
             spill_bytes,
+            spill_files: SPILL_FILES,
             depth,
             files: None,
             objects: None,
@@ -90,6 +99,8 @@ impl Budget<'_> {
             inflated: AtomicU64::new(inflated),
             held: AtomicUsize::new(0),
             spilled: AtomicU64::new(0),
+            spilled_files: AtomicUsize::new(0),
+            most_spilled_files: AtomicUsize::new(0),
             most_held: AtomicUsize::new(0),
             most_spilled: AtomicU64::new(0),
         }
@@ -105,6 +116,11 @@ impl Budget<'_> {
             self.most_held.load(Relaxed),
             self.most_spilled.load(Relaxed),
         )
+    }
+
+    /// The most bases in files at once.
+    pub fn most_files(&self) -> usize {
+        self.most_spilled_files.load(Relaxed)
     }
 
     pub(super) fn waited_for(&self) -> Result<(), PackError> {
@@ -124,4 +140,21 @@ impl Budget<'_> {
             .map(|_| ())
             .map_err(|_| PackError::Limit("inflated bytes"))
     }
+}
+
+/// The work indexing a pack took.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct IndexWork {
+    /// zlib streams inflated
+    pub inflated: u64,
+    /// objects hashed to their ids
+    pub hashed: u64,
+    /// deltas applied
+    pub applied: u64,
+    /// the most bytes of delta bases held at once
+    pub held: usize,
+    /// the most bytes of delta bases in files at once
+    pub spilled: u64,
+    /// the most delta bases in files at once
+    pub spilled_files: usize,
 }

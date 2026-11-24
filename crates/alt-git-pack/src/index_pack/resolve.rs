@@ -5,8 +5,9 @@ use alt_git_codec::{ObjectId, ObjectKind};
 
 use super::budget::Budget;
 use super::deltas::{Deltas, Of};
+use super::objects::Objects;
 use super::scan::{Entry, Form, Scanned};
-use super::walk::{Objects, Walk};
+use super::walk::Walk;
 use super::{IndexLimits, IndexWork, MAX_DELTA_DEPTH, ObjectMemory};
 use crate::{Pack, PackError};
 
@@ -97,5 +98,6 @@ pub(super) fn resolve(
     let (held, spilled) = budget.most();
     work.held = work.held.max(held);
     work.spilled = work.spilled.max(spilled);
+    work.spilled_files = work.spilled_files.max(budget.most_files());
     walked
 }

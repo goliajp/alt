@@ -151,3 +151,44 @@ fn a_pack_with_no_base_in_files_waits_for_room_there_and_one_with_some_does_not(
     assert_eq!((index, took.spilled), (expected, BYTES as u64));
     assert_eq!(files.taken(), (0, BYTES as u64));
 }
+
+/// More bases of one pack wait than a pack may have in files at once, each of
+/// a thousand bytes: as many are in files as may be, the rest are made again,
+/// and the pack is indexed the same. Where the packs between them have ten
+/// files left of those there may be, the pack has ten.
+#[test]
+fn a_pack_has_so_many_bases_in_files_at_once_and_all_the_packs_so_many() {
+    use alt_pack_segment::{BASE_FILES, SPILL_FILES};
+    const LONG: usize = SPILL_FILES + 500;
+    let pack = pack(LONG);
+    let indexed = |files: Option<&'static BaseFiles>| {
+        let limits = Limits {
+            base_bytes: 5 * BYTES,
+            spill_bytes: 1 << 30,
+            files,
+            ..Limits::of(1 << 20, 1 << 20, 1 << 32)
+        };
+        let ingested = ingest(&pack, &SegmentSet::default(), &limits).unwrap();
+        let mut index = Vec::new();
+        ingested.write_index(&mut index).unwrap();
+        (index, ingested.work())
+    };
+    let work = alt_os::temp::tempdir().unwrap();
+    let files = files(&work.path().join("bases"), 1 << 30);
+    let (expected, in_memory) = indexed(None);
+    let (index, took) = indexed(Some(files));
+    assert_eq!(index, expected);
+    assert_eq!(in_memory.spilled_files, SPILL_FILES, "{in_memory:?}");
+    assert_eq!(took.spilled_files, SPILL_FILES, "{took:?}");
+    assert!(took.applied > 2 * LONG as u64, "{took:?}");
+    assert_eq!(files.files(), (0, SPILL_FILES));
+
+    let others: Vec<_> = (0..BASE_FILES - 10)
+        .map(|_| files.occupy(1).unwrap())
+        .collect();
+    let (index, took) = indexed(Some(files));
+    assert_eq!((index, took.spilled_files), (expected, 10), "{took:?}");
+    assert_eq!(files.files().1, BASE_FILES);
+    drop(others);
+    assert_eq!(files.files().0, 0);
+}

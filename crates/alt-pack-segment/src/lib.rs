@@ -19,6 +19,7 @@ mod mend;
 mod merge;
 mod object;
 mod ordered;
+mod passes;
 mod plain;
 mod reach;
 mod readback;
@@ -34,7 +35,7 @@ mod told;
 mod trees;
 mod wanted;
 
-pub use alt_git_pack::{BaseFiles, IndexWork, Memory, Wait};
+pub use alt_git_pack::{BASE_FILES, BaseFiles, IndexWork, Memory, SPILL_FILES, Wait};
 pub use build::{Builder, Built, Compress};
 pub use format::{CommitInfo, Delta, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_led, ingest_while_waited_for};

@@ -14,7 +14,8 @@
 //! to. One there is no room for either is let go of and made again: that
 //! work is the sender's to cause, and each object made or inflated again
 //! counts against what the pack may inflate to, like the objects
-//! themselves.
+//! themselves. The files of one pack are so many at the most, whatever
+//! their bytes: a base beyond that is let go of as well.
 //!
 //! Several walks may go below different bases of one pack at once. What
 //! they hold is one amount between them, and each keeps at least the
@@ -23,69 +24,41 @@
 //! kept for as long as the walk has a large object.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
 
 use super::IndexWork;
 use super::budget::Budget;
 use super::deltas::Deltas;
 use super::held::Base;
 use super::memory::Taken;
-use crate::{PackError, delta};
-
-/// The pack a walk goes through, and what is done with what it makes.
-pub trait Objects {
-    type Id: Ord + Copy;
-    type Error: From<PackError>;
-
-    /// What the entry inflates to: the object of a base that is no delta,
-    /// the instructions of a delta. `scratch` is there to inflate into.
-    fn payload<'a>(
-        &'a mut self,
-        entry: u32,
-        scratch: &'a mut Vec<u8>,
-    ) -> Result<&'a [u8], Self::Error>;
-
-    /// Whether the delta was resolved before, through another entry of
-    /// the object it is made of, or is another walk's to resolve. A delta
-    /// this says no of is resolved by the walk that asked: where several
-    /// walks go through one pack, it is said of each delta to one of them.
-    fn reached(&self, delta: u32) -> bool;
-
-    /// Takes the object a delta made, of the base `of` and `depth` deltas
-    /// below a plain entry, and gives its id.
-    fn made(
-        &mut self,
-        delta: u32,
-        of: u32,
-        depth: u32,
-        object: &[u8],
-    ) -> Result<Self::Id, Self::Error>;
-}
+use super::objects::Objects;
+use crate::delta;
 
 /// A base on the path from a plain entry to the delta being resolved.
-struct Frame {
-    entry: u32,
+pub(super) struct Frame {
+    pub(super) entry: u32,
     /// let go of when the bases held pass their limit
-    data: Option<Arc<Base>>,
+    pub(super) data: Option<Arc<Base>>,
     /// whether its bytes were there once: inflating them again is counted
     made: bool,
+    /// the object of the frame below it once more, by another entry
+    same: bool,
     /// its deltas by offset and by id that are still to be resolved, as
     /// places in the sorted lists
-    ofs: std::ops::Range<usize>,
-    refs: std::ops::Range<usize>,
+    pub(super) ofs: std::ops::Range<usize>,
+    pub(super) refs: std::ops::Range<usize>,
 }
 
 pub struct Walk<'a, O: Objects> {
     pub objects: O,
     deltas: &'a Deltas<O::Id>,
-    budget: &'a Budget<'a>,
+    pub(super) budget: &'a Budget<'a>,
     /// the memory of the object being worked on, where it is a large one
-    object: Option<Taken<'static>>,
+    pub(super) object: Option<Taken<'static>>,
     /// the streams inflated, deltas applied and objects made
     pub work: IndexWork,
-    stack: Vec<Frame>,
+    pub(super) stack: Vec<Frame>,
     /// no frame below this one holds its base
-    lowest: usize,
+    pub(super) lowest: usize,
     scratch: Vec<u8>,
 }
 
@@ -111,6 +84,7 @@ impl<'a, O: Objects> Walk<'a, O> {
             entry: index,
             data: None,
             made: false,
+            same: false,
             ofs,
             refs,
         })
@@ -138,11 +112,44 @@ impl<'a, O: Objects> Walk<'a, O> {
     /// and is the object `id`, itself `depth` deltas below a plain entry.
     /// `root` need not be an entry: nothing is made of it by offset then.
     pub fn below(&mut self, root: u32, id: &O::Id, depth: u32) -> Result<(), O::Error> {
-        let Some(frame) = self.frame(root, id) else {
+        self.below_made(&[root], root, id, depth)
+    }
+
+    /// [`Self::below`] for an object that deltas of this pack made, and
+    /// for the entry `of` that is one of those that make it. `way` are
+    /// entries that make it, from one that is no delta onwards, and
+    /// `depth` is the deltas there are that way: the object is made again
+    /// along it, and what is resolved is made of `of`.
+    pub fn below_made(
+        &mut self,
+        way: &[u32],
+        of: u32,
+        id: &O::Id,
+        depth: u32,
+    ) -> Result<(), O::Error> {
+        let Some(frame) = self.frame(of, id) else {
             return Ok(());
         };
-        self.stack.push(frame);
+        self.stack.extend(way.iter().map(|entry| Frame {
+            entry: *entry,
+            data: None,
+            made: way.len() > 1,
+            same: false,
+            ofs: 0..0,
+            refs: 0..0,
+        }));
+        match way.last() == Some(&of) {
+            true => {
+                let last = self.stack.last_mut().expect("the way");
+                (last.ofs, last.refs) = (frame.ofs, frame.refs);
+            }
+            false => self.stack.push(Frame {
+                same: true,
+                ..frame
+            }),
+        }
         self.lowest = 0;
+        let above = self.stack.len() - 1;
         while let Some(top) = self.stack.last_mut() {
             // the walk has no more than the base of the top frame now
             let has = top.data.as_ref().map_or(0, |data| data.held() as u64);
@@ -161,9 +168,11 @@ impl<'a, O: Objects> Walk<'a, O> {
                 continue;
             }
             self.budget.waited_for()?;
-            let depth = depth.saturating_add(self.stack.len() as u32);
+            let depth = depth.saturating_add((self.stack.len() - above) as u32);
             if depth > self.budget.depth {
-                return Err(PackError::Limit("delta depth").into());
+                let of = self.stack.last().expect("the top").entry;
+                self.objects.beyond(child, of)?;
+                continue;
             }
             let base = self.base()?;
             let data = self.apply(&base, child)?;
@@ -191,19 +200,6 @@ impl<'a, O: Objects> Walk<'a, O> {
         Ok(())
     }
 
-    fn hold(&mut self, bytes: usize) {
-        let held = self.budget.held.fetch_add(bytes, Relaxed) + bytes;
-        self.budget.most_held.fetch_max(held, Relaxed);
-    }
-
-    /// Takes what a frame gave up out of the counts.
-    fn gone(&mut self, data: Option<Arc<Base>>) {
-        if let Some(data) = data {
-            self.budget.held.fetch_sub(data.held(), Relaxed);
-            self.budget.spilled.fetch_sub(data.spilled(), Relaxed);
-        }
-    }
-
     /// The object of the top frame. Where it was let go of it is made
     /// again from the nearest base below it that is there, or from the
     /// pack, and the bases made on the way are held anew within the
@@ -224,7 +220,7 @@ impl<'a, O: Objects> Walk<'a, O> {
             }
         };
         for at in from..=top {
-            if at > 0 {
+            if at > 0 && !self.stack[at].same {
                 data = Arc::new(Base::Held(self.apply(&data, self.stack[at].entry)?));
             }
             if std::mem::replace(&mut self.stack[at].made, true) {
@@ -236,54 +232,5 @@ impl<'a, O: Objects> Walk<'a, O> {
             self.let_go()?;
         }
         Ok(data)
-    }
-
-    /// Makes room while the bases held pass their limit, in those nearest
-    /// the plain entry first: they are the last to be needed again. One
-    /// that deltas still wait for goes to a file while there is room in
-    /// those, for this pack and for all the packs there are, and is
-    /// otherwise let go of; so is one whose file could not be written.
-    /// The top frame keeps its own.
-    ///
-    /// Room among the files is waited for by a pack that has none there, in
-    /// a walk that has no memory of an object taken: whoever waits has
-    /// nothing another waits for.
-    fn let_go(&mut self) -> Result<(), PackError> {
-        let top = self.stack.len() - 1;
-        let budget = self.budget;
-        while budget.held.load(Relaxed) > budget.base_bytes && self.lowest < top {
-            let frame = &mut self.stack[self.lowest];
-            let waited_for = !frame.ofs.is_empty() || !frame.refs.is_empty();
-            if let Some(data) = frame.data.take_if(|data| data.held() > 0) {
-                budget.held.fetch_sub(data.held(), Relaxed);
-                let bytes = data.len() as u64;
-                let room = |spilled: u64| {
-                    (spilled.checked_add(bytes)).filter(|total| *total <= budget.spill_bytes)
-                };
-                if waited_for && let Ok(before) = budget.spilled.try_update(Relaxed, Relaxed, room)
-                {
-                    let wait = (before == 0 && self.object.is_none()).then_some(budget.wait);
-                    let written = match budget.files {
-                        None => data.spill(None, None).ok(),
-                        Some(files) => files.take(bytes, wait).and_then(|room| {
-                            let written = data.spill(Some(files.directory()), Some(room));
-                            if written.is_err() {
-                                files.failed();
-                            }
-                            written.ok()
-                        }),
-                    };
-                    match written {
-                        Some(written) => {
-                            budget.most_spilled.fetch_max(before + bytes, Relaxed);
-                            frame.data = Some(Arc::new(written));
-                        }
-                        None => _ = budget.spilled.fetch_sub(bytes, Relaxed),
-                    }
-                }
-            }
-            self.lowest += 1;
-        }
-        Ok(())
     }
 }

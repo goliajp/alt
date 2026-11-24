@@ -36,6 +36,10 @@ pub(crate) struct Root {
     pub kind: Kind,
     /// deltas below a plain entry, in the segment that holds it
     pub depth: u16,
+    /// Where deltas of this pack made the object: entries that make it, from
+    /// one that is no delta onwards, by the shortest way there is. Empty
+    /// otherwise.
+    pub way: Vec<u32>,
 }
 
 #[derive(Default)]
@@ -43,6 +47,9 @@ pub(crate) struct Made {
     pub metas: Vec<(usize, Meta)>,
     pub commits: Vec<CommitRow>,
     pub work: IndexWork,
+    /// what deltas that lie deeper than the walks went are made of, and
+    /// the kind of object they make
+    pub left: Vec<(u32, Kind)>,
 }
 
 struct Verified<'s> {
@@ -94,6 +101,14 @@ impl Objects for Verified<'_> {
         self.made.metas.push((delta as usize, meta));
         Ok(oid)
     }
+
+    /// Left for a pass that comes to it again, by this entry or by another
+    /// that makes the same object.
+    fn beyond(&mut self, delta: u32, of: u32) -> Result<(), Error> {
+        self.shared.taken[delta as usize].store(false, Relaxed);
+        self.made.left.push((of, self.kind));
+        Ok(())
+    }
 }
 
 /// Resolves every delta below `roots`, below no more of them at once than `walks`
@@ -122,7 +137,12 @@ pub(crate) fn below(
         let mut walk = Walk::new(verified, shared.deltas, shared.budget);
         for root in roots {
             walk.objects.kind = root.kind;
-            walk.below(root.entry, &root.oid, u32::from(root.depth))?;
+            match root.way.is_empty() {
+                true => walk.below(root.entry, &root.oid, u32::from(root.depth))?,
+                false => {
+                    walk.below_made(&root.way, root.entry, &root.oid, u32::from(root.depth))?
+                }
+            }
         }
         let mut made = walk.objects.made;
         made.work = walk.work;
@@ -133,6 +153,7 @@ pub(crate) fn below(
         let part = part?;
         all.metas.extend(part.metas);
         all.commits.extend(part.commits);
+        all.left.extend(part.left);
         all.work.inflated += part.work.inflated;
         all.work.applied += part.work.applied;
         all.work.hashed += part.work.hashed;

@@ -15,7 +15,7 @@
 //! delta is chance; which the record goes by is not: the one with fewer deltas
 //! below it, the earlier segment where they are as many.
 
-use crate::{Error, Oid, format::NO_BASE, ingest::Meta, scan::Form, scan::Raw};
+use crate::{Error, Oid, format::NO_BASE, ingest::Meta, scan::Form};
 
 pub(crate) struct Chosen {
     /// the entry of each object, the objects in the order of their ids
@@ -41,13 +41,13 @@ struct Way {
     outside: bool,
 }
 
-/// `metas` and `entries` are of the same entries; `earlier` are the objects of
+/// `metas` and `form` are of the same entries; `earlier` are the objects of
 /// earlier segments that deltas of the pack name, in the order of their ids, each
 /// with the deltas below it there. An object more than `most` deltas below a
 /// plain entry, by its shortest way, refuses the pack.
 pub(crate) fn choose(
     metas: &[Meta],
-    entries: &[Raw],
+    form: impl Fn(usize) -> Form,
     earlier: &[(Oid, u16)],
     most: u16,
 ) -> Result<Chosen, Error> {
@@ -63,12 +63,12 @@ pub(crate) fn choose(
     }
     let objects = ids.len();
     // what each entry is made of in the pack, and how deep in an earlier segment
-    let within = |index: usize| match (metas[index].base, entries[index].form) {
+    let within = |index: usize| match (metas[index].base, form(index)) {
         (Some(base), _) => Some(position[base]),
         (None, Form::Reference(base)) => ids.binary_search(&&base).ok().map(|at| at as u32),
         (None, _) => None,
     };
-    let without = |index: usize| match entries[index].form {
+    let without = |index: usize| match form(index) {
         Form::Reference(base) => {
             (earlier.binary_search_by(|held| held.0.cmp(&base)).ok()).map(|at| earlier[at].1)
         }
@@ -94,7 +94,7 @@ pub(crate) fn choose(
         }
         levels[level].push(way);
     };
-    for (index, raw) in entries.iter().enumerate() {
+    for index in 0..metas.len() {
         let entry = index as u32;
         let inside = within(index);
         if let Some(base) = inside {
@@ -102,7 +102,7 @@ pub(crate) fn choose(
             made_of[*slot as usize] = entry;
             *slot += 1;
         }
-        match (raw.form, without(index)) {
+        match (form(index), without(index)) {
             (Form::Plain(_), _) => put(
                 0,
                 Way {

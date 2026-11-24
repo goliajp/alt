@@ -49,7 +49,7 @@ pub(super) fn pack(entries: &[(usize, Of)]) -> Vec<u8> {
 /// The segment a pack that was taken in becomes: the bytes of its index, and each
 /// of `objects` read out of it. The depth a record tells is the deltas there are
 /// from it to a plain entry.
-fn read_back(pack: &[u8], limits: &Limits, objects: &[usize]) -> Result<Vec<u8>, Error> {
+pub(super) fn read_back(pack: &[u8], limits: &Limits, objects: &[usize]) -> Result<Vec<u8>, Error> {
     let ingested = ingest(pack, &SegmentSet::default(), limits)?;
     let mut index = Vec::new();
     ingested.write_index(&mut index).unwrap();

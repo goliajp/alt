@@ -3,6 +3,7 @@ mod base_files;
 mod bases;
 mod budget;
 mod build;
+mod deep;
 mod fetch;
 mod kinds;
 mod many_of_one;

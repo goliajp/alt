@@ -46,20 +46,23 @@ mod deltas;
 mod files;
 mod held;
 mod idx;
+mod kept;
 mod limits;
 mod memory;
+mod objects;
 mod resolve;
 mod scan;
 mod thin;
 mod walk;
 
-pub use budget::{Budget, Objects as ObjectMemory};
+pub use budget::{Budget, IndexWork, Objects as ObjectMemory, SPILL_FILES};
 pub use deltas::{Deltas, Of};
-pub use files::BaseFiles;
+pub use files::{BaseFiles, FILES as BASE_FILES};
 pub use limits::IndexLimits;
 pub use memory::{Memory, Taken, Wait};
+pub use objects::Objects;
 pub use thin::Bases;
-pub use walk::{Objects, Walk};
+pub use walk::Walk;
 
 use std::fs::File;
 use std::io::Write;
@@ -77,21 +80,6 @@ pub const MAX_DELTA_DEPTH: u32 = 4095;
 /// without asking for it: the objects of a history are far smaller, and
 /// only one that is larger has memory taken for it alone.
 pub const EACH: u64 = 4 << 20;
-
-/// The work indexing a pack took.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct IndexWork {
-    /// zlib streams inflated
-    pub inflated: u64,
-    /// objects hashed to their ids
-    pub hashed: u64,
-    /// deltas applied
-    pub applied: u64,
-    /// the most bytes of delta bases held at once
-    pub held: usize,
-    /// the most bytes of delta bases in files at once
-    pub spilled: u64,
-}
 
 /// Result of indexing a `.pack` file.
 #[derive(Debug)]

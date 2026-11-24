@@ -81,7 +81,7 @@ impl Resolved {
                 earlier.push((base, record.depth));
             }
         }
-        let chosen = crate::chosen::choose(metas, entries, &earlier, self.depth)?;
+        let chosen = crate::chosen::choose(metas, |at| entries[at].form, &earlier, self.depth)?;
         let kept = &chosen.kept;
         let mut flags = if chosen.duplicates {
             FLAG_DUPLICATES

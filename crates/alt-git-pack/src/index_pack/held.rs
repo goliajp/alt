@@ -6,14 +6,14 @@ use std::ops::Deref;
 
 use alt_os::map::Mmap;
 
-use super::memory::Taken;
+use super::files::Place;
 
 pub(super) enum Base {
     Held(Vec<u8>),
     Spilled {
         map: Mmap,
         /// what it has of the room all the packs have for their files
-        _room: Option<Taken<'static>>,
+        _room: Option<Place<'static>>,
     },
 }
 
@@ -51,7 +51,7 @@ impl Base {
     pub(super) fn spill(
         &self,
         directory: Option<&std::path::Path>,
-        room: Option<Taken<'static>>,
+        room: Option<Place<'static>>,
     ) -> std::io::Result<Base> {
         let mut private = alt_os::temp::Builder::new();
         let private = private.owner_only();
