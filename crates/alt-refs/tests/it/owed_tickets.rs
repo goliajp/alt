@@ -31,6 +31,16 @@ fn in_the_log(dir: &Path, n: u8) -> bool {
         .any(|(_, target)| *target == RefTarget::Oid(oid(n)))
 }
 
+/// How many ops of the log in `dir` lie within where it is recorded as
+/// synced.
+fn recorded(dir: &Path) -> u64 {
+    let log = dir.join("oplog");
+    let bound = alt_oplog::bounded_in(&log).unwrap_or(0);
+    let log = OpLog::open_read_only(&log, None).unwrap();
+    let within = |op: &&alt_oplog::Op| op.frame.is_some_and(|frame| frame.end <= bound);
+    log.ops().unwrap().iter().filter(within).count() as u64
+}
+
 /// Has `store` commit a ref that points at object `n`, for a caller of
 /// its own; the ticket of that caller.
 fn committed(store: &mut RefStore, n: u8) -> Ticket {
@@ -90,30 +100,69 @@ fn of_the_commits_one_fsync_was_to_cover_each_whose_transaction_was_cut_is_told_
     assert_eq!(store.len(), 2);
 }
 
-/// One sequence of commits by callers that hold a ticket each, cuts by
-/// another handle, the store going on past them, and callers asking
-/// the sink in any order. Each is told that its commit is synced, and
-/// its transaction is in the log, or told of a cut, and it is not.
-/// Returns how many came to each end.
-fn sequence(seed: u64) -> (u64, u64) {
+/// The sink of a store on `dir` is asked without a ticket, for the
+/// commits `left` that were made for the caller the store has without
+/// one: told that they are synced (2), they are in the log; or told of
+/// a cut (3), of some commit.
+fn sink_asked(dir: &Path, sink: &OpLogSink, left: &[u8], case: &str) -> usize {
+    match sink.fsync() {
+        Ok(()) => {
+            for n in left {
+                assert!(in_the_log(dir, *n), "{case}: commit {n} is not");
+            }
+            2
+        }
+        Err(OpLogError::CutBack) => {
+            assert!(!left.is_empty(), "{case}: told of a cut of nothing");
+            3
+        }
+        Err(other) => panic!("{case}: {other:?}"),
+    }
+}
+
+/// One sequence of commits by callers that hold a ticket each and by
+/// the caller the store has without one, cuts by another handle, the
+/// store going on past them, and callers asking the sink in any order.
+/// Each with a ticket is told that its commit is synced, and its
+/// transaction is in the log, or told of a cut, and it is not. The one
+/// without is told that the commits made for it since it last asked
+/// are synced, and they are in the log, or told of a cut. Returns how
+/// many came to each end: tickets synced and cut, then commits without
+/// a ticket synced, and times their caller was told of a cut.
+fn sequence(seed: u64) -> [u64; 4] {
     let dir = alt_os::temp::tempdir().unwrap();
     boot(1);
     let mut store = new_store(dir.path());
     store.set_defer_durability(true);
     let sink = store.sync_handle().unwrap();
     let mut rng = Rng(seed);
-    let (mut waiting, mut next, mut ends) = (Vec::<(u8, Ticket)>::new(), 0u8, (0, 0));
-    // how many ops the log held when a sync was last recorded
+    let (mut waiting, mut next, mut ends) = (Vec::<(u8, Ticket)>::new(), 0u8, [0; 4]);
+    // the commits made without a ticket that the sink was not asked for
+    let mut unticketed = Vec::<u8>::new();
+    // how many ops the log was ever recorded as synced over
     let mut synced = 0;
     for step in 0..30 {
         let case = format!("seed {seed}, step {step}");
-        match rng.below(6) {
+        // an fsync of the sink records a sync whatever it answers after
+        synced = synced.max(recorded(dir.path()));
+        match rng.below(8) {
             0 | 1 => {
                 next += 1;
                 waiting.push((next, committed(&mut store, next)));
             }
             2 => drop(cut_unsynced(dir.path(), synced)),
             3 => goes_on(&mut store, rng.below(2) == 0),
+            4 => {
+                next += 1;
+                let committed = commit(&mut store, &format!("refs/heads/b{next}"), next);
+                assert!(committed.is_ok(), "{case}: {committed:?}");
+                unticketed.push(next);
+            }
+            5 => {
+                let left = std::mem::take(&mut unticketed);
+                let end = sink_asked(dir.path(), &sink, &left, &case);
+                ends[end] += if end == 2 { left.len() as u64 } else { 1 };
+            }
             _ if waiting.is_empty() => {}
             _ => {
                 let (n, ticket) = waiting.remove(rng.below(waiting.len() as u64) as usize);
@@ -122,13 +171,11 @@ fn sequence(seed: u64) -> (u64, u64) {
                 match told {
                     Ok(()) => {
                         assert!(held, "{case}: commit {n} is told as synced");
-                        let log = OpLog::open_read_only(&dir.path().join("oplog"), None);
-                        synced = log.unwrap().len() as u64;
-                        ends.0 += 1;
+                        ends[0] += 1;
                     }
                     Err(OpLogError::CutBack) => {
                         assert!(!held, "{case}: commit {n} is told as cut");
-                        ends.1 += 1;
+                        ends[1] += 1;
                     }
                     Err(other) => panic!("{case}: {other:?}"),
                 }
@@ -140,11 +187,15 @@ fn sequence(seed: u64) -> (u64, u64) {
 
 #[test]
 fn whatever_a_store_does_past_cuts_each_caller_is_told_what_became_of_its_own_commit() {
-    let (mut synced, mut told) = (0, 0);
+    let mut ends = [0; 4];
     for seed in 0..300 {
-        let ends = sequence(seed);
-        (synced, told) = (synced + ends.0, told + ends.1);
+        let of_one = sequence(seed);
+        ends = std::array::from_fn(|end| ends[end] + of_one[end]);
     }
-    eprintln!("{synced} commits synced, {told} told of as cut");
-    assert!(synced > 100 && told > 100);
+    eprintln!(
+        "{} commits on tickets synced, {} told of as cut; {} without a ticket synced, \
+         their caller told of a cut {} times",
+        ends[0], ends[1], ends[2], ends[3]
+    );
+    assert!(ends.iter().all(|times| *times > 100), "{ends:?}");
 }

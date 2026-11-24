@@ -45,6 +45,7 @@ mod v2_kept_ends;
 mod v2_kept_past;
 mod v2_kept_state;
 mod v2_ledger;
+mod v2_left_seen;
 mod v2_log;
 mod v2_looked;
 mod v2_meanwhile;

@@ -128,6 +128,14 @@ fn left_and_staged_after(dir: &Path) -> OpLog {
     staging
 }
 
+/// The sync of `staging`, which wrote ops that were cut since, tells so,
+/// with the log in `dir` recorded as synced no further for it.
+fn told_of_its_cut(staging: &mut OpLog, dir: &Path, case: &str) {
+    let synced = alt_oplog::bounded_in(dir);
+    assert!(matches!(staging.sync(), Err(OpLogError::CutBack)), "{case}");
+    assert_eq!(alt_oplog::bounded_in(dir), synced, "{case}");
+}
+
 #[test]
 fn a_cut_whose_process_dies_at_any_step_leaves_a_log_that_is_whole_or_ends_where_it_was_cut() {
     for step in 1..=5 {
@@ -152,7 +160,6 @@ fn a_cut_whose_process_dies_at_any_step_leaves_a_log_that_is_whole_or_ends_where
                     assert_eq!(alt_oplog::bounded_in(dir.path()), synced, "{case}");
                 }
             }
-            drop(staging);
             // the log tells of the cut from its first step on, in any
             // boot: it ends where it is cut for whoever opens it
             for read_only in [true, false] {
@@ -175,12 +182,12 @@ fn a_cut_whose_process_dies_at_any_step_leaves_a_log_that_is_whole_or_ends_where
             next.verify().unwrap();
             let said = told(dir.path());
             assert_eq!(said.iter().map(|cut| cut.ops).sum::<u32>(), 41, "{case}");
-            assert_eq!(
-                said.len(),
-                if step == 1 || step > 3 { 1 } else { 2 },
-                "{case}"
-            );
+            let cuts = if step == 1 || step > 3 { 1 } else { 2 };
+            assert_eq!(said.len(), cuts, "{case}");
             assert!(!OpLog::open(dir.path()).unwrap().unsettled(), "{case}");
+            if !next_boot {
+                told_of_its_cut(&mut staging, dir.path(), &case);
+            }
         }
     }
 }
