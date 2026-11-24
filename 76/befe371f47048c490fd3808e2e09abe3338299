@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a platform that gives no answer is asked by one request at a time, and left alone for a while
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/cloud.rs
+touched: crates/alt-server/src/cloud/asking.rs
+touched: crates/alt-server/tests/it/database/cloud.rs
+touched: crates/alt-server/tests/it/database/cloud/platform.rs
+touched: crates/alt-server/tests/it/database/cloud/unanswered.rs
