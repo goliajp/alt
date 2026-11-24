@@ -8,6 +8,7 @@ use std::path::Path;
 
 use super::super::checkout_recovery::FileChange;
 use super::super::*;
+use super::Listed;
 
 /// The directories a move of `from` to `to` is a rename of, where the
 /// two paths end alike: `d/s/y` to `e/s/y` moves `d` to `e`.
@@ -39,8 +40,12 @@ impl NativeRepo<'_> {
     /// that would pass a file or a symlink above either path is not
     /// made, nor one the file system cannot make from one of its parts
     /// to another: it is left to be made as any other change.
-    fn renamed(&self, from: &[u8], to: &[u8]) -> Res<bool> {
+    fn renamed(&self, from: &[u8], to: &[u8], listed: &mut Listed) -> Res<bool> {
         if !self.may_stand(to)? || !self.beneath_directories(from)? {
+            return Ok(false);
+        }
+        // into a directory spelled otherwise it would keep that spelling
+        if self.spelled_otherwise(to, listed)? {
             return Ok(false);
         }
         let (source, target) = (
@@ -76,6 +81,7 @@ impl NativeRepo<'_> {
             return Ok(done);
         }
         super::super::tree_state::wrote_file(&self.root);
+        let mut listed = Listed::default();
         // a directory first, the shortest before those within it
         let mut whole: Vec<(&[u8], &[u8])> = moves
             .iter()
@@ -103,7 +109,7 @@ impl NativeRepo<'_> {
             if files.is_empty() || !apart || !files.iter().all(goes) || expected != files.len() {
                 continue;
             }
-            if self.renamed(from, to)? {
+            if self.renamed(from, to, &mut listed)? {
                 for (gone, come) in moves.iter().filter(|(gone, _)| inside(gone, from)) {
                     done.extend([*gone, *come]);
                 }
@@ -118,7 +124,7 @@ impl NativeRepo<'_> {
         loop {
             let mut blocked = Vec::new();
             for (from, to) in &waiting {
-                match self.renamed(from, to)? {
+                match self.renamed(from, to, &mut listed)? {
                     true => done.extend([*from, *to]),
                     false => blocked.push((*from, *to)),
                 }
@@ -131,10 +137,25 @@ impl NativeRepo<'_> {
     }
 }
 
+impl NativeRepo<'_> {
+    /// The moves among `changes` to make by renaming: none where two
+    /// paths that come spell one directory in two ways, which is then
+    /// spelled as by the first of them written.
+    pub(super) fn moves_among<'c>(
+        &self,
+        changes: &[&'c FileChange],
+    ) -> Res<HashMap<&'c [u8], &'c [u8]>> {
+        Ok(match self.spelled_two_ways(changes)? {
+            true => HashMap::new(),
+            false => moves_among(changes),
+        })
+    }
+}
+
 /// The moves among `changes`: a path whose file goes, with a path where
 /// nothing was and the same file comes to be. Of several such paths the
 /// one that ends most like the first is taken.
-pub(super) fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
+fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
     let file = |c: &FileChange| c.before.as_ref().or(c.after.as_ref()).map(|s| s.mode);
     let plain = |c: &&&'c FileChange| file(c).is_some_and(|mode| mode != 0o160000);
     let gone = changes.iter().filter(plain).filter(|c| c.after.is_none());

@@ -82,6 +82,7 @@ impl NativeRepo<'_> {
         conflicts: Option<&Index>,
     ) -> Res<(Vec<&'c FileChange>, Vec<BString>)> {
         let (mut outstanding, mut left) = (Vec::new(), Vec::new());
+        let mut listed = crate::native::checkout_files::Listed::default();
         let paths: std::collections::HashSet<&[u8]> =
             intent.files.iter().map(|c| c.path.as_slice()).collect();
         for change in &intent.files {
@@ -123,7 +124,9 @@ impl NativeRepo<'_> {
             // what is as the intent leaves it but for the spelling of its
             // name is written again
             let respelled = change.after.as_ref().is_some_and(|s| s.mode != 0o160000);
-            if actual != change.after || (respelled && self.spelled_otherwise(&path)?) {
+            if actual != change.after
+                || (respelled && self.spelled_otherwise(&path, &mut listed)?)
+            {
                 outstanding.push(change);
             }
         }

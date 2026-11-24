@@ -24,34 +24,6 @@ impl NativeRepo<'_> {
         Ok(*self.folded.get_or_init(|| folds))
     }
 
-    /// Whether what is at `path` is listed by its directory under another
-    /// spelling of its name, where names fold.
-    pub(in crate::native) fn spelled_otherwise(&self, path: &BString) -> Res<bool> {
-        let abs = self.abs(path)?;
-        if !self.folds()? || abs.symlink_metadata().is_err() {
-            return Ok(false);
-        }
-        let (above, name) = (abs.parent(), abs.file_name());
-        let (above, name) = above.zip(name).ok_or("checkout path has no parent")?;
-        for entry in std::fs::read_dir(above)? {
-            if entry?.file_name() == name {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
-    /// Removes the file at `path` that its directory lists under another
-    /// spelling, before it is written: gone first, as by git, since
-    /// written over it would keep the spelling its directory has for it.
-    pub(super) fn remove_spelled_otherwise(&self, path: &BString, abs: &Path) -> Res<()> {
-        if self.spelled_otherwise(path)? {
-            crate::durable::remove_file(abs)?;
-            crash_point!("checkout-file:respelled");
-        }
-        Ok(())
-    }
-
     /// Names each of `changes` that writes a file again at a path the
     /// index `restored` lacks by the path of `restored`, one `current`
     /// lacks, whose file it reaches under another spelling: written
@@ -87,6 +59,7 @@ impl NativeRepo<'_> {
                 change.path = named.to_vec();
             }
         }
+        self.named_as_folded(&mut changes, &back, &names)?;
         Ok(changes)
     }
 

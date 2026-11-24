@@ -35,6 +35,7 @@ mod capability_gate;
 mod casefold;
 mod casefold_asked;
 mod casefold_composed;
+mod casefold_dir_spelled;
 mod casefold_dirs;
 mod casefold_left;
 mod casefold_meet;

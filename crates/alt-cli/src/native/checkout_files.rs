@@ -11,9 +11,11 @@ mod asked;
 mod folded;
 mod moves;
 mod paths;
+mod spelled;
 
 pub(super) use asked::clear_left;
 pub(super) use paths::ensure_no_control_directory;
+pub(super) use spelled::Listed;
 
 impl NativeRepo<'_> {
     pub(super) fn file_state(&self, path: &BString, persist: bool) -> Res<Option<FileState>> {
@@ -131,8 +133,8 @@ impl NativeRepo<'_> {
     /// Applies recorded changes. What leaves goes first: a path can only
     /// turn from a file or a symlink into a directory, or back, once the
     /// old side is out of the way. A file that only moves is renamed
-    /// then, and what could not be renamed leaves and is written with
-    /// the rest.
+    /// then, and what could not be renamed leaves, as does what is
+    /// reached under another spelling, and is written with the rest.
     pub(super) fn apply_changes<'c>(
         &self,
         changes: impl Iterator<Item = &'c FileChange> + Clone,
@@ -145,7 +147,7 @@ impl NativeRepo<'_> {
             applied.map_err(|e| format!("cannot write '{path}': {e}").into())
         };
         let all: Vec<&FileChange> = changes.collect();
-        let moves = moves::moves_among(&all);
+        let moves = self.moves_among(&all)?;
         let stays = |c: &&FileChange| !moves.contains_key(c.path.as_slice());
         let leaving = all.iter().copied().filter(removed);
         leaving.filter(stays).try_for_each(apply)?;
@@ -159,6 +161,7 @@ impl NativeRepo<'_> {
             .filter(removed)
             .filter(|c| !stays(c))
             .try_for_each(apply)?;
+        self.clear_respelled(rest().filter(|c| !removed(c)))?;
         rest().filter(|c| !removed(c)).try_for_each(apply)
     }
 
@@ -253,7 +256,6 @@ impl NativeRepo<'_> {
                 let parent = abs.parent().ok_or("checkout path has no parent")?;
                 self.make_directories_above(path)?;
                 paths::remove_empty_directories(&abs)?;
-                self.remove_spelled_otherwise(path, &abs)?;
                 if state.mode == 0o120000 {
                     let temp = alt_os::temp::tempdir_in(parent)?;
                     let link = temp.path().join("link");

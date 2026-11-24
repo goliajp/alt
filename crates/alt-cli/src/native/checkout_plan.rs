@@ -137,6 +137,7 @@ impl NativeRepo<'_> {
         let mut ignored = Vec::new();
         let mut files = Vec::new();
         let mut planned = std::collections::HashMap::new();
+        let mut listed = super::checkout_files::Listed::default();
         for path in paths {
             let file =
                 |above: &[u8]| files_on_disk.contains(above) || respelled.contains_key(above);
@@ -171,9 +172,9 @@ impl NativeRepo<'_> {
                 ignored.extend(self.ignored_in_the_way(path, &tracked, &mut visible)?);
             }
             // a file that stays as it is under another spelling of its
-            // name is written again, under the name the tree has for it
-            let respelled = || Res::Ok(after.is_some() && self.spelled_otherwise(path)?);
-            if before != after || respelled()? {
+            // name, or of a directory above it, is written again
+            let plain = after.as_ref().is_some_and(|s| s.mode != 0o160000);
+            if before != after || (plain && self.spelled_otherwise(path, &mut listed)?) {
                 files.push(FileChange {
                     path: path.to_vec(),
                     before,
