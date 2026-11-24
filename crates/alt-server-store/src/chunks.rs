@@ -104,10 +104,10 @@ impl Store {
         if verified {
             // Git objects the segments hold were granted when the request began:
             // there are no chunks to assemble them from
-            let segments = self.published_segments(&key.scope.repository_instance_id)?;
+            let published = self.published(&key.scope.repository_instance_id)?;
             let mut held = true;
             for entry in &entries {
-                held &= crate::pack_native::holds_entry(&segments, entry)?;
+                held &= published.holds_entry(entry)?;
             }
             if held {
                 return Ok(());

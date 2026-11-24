@@ -27,8 +27,7 @@ pub(crate) fn check_graph_pins(
         for oid in batch {
             match work.source.objects.get(oid) {
                 Some(found) => selected.push(found),
-                None if <[u8; 20]>::try_from(oid.as_bytes())
-                    .is_ok_and(|key| work.source.segments.locate_any(&key)) => {}
+                None if work.source.given(oid)? => {}
                 None => return Err(Error::Integrity("graph outside authorized source")),
             }
         }

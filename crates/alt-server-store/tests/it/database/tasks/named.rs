@@ -100,14 +100,11 @@ fn what_a_deleted_ref_led_to_is_given_where_a_published_record_names_it_and_not_
     // its ref deleted before any record names it, it is not given either
     deleted(&mut f, "remove-the-named", named.commit);
     assert_eq!(given(&mut f, &commit(&named)), None);
-    // put back, a task published with it as its baseline, and the ref deleted again
-    let mut back = Payload::new("the-named-back", None);
-    back.publication.refs[0].new = Some(named.commit.to_string());
-    back.manifest.entries.clear();
-    back.contents.clear();
-    back.publication.content_manifest = back.manifest.id(limits()).unwrap();
-    back.upload(&mut f.store, &f.credential);
-    back.publish(&mut f.store, &f.credential);
+    // brought again, a task published with it as its baseline, and the ref deleted again
+    let mut back = Payload::new("a-task-names-this", None);
+    back.publication.key.request_id = "the-named-back".into();
+    assert_eq!(back.commit, named.commit);
+    back.publish_new(&mut f.store, &f.credential);
     let mut payload = task_payload("a-task-names-this");
     payload.publication.key.request_id = "publish-the-task".into();
     assert_eq!(payload.commit, named.commit);

@@ -101,9 +101,10 @@ impl Store {
             // a selected Git object that was published earlier was not uploaded again
             let entry = entry.clone();
             tx.commit()?;
-            let segments = self.published_segments(&key.scope.repository_instance_id)?;
-            if crate::pack_native::holds_entry(&segments, &entry)?
-                && let Some(content) = crate::transport::segment_content(&segments, digest)?
+            let published = self.published(&key.scope.repository_instance_id)?;
+            if published.holds_entry(&entry)?
+                && let Some(content) =
+                    crate::transport::segment_content(&published.segments, digest)?
             {
                 return Ok(content);
             }

@@ -9,6 +9,7 @@ mod delegation;
 mod expiry;
 mod faults;
 mod json;
+mod led;
 mod maintenance;
 mod pack_scrub;
 mod pack_sweep;

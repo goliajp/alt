@@ -2,12 +2,15 @@ use crate::Jsonb;
 mod acquire;
 mod fence;
 mod pack;
+mod reached;
 mod refs;
 mod settled;
 mod source;
 
 pub(crate) use fence::{check_graph_pins, finish, worker};
+pub(crate) use reached::Published;
 pub(crate) use refs::replace as replace_refs;
+pub(crate) use source::PinnedSource;
 
 use crate::database::Transaction;
 use crate::requests::{active, check_key, pin_many, request_row, upload_pin};
@@ -70,14 +73,6 @@ enum Packed {
     Unreadable,
     /// the selected objects are not a closed set
     Invalid,
-}
-pub(crate) struct PinnedSource {
-    bytes: crate::bytes::ReadSession,
-    pub(crate) objects: BTreeMap<ObjectId, (ObjectKind, String, u64)>,
-    artifacts: BTreeMap<String, u64>,
-    locations: crate::segments::Locations,
-    /// Git objects published earlier, whichever protocol brought them in
-    pub(crate) segments: alt_pack_segment::SegmentSet,
 }
 impl Store {
     pub fn renew_publication(

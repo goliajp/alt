@@ -1,16 +1,41 @@
 //! Where a leased request reads its selected content from.
 use super::*;
 
+pub(crate) struct PinnedSource {
+    pub(super) bytes: crate::bytes::ReadSession,
+    pub(crate) objects: BTreeMap<ObjectId, (ObjectKind, String, u64)>,
+    pub(super) artifacts: BTreeMap<String, u64>,
+    pub(super) locations: crate::segments::Locations,
+    /// Git objects published earlier, whichever protocol brought them in
+    pub(crate) segments: alt_pack_segment::SegmentSet,
+    /// those of them the request is given without bringing them
+    pub(super) reached: reached::Reached,
+}
+
 impl PinnedSource {
     /// A selected Git object the content store does not hold for this request and a
-    /// segment does: published earlier, by either protocol.
+    /// segment gives it: published earlier, by either protocol, and led to by the refs.
     pub(crate) fn settled_entry(&self, entry: &alt_remote_protocol::ContentEntry) -> Result<bool> {
-        let uploaded = entry
-            .git_oid
-            .as_deref()
-            .and_then(|oid| oid.parse().ok())
-            .is_some_and(|oid: ObjectId| self.objects.contains_key(&oid));
-        Ok(!uploaded && crate::pack_native::holds_entry(&self.segments, entry)?)
+        let oid = entry.git_oid.as_deref().and_then(|oid| oid.parse().ok());
+        let uploaded = oid.is_some_and(|oid: ObjectId| self.objects.contains_key(&oid));
+        if uploaded || !crate::pack_native::holds_entry(&self.segments, entry)? {
+            return Ok(false);
+        }
+        oid.map_or(Ok(false), |oid| self.given(&oid))
+    }
+    /// whether a segment holds the object and the refs lead to it
+    pub(crate) fn given(&self, oid: &ObjectId) -> Result<bool> {
+        let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
+            return Ok(false);
+        };
+        Ok(self.segments.locate_any(&key) && self.reached.to(&self.segments, &key)?)
+    }
+    /// the same of an object a segment holds, for the reading of a graph
+    fn led(&self, key: &[u8; 20]) -> alt_repository_service::Result<bool> {
+        (self.reached.to(&self.segments, key)).map_err(|error| match error {
+            Error::Limit(limit) => alt_repository_service::Error::Limit(limit),
+            _ => alt_repository_service::Error::Integrity("objects the refs reach"),
+        })
     }
     /// the bytes of a selected entry, from wherever this request has them
     pub(super) fn entry_reader(
@@ -60,20 +85,27 @@ impl alt_task_service::ArtifactSource for PinnedSource {
             return Err(unavailable);
         };
         match self.segments.open_blake3(&digest) {
-            Ok(Some((_, _, size, stream))) if size == artifact.bytes => Ok(Box::new(stream)),
+            Ok(Some((oid, _, size, stream)))
+                if size == artifact.bytes
+                    && matches!(self.reached.to(&self.segments, &oid), Ok(true)) =>
+            {
+                Ok(Box::new(stream))
+            }
             _ => Err(unavailable),
         }
     }
 }
 impl ObjectSource for PinnedSource {
     /// What a live segment holds was verified when the segment was written, and the
-    /// segments of a repository hold everything their objects reference.
+    /// segments of a repository hold everything their objects reference. What the
+    /// refs lead to, they lead to everything it references.
     fn settled(&self, oid: ObjectId) -> alt_repository_service::Result<Option<ObjectKind>> {
         let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
             return Ok(None);
         };
         match self.segments.kind(&key) {
-            Ok(kind) => Ok(kind.map(crate::packs::object_kind)),
+            Ok(Some(kind)) if self.led(&key)? => Ok(Some(crate::packs::object_kind(kind))),
+            Ok(_) => Ok(None),
             Err(_) => Err(alt_repository_service::Error::Integrity(
                 "pack segment record",
             )),
@@ -84,6 +116,9 @@ impl ObjectSource for PinnedSource {
             let Ok(key) = <[u8; 20]>::try_from(oid.as_bytes()) else {
                 return Ok(None);
             };
+            if !self.led(&key)? {
+                return Ok(None);
+            }
             return match self.segments.open(&key) {
                 Ok(Some((kind, bytes, stream))) => Ok(Some(ObjectReader {
                     kind: crate::packs::object_kind(kind),

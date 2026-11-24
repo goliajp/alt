@@ -12,6 +12,7 @@ mod dispatch;
 mod git;
 mod json;
 mod native_client;
+mod native_led;
 mod operator;
 mod portable;
 mod read_deadline;

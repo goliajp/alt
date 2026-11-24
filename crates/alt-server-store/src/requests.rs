@@ -25,9 +25,10 @@ impl Store {
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
             return Err(Error::Limit("upload lifetime"));
         }
-        // Git objects the segments hold need no upload. Segments only gain objects, so
-        // a set opened before the transaction grants nothing a later one would not.
-        let segments = self.published_segments(&publication.key.scope.repository_instance_id)?;
+        // Git objects the segments give need no upload: told before the transaction,
+        // where what the refs lead to is read.
+        let published = self.published(&publication.key.scope.repository_instance_id)?;
+        let contents = selected_contents(manifest, &published)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let snapshot = snapshot(
@@ -50,7 +51,6 @@ impl Store {
         let expires = time
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("upload lifetime"))?;
-        let contents = selected_contents(manifest, &segments)?;
         let repository = &publication.key.scope.repository_instance_id;
         let mut reservation = 0u64;
         let selected: Vec<_> = contents.iter().collect();
@@ -400,7 +400,7 @@ struct SelectedContent<'a> {
     entries: Vec<&'a ContentEntry>,
     chunk: bool,
     /// some entry with these bytes, or made of this chunk, is not a Git object the
-    /// segments already hold
+    /// segments already give
     needed: bool,
 }
 impl SelectedContent<'_> {
@@ -411,7 +411,7 @@ impl SelectedContent<'_> {
 }
 fn selected_contents<'a>(
     manifest: &'a Manifest,
-    segments: &alt_pack_segment::SegmentSet,
+    published: &crate::publication::Published,
 ) -> Result<BTreeMap<String, SelectedContent<'a>>> {
     let mut selected = BTreeMap::new();
     let blank = |bytes| SelectedContent {
@@ -421,7 +421,7 @@ fn selected_contents<'a>(
         needed: false,
     };
     for entry in &manifest.entries {
-        let needed = !crate::pack_native::holds_entry(segments, entry)?;
+        let needed = !published.holds_entry(entry)?;
         let item = selected
             .entry(entry.blake3.clone())
             .or_insert_with(|| blank(entry.bytes));

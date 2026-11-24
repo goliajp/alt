@@ -82,17 +82,13 @@ pub(crate) fn check_pins(
     }
     for oid in tasks.git_objects() {
         graph.node(*oid)?;
-        if !work.source.objects.contains_key(oid) && !in_segment(work, oid) {
+        if !work.source.objects.contains_key(oid) && !work.source.given(oid)? {
             return Err(Error::Integrity(
                 "task Git object outside authorized source",
             ));
         }
     }
     Ok(())
-}
-/// published earlier, by either protocol
-fn in_segment(work: &PublicationWork, oid: &alt_git_codec::ObjectId) -> bool {
-    <[u8; 20]>::try_from(oid.as_bytes()).is_ok_and(|key| work.source.segments.locate_any(&key))
 }
 pub(crate) fn retain(
     tx: &mut Transaction<'_>,

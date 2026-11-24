@@ -36,9 +36,9 @@ impl Store {
         }
         let max_objects = max_objects.min(self.limits.graph_objects);
         // Selected Git objects that were published earlier are confirmed against the
-        // segments. Segments only gain objects, so a set opened before the
-        // transaction confirms nothing a later one would not.
-        let published = self.published_segments(&key.scope.repository_instance_id)?;
+        // segments and the refs as they are before the transaction, where what
+        // the refs lead to is read.
+        let published = self.published_walked(&key.scope.repository_instance_id)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
@@ -115,7 +115,7 @@ impl Store {
             return Err(Error::Limit("worker lease or object bound"));
         }
         let max_objects = max_objects.min(self.limits.graph_objects);
-        let published = self.published_segments(&key.scope.repository_instance_id)?;
+        let published = self.published_walked(&key.scope.repository_instance_id)?;
         let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let (row, _) = crate::review::request(&mut tx, &self.spec, credential, key)?;
@@ -137,8 +137,7 @@ impl Store {
         manifest: Manifest,
         held: Held,
     ) -> Result<PublicationWork> {
-        let (_, segments) =
-            self.open_listed_segments(&key.scope.repository_instance_id, held.segment_ids)?;
+        let published = self.published_walked_as(&key.scope.repository_instance_id, held.listed)?;
         Ok(PublicationWork {
             key: key.clone(),
             fence,
@@ -149,7 +148,8 @@ impl Store {
                 objects: held.objects,
                 artifacts: held.artifacts,
                 locations: held.locations,
-                segments,
+                segments: published.segments,
+                reached: published.reached,
             },
         })
     }
@@ -162,7 +162,7 @@ struct Held {
     objects: Objects,
     artifacts: BTreeMap<String, u64>,
     locations: crate::segments::Locations,
-    segment_ids: Vec<(String, bool)>,
+    listed: reached::Listed,
 }
 impl Held {
     fn of(
@@ -183,23 +183,23 @@ impl Held {
             .chain(artifacts.keys().map(String::as_str))
             .collect();
         let locations = crate::segments::locations(tx, repository, &all_digests)?;
-        let segment_ids = Store::live_segment_ids(tx, repository)?;
+        let listed = reached::Listed::of(tx, repository)?;
         Ok(Self {
             objects,
             artifacts,
             locations,
-            segment_ids,
+            listed,
         })
     }
 }
 
 /// Every entry of the manifest is content the request has verified, stored or
-/// held by a segment.
+/// given by a segment.
 fn selected(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
     manifest: &Manifest,
-    published: &alt_pack_segment::SegmentSet,
+    published: &reached::Published,
 ) -> Result<()> {
     let repository = &key.scope.repository_instance_id;
     for batch in manifest.entries.chunks(crate::database::BATCH_ROWS) {
@@ -238,8 +238,8 @@ fn selected(
                         return Err(Error::Integrity("Git mapping selection"));
                     }
                     Some(_) if stored => {}
-                    // not in the content store: a segment has to hold it
-                    _ if crate::pack_native::holds_entry(published, entry)? => {}
+                    // not in the content store: a segment has to give it
+                    _ if published.holds_entry(entry)? => {}
                     _ => return Err(Error::Precondition("Git mapping not uploaded")),
                 }
             } else if !stored {
