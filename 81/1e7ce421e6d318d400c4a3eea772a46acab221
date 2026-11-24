@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the pages of a repository begin at commits that refs lead to, and a page of history ends where what it may read does
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/browse/history.rs
+touched: crates/alt-server/src/browse/reached.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/led_to.rs
