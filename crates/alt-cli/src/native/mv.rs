@@ -60,18 +60,7 @@ impl NativeRepo<'_> {
         let from_root = |given: &str| self.moved_path(given);
         let destination = from_root(destination)?;
         let folds = self.folds()?;
-        // a directory named in another spelling is the one to rename, not
-        // one to move into
-        let itself = match sources {
-            [one] if folds => self.one_file(&from_root(one)?, &destination)?,
-            _ => false,
-        };
-        let into = destination.is_empty() || (self.abs(&destination)?.is_dir() && !itself);
-        if sources.len() > 1 && !into {
-            return Err(settings::fatal(format!(
-                "destination '{destination}' is not a directory"
-            )));
-        }
+        let into = self.moves_into(sources, &destination, folds)?;
         let index = self.index()?;
         let mut edit = TreeEdit::of(index.clone());
         // the sources as they were given, then what lies in each directory
@@ -108,6 +97,23 @@ impl NativeRepo<'_> {
         }
         renamed.extend(beneath);
         Ok(renamed)
+    }
+
+    /// Whether the sources go into the directory `destination`, each
+    /// under its own name. A directory named in another spelling is the
+    /// one to rename, not one to move into.
+    fn moves_into(&self, sources: &[String], destination: &BString, folds: bool) -> Res<bool> {
+        let itself = match sources {
+            [one] if folds => self.one_file(&self.moved_path(one)?, destination)?,
+            _ => false,
+        };
+        let into = destination.is_empty() || (self.abs(destination)?.is_dir() && !itself);
+        if sources.len() > 1 && !into {
+            return Err(settings::fatal(format!(
+                "destination '{destination}' is not a directory"
+            )));
+        }
+        Ok(into)
     }
 
     /// A path given to `mv`, from the root of the tree.
