@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: ci
+summary: build the oplog test hooks only where a test run names them
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-oplog/Cargo.toml
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-refs/Cargo.toml
+touched: scripts/gate.sh
