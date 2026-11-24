@@ -1,8 +1,9 @@
-//! Sixty thousand sequences of what handles do to a version 2 log, on
-//! blocks of three sizes and of three batches of seeds (`v2_sequences`),
-//! each with the note beside the log kept, meddled with before any read
-//! of it, or never written. And as many more as the environment names,
-//! of seeds of its choosing.
+//! Sequences of what handles do to a version 2 log, on blocks of three
+//! sizes and of three batches of seeds (`v2_sequences`), each with the
+//! note beside the log kept, meddled with before any read of it, or
+//! never written: as many as a gate has the time for, the rest of the
+//! sixty thousand where the environment asks for them, and as many more
+//! as it names, of seeds of its choosing.
 
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::atomic::Ordering;
@@ -111,18 +112,35 @@ fn held(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
     );
 }
 
+/// The first seed of each batch a gate runs, and how many sequences a
+/// batch has on blocks of 1, 4 and 16 KiB.
+const BATCHES: [u64; 3] = [0, 7_310_000, 1_124_000_000];
+const OF_A_BATCH: [u64; 3] = [10_000, 6_000, 4_000];
+
+/// Of a thousand sequences of a batch, how many a gate runs: what it has
+/// the time for, five minutes on eight cores that it shares with others.
+/// The rest are run where the environment asks for them.
+const IN_A_GATE: u64 = 500;
+
+/// How many of the sequences of a batch on blocks of two to the power
+/// of `block_exp` bytes a gate runs.
+fn in_a_gate(block_exp: u8) -> u64 {
+    OF_A_BATCH[(block_exp as usize - 10) / 2] * IN_A_GATE / 1_000
+}
+
 /// [`held`] for the sequences of batch `batch` of the seeds a gate runs.
-fn all_of(batch: usize, block_exp: u8, sequences: u64) {
-    let first = [0, 7_310_000, 1_124_000_000][batch];
+fn all_of(batch: usize, block_exp: u8) {
     let counts = &COUNTS[batch][(block_exp as usize - 10) / 2];
-    held(first, block_exp, sequences, counts);
+    held(BATCHES[batch], block_exp, in_a_gate(block_exp), counts);
 }
 
 #[test]
 #[ignore = "runs the sequences ALT_OPLOG_SEQUENCES names, as `first seed:how many:block exponent`: \
             more of them, of other seeds, than a gate has the time for"]
 fn the_sequences_the_environment_names_hold() {
-    let named = std::env::var("ALT_OPLOG_SEQUENCES").expect("ALT_OPLOG_SEQUENCES is set");
+    let Ok(named) = std::env::var("ALT_OPLOG_SEQUENCES") else {
+        return;
+    };
     let mut parts = named.split(':').map(|part| part.parse::<u64>().unwrap());
     let mut next = || parts.next().expect("first seed:how many:block exponent");
     let (first, sequences, block_exp) = (next(), next(), next());
@@ -130,46 +148,63 @@ fn the_sequences_the_environment_names_hold() {
 }
 
 #[test]
+fn the_sequences_a_gate_leaves_out_hold_where_the_environment_asks_for_them() {
+    if std::env::var_os("ALT_OPLOG_LEFT_OUT").is_none() {
+        return;
+    }
+    for first in BATCHES {
+        for block_exp in [10, 12, 14] {
+            let (all, run) = (
+                OF_A_BATCH[(block_exp as usize - 10) / 2],
+                in_a_gate(block_exp),
+            );
+            let counts = Box::leak(Box::new(Counts::new()));
+            held(first + run, block_exp, all - run, counts);
+        }
+    }
+}
+
+#[test]
 fn whatever_handles_do_none_takes_for_looked_at_or_synced_what_the_file_and_its_writers_do_not() {
-    all_of(0, 10, 10_000);
+    all_of(0, 10);
 }
 
 #[test]
 fn whatever_handles_do_to_a_log_of_four_kibibyte_blocks_it_holds_what_its_writers_left_in_it() {
-    all_of(0, 12, 6_000);
+    all_of(0, 12);
 }
 
 #[test]
 fn whatever_handles_do_to_a_log_of_sixteen_kibibyte_blocks_it_holds_what_its_writers_left_in_it() {
-    all_of(0, 14, 4_000);
+    all_of(0, 14);
 }
 
 #[test]
 fn the_sequences_of_a_second_batch_of_seeds_hold_on_blocks_of_one_kibibyte() {
-    all_of(1, 10, 10_000);
+    all_of(1, 10);
 }
 
 #[test]
 fn the_sequences_of_a_second_batch_of_seeds_hold_on_blocks_of_four_kibibytes() {
-    all_of(1, 12, 6_000);
+    all_of(1, 12);
 }
 
 #[test]
 fn the_sequences_of_a_second_batch_of_seeds_hold_on_blocks_of_sixteen_kibibytes() {
-    all_of(1, 14, 4_000);
+    all_of(1, 14);
 }
 
 #[test]
 fn the_sequences_of_a_third_batch_of_seeds_hold_on_blocks_of_one_kibibyte() {
-    all_of(2, 10, 10_000);
+    all_of(2, 10);
 }
 
 #[test]
 fn the_sequences_of_a_third_batch_of_seeds_hold_on_blocks_of_four_kibibytes() {
-    all_of(2, 12, 6_000);
+    all_of(2, 12);
 }
 
 #[test]
 fn the_sequences_of_a_third_batch_of_seeds_hold_on_blocks_of_sixteen_kibibytes() {
-    all_of(2, 14, 4_000);
+    all_of(2, 14);
 }
