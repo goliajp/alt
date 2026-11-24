@@ -3,6 +3,7 @@ mod acquire;
 mod fence;
 mod pack;
 mod refs;
+mod settled;
 mod source;
 
 pub(crate) use fence::{check_graph_pins, finish, worker};
@@ -13,7 +14,7 @@ use crate::requests::{active, check_key, pin_many, request_row, upload_pin};
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
 use crate::{ByteStore, Credential, Error, Result, Store};
 use alt_git_codec::{ObjectId, ObjectKind};
-use alt_remote_protocol::{Manifest, Publication, Receipt, ReceiptBody, RequestKey, RequestState};
+use alt_remote_protocol::{Manifest, Publication, Receipt, RequestKey, RequestState};
 use alt_repository_service::{ObjectReader, ObjectSource, VerifiedGraph, validate_publication};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -408,25 +409,8 @@ impl Store {
             .any(|update| update.force || update.new.is_none());
         let sequence=unsigned(tx.query_one("UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1,pack_unreachable=pack_unreachable OR $2 WHERE id=$1 RETURNING transaction_sequence",&[repository,&unreachable])?.get(0))?;
         crate::tasks::retain(&mut tx, work, tasks, sequence, &validated.digest)?;
-        let body = ReceiptBody {
-            publication: work.publication.clone(),
-            request_digest: validated.digest,
-            transaction_sequence: sequence,
-            policy_version: validated.policy_version,
-            committed_at_unix_ms: now(&mut tx)?,
-        };
-        let signature = self.signing_key.sign(&body.signing_bytes_of_validated()?);
-        let receipt = Receipt {
-            body,
-            signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
-                .to_hex()
-                .to_string(),
-            signature: signature
-                .to_bytes()
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect(),
-        };
+        let committed_at = now(&mut tx)?;
+        let receipt = settled::receipt(&self.signing_key, work, validated, sequence, committed_at)?;
         let documents = crate::committed::committed_documents(&receipt)?;
         crate::committed::record_committed(
             &mut tx,
@@ -442,38 +426,7 @@ impl Store {
             &crate::jsonb::JsonText(&documents.result),
             unsigned(row.get("reserved_bytes"))?,
         )?;
-        // With the upload pins gone, what this request uploaded and nothing retains
-        // leaves the content store: its Git objects, which the segments hold now, and
-        // the chunks its content was assembled from. The new segment is counted instead.
-        let uploaded: BTreeSet<&str> = work
-            .manifest
-            .entries
-            .iter()
-            .flat_map(|entry| {
-                std::iter::once(entry.blake3.as_str())
-                    .chain(entry.chunks.iter().map(|chunk| chunk.blake3.as_str()))
-            })
-            .collect();
-        crate::pack_native::release_content(
-            &mut tx,
-            repository,
-            &uploaded.into_iter().collect::<Vec<_>>(),
-        )?;
-        if let Some(segment) = materialized {
-            crate::pack_native::account_segment(&mut tx, repository, segment.bytes)?;
-            crate::packs::insert_segment(
-                &mut tx,
-                repository,
-                sequence,
-                &crate::NewSegment {
-                    id: &segment.id,
-                    objects: segment.objects,
-                    bytes: segment.bytes,
-                    flags: segment.flags,
-                    inline: segment.inline.as_deref(),
-                },
-            )?;
-        }
+        settled::content(&mut tx, work, sequence, materialized)?;
         // SQL work and lock waits can outlive a lease checked on entry.
         crate::store::credential_row(&mut tx, &self.spec, credential)?;
         crate::tasks::recheck_current_authority(&mut tx, &self.spec, work, tasks, &current)?;

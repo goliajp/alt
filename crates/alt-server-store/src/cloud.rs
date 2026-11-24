@@ -15,6 +15,11 @@ use golia_platform_contract::{
 };
 pub(crate) use held::check_instance;
 use held::{binding, check_revision};
+mod service;
+pub(crate) use service::{repository_quota, service, writes_enabled};
+mod restore;
+pub use restore::CloudRestoreBinding;
+pub(crate) use restore::restore_binding;
 
 /// Authenticated ciphertext, never the upstream bearer grant. No Debug output.
 pub struct CloudRefresh {
@@ -23,46 +28,6 @@ pub struct CloudRefresh {
     pub claims: AccountAuthorization,
     pub browser: bool,
     pub refresh_needed: bool,
-}
-/// Fresh platform authority for an externally fenced disaster recovery. Content
-/// and membership history survive; runtime credentials and leases do not.
-pub struct CloudRestoreBinding<'a> {
-    pub audience: &'a Audience,
-    pub runtime_key_digest: &'a str,
-    pub provision_digest: Option<&'a str>,
-}
-pub(crate) fn restore_binding(
-    tx: &mut Transaction<'_>,
-    source: &InstanceSpec,
-    generation: u64,
-    replacement: &CloudRestoreBinding<'_>,
-) -> Result<()> {
-    let row = binding(tx)?;
-    let mut expected: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
-    audience_matches(source, &expected)?;
-    expected.generation = golia_platform_contract::Counter(generation);
-    let mut target = source.clone();
-    target.runtime_generation = generation;
-    audience_matches(&target, replacement.audience)?;
-    crate::bytes::check_digest(replacement.runtime_key_digest)?;
-    if let Some(digest) = replacement.provision_digest {
-        crate::bytes::check_digest(digest)?;
-    }
-    let old_provision: Option<String> = row.get("provision_digest");
-    if replacement.audience != &expected
-        || replacement.runtime_key_digest == row.get::<_, String>("runtime_key_digest")
-        || old_provision
-            .is_some_and(|old| replacement.provision_digest.is_none_or(|new| new == old))
-    {
-        return Err(Error::Precondition(
-            "Cloud recovery requires same identity and fresh runtime binding",
-        ));
-    }
-    tx.execute(
-        "UPDATE alt_cloud_binding SET audience=$1,runtime_key_digest=$2,provision_digest=$3,service=NULL,service_denied_at=0 WHERE singleton",
-        &[&Jsonb::from_serde(&replacement.audience)?, &replacement.runtime_key_digest, &replacement.provision_digest],
-    )?;
-    Ok(())
 }
 /// Stable local identifier for authenticated grant encryption; not a bearer.
 pub fn cloud_credential_digest(token: &str) -> Result<String> {
@@ -495,54 +460,4 @@ impl Store {
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
-}
-
-/// Account authorization and service authorization are deliberately separate.
-/// Missing/expired paid service disables new content without blocking exports.
-pub(crate) fn service(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-) -> Result<Option<AltServiceAuthorization>> {
-    if spec.deployment_mode != DeploymentMode::Cloud {
-        return Ok(None);
-    }
-    let row = binding(tx)?;
-    let value: Jsonb = row
-        .get::<_, Option<Jsonb>>("service")
-        .ok_or(Error::Precondition(
-            "Cloud service authorization unavailable",
-        ))?;
-    let service: AltServiceAuthorization = value.read_serde()?;
-    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
-    denied(service.check(&audience, now(tx)?))?;
-    if service.lease.revocation_generation.0 < unsigned(row.get("authority_revision"))?
-        || service.lease.issued_at_unix_ms.0 <= unsigned(row.get("service_denied_at"))?
-        || !service.writes_enabled
-    {
-        return Err(Error::Precondition(
-            "Cloud writes are not currently authorized",
-        ));
-    }
-    Ok(Some(service))
-}
-pub(crate) fn writes_enabled(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<bool> {
-    if spec.deployment_mode != DeploymentMode::Cloud {
-        return Ok(true);
-    }
-    match service(tx, spec) {
-        Ok(_) => Ok(true),
-        Err(Error::Precondition(_) | Error::Unauthorized) => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-pub(crate) fn repository_quota(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
-    if let Some(service) = service(tx, spec)? {
-        let count: i64 = tx
-            .query_one("SELECT count(*) FROM alt_repositories", &[])?
-            .get(0);
-        if unsigned(count)? >= service.limits.repositories.0 {
-            return Err(Error::Limit("Cloud repository quota"));
-        }
-    }
-    Ok(())
 }
