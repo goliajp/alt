@@ -36,6 +36,7 @@ fn landing<T>(
         checked: None,
         updates: &updates,
         principal: &principal,
+        signed_in: None,
         sig_label: "none",
     };
     let mut store = Store::open(alt_dir.to_path_buf()).unwrap();

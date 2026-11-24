@@ -257,10 +257,14 @@ pub(super) fn verify_push_signature(
 /// string. A verified signature wins over Basic-auth (it's a stronger
 /// claim of identity); otherwise we fall back to the Basic-auth user
 /// (or "anonymous") and the label records *why* it isn't verified.
+///
+/// Where a verified signature names another principal than the request
+/// signed in as, that one is returned beside it: the push is held to the
+/// policy of both. A key does not take off what an account is held to.
 pub(super) fn pick_principal(
     outcome: &SigOutcome,
     auth_user: Option<&str>,
-) -> (Principal, &'static str) {
+) -> (Principal, &'static str, Option<Principal>) {
     let (id, label) = match outcome {
         SigOutcome::Verified { principal_id } => (principal_id.clone(), "ed25519"),
         SigOutcome::NoSignature => (auth_user.unwrap_or("anonymous").to_owned(), "none"),
@@ -270,14 +274,16 @@ pub(super) fn pick_principal(
             "unknown-principal",
         ),
     };
-    (
-        Principal {
-            kind: PrincipalKind::Human,
-            id,
-            session: None,
-        },
-        label,
-    )
+    let human = |id: String| Principal {
+        kind: PrincipalKind::Human,
+        id,
+        session: None,
+    };
+    let signed_in = match (outcome, auth_user) {
+        (SigOutcome::Verified { .. }, Some(user)) if user != id => Some(human(user.to_owned())),
+        _ => None,
+    };
+    (human(id), label, signed_in)
 }
 
 /// Does this principal's policy require a verified signature on every

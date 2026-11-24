@@ -139,6 +139,10 @@ pub struct Push<'a> {
     pub checked: Option<&'a Checked>,
     pub updates: &'a [RefUpdate],
     pub principal: &'a Principal,
+    /// Whom the request signed in as, where a signature names another: the
+    /// push is held to what both may do. A signature tells who pushes, and
+    /// takes nothing off what the account it came in by is held to.
+    pub signed_in: Option<&'a Principal>,
     pub sig_label: &'a str,
 }
 
@@ -271,7 +275,10 @@ pub fn land(store: &mut Store, push: &Push<'_>) -> Res<Landed> {
 
 /// [`land`], with `observe` called at each [`Step`] it comes to.
 pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step)) -> Res<Landed> {
-    let tx = ref_tx::Tx::new(store.capabilities_for(push.principal), push);
+    let held_to = [Some(push.principal), push.signed_in];
+    let caps = held_to.into_iter().flatten();
+    let caps = caps.map(|principal| store.capabilities_for(principal));
+    let tx = ref_tx::Tx::new(caps.collect(), push);
     if let Err(denied) = tx.names_allowed() {
         return Ok(Landed::Refused(format!("ref tx: {denied}")));
     }

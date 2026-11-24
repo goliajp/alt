@@ -41,7 +41,7 @@ pub fn take_in<T>(
         alt_git_pack::Bases<'_>,
     )>,
     updates: &[RefUpdate],
-    (principal, sig_label): &(Principal, &str),
+    (principal, sig_label, signed_in): &(Principal, &str, Option<Principal>),
     recorded: impl Recorded<T>,
 ) -> Res<Report<T>> {
     // a pack that fails to index is reported as the unpack error; one
@@ -61,7 +61,13 @@ pub fn take_in<T>(
     if updates.is_empty() {
         return Ok((Ok(()), Ok(None)));
     }
-    let trust = signed::trust_for(&store.take(), principal)?;
+    let trust = match signed::trust_for(&store.take(), principal)? {
+        None => match signed_in {
+            Some(signed_in) => signed::trust_for(&store.take(), signed_in)?,
+            None => None,
+        },
+        trust => trust,
+    };
     let checked = match trust {
         Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
         None => None,
@@ -71,6 +77,7 @@ pub fn take_in<T>(
         checked: checked.as_ref(),
         updates,
         principal,
+        signed_in: signed_in.as_ref(),
         sig_label,
     };
     let mut store = store.take();

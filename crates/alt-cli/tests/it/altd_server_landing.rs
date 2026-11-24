@@ -62,6 +62,18 @@ pub(crate) fn land_as(
     pack: Option<&[u8]>,
     written: &dyn Fn(),
 ) -> Landed {
+    land_held_to(store, (principal, None), updates, pack, written)
+}
+
+/// [`land_as`], the push signed by `principal` and come in by the account
+/// `signed_in` where one is given.
+pub(crate) fn land_held_to(
+    store: &RefCell<Store>,
+    (principal, signed_in): (&Principal, Option<&Principal>),
+    updates: &[alt_wire::RefUpdate],
+    pack: Option<&[u8]>,
+    written: &dyn Fn(),
+) -> Landed {
     let mut store = store.borrow_mut();
     store.refresh().unwrap();
     let prepared = pack.map(prepared);
@@ -73,6 +85,7 @@ pub(crate) fn land_as(
         checked: checked.as_ref(),
         updates,
         principal,
+        signed_in,
         sig_label: "none",
     };
     let written = |step| {
@@ -261,4 +274,35 @@ fn a_push_whose_ref_transaction_fails_has_its_objects_taken_out_again() {
     drop(store);
     assert_eq!(tip(origin.path(), "refs/heads/new"), name);
     ok(alt(origin.path(), &["fsck"]));
+}
+
+/// A push that a key signs comes in by an account, and each has what it may
+/// do: a branch the account may not write is not written because the key
+/// may, nor one the key may not because the account may. The policy of the
+/// one alone is what the other had taken off before.
+#[test]
+fn a_signed_push_is_held_to_what_its_signer_and_the_account_it_came_in_by_may_do() {
+    let (origin, seed) = seeded();
+    let policy = "human:bob -> branch_deny=refs/heads/kept\nhuman:carol -> branch=refs/heads/c-*\n";
+    std::fs::write(origin.path().join(".alt/policy"), policy).unwrap();
+    let store = served(origin.path());
+    let (bob, carol, dave) = (pusher("bob"), pusher("carol"), pusher("dave"));
+    let to = |branch: &str| [creation(&format!("refs/heads/{branch}"), &seed)];
+    let landed = |held_to: (&Principal, Option<&Principal>), branch: &str| {
+        land_held_to(&store, held_to, &to(branch), None, &|| ())
+    };
+    let refused = |landed: Landed| matches!(landed, Landed::Refused(_));
+    // each alone, as the policy tells
+    assert!(refused(landed((&bob, None), "kept")));
+    assert!(refused(landed((&carol, None), "other")));
+    assert_eq!(landed((&dave, None), "d-1"), Landed::Moved);
+    // signed by one who may, come in by the account that may not: and the other way
+    assert!(refused(landed((&dave, Some(&bob)), "kept")));
+    assert!(refused(landed((&carol, Some(&bob)), "kept")));
+    assert!(refused(landed((&bob, Some(&carol)), "other")));
+    assert!(refused(landed((&carol, Some(&dave)), "other")));
+    // what both may
+    assert_eq!(landed((&carol, Some(&bob)), "c-1"), Landed::Moved);
+    assert_eq!(landed((&dave, Some(&bob)), "d-2"), Landed::Moved);
+    assert_eq!(landed((&bob, Some(&carol)), "c-2"), Landed::Moved);
 }
