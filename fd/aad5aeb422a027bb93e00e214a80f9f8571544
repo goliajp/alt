@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the wait after a platform gave no answer is read from the clock, not from how soon a request was sent
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/cloud/platform.rs
+touched: crates/alt-server/tests/it/database/cloud/unanswered.rs
