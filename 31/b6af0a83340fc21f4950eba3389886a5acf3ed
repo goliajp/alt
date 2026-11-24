@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what the upgrade from schema 21 takes of the disk and how it is given back
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
