@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: say at a clone, as at an import, which paths met in one name
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/import_config.rs
