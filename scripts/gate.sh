@@ -39,6 +39,8 @@ Corpus runs ignored library and integration tests; --test restricts it to that
 integration target. Filters apply to both kinds when no target is selected.
 A corpus run that reaches alt-cli needs ALT_OLD_BIN: an alt built from the
 previous release, which its mixed-version tests run against this build.
+It also needs ALT_CASEFOLD_DIR: a directory on a file system that takes names
+differing in case for one, where its casefold tests run.
 A package with an ignored test marked "needs --release" has its corpus run
 built with --release.
 EOF
@@ -207,6 +209,14 @@ needs_old_bin() {
     case "$filter" in ''|*mixed_versions*) ;; *) return 1 ;; esac
 }
 
+# whether this corpus run reaches alt-cli's tests of a file system that
+# takes names differing in case for one
+needs_casefold_dir() {
+    case "$package" in ''|alt-cli) ;; *) return 1 ;; esac
+    case "$target" in ''|it) ;; *) return 1 ;; esac
+    case "$filter" in ''|*casefold*) ;; *) return 1 ;; esac
+}
+
 # Packages with an ignored test whose reason says it needs --release: the
 # corpus class builds these optimized, whatever profile the rest uses.
 release_packages() {
@@ -227,6 +237,21 @@ run_corpus() {
                 die "corpus: set ALT_OLD_BIN to an alt built from the previous release (the mixed_versions tests run it)"
             ALT_OLD_BIN=$(cd "$(dirname "$ALT_OLD_BIN")" && pwd -P)/$(basename "$ALT_OLD_BIN")
             export ALT_OLD_BIN
+        fi
+        if needs_casefold_dir; then
+            if [ -z "${ALT_CASEFOLD_DIR:-}" ]; then
+                die "corpus: set ALT_CASEFOLD_DIR to a directory on a file system that takes names differing in case for one (the casefold tests of alt-cli run there and do not run without it); on Linux: mkfs.ext4 -O casefold,^has_journal -E encoding=utf8 <image>, mount it with -o loop, mkdir <mount>/t, chattr +F <mount>/t, and name <mount>/t; on macOS any directory of a default APFS volume"
+            fi
+            probe=$ALT_CASEFOLD_DIR/.gate-case-probe.$$
+            : > "$probe" || die "corpus: cannot write in ALT_CASEFOLD_DIR ($ALT_CASEFOLD_DIR)"
+            if [ -e "$ALT_CASEFOLD_DIR/.GATE-CASE-PROBE.$$" ]; then
+                rm -f "$probe"
+            else
+                rm -f "$probe"
+                die "corpus: ALT_CASEFOLD_DIR ($ALT_CASEFOLD_DIR) is on a file system that tells case apart"
+            fi
+            ALT_CASEFOLD_DIR=$(cd "$ALT_CASEFOLD_DIR" && pwd -P) || exit 2
+            export ALT_CASEFOLD_DIR
         fi
         optimized=$(release_packages)
         if [ -n "$package" ]; then
