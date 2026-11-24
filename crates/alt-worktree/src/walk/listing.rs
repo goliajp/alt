@@ -38,7 +38,7 @@ impl Walk<'_> {
         reach: Reach,
         found: &mut Found,
     ) -> io::Result<()> {
-        let mut names = fd.names()?;
+        let mut names = fd.names(self.precompose)?;
         names.sort();
         let base = self.snapshot.dir_path(dir);
         if !hidden {

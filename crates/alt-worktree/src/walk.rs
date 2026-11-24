@@ -34,6 +34,8 @@ pub(crate) struct Walk<'a> {
     file_mode: bool,
     /// names that differ in case are one name to the file system
     ignore_case: bool,
+    /// a name listed is taken in its composed form
+    pub(crate) precompose: bool,
 }
 
 /// A directory in the one being walked, which takes a walk of its own:
@@ -62,6 +64,7 @@ pub(crate) fn walk(
         untracked,
         file_mode: opts.file_mode,
         ignore_case: opts.ignore_case,
+        precompose: opts.precompose,
     };
     let reach = match within.is_empty() {
         true => Reach::Inside,

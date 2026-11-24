@@ -50,7 +50,7 @@ impl Listing {
     /// Takes an entry as a directory listing gives it: its NUL-terminated
     /// name and its type. One whose type the listing leaves open is noted
     /// in `unknown`.
-    fn add(&mut self, name: &[u8], d_type: u8, unknown: &mut Vec<usize>) {
+    pub(crate) fn add(&mut self, name: &[u8], d_type: u8, unknown: &mut Vec<usize>) {
         if name == b".\0" || name == b"..\0" {
             return;
         }
@@ -201,11 +201,11 @@ impl DirFd {
         Ok(out)
     }
 
-    /// Every name in the directory except `.` and `..`, in no order.
-    pub(crate) fn names(&mut self) -> io::Result<Listing> {
+    /// Every name in the directory but `.` and `..`, in no order; composed with `precompose`.
+    pub(crate) fn names(&mut self, precompose: bool) -> io::Result<Listing> {
         let mut listing = Listing::default();
         let mut unknown = Vec::new();
-        self.each_entry(&mut |name, d_type| listing.add(name, d_type, &mut unknown))?;
+        self.each_entry(&mut |name, d_type| listing.take(name, d_type, precompose, &mut unknown))?;
         self.resolve(&mut listing, &unknown)?;
         Ok(listing)
     }
@@ -330,7 +330,7 @@ mod tests {
         std::fs::create_dir(tmp.path().join("b")).unwrap();
         std::os::unix::fs::symlink("b.txt", tmp.path().join("l")).unwrap();
         let mut dir = DirFd::open(tmp.path()).unwrap();
-        let mut names = dir.names().unwrap();
+        let mut names = dir.names(false).unwrap();
         names.sort();
         let seen: Vec<(&[u8], Kind)> = (0..names.len())
             .map(|i| (names.name(i), names.kind(i)))

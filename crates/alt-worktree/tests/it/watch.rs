@@ -20,6 +20,7 @@ pub(crate) fn options(untracked: Untracked, root: &Path) -> ScanOptions<'static>
     ScanOptions {
         file_mode: true,
         ignore_case: false,
+        precompose: false,
         untracked,
         within: &[],
         clean: None,
@@ -36,6 +37,7 @@ pub(crate) fn start(root: &Path, most: usize, snapshot: &Snapshot) -> std::io::R
     let opts = ScanOptions {
         file_mode: true,
         ignore_case: false,
+        precompose: false,
         untracked: Untracked::Normal,
         within: &[],
         clean: None,

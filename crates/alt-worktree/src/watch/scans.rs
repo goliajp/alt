@@ -15,6 +15,7 @@ fn held_for<'a>(opts: &ScanOptions<'a>, within: &'a [&'a [u8]]) -> ScanOptions<'
     ScanOptions {
         file_mode: opts.file_mode,
         ignore_case: opts.ignore_case,
+        precompose: opts.precompose,
         untracked: Untracked::Normal,
         within,
         clean: opts.clean,

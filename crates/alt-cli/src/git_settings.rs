@@ -209,6 +209,14 @@ pub(crate) fn ignore_case(settings: &Config) -> Res<bool> {
     Ok(set.unwrap_or(false))
 }
 
+/// `core.precomposeUnicode`: whether a name read from a directory or
+/// given to a command is taken in its composed form. As for git, only
+/// where the file systems list names decomposed: on macOS.
+pub(crate) fn precompose(settings: &Config) -> Res<bool> {
+    let set = settings.get_bool("core", None, "precomposeunicode");
+    Ok(cfg!(target_os = "macos") && set.transpose()?.unwrap_or(false))
+}
+
 /// A failure that changed nothing, with the exit status git has for it.
 pub(crate) fn fatal(message: String) -> Box<dyn std::error::Error> {
     let refusal = crate::machine::Failure::refusal("execution_error", message);

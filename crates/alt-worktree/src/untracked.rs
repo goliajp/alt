@@ -12,6 +12,8 @@ use crate::fsdir::{DirFd, Kind, Listing};
 use crate::ignore::{self, IgnoreLayer, IgnoreStack};
 use crate::walk::{Reach, Walk, holds_repository, ignore_file};
 
+pub(crate) mod composed;
+
 /// Which of the files the index does not have a scan reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Untracked {
@@ -145,7 +147,7 @@ impl Walk<'_> {
         reach: Reach,
         each: &mut dyn FnMut(&[u8]) -> ControlFlow<()>,
     ) -> io::Result<ControlFlow<()>> {
-        let mut names = fd.names()?;
+        let mut names = fd.names(self.precompose)?;
         names.sort();
         if holds_repository(&names) {
             return Ok(as_one_path(path, each));

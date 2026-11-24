@@ -144,6 +144,7 @@ impl NativeRepo<'_> {
         let options = ScanOptions {
             file_mode: inputs.file_mode,
             ignore_case: inputs.ignore_case,
+            precompose: inputs.precompose,
             untracked,
             within,
             clean: Some(&clean),

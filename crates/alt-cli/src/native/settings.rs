@@ -17,6 +17,8 @@ pub(super) struct ScanInputs {
     pub(super) file_mode: bool,
     /// `core.ignoreCase`
     pub(super) ignore_case: bool,
+    /// `core.precomposeUnicode`
+    pub(super) precompose: bool,
 }
 
 impl NativeRepo<'_> {
@@ -39,6 +41,7 @@ impl NativeRepo<'_> {
             file_mode: crate::git_settings::file_mode(&settings)?,
             ignore_case: crate::git_settings::ignore_case(&settings)?
                 || import_config::folds_case(&self.root.join(".alt")),
+            precompose: crate::git_settings::precompose(&settings)?,
         })
     }
 

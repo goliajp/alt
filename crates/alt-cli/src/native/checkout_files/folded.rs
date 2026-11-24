@@ -107,8 +107,10 @@ impl NativeRepo<'_> {
         if !self.folds()? {
             return Ok(false);
         }
+        // as git: a name is another spelling of one the index has only
+        // where the two differ in the case of letters of the alphabet
         let there = self.file_there(path)?;
-        for other in gone.filter(|other| *other != path) {
+        for other in gone.filter(|other| *other != path && other.eq_ignore_ascii_case(path)) {
             if there.is_some() && self.file_there(other)? == there {
                 return Ok(true);
             }

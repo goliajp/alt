@@ -52,6 +52,7 @@ pub mod patterns;
 pub mod policy;
 pub mod portable;
 pub mod precommit;
+pub mod precompose;
 pub mod prompt;
 pub mod quote;
 pub mod receive;

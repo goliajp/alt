@@ -346,12 +346,10 @@ pub fn import(
     let report = alt_import::import_git_with(repo, &alt_dir, &actor, timestamp_ms, prepare)?;
     import_config::say_imported(out, &report, &alt_dir)?;
 
-    // Decide whether to materialize. We only do it when the work tree
-    // is empty (a fresh import-into-blank-dir). If `target` is the
-    // *same* dir we discovered the source git in — i.e. the user is
-    // converting `.git` → `.alt` in place — the work tree already
-    // matches HEAD, and any "switch" pass would be a no-op at best,
-    // a clobber at worst.
+    // Materialize only where the work tree is empty (a fresh import into
+    // a blank dir). Where `target` is the dir the source git is in, the
+    // work tree already matches HEAD, and a "switch" pass would be a
+    // no-op at best, a clobber at worst.
     let target_canon = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_owned());
     let same_dir = repo
         .work_tree()
@@ -374,6 +372,7 @@ pub fn import(
         }
     };
     let mut native = open.repo();
+    native.note_composition()?;
     let taken = native.lfs_take(repo.git_dir())?;
     if taken > 0 {
         writeln!(out, "took {taken} LFS object(s)")?;

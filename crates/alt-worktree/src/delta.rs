@@ -28,8 +28,7 @@ pub type CleanTracked<'a> = &'a dyn Fn(&[u8], &[u8], ObjectId) -> Option<Vec<u8>
 pub struct ScanOptions<'a> {
     /// which files the index does not have to look for
     pub untracked: Untracked,
-    /// the paths to look at, each with everything beneath it; the whole
-    /// tree when empty
+    /// the paths to look at, each with all beneath it; the whole tree when empty
     pub within: &'a [&'a [u8]],
     pub clean: Option<CleanTracked<'a>>,
     pub head: Option<SubmoduleHead<'a>>,
@@ -37,13 +36,13 @@ pub struct ScanOptions<'a> {
     /// earlier and every `.gitignore` above them all
     pub excludes: &'a [&'a Path],
     /// `core.fileMode`: whether a file can be executed is told from its
-    /// stat. Where not, a file the index has is taken to have the mode
-    /// the index has for it
+    /// stat; where not, a tracked file has the mode the index has for it
     pub file_mode: bool,
-    /// `core.ignoreCase`: the file system takes names that differ in case
-    /// for one, so a file the index has may be listed under another
-    /// spelling than the index has for it
+    /// `core.ignoreCase`: names that differ in case are one name to the
+    /// file system, so a tracked file may be listed under another spelling
     pub ignore_case: bool,
+    /// `core.precomposeUnicode`: a name listed is taken in its composed form
+    pub precompose: bool,
     /// when the scan began: a file changed at or after it is compared but
     /// not recorded as unchanged, because a later change within the same
     /// tick of the clock would leave its stat as it is
@@ -59,6 +58,7 @@ impl ScanOptions<'_> {
         ScanOptions {
             file_mode: true,
             ignore_case: false,
+            precompose: false,
             untracked,
             within: &[],
             clean: None,

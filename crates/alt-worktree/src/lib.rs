@@ -11,11 +11,11 @@ mod cachetree;
 #[cfg(unix)]
 mod clock;
 mod commit;
+#[cfg(unix)]
 mod control;
 #[cfg(unix)]
 mod delta;
 mod error;
-#[cfg(unix)]
 mod fsdir;
 mod glob;
 pub mod ident;
@@ -38,12 +38,12 @@ pub use cachetree::Staged;
 pub use clock::{Clock, Stamp};
 pub use commit::{Sig, build_commit_bytes, write_commit};
 #[cfg(unix)]
+#[cfg(unix)]
 pub use delta::{CleanTracked, Delta, ScanOptions, scan};
 pub use error::WorktreeError;
 pub use kind::{ChangeKind, NAMES_ASKED};
 pub use snapshot::{Dir, Entry, FileStat, Replaced, Snapshot};
-#[cfg(unix)]
-pub use untracked::{Hidden, Untracked};
+pub use untracked::{Hidden, Untracked, composed::composed};
 #[cfg(target_os = "linux")]
 pub use watch::{Unanswered, Watched, watch_allowance};
 

@@ -826,6 +826,7 @@ dependencies = [
  "alt-repo",
  "alt-testutil",
  "alt-threads",
+ "alt-url",
 ]
 
 [[package]]

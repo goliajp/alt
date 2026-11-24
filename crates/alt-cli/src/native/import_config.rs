@@ -37,6 +37,21 @@ impl NativeRepo<'_> {
     /// Makes a remote of this store of each remote the git repository
     /// `source` has, where the store has none of that name: one it has is
     /// the store's own to change. Returns the names taken over.
+    /// After an import: sets `core.precomposeUnicode` in the store's own
+    /// configuration where the git repository left it unset and the
+    /// file system here takes the two forms of a name for one.
+    pub(super) fn note_composition(&self) -> Res<()> {
+        let unset = self
+            .settings()?
+            .get_bool("core", None, "precomposeunicode")
+            .is_none();
+        if unset && composes(&self.store.alt_dir)? {
+            let repo = self.store.git_view()?;
+            crate::config_cmd::set(&repo, "core.precomposeunicode", "true")?;
+        }
+        Ok(())
+    }
+
     pub(super) fn take_remotes(&mut self, source: &alt_repo::Repository) -> Res<Vec<String>> {
         let config = source.config_at(crate::git_settings::home())?;
         let mut taken = Vec::new();
@@ -61,13 +76,37 @@ pub(super) fn folds_case(alt_dir: &Path) -> bool {
     alt_dir.with_file_name(".ALT").symlink_metadata().is_ok()
 }
 
-/// Writes `core.ignoreCase` into the configuration of the new store
-/// `alt_dir` where its file system ignores case, as `git init` does.
+/// Whether the file system of the working tree whose `.alt` is `alt_dir`
+/// reaches a file by its name composed and decomposed alike: told, as
+/// git tells it, by a file made under the one and found under the other.
+/// Asked on macOS alone, where git asks.
+fn composes(alt_dir: &Path) -> Res<bool> {
+    if !cfg!(target_os = "macos") {
+        return Ok(false);
+    }
+    let (made, found) = (alt_dir.join("\u{e4}"), alt_dir.join("a\u{308}"));
+    std::fs::write(&made, "")?;
+    let composes = found.symlink_metadata().is_ok();
+    std::fs::remove_file(&made)?;
+    Ok(composes)
+}
+
+/// Writes `core.ignoreCase` and `core.precomposeUnicode` into the
+/// configuration of the new store `alt_dir` where its file system
+/// ignores case, or takes the two forms of a name for one, as `git
+/// init` does.
 pub(super) fn note_case(alt_dir: &Path) -> Res<()> {
+    let mut core = String::new();
     if folds_case(alt_dir) {
+        core.push_str("\tignorecase = true\n");
+    }
+    if composes(alt_dir)? {
+        core.push_str("\tprecomposeunicode = true\n");
+    }
+    if !core.is_empty() {
         let kept = alt_dir.join("git-import");
         std::fs::create_dir_all(&kept)?;
-        crate::durable::write(kept.join("config"), "[core]\n\tignorecase = true\n")?;
+        crate::durable::write(kept.join("config"), format!("[core]\n{core}"))?;
     }
     Ok(())
 }

@@ -99,6 +99,7 @@ fn scanned_within(root: &Path, untracked: Untracked, within: &[&[u8]]) -> Vec<St
     let options = ScanOptions {
         file_mode: true,
         ignore_case: false,
+        precompose: false,
         untracked,
         within,
         clean: None,

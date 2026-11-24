@@ -34,6 +34,7 @@ mod byte_names;
 mod capability_gate;
 mod casefold;
 mod casefold_asked;
+mod casefold_composed;
 mod casefold_dirs;
 mod casefold_left;
 mod casefold_meet;
@@ -250,6 +251,8 @@ mod funcname_drivers;
 mod funcname_git;
 mod funcname_long;
 mod git_settings;
+#[cfg(target_os = "macos")]
+mod precompose;
 // the points to be killed at are in a debug build only
 #[cfg(debug_assertions)]
 mod recover_shared_refs;
