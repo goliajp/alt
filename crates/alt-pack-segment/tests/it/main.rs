@@ -6,6 +6,8 @@ mod build;
 mod deep;
 mod fetch;
 mod kinds;
+mod led;
+mod led_cost;
 mod many_of_one;
 mod mend;
 mod merge;

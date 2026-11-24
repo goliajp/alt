@@ -5,43 +5,30 @@
 //! names such a commit is no reason to tell it the commit is here, nor to leave
 //! out of what it is sent what only that commit reaches.
 
-use crate::{Error, Oid, OidMap, OidSet, SegmentSet};
+use crate::{
+    Error, Kind, Oid, OidMap, OidSet, SegmentSet,
+    object::{self, Parsed},
+};
 use std::collections::BinaryHeap;
-use std::sync::atomic::AtomicBool;
-
-/// The objects some refs lead to, among those the segments hold.
-pub struct Led {
-    /// in the order of the ids
-    objects: Vec<Oid>,
-}
-
-impl Led {
-    pub fn to(&self, oid: &Oid) -> bool {
-        self.objects.binary_search(oid).is_ok()
-    }
-
-    pub fn len(&self) -> usize {
-        self.objects.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
-    }
-}
 
 impl SegmentSet {
-    /// Every object `tips` lead to. Reads `steps` trees at the most and ends once
-    /// `gone` is set, as [`Self::select_while`] does.
-    pub fn led_to(
-        &self,
-        tips: &[Oid],
-        steps: usize,
-        gone: Option<&AtomicBool>,
-    ) -> Result<Led, Error> {
-        let mut objects = self.select_while(tips, &[], steps, gone)?.objects;
-        objects.sort_unstable();
-        objects.dedup();
-        Ok(Led { objects })
+    /// Whether `tips` lead to every one of `sought`, as the commits tell it:
+    /// a tag among the tips is gone through to what it names, and one of
+    /// `sought` that is no commit is led to by none.
+    pub fn lead_to_all(&self, tips: &[Oid], sought: &[Oid], steps: usize) -> Result<bool, Error> {
+        let mut commits = Vec::with_capacity(tips.len());
+        for tip in tips {
+            let mut oid = *tip;
+            while self.commit(&oid).is_none() && self.kind(&oid)? == Some(Kind::Tag) {
+                let (kind, data) = self.read(&oid)?;
+                let Parsed::Tag { object, .. } = object::parse(kind, &data)? else {
+                    unreachable!()
+                };
+                oid = object;
+            }
+            commits.push(oid);
+        }
+        Ok(self.reached(&commits, sought, steps)?.len() == sought.len())
     }
 
     /// Those of `said` that are commits one of `tips` reaches, in the order they
