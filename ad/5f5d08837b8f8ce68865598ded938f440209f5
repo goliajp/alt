@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: refuse to set or unset by hand a variable that tells the format of the store
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/config_cmd.rs
+touched: crates/alt-cli/tests/it/mixed_versions/new_imports.rs
