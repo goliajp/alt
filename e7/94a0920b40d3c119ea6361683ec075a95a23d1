@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: set no oplog boundary over an op that was refused, by an append or by a reader
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/panic.rs
+touched: crates/alt-oplog/tests/it/v2_cut_told.rs
+touched: crates/alt-oplog/tests/it/v2_driver.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
+touched: crates/alt-oplog/tests/it/v2_holes.rs
+touched: crates/alt-oplog/tests/it/v2_kept.rs
+touched: crates/alt-oplog/tests/it/v2_kept_state.rs
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
+touched: crates/alt-oplog/tests/it/v2_notes.rs
+touched: crates/alt-oplog/tests/it/v2_outcomes.rs
+touched: crates/alt-oplog/tests/it/v2_owed.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
