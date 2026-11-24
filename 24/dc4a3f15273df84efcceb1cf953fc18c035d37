@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a request refused for the requests of its address that brought no body leaves its connection open
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/connection.rs
+touched: crates/alt-server/tests/it/database/connections/sources.rs
