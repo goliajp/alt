@@ -280,7 +280,11 @@ received, the peers of one address that is not the host itself have a
 quarter between them; a single response or body of an address may pass the
 quarter as far as the room goes. These numbers, and those for the size of a push and the
 memory and disk requests may take, are set through the environment;
-`altd-server --help` lists them with their defaults.
+`altd-server --help` lists them with their defaults. Two more that it lists
+bound what the server holds at once: `ALT_SERVER_MAX_OPEN_REPOS`, the
+repositories of a root kept open, and `ALT_SERVER_MAX_INDEX_BYTES`, the memory
+the packs of pushes are indexed in between them and as much on disk for the
+bases of their deltas.
 
 ## Status and roadmap
 
