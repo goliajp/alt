@@ -2,7 +2,7 @@
 //! while it does not take its answer; and one that does not go on is let
 //! go of.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -70,18 +70,21 @@ fn a_body_that_stalls_or_dribbles_is_let_go_of() {
 }
 
 /// A body that comes slowly and goes on coming is taken to its end, over
-/// many times the time one has to move in, and the worker answers other
-/// requests while it comes.
+/// several times the time one has to move in, and the worker answers other
+/// requests while it comes. The time to move in is a second here: the test
+/// sends at the pace it means to only while the host lets its thread run, and a
+/// thread kept from running for the whole of that time is a peer that stalled.
 #[test]
 fn a_body_that_is_slow_and_goes_on_is_received_and_keeps_no_worker_meanwhile() {
-    let address = echo(SHORT);
+    let window = Duration::from_secs(1);
+    let address = echo(window);
     let (mut slow, mut reader) = connected(address);
-    slow.write_all(b"POST /slow HTTP/1.1\r\nContent-Length: 100000\r\n\r\n")
+    slow.write_all(b"POST /slow HTTP/1.1\r\nContent-Length: 150000\r\n\r\n")
         .unwrap();
     let began = Instant::now();
-    // a thousand bytes each twenty milliseconds: fifteen times what is
-    // asked of it, and two seconds for all of it
-    for sent in 0..100 {
+    // a thousand bytes each twenty milliseconds: fifty times what is asked
+    // of it, and three seconds for all of it
+    for sent in 0..150 {
         slow.write_all(&[b'x'; 1000]).unwrap();
         std::thread::sleep(Duration::from_millis(20));
         if sent % 25 == 0 {
@@ -90,8 +93,8 @@ fn a_body_that_is_slow_and_goes_on_is_received_and_keeps_no_worker_meanwhile() {
     }
     let (status, body, _) = response(&mut reader);
     assert_eq!(status, "HTTP/1.1 200 OK");
-    assert_eq!(body.len(), "Post /slow ".len() + 100_000);
-    assert!(began.elapsed() >= 5 * SHORT);
+    assert_eq!(body.len(), "Post /slow ".len() + 150_000);
+    assert!(began.elapsed() >= 3 * window);
 }
 
 /// The bodies received and not yet let go of have a size between them:
@@ -125,7 +128,8 @@ fn a_body_there_is_no_room_for_is_told_so() {
 /// extension.
 #[test]
 fn the_lines_around_the_chunks_count_against_the_bytes_a_body_may_have() {
-    let address = echo(SHORT);
+    // however long the lines take to come: it is their bytes that end the body
+    let address = echo(LONG);
     let head = b"POST /c HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
     let trailer = format!("X-T: {}\r\n", "a".repeat(1000));
     let (mut stream, mut reader) = connected(address);
@@ -187,7 +191,7 @@ fn the_end_of_a_connection_is_not_waited_for_by_the_worker() {
     let (status, _, last) = response(&mut reader);
     assert_eq!((status.as_str(), last), ("HTTP/1.1 401 Unauthorized", true));
     // nothing more is sent to the peer, and what it sends is still taken
-    assert_eq!(reader.read(&mut [0]).unwrap(), 0);
+    assert_eq!(ended(&mut reader).unwrap(), 0);
     unsent.write_all(b"some of the body").unwrap();
     answered(address);
     drop(unsent);

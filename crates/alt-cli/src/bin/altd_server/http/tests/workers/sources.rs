@@ -16,15 +16,26 @@ fn outward() -> IpAddr {
 }
 
 /// A server at every address of this host with one worker, which answers a
-/// request once its body is received: 200, or 503 where it had no room.
-fn receiving(limits: Limits) -> u16 {
+/// request once its body is received: 200, or 503 where it had no room. Its
+/// port, and what it counts the bodies it holds in.
+fn receiving(limits: Limits) -> (u16, Arc<Shares>) {
     receiving_here(limits, &LOOPBACK)
 }
 
+/// Returns once the server holds `bytes` of bodies: what was sent to it before
+/// has come to it and is counted, however long the host took over it.
+fn holds(held: &Shares, bytes: u64) {
+    let until = Instant::now() + Duration::from_secs(120);
+    while held.held() < bytes {
+        assert!(Instant::now() < until, "{} of {bytes}", held.held());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// [`receiving`], with the peers of the networks `here` counted for nothing.
-fn receiving_here(limits: Limits, here: &'static [Network]) -> u16 {
+fn receiving_here(limits: Limits, here: &'static [Network]) -> (u16, Arc<Shares>) {
     let server = Server::listen("0.0.0.0:0", limits, 16, here).unwrap();
-    let port = server.server_addr().port();
+    let port = (server.server_addr().port(), Arc::clone(&server.shared.held));
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
             if !request.received() {
@@ -67,14 +78,14 @@ fn the_bodies_of_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
         each: 8,
         ..within(LONG)
     };
-    let port = receiving(limits);
+    let (port, held) = receiving(limits);
     let (far, near) = (
         SocketAddr::new(outward(), port),
         SocketAddr::from(([127, 0, 0, 1], port)),
     );
     let (mut slow, mut slow_reader) = posted(far, 900, 800);
     // the body of the first is being received before the second comes
-    std::thread::sleep(Duration::from_millis(300));
+    holds(&held, 800);
     let (_second, mut reader) = posted(far, 400, 400);
     assert_eq!(status(&mut reader), "HTTP/1.1 503 Service Unavailable");
     let (_other, mut reader) = posted(near, 2000, 2000);
@@ -112,9 +123,10 @@ fn the_bodies_a_proxy_of_this_host_brings_are_counted_for_whom_it_says_they_are_
         each: 8,
         ..within(LONG)
     };
-    let near = SocketAddr::from(([127, 0, 0, 1], receiving(limits)));
+    let (port, held) = receiving(limits);
+    let near = SocketAddr::from(([127, 0, 0, 1], port));
     let (mut slow, mut slow_reader) = forwarded(near, "198.51.100.1", 900, 800);
-    std::thread::sleep(Duration::from_millis(300));
+    holds(&held, 800);
     let (_second, mut reader) = forwarded(near, "10.1.1.1, 198.51.100.1", 400, 400);
     assert_eq!(status(&mut reader), "HTTP/1.1 503 Service Unavailable");
     let (_other, mut reader) = forwarded(near, "198.51.100.1, 198.51.100.2", 400, 400);
@@ -134,14 +146,17 @@ fn the_lines_around_the_chunks_take_of_the_room_as_the_chunks_do() {
         spool: 4000,
         ..within(LONG)
     };
-    let near = SocketAddr::from(([127, 0, 0, 1], receiving(limits)));
+    let (port, held) = receiving(limits);
+    let near = SocketAddr::from(([127, 0, 0, 1], port));
     let (mut chunked, _chunked_reader) = connected(near);
     let head = b"POST /c HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
     chunked.write_all(head).unwrap();
     let extended = format!("1;x={}\r\ny\r\n", "e".repeat(500 - 9));
     assert_eq!(extended.len(), 500);
     chunked.write_all(extended.repeat(6).as_bytes()).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    // five of them leave the other no room; the end of the sixth is not read
+    // before the line of a seventh is
+    holds(&held, 2500);
     let (_other, mut reader) = posted(near, 2000, 2000);
     assert_eq!(status(&mut reader), "HTTP/1.1 503 Service Unavailable");
 }
@@ -152,7 +167,7 @@ fn the_lines_around_the_chunks_take_of_the_room_as_the_chunks_do() {
 /// go of while it still sends, and is not answered with what it sent.
 #[test]
 fn a_body_moves_by_what_it_has_and_not_by_the_lines_around_its_chunks() {
-    let near = SocketAddr::from(([127, 0, 0, 1], receiving(within(SHORT))));
+    let near = SocketAddr::from(([127, 0, 0, 1], receiving(within(SHORT)).0));
     let (mut chunked, mut reader) = connected(near);
     let head = b"POST /c HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
     chunked.write_all(head).unwrap();
@@ -182,10 +197,10 @@ fn the_peers_of_a_network_told_to_be_of_this_host_are_held_to_no_part() {
         ..within(LONG)
     };
     // whether a second connection from the outward address is answered
-    let second = |port: u16| {
+    let second = |(port, held): (u16, Arc<Shares>)| {
         let far = SocketAddr::new(outward(), port);
         let (_first, _reader) = posted(far, 2000, 1900);
-        std::thread::sleep(Duration::from_millis(300));
+        holds(&held, 1900);
         let mut stream = TcpStream::connect(far).unwrap();
         stream.set_read_timeout(Some(LONG)).unwrap();
         let sent = stream.write_all(b"POST /p HTTP/1.1\r\nContent-Length: 1500\r\n\r\n");

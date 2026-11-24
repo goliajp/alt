@@ -114,6 +114,17 @@ fn response(reader: &mut BufReader<TcpStream>) -> (String, Vec<u8>, bool) {
     (status.trim_end().to_owned(), body, last)
 }
 
+/// What a read of a connection the server is to have ended gives: nothing, where
+/// it has. A read a signal broke into is made again.
+fn ended(reader: &mut BufReader<TcpStream>) -> std::io::Result<usize> {
+    loop {
+        match reader.read(&mut [0]) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            read => return read,
+        }
+    }
+}
+
 fn connected(address: std::net::SocketAddr) -> (TcpStream, BufReader<TcpStream>) {
     let stream = TcpStream::connect(address).unwrap();
     stream
@@ -177,7 +188,7 @@ fn a_head_that_is_no_request_is_refused_and_ends_the_connection() {
         let (status, _, last) = response(&mut reader);
         assert_eq!(status, "HTTP/1.1 400 Bad Request");
         assert!(last);
-        assert_eq!(reader.read(&mut [0]).unwrap_or(0), 0);
+        assert_eq!(ended(&mut reader).unwrap_or(0), 0);
     }
 }
 
@@ -208,7 +219,7 @@ fn a_connection_that_sends_no_head_keeps_no_worker_and_is_let_go_of() {
     let (mut partial, mut partial_reader) = connected(address);
     partial.write_all(b"GET /never HTTP/1.1\r\nHost").unwrap();
     // the one that sent nothing is ended, the one that began is told why
-    assert_eq!(silent_reader.read(&mut [0]).unwrap(), 0);
+    assert_eq!(ended(&mut silent_reader).unwrap(), 0);
     let (status, _, last) = response(&mut partial_reader);
     assert_eq!(status, "HTTP/1.1 408 Request Timeout");
     assert!(last);
@@ -221,12 +232,12 @@ fn a_connection_that_sends_no_head_keeps_no_worker_and_is_let_go_of() {
 #[test]
 fn a_head_that_trickles_is_given_up_when_the_grace_is_over() {
     let (mut slow, mut reader) = connected(echo(SHORT));
+    // the head is begun before the grace can be over: a connection that sent
+    // nothing in it is ended without an answer, and a thread may be late
+    slow.write_all(b"GET /never HTTP/1.1\r\nX: ").unwrap();
     let sender = std::thread::spawn(move || {
-        let head = b"GET /never HTTP/1.1\r\nX: "
-            .iter()
-            .chain([b'x'; 4096].iter());
-        for byte in head {
-            if slow.write_all(&[*byte]).is_err() {
+        for byte in [b'x'; 4096] {
+            if slow.write_all(&[byte]).is_err() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -255,7 +266,7 @@ fn a_connection_above_the_limit_is_not_taken() {
     }
     let (mut fifth, mut reader) = connected(address);
     let _ = fifth.write_all(b"GET /fifth HTTP/1.1\r\n\r\n");
-    assert_eq!(reader.read(&mut [0]).unwrap_or(0), 0);
+    assert_eq!(ended(&mut reader).unwrap_or(0), 0);
     // one of the four ends, and the next is taken
     drop(held);
     let until = Instant::now() + Duration::from_secs(10);
