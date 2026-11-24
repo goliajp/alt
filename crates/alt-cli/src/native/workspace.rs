@@ -49,12 +49,19 @@ impl NativeRepo<'_> {
                 });
                 at
             }
-            None => self.store.refs.resolve(&branch_ref)?.ok_or_else(|| {
-                crate::machine::Failure::refusal(
-                    "precondition_failed",
-                    format!("invalid reference: {branch}"),
-                )
-            })?,
+            None => {
+                if let Some((at, _)) = self.busy_at(&branch_ref, true)? {
+                    let at = at.display();
+                    let said = format!("'{branch}' is already used by worktree at '{at}'");
+                    return Err(settings::fatal(said));
+                }
+                self.store.refs.resolve(&branch_ref)?.ok_or_else(|| {
+                    crate::machine::Failure::refusal(
+                        "precondition_failed",
+                        format!("invalid reference: {branch}"),
+                    )
+                })?
+            }
         };
         changes.push(RefChange {
             name: head_ref.clone(),

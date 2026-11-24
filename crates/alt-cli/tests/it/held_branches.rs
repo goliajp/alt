@@ -41,6 +41,35 @@ fn held(pair: &Pair, args: &[&str], code: i32, said: &str) {
     assert!(theirs.starts_with(said), "{args:?}: {theirs}");
 }
 
+/// A working tree of `topic` beside the one that has it is refused by
+/// both in git's words, and none is made.
+fn no_second_tree(pair: &Pair) {
+    let trees = alt_os::temp::tempdir().unwrap();
+    let said = "fatal: 'topic' is already used by worktree at '";
+    let tree = trees.path().join("theirs");
+    let theirs = git(
+        &pair.git,
+        &["worktree", "add", tree.to_str().unwrap(), "topic"],
+    );
+    assert!(fails(theirs, 128).contains(said));
+    let tree = trees.path().join("ours");
+    let args = [
+        "workspace",
+        "add",
+        "second",
+        tree.to_str().unwrap(),
+        "topic",
+    ];
+    let ours = fails(alt(&pair.alt, &args), 128);
+    let at = pair.alt.canonicalize().unwrap();
+    assert!(
+        ours.starts_with(&format!("{said}{}'\n", at.display())),
+        "{ours}"
+    );
+    assert!(!tree.join(".alt").exists());
+    assert!(!ok(alt(&pair.alt, &["workspace", "list"])).contains("second"));
+}
+
 #[test]
 fn a_branch_being_rebased_or_bisected_stays_as_it_is() {
     let pair = history();
@@ -59,6 +88,7 @@ fn a_branch_being_rebased_or_bisected_stays_as_it_is() {
     }
     let deleted = "error: cannot delete branch 'topic' used by worktree at '";
     held(&pair, &["branch", "-d", "topic"], 1, deleted);
+    no_second_tree(&pair);
     assert_eq!(branches(&pair.alt), before);
     // a branch that is not in it moves and takes a name as ever
     pair.both(&["branch", "-f", "other", "main"]);
@@ -77,6 +107,7 @@ fn a_branch_being_rebased_or_bisected_stays_as_it_is() {
     let renamed = "fatal: branch refs/heads/topic is being bisected at ";
     held(&pair, &["branch", "-m", "topic", "t9"], 128, renamed);
     held(&pair, &["branch", "-d", "topic"], 1, deleted);
+    no_second_tree(&pair);
     assert_eq!(
         ok(alt(&pair.alt, &["rev-parse", "main", "topic", "o2"])),
         before
@@ -125,6 +156,20 @@ fn a_branch_another_workspace_rebases_is_not_taken_from_it() {
     assert!(said.starts_with(&rebased), "{said}");
     let said = fails(alt(&pair.alt, &["branch", "-d", "topic"]), 1);
     assert!(said.starts_with("error: cannot delete branch 'topic'") && said.contains(&at));
+    let third = trees.path().join("third");
+    let args = [
+        "workspace",
+        "add",
+        "third",
+        third.to_str().unwrap(),
+        "topic",
+    ];
+    let said = fails(alt(&pair.alt, &args), 128);
+    assert!(
+        said.starts_with(&format!("fatal: 'topic' is already {at}")),
+        "{said}"
+    );
+    assert!(!third.join(".alt").exists());
     assert_eq!(branches(&pair.alt), before);
     // once the rebase is given up and the workspace elsewhere, the branch is free
     ok(alt(&tree, &["rebase", "--abort"]));
