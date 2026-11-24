@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: hold a log made where no note is to having nothing left to look at
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_note_unread.rs
