@@ -5,7 +5,7 @@ use super::*;
 
 mod owned;
 
-pub use owned::ensure_repository_owned;
+pub use owned::discover_owned;
 
 /// The per-workspace coordinates within a repo: the working-tree root, the
 /// workspace name, the ref naming its HEAD, and its index file. Resolved per

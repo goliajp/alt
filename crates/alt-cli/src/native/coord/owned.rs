@@ -33,14 +33,17 @@ pub(super) fn ensure_owned(tree: &Path, paths: &[&Path]) -> Res<()> {
     Err(said::refused(&said, 128))
 }
 
-/// [`ensure_owned`] of a repository found by its directory alone: a git
-/// repository, or a store reached past a refusal.
-pub fn ensure_repository_owned(repo: &alt_repo::Repository) -> Res<()> {
+/// The repository `start` is in, found by its directory alone: a git
+/// repository, or a store reached past a refusal. Refused as by
+/// [`ensure_owned`].
+pub fn discover_owned(start: &Path) -> Res<alt_repo::Repository> {
+    let repo = alt_repo::Repository::discover(start)?;
     let control = repo.git_dir();
     match repo.work_tree() {
-        Some(tree) => ensure_owned(tree, &[tree, control]),
-        None => ensure_owned(control, &[control]),
+        Some(tree) => ensure_owned(tree, &[tree, control])?,
+        None => ensure_owned(control, &[control])?,
     }
+    Ok(repo)
 }
 
 /// Whether `safe.directory`, in the configuration of the system and of
