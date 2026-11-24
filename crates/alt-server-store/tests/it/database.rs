@@ -4,6 +4,7 @@ mod bulk_publication;
 mod change_links;
 mod claimed_sizes;
 mod cloud;
+mod cloud_binding;
 mod delegation;
 mod expiry;
 mod faults;

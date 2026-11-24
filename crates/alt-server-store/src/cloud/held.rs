@@ -11,6 +11,10 @@ use golia_platform_contract::Audience;
 /// This barrier precedes repository and credential locks. It serializes cache
 /// installation, revocation, quota accounting and authority use across workers.
 /// A backwards wall clock never gives a previously accepted lease extra life.
+///
+/// What an instance may store is checked as a sum over all of its repositories,
+/// which holds only while one transaction at a time changes what is summed: that
+/// is why every transaction that writes takes the row, and takes it first.
 pub(crate) fn check_instance(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
     let row = binding(tx)?;
     let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
@@ -49,7 +53,7 @@ pub(super) fn check_revision(tx: &mut Transaction<'_>, revision: u64) -> Result<
         return Ok(());
     }
     tx.execute(
-        "UPDATE alt_cloud_binding SET authority_revision=$1 WHERE singleton",
+        "UPDATE alt_cloud_binding SET authority_revision=$1 WHERE singleton AND authority_revision<$1",
         &[&integer(revision)?],
     )?;
     Ok(())
