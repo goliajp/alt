@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a device code is approved by a server with the time every test gives a request
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/device_exchange.rs
+touched: crates/alt-server/tests/it/database/sign_in_deadline.rs
