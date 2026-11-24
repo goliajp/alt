@@ -17,19 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc-aarch64-lin
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY vendor/ ./vendor/
-# The target directory is kept between builds, and cargo takes a crate for built
-# where its files are older than what was built of it. The files here have the
-# times of the checkout, or of the build that first copied this very content, and
-# the directory may have been built from other sources since: they are given the
-# time of this build unless the directory was last built from these sources.
+COPY self-hosted/build-server.sh ./
 RUN --mount=type=cache,id=alt-server-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=alt-server-target-${TARGETARCH},target=/build/target,sharing=locked test -n "$ALT_BUILD_ID" && case "$TARGETARCH" in amd64) target=x86_64-unknown-linux-gnu;; arm64) target=aarch64-unknown-linux-gnu;; *) exit 2;; esac && \
-    rustup target add "$target" && \
-    if [ "$(cat target/.built-from 2>/dev/null)" != "$ALT_BUILD_ID" ]; then find Cargo.toml Cargo.lock crates vendor -type f -exec touch {} +; fi && \
+    rustup target add "$target" && install -d -m 0700 /out/directories/alt-cloud && \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc \
-    ALT_BUILD_ID="$ALT_BUILD_ID" cargo build --release --locked --target "$target" -p alt-server --bin alt-server && \
-    printf '%s' "$ALT_BUILD_ID" > target/.built-from && \
-    install -d -m 0700 /out/directories/alt-cloud && cp "target/$target/release/alt-server" /out/alt-server
+    ALT_BUILD_ID="$ALT_BUILD_ID" ./build-server.sh "$target" /out/alt-server
 RUN case "$TARGETARCH" in \
       amd64) digest=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10;; \
       arm64) digest=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4;; *) exit 2;; esac && \
