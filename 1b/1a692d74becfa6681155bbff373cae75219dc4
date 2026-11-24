@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a lock on the temporary directory that cannot be asked for is not told as another server
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator/validate.rs
