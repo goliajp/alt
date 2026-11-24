@@ -17,7 +17,8 @@
 //!
 //! Whoever finds no room waits in line, in the order they came: the packs
 //! to be let in in one line, the walks that come to a large object in
-//! another. A pack waits to be let in while it has nothing, and a walk
+//! another. One that comes later and has room is let in before one that
+//! waits for more, a few times and no more. A pack waits to be let in while it has nothing, and a walk
 //! while it has no large object, so none waits for what another that
 //! waits has. While a pack waits to be let in, the objects are held to
 //! what is kept free for them, so that it is let in when its turn comes.
@@ -49,6 +50,10 @@ impl<'a> Wait<'a> {
 /// how often one that waits looks whether whoever sent its pack is gone
 const LOOK: Duration = Duration::from_millis(100);
 
+/// How many that came later and have room are let in before one that waits for
+/// more than there is: a small pack does not wait out a large one, and a large
+/// one is not kept waiting by small ones without end.
+const PASSED: u32 = 8;
 const PACKS: usize = 0;
 const OBJECTS: usize = 1;
 
@@ -67,12 +72,29 @@ struct Held {
     objects: u64,
     /// the most one object of a pack let in takes, and how many packs say so
     most: BTreeMap<u64, usize>,
-    /// those that wait, the packs and the objects, in the order they came
-    lines: [VecDeque<u64>; 2],
+    /// those that wait, the packs and the objects, in the order they came,
+    /// each with how many that came later were let in before it
+    lines: [VecDeque<(u64, u32)>; 2],
     came: u64,
 }
 
 impl Held {
+    /// Whether the one at `place` in `line`, or one that has just come, may be
+    /// let in now: none before it has been passed as often as one may be. Those
+    /// before it are passed once more where it may.
+    fn turn(&mut self, line: usize, place: Option<u64>) -> bool {
+        let line = &mut self.lines[line];
+        let before = match place {
+            Some(place) => line.iter().take_while(|(other, _)| *other != place).count(),
+            None => line.len(),
+        };
+        let may = line.iter().take(before).all(|(_, passed)| *passed < PASSED);
+        if may {
+            (line.iter_mut().take(before)).for_each(|(_, passed)| *passed += 1);
+        }
+        may
+    }
+
     /// what is kept free of the packs for the objects being made
     fn kept_free(&self) -> u64 {
         let said = self.most.last_key_value().map_or(0, |(most, _)| *most);
@@ -163,15 +185,15 @@ impl Memory {
         room: impl Fn(&Held) -> bool,
     ) -> Result<MutexGuard<'_, Held>, PackError> {
         let mut held = self.held.lock().expect("index memory");
-        if held.lines[line].is_empty() && room(&held) {
+        if room(&held) && held.turn(line, None) {
             return Ok(held);
         }
         let place = held.came;
         held.came += 1;
-        held.lines[line].push_back(place);
+        held.lines[line].push_back((place, 0));
         loop {
-            if held.lines[line].front() == Some(&place) && room(&held) {
-                held.lines[line].pop_front();
+            if room(&held) && held.turn(line, Some(place)) {
+                held.lines[line].retain(|(other, _)| *other != place);
                 // the next in line may have room as well
                 self.given_back.notify_all();
                 return Ok(held);
@@ -181,7 +203,7 @@ impl Memory {
                 .by
                 .map(|by| by.saturating_duration_since(Instant::now()));
             if gone || left.is_some_and(|left| left.is_zero()) {
-                held.lines[line].retain(|other| *other != place);
+                held.lines[line].retain(|(other, _)| *other != place);
                 self.given_back.notify_all();
                 return Err(match gone {
                     true => PackError::GivenUp,

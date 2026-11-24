@@ -130,36 +130,47 @@ fn the_packs_that_say_they_make_a_large_object_keep_free_what_one_of_them_does()
     drop(both);
 }
 
-/// Those that wait are let in in the order they came: one that came later
-/// is not let in before one that came earlier, though there is room for it.
+/// One that waits for more than there is does not keep out those that come
+/// later and have room: eight of them are let in before it. The ninth waits
+/// behind it though there is room, so that the first is let in when its room
+/// is there, and then the ninth.
 #[test]
-fn those_that_wait_for_memory_have_it_in_the_order_they_came() {
+fn those_that_have_room_pass_one_that_waits_and_no_more_than_so_many_do() {
     let memory = Memory::new(100);
     let mut held = memory.take(100).unwrap();
     std::thread::scope(|scope| {
         let memory = &memory;
-        let waiting = |bytes: u64, others: usize| {
+        let take = |bytes: u64| {
             let (tell, told) = mpsc::channel();
             scope.spawn(move || {
                 let taken = memory.take(bytes).unwrap();
                 tell.send(()).unwrap();
                 drop(taken);
             });
-            let began = Instant::now();
-            while memory.waiting().0 <= others {
-                assert!(began.elapsed() < LONG);
-                std::thread::yield_now();
-            }
             told
         };
-        let large = waiting(80, 0);
-        let small = waiting(10, 1);
-        // room for the one that came later, and none for the one before it
+        let waits = |waiting: usize| {
+            let began = Instant::now();
+            while memory.waiting().0 != waiting {
+                assert!(began.elapsed() < LONG, "{:?}", memory.waiting());
+                std::thread::yield_now();
+            }
+        };
+        let large = take(80);
+        waits(1);
+        // room for twenty, and none for the one that waits
         held.keep(80);
-        assert!(!soon(&small) && !soon(&large));
+        for passed in 0..8 {
+            let small = take(10).recv_timeout(LONG);
+            assert!(small.is_ok(), "the {passed}th that came later");
+        }
+        assert!(!soon(&large));
+        let ninth = take(10);
+        waits(2);
+        assert!(!soon(&ninth) && !soon(&large));
         drop(held);
         large.recv_timeout(LONG).unwrap();
-        small.recv_timeout(LONG).unwrap();
+        ninth.recv_timeout(LONG).unwrap();
     });
     assert_eq!((memory.taken(), memory.waiting()), ((0, 0), (0, 0)));
 }
@@ -185,6 +196,10 @@ fn one_that_waits_for_memory_leaves_the_line_when_nobody_waits_for_its_pack() {
         while memory.waiting().0 == 0 {
             assert!(began.elapsed() < LONG);
             std::thread::yield_now();
+        }
+        // as many pass it as may pass one that waits
+        for _ in 0..8 {
+            drop(memory.take(1).unwrap());
         }
         // behind it, and with room: held up by the one before it
         let (tell, told) = mpsc::channel();

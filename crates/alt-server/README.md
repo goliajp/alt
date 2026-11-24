@@ -112,7 +112,8 @@ A request keeps no worker while its body is received. One caller may have
 `http.receiving_each` bodies under way at once (an eighth of `connections` by
 default; `429` beyond), and the instance holds `http.receiving_megabytes` of
 bodies no worker has taken yet (four of the largest body by default; `503`
-beyond). A request whose body is whole waits for a worker for as long as a request
+beyond), of which the bodies of one caller have a quarter between them (`429`
+beyond; a caller's only body may be larger). A request whose body is whole waits for a worker for as long as a request
 may run, and is answered `503` with `retry: same_request` when none comes free:
 nothing of it was applied. Requests whose time to upload ran out are ended by the
 running server, which gives back what they had reserved.
@@ -149,7 +150,8 @@ in turn, or at once where the packs leave more free. A pack of ten million
 small objects takes 2.5 GiB for its entries alone, and is refused (`index
 memory`) where the key is set lower than what it needs. Packs that find no
 memory wait in the order they came, and so do those that find no room for a
-base among the files while they have none there.
+base among the files while they have none there; a pack that has room is let
+in before one that waits for more, eight times at the most for each that waits.
 
 What the serving process writes for a time is under `temporary` in
 `bytes_directory`, on the disk of the stored bytes and not among the temporary
@@ -161,8 +163,9 @@ that are written to files (those of more than 8 MiB that are not a whole
 repository as it is stored) take no more than `http.sending_megabytes` between
 them until they are sent: half of what is free on that disk when the server
 starts where the key is absent. The responses to one address have a quarter of
-that; a single response of an address may pass the quarter as far as the room
-goes, and one that is alone on the server is written whatever its size. A fetch
+that; a single response of an address may pass the quarter as far as half of
+the room, one such response at a time, and one that is alone on the server is
+written whatever its size. A fetch
 whose response has no room is answered `503` with `Retry-After`. The files of bases of
 all the packs verified at once take no more than `http.indexing_megabytes`
 between them; a base that has no room there, or cannot be written, is made
