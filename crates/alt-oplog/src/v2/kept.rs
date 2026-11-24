@@ -29,24 +29,24 @@ use crate::v2::tail::Tail;
 use crate::{Discarded, Op, OpLogError};
 
 impl Log {
-    /// Where the first receipt past the first op of `cut` starts that a
-    /// writer who syncs left of a request none of whose ops is cut.
-    fn receipt_past(&self, cut: &Discarded) -> Result<Option<u64>, OpLogError> {
+    /// Where the receipts start, past the first op of `cut`, that a
+    /// writer who syncs left of a request none of whose ops is cut; in
+    /// the order of the log.
+    fn receipts_past(&self, cut: &Discarded) -> Result<Vec<u64>, OpLogError> {
         let of_cut = |receipt: Receipt| {
             let of_it = |op: &Op| op.frame.and_then(|frame| frame.request) == Some(receipt.request);
             cut.ops.iter().any(of_it)
         };
         let source = self.source();
         let mut read = |at: u64, len: usize| source.at(at, len);
-        let (mut state, mut found) = (State::empty(), None);
+        let (mut state, mut found) = (State::empty(), Vec::new());
         let mut each = |frame: u64, _: u64, view: &View| {
             let kept = frame > cut.from
-                && found.is_none()
                 && view.head.kind == KIND_RECEIPT
                 && view.head.flags & UNSYNCED == 0
                 && Receipt::decode(view.body).is_some_and(|receipt| !of_cut(receipt));
             if kept {
-                found = Some(frame);
+                found.push(frame);
             }
             Ok(())
         };
@@ -73,16 +73,17 @@ impl Log {
         // op of the workspace replaces it or the workspace is gone
         let of_workspace = refused.workspace != [0; 8];
         let mut unseen = !(refused.staged && of_workspace);
-        let mut receipt = self.receipt_past(cut)?;
+        let receipts = self.receipts_past(cut)?;
+        let mut receipts = receipts.into_iter().peekable();
         for op in cut.ops.iter().skip(1) {
             let Some(frame) = op.frame else {
                 continue;
             };
-            if receipt.is_some_and(|receipt| receipt < frame.at) {
+            // the receipts before this op, each as the ops before it are
+            while let Some(receipt) = receipts.next_if(|receipt| *receipt < frame.at) {
                 if unseen {
-                    return Ok(receipt);
+                    return Ok(Some(receipt));
                 }
-                receipt = None;
             }
             let replaces = frame.workspace == refused.workspace && (frame.staged || frame.retired);
             unseen |= of_workspace && replaces;
@@ -90,7 +91,7 @@ impl Log {
                 return Ok(Some(frame.at));
             }
         }
-        Ok(receipt.filter(|_| unseen))
+        Ok(receipts.next().filter(|_| unseen))
     }
 
     /// Up to where the log is known synced to a writer about to cut it

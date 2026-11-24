@@ -102,10 +102,10 @@ pub struct Ledger {
     /// ends there, in a file of any length and in any boot, until a
     /// writer reads it to its end.
     pub begun: Option<u64>,
-    /// The receipts appended: how many ops the log held then, whether
-    /// the writer was one that syncs, and the request. One a power cut
-    /// took may still be told here.
-    pub receipts: Vec<(usize, bool, [u8; 16])>,
+    /// The receipts the log holds: how many ops it held when each was
+    /// appended, whether the writer was one that syncs, the request,
+    /// and where the receipt ends.
+    pub receipts: Vec<(usize, bool, [u8; 16], u64)>,
 }
 
 impl Ledger {
@@ -174,9 +174,11 @@ impl Ledger {
         op.is_some_and(|op| (op.id, op.at, op.end) == (head.op, head.start, head.end))
     }
 
-    fn went(&mut self, from: usize, synced: u64) -> Vec<Entry> {
+    /// The ops from number `from` on are gone, and the receipts that
+    /// do not end by byte `byte`.
+    fn went(&mut self, (from, byte): (usize, u64), synced: u64) -> Vec<Entry> {
         let gone = self.ops.split_off(from);
-        self.receipts.retain(|(after, ..)| *after <= from);
+        self.receipts.retain(|(.., end)| *end <= byte);
         for op in &gone {
             assert!(
                 op.end > synced,
@@ -195,20 +197,21 @@ impl Ledger {
     /// synced up to `synced`.
     pub fn cut_from(&mut self, payload: &[u8], synced: u64) -> Vec<Entry> {
         let from = self.ops.iter().position(|op| op.payload == payload);
-        self.went(from.expect("the op to cut is in the log"), synced)
+        let from = from.expect("the op to cut is in the log");
+        self.went((from, self.ops[from].at), synced)
     }
 
     /// The bytes of the file from `byte` on were damaged: an op whose
     /// frame does not end before is lost, and every op after it.
     pub fn lost_from(&mut self, byte: u64, synced: u64) {
         let from = self.ops.iter().position(|op| op.end > byte);
-        self.went(from.unwrap_or(self.ops.len()), synced);
+        self.went((from.unwrap_or(self.ops.len()), byte), synced);
     }
 
     /// Whether the receipt of `request` is among those the log holds, as
     /// far as cuts took none after it.
     pub fn receipt_of(&self, request: [u8; 16]) -> bool {
-        self.receipts.iter().any(|(.., of)| *of == request)
+        self.receipts.iter().any(|(.., of, _)| *of == request)
     }
 
     /// Where the first op of `request` starts, and how many ops it has.
@@ -247,6 +250,12 @@ impl Ledger {
         assert_eq!(
             laid, known,
             "the log holds other ops than its writers left in it"
+        );
+        let slips = self.receipts.iter();
+        let slips: Vec<_> = slips.map(|(.., of, end)| (*end, *of)).collect();
+        assert_eq!(
+            log.receipts, slips,
+            "the log holds other receipts than its writers left in it"
         );
     }
 

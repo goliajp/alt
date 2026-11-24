@@ -8,7 +8,8 @@ use std::fs;
 use std::path::Path;
 
 use alt_oplog::v2::block::FileHeader;
-use alt_oplog::v2::frame::KIND_OP;
+use alt_oplog::v2::frame::{KIND_OP, KIND_RECEIPT};
+use alt_oplog::v2::receipt::Receipt;
 use alt_oplog::v2::scan::Walk;
 use alt_oplog::v2::state::State;
 use alt_oplog::{Op, OpId};
@@ -59,6 +60,8 @@ pub struct Reference {
     /// the generation the log is of, and where the last frame ends that
     /// says the log was cut before it
     pub cut: (u32, u64),
+    /// its receipts: where each ends, and the request it is of
+    pub receipts: Vec<(u64, [u8; 16])>,
 }
 
 pub fn reference(dir: &Path) -> Reference {
@@ -70,9 +73,14 @@ pub fn reference(dir: &Path) -> Reference {
         strict: true,
     };
     let (mut state, mut ops, mut cut_end) = (State::empty(), Vec::new(), 0);
+    let mut receipts = Vec::new();
     let walked = walk.run(&mut state, &mut |at, end, view| {
         if view.ext.cut.is_some() {
             cut_end = end;
+        }
+        if view.head.kind == KIND_RECEIPT {
+            let receipt = Receipt::decode(view.body).expect("a receipt reads");
+            receipts.push((end, receipt.request));
         }
         if view.head.kind == KIND_OP {
             ops.push(Laid {
@@ -94,6 +102,7 @@ pub fn reference(dir: &Path) -> Reference {
         end: state.end,
         said_synced: state.synced,
         cut: (state.generation, cut_end),
+        receipts,
     }
 }
 

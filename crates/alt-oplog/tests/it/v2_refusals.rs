@@ -93,7 +93,7 @@ impl Run {
             None => alone,
         };
         let mut receipts = self.ledger.receipts.iter();
-        let kept = |(after, synced, request): &(usize, bool, [u8; 16])| {
+        let kept = |(after, synced, request, _): &(usize, bool, [u8; 16], u64)| {
             *after > index && *synced && !cut(*request) && unseen_at(*after)
         };
         (op.map(|(op, _)| op.at), receipts.any(kept))
@@ -146,14 +146,21 @@ impl Run {
         }
     }
 
-    /// A look cut the log from op `index` on: no op a writer who syncs
-    /// left lies past that op, as each is vouched for.
+    /// A look cut the log from op `index` on: no frame a writer who
+    /// syncs left lies past that op that a sync may have covered, op or
+    /// receipt.
     pub fn cut_kept_nothing(&self, index: usize) {
-        let (op, _) = self.to_keep(index);
+        let (op, receipt) = self.to_keep(index);
         assert!(
             op.is_none(),
             "a cut took the op at {op:?}, which a writer who syncs left and a sync may \
              have covered"
+        );
+        assert!(
+            !receipt,
+            "a cut from op {} on took a receipt a writer who syncs left, of a request \
+             whose ops are in the log, which a sync may have covered",
+            self.ledger.ops[index].n
         );
     }
 }

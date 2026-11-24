@@ -90,10 +90,10 @@ impl Run {
         self.meanwhile_done(&unsettled);
         if self.took(index, appended, false).is_some() {
             let after = self.ledger.ops.len();
-            self.ledger.receipts.push((after, !unsynced, request));
             let handle = &mut self.handles[index];
             let end = handle.log.appended_len();
             handle.mine.push(Wrote::Receipt(request, end));
+            self.ledger.receipts.push((after, !unsynced, request, end));
             self.request += 1;
             self.ledger.begun = None;
             self.counts.receipts.fetch_add(1, Ordering::Relaxed);

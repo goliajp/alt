@@ -13,7 +13,7 @@ use super::v2_image::linked;
 use super::v2_log::{boot, file_len, grow, new_log};
 
 /// What a look that refuses `left` comes to, as text.
-fn settled(log: &mut OpLog) -> String {
+pub fn settled(log: &mut OpLog) -> String {
     format!("{:?}", log.settle(but_left))
 }
 
@@ -26,7 +26,7 @@ fn payloads(dir: &Path) -> Vec<Vec<u8>> {
     ops.iter().map(|op| op.payload.clone()).collect()
 }
 
-fn receipt_of(request: u8, first_op: u64) -> Receipt {
+pub fn receipt_of(request: u8, first_op: u64) -> Receipt {
     let mut receipt = Receipt {
         request: [request; 16],
         binding: [7; 32],
@@ -201,7 +201,7 @@ fn ops_past_the_one_refused_that_no_writer_who_syncs_left_or_whose_content_is_go
 }
 
 /// An op that changes the index of workspace `n`.
-fn staged(n: u8) -> Meta {
+pub fn staged(n: u8) -> Meta {
     Meta {
         workspace: Some([n; 8]),
         index_after: Some([n; 20]),
