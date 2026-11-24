@@ -16,6 +16,7 @@ fn run(program: &str, repo: &Path, global: &Path, args: &[&str]) -> Output {
         .env("ALT_NO_DAEMON", "1")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", global)
+        .env("HOME", repo.parent().unwrap())
         .env_remove("SUDO_UID")
         .args(args);
     command.output().unwrap()
@@ -64,6 +65,18 @@ fn a_repository_of_another_user_is_opened_only_where_it_is_named_safe() {
     let said = fails(run("alt", &pair.git, &global, &import), 128);
     assert!(said.contains("detected dubious ownership"), "{said}");
     assert!(!to.exists());
+    // nor is one made for tasks
+    let (from, tasks) = (pair.git.to_str().unwrap(), to.with_file_name("tasks"));
+    let intake = [
+        "intake",
+        from,
+        tasks.to_str().unwrap(),
+        "--git",
+        "/usr/bin/git",
+    ];
+    let said = fails(run("alt", &pair.alt, &global, &intake), 128);
+    assert!(said.contains("detected dubious ownership"), "{said}");
+    assert!(!tasks.exists());
     for (program, repo) in [("alt", &pair.alt), ("git", &pair.git)] {
         let at = repo.canonicalize().unwrap();
         for named in [at.to_str().unwrap().to_owned(), "*".to_owned()] {
@@ -73,6 +86,28 @@ fn a_repository_of_another_user_is_opened_only_where_it_is_named_safe() {
         // named, and taken back
         let both = "[safe]\n\tdirectory = *\n\tdirectory =\n";
         std::fs::write(&global, both).unwrap();
+        fails(run(program, repo, &global, &["status"]), 128);
+        // named from the home of the user, as the directory the command
+        // runs in, and by a path that leads through a symbolic link
+        let above = at.parent().unwrap();
+        let via = above.join("via");
+        if via.symlink_metadata().is_err() {
+            std::os::unix::fs::symlink(above, &via).unwrap();
+        }
+        let name = at.file_name().unwrap().to_str().unwrap();
+        let through = via.join(name);
+        for named in [
+            format!("~/{name}"),
+            ".".to_owned(),
+            through.to_str().unwrap().to_owned(),
+            format!("{}/*", via.display()),
+        ] {
+            std::fs::write(&global, format!("[safe]\n\tdirectory = {named}\n")).unwrap();
+            let opened = run(program, repo, &global, &["status"]);
+            assert!(opened.status.success(), "{program} {named}");
+        }
+        // a path that begins nowhere names nothing
+        std::fs::write(&global, format!("[safe]\n\tdirectory = {name}\n")).unwrap();
         fails(run(program, repo, &global, &["status"]), 128);
     }
 }

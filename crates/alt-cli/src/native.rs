@@ -309,16 +309,9 @@ impl OpenRepo {
 /// clone starts before any repository exists: it creates the working
 /// directory, runs init, then opens the repo to drive fetch/switch
 /// in-process.
-/// `alt import <target>`: ingest the git repo discovered at `cwd` into
-/// `<target>/.alt`, then materialize HEAD's tree into `<target>` so
-/// the work tree matches `alt status` (clean instead of "everything
-/// deleted"), so callers don't have to follow `alt import` with
-/// `alt switch <branch>` to get a usable work tree.
-///
-/// When `<target>` is the same path the import was discovered in,
-/// alt would be checking out into the directory that already holds
-/// the source files — we leave that case alone (skip checkout) so we
-/// never clobber the user's existing working copy.
+/// `alt task intake`: a store for tasks made of the git repository at
+/// `source`, which is refused, as git refuses it, where it belongs to
+/// another user and `safe.directory` does not name it.
 pub fn task_intake(
     source: &Path,
     target: &Path,
@@ -326,9 +319,15 @@ pub fn task_intake(
     json_mode: bool,
     out: &mut impl Write,
 ) -> Res<()> {
+    discover_owned(source)?;
     task::delivery_intake(source, target, git, json_mode, out)
 }
 
+/// `alt import <target>`: ingest the git repo discovered at `cwd` into
+/// `<target>/.alt`, then materialize HEAD's tree into `<target>` so the
+/// work tree matches `alt status`. Where `<target>` is the directory the
+/// import was discovered in, the files are already there and are left
+/// alone: the user's working copy is never clobbered.
 pub fn import(
     repo: &alt_repo::Repository,
     target: &Path,

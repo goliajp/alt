@@ -86,31 +86,51 @@ pub fn discover_served(path: &Path) -> Res<alt_repo::Repository> {
 }
 
 /// Whether `safe.directory`, in the configuration of the system and of
-/// the user, names `tree`: itself, `*`, or a directory above it
-/// followed by `/*`. An empty value takes back what was named before it.
+/// the user, names `tree`. `*` names every directory, and an empty value
+/// takes back what was named before it.
 fn listed_safe(tree: &Path) -> Res<bool> {
     let tree = tree.canonicalize()?;
-    let tree = tree.as_os_str().as_encoded_bytes();
     let mut safe = false;
     for entry in crate::git_settings::outer(None, None)? {
         if entry.section != "safe" || entry.subsection.is_some() || entry.key != "directory" {
             continue;
         }
-        let value = entry
-            .value
-            .as_ref()
-            .map(|v| v.as_slice())
-            .unwrap_or_default();
-        safe = match value {
+        let value = entry.value.as_ref().map(|v| v.as_slice());
+        safe = match value.unwrap_or_default() {
             b"" => false,
             b"*" => true,
-            value => {
-                let within = value.strip_suffix(b"/*").is_some_and(|above| {
-                    tree.starts_with(above) && tree.get(above.len()) == Some(&b'/')
-                });
-                safe || within || value.strip_suffix(b"/").unwrap_or(value) == tree
-            }
+            value => safe || names(value, &tree),
         };
     }
     Ok(safe)
+}
+
+/// Whether `named`, a value of `safe.directory`, is the directory
+/// `tree`, as git reads the value: `~` is the home of the user, `.` the
+/// directory the command runs in, and no other path that does not begin
+/// at the root names anything. One that ends in `/*` names every
+/// directory beneath it. The path is taken as the file system resolves
+/// it, as `tree` is.
+fn names(named: &[u8], tree: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let named = Path::new(std::ffi::OsStr::from_bytes(named));
+    let named = match (named.strip_prefix("~"), crate::git_settings::home()) {
+        (Ok(below), Some(home)) => home.join(below),
+        _ => named.to_owned(),
+    };
+    if named == Path::new(".") {
+        let here = std::env::current_dir().and_then(|here| here.canonicalize());
+        return here.is_ok_and(|here| here == tree);
+    }
+    if !named.is_absolute() {
+        return false;
+    }
+    let resolved = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_owned());
+    match named.file_name().is_some_and(|last| last == "*") {
+        true => named
+            .parent()
+            .map(resolved)
+            .is_some_and(|above| tree != above && tree.starts_with(above)),
+        false => resolved(&named) == tree,
+    }
 }
