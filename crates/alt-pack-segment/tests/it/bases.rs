@@ -3,7 +3,9 @@
 //! out of one amount.
 
 use super::waiting::{BYTES, delta, distance, header, object, zlib};
-use alt_pack_segment::{DELTA_BYTES, Error, Limits, Memory, SegmentSet, ingest, ingest_holding};
+use alt_pack_segment::{
+    DELTA_BYTES, ENTRY_BYTES, Error, Limits, Memory, SegmentSet, ingest, ingest_holding,
+};
 use std::time::{Duration, Instant};
 
 /// `bases` plain objects, each followed by one delta of it.
@@ -50,10 +52,11 @@ fn the_bases_of_a_pack_are_in_memory_one_to_a_walk_however_many_they_are() {
             "{most} bytes of bases at once, keeping {held}"
         );
     }
-    // memory for the bases that wait and one walk: one base at a time
+    // memory for what is known of the entries, the bases that wait and one walk:
+    // one base at a time
     let bases = 2 * BYTES as u64;
     let walk = 4 * BYTES as u64;
-    let told = BASES as u64 * DELTA_BYTES;
+    let told = BASES as u64 * (DELTA_BYTES + 2 * ENTRY_BYTES);
     let small = Limits::of(1 << 20, BYTES as u64, 1 << 30);
     let limits = Limits {
         base_bytes: bases as usize,
@@ -85,7 +88,7 @@ fn a_pack_takes_its_memory_out_of_what_all_have_and_waits_for_it_no_longer_than_
     let kept = (8 * BYTES + 8 * delta(0).len()) as u64;
     let tight = Limits {
         base_bytes: 2 * BYTES,
-        memory: Some(memory(kept + BYTES as u64)),
+        memory: Some(memory(kept + BYTES as u64 + 16 * ENTRY_BYTES)),
         ..plain
     };
     assert_eq!(index(&pack, &tight, kept).unwrap().1, expected);

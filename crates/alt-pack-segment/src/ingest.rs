@@ -158,7 +158,7 @@ fn verified(
     });
     let told = Told::new(existing, said, limits.parents_beside);
     // an entry is inflated whole to be scanned, beside what the scan keeps
-    let memory = room::scanning(pack.len() as u64, limits, held)?;
+    let memory = room::scanning(pack.len() as u64, said as u64, limits, held)?;
     let mut unkept: Vec<(usize, Meta)> = Vec::new();
     let mut commits: Vec<CommitRow> = Vec::new();
     let mut refused = None;

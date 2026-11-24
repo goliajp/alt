@@ -4,7 +4,8 @@
 use super::segment;
 use super::waiting::{BYTES, delta, header, id, object, zlib};
 use alt_pack_segment::{
-    DELTA_BYTES, Error, Limits, Memory, SegmentSet, ingest, ingest_holding, ingest_while_waited_for,
+    DELTA_BYTES, ENTRY_BYTES, Error, Limits, Memory, SegmentSet, ingest, ingest_holding,
+    ingest_while_waited_for,
 };
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -71,15 +72,16 @@ fn a_delta_of_an_object_that_many_deltas_make_is_resolved_once() {
     }
 }
 
-/// What is told of each delta is taken out of the memory the packs have between
-/// them: a pack is verified in the memory for its bases, one walk and its deltas,
-/// and refused where the deltas have no room.
+/// What is known of each entry and told of each delta is taken out of the memory
+/// the packs have between them: a pack is verified in the memory for its bases,
+/// one walk, its entries and its deltas, and refused where it is a byte less.
 #[test]
 fn what_is_told_of_each_delta_is_within_the_memory_of_the_pack() {
     let none = SegmentSet::default();
     let pack = pack(false);
     let (bases, walk) = (2 * BYTES as u64, 4 * BYTES as u64);
-    let told = (LAYERS * WIDTH) as u64 * DELTA_BYTES;
+    let entries = (LAYERS * WIDTH + 1) as u64 * ENTRY_BYTES;
+    let told = entries + (LAYERS * WIDTH) as u64 * DELTA_BYTES;
     let within = |memory: u64| {
         let limits = Limits {
             base_bytes: bases as usize,
