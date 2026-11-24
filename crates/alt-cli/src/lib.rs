@@ -31,6 +31,7 @@ pub mod daemon;
 pub mod daemon_meta;
 pub mod diagnostics;
 mod diffstat;
+pub mod flow_args;
 pub mod fsck;
 pub mod group_commit;
 pub mod hardening;

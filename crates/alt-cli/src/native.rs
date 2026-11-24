@@ -1306,41 +1306,7 @@ impl<'a> NativeRepo<'a> {
                 .resolve(&self.head_branch()?)?
                 .ok_or("cannot tag before the first commit")?,
         };
-        // The kind of the target — we accept commits today (the common
-        // case). Annotated tags of trees / blobs / other tags exist in
-        // git, but no first-pass dogfood scenario asks for them.
-        let target_kind = self
-            .store
-            .odb
-            .lookup(&target)?
-            .map(|e| e.kind)
-            .ok_or_else(|| format!("target {target} not in the object store"))?;
-        let type_str = match target_kind {
-            ObjectKind::Commit => "commit",
-            ObjectKind::Tree => "tree",
-            ObjectKind::Blob => "blob",
-            ObjectKind::Tag => "tag",
-        };
-
-        let tagger = self.committer()?;
-        let msg = if message.ends_with('\n') {
-            message.to_owned()
-        } else {
-            format!("{message}\n")
-        };
-        let bytes = build_tag_bytes(
-            target,
-            type_str,
-            name,
-            tagger.name(),
-            tagger.email(),
-            tagger.when(),
-            tagger.tz(),
-            &msg,
-        );
-        let tag_oid = ObjectId::hash_object(self.store.algo()?, ObjectKind::Tag, &bytes);
-        self.store.odb.put(tag_oid, ObjectKind::Tag, &bytes)?;
-        self.store.odb.flush()?;
+        let tag_oid = self.store_tag(name, target, message)?;
 
         self.commit_refs_only(
             "tag",
@@ -2520,32 +2486,6 @@ fn set_exec(_path: &Path, _exec: bool) -> Res<()> {
 /// validator since the constraints overlap exactly.
 fn check_tag_name(name: &str) -> Res<()> {
     check_branch_name(name)
-}
-
-/// Build the canonical git-object bytes for an annotated tag. The
-/// hashing wrapper (`<size>\0<bytes>`) is applied separately by
-/// `ObjectId::hash_object`.
-#[allow(clippy::too_many_arguments)]
-fn build_tag_bytes(
-    object: ObjectId,
-    obj_type: &str,
-    tag_name: &str,
-    tagger_name: &str,
-    tagger_email: &str,
-    when: i64,
-    tz: &str,
-    message: &str,
-) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(format!("object {object}\n").as_bytes());
-    bytes.extend_from_slice(format!("type {obj_type}\n").as_bytes());
-    bytes.extend_from_slice(format!("tag {tag_name}\n").as_bytes());
-    bytes.extend_from_slice(
-        format!("tagger {tagger_name} <{tagger_email}> {when} {tz}\n").as_bytes(),
-    );
-    bytes.push(b'\n');
-    bytes.extend_from_slice(message.as_bytes());
-    bytes
 }
 
 fn check_branch_name(name: &str) -> Res<()> {

@@ -202,8 +202,5 @@ pub enum FlowTopicOp {
     },
     /// Merge the topic back into its target(s) and delete it (atomic
     /// ref transaction + single op-log entry, like every other flow op)
-    Finish {
-        #[arg(hint = "flow-topic")]
-        name: String,
-    },
+    Finish(crate::flow_args::Finish),
 }

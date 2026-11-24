@@ -1977,7 +1977,12 @@ Arguments:
   <NAME>  
 
 Options:
+      --tag                    Tag the commit the finish leaves on its target, though the kind of topic is not tagged of itself
+  -n, --notag                  Make no tag
+  -T, --tagname <NAME>         The name of the tag, in place of the topic's own
+  -m, --message <MESSAGE>      The message of the tag
       --json                   Emit a structured JSON result instead of the human line
+      --messagefile <FILE>     A file whose contents are the message of the tag
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
@@ -2017,7 +2022,12 @@ Arguments:
   <NAME>  
 
 Options:
+      --tag                    Tag the commit the finish leaves on its target, though the kind of topic is not tagged of itself
+  -n, --notag                  Make no tag
+  -T, --tagname <NAME>         The name of the tag, in place of the topic's own
+  -m, --message <MESSAGE>      The message of the tag
       --json                   Emit a structured JSON result instead of the human line
+      --messagefile <FILE>     A file whose contents are the message of the tag
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help
@@ -2057,7 +2067,12 @@ Arguments:
   <NAME>  
 
 Options:
+      --tag                    Tag the commit the finish leaves on its target, though the kind of topic is not tagged of itself
+  -n, --notag                  Make no tag
+  -T, --tagname <NAME>         The name of the tag, in place of the topic's own
+  -m, --message <MESSAGE>      The message of the tag
       --json                   Emit a structured JSON result instead of the human line
+      --messagefile <FILE>     A file whose contents are the message of the tag
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
   -h, --help                   Print help

@@ -94,20 +94,20 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
                 op: FlowTopicOp::Start { name },
             } => repo.flow_feature_start(name, *json, out)?,
             FlowOp::Feature {
-                op: FlowTopicOp::Finish { name },
-            } => repo.flow_feature_finish(name, *json, out)?,
+                op: FlowTopicOp::Finish(finish),
+            } => repo.flow_feature_finish(finish, *json, out)?,
             FlowOp::Release {
                 op: FlowTopicOp::Start { name },
             } => repo.flow_release_start(name, *json, out)?,
             FlowOp::Release {
-                op: FlowTopicOp::Finish { name },
-            } => repo.flow_release_finish(name, *json, out)?,
+                op: FlowTopicOp::Finish(finish),
+            } => repo.flow_release_finish(finish, *json, out)?,
             FlowOp::Hotfix {
                 op: FlowTopicOp::Start { name },
             } => repo.flow_hotfix_start(name, *json, out)?,
             FlowOp::Hotfix {
-                op: FlowTopicOp::Finish { name },
-            } => repo.flow_hotfix_finish(name, *json, out)?,
+                op: FlowTopicOp::Finish(finish),
+            } => repo.flow_hotfix_finish(finish, *json, out)?,
         },
         Command::Undo { json } => repo.undo(*json, out)?,
         Command::Operation { op, json } => match op {

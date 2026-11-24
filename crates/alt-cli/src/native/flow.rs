@@ -2,73 +2,12 @@
 
 use super::merge::MergeOutcome;
 use super::*;
+use crate::flow_args::Finish;
+
+mod init;
+mod tag;
 
 impl NativeRepo<'_> {
-    /// `alt flow init`: create `develop` off `main` (or the current branch's
-    /// commit) and switch to it, in one ref transaction.
-    pub fn flow_init(&mut self, json: bool, out: &mut impl Write) -> Res<()> {
-        use crate::json::Json;
-        let model = self.flow_model();
-        let dev_ref = format!("refs/heads/{}", model.develop);
-        if self.store.refs.get(&dev_ref).is_some() {
-            if json {
-                crate::json::emit(
-                    out,
-                    vec![
-                        ("develop", Json::str(model.develop)),
-                        ("already_initialized", Json::Bool(true)),
-                    ],
-                )?;
-            } else {
-                writeln!(out, "flow already initialized (branch '{}')", model.develop)?;
-            }
-            return Ok(());
-        }
-        let main_ref = format!("refs/heads/{}", model.main);
-        let start = match self.store.refs.resolve(&main_ref)? {
-            Some(c) => c,
-            None => self
-                .store
-                .refs
-                .resolve(&self.head_branch()?)?
-                .ok_or("create an initial commit before 'alt flow init'")?,
-        };
-        let head_old = self.store.refs.get(&self.head_ref).cloned();
-        let head_ref = self.head_ref.clone();
-        self.commit_refs_only(
-            "flow",
-            &[
-                RefChange {
-                    name: dev_ref.clone(),
-                    old: None,
-                    new: Some(RefTarget::Oid(start)),
-                },
-                RefChange {
-                    name: head_ref,
-                    old: head_old,
-                    new: Some(RefTarget::Symbolic(dev_ref.clone())),
-                },
-            ],
-        )?;
-        if json {
-            crate::json::emit(
-                out,
-                vec![
-                    ("develop", Json::str(model.develop)),
-                    ("already_initialized", Json::Bool(false)),
-                    ("commit", Json::str(start.to_string())),
-                ],
-            )?;
-        } else {
-            writeln!(
-                out,
-                "Initialized flow: created '{}' at {start}",
-                model.develop
-            )?;
-        }
-        Ok(())
-    }
-
     /// `alt flow feature start <name>`: branch `feature/<name>` off `develop`
     /// and switch to it, atomically (one op log entry → O(1) undo).
     pub fn flow_feature_start(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
@@ -81,8 +20,14 @@ impl NativeRepo<'_> {
     /// with a merge commit, delete the feature branch, and move HEAD to
     /// `develop` — all in one atomic ref transaction (one op log entry →
     /// O(1) undo). Aborts if the merge conflicts.
-    pub fn flow_feature_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = self.flow_model().feature(name)?;
+    pub fn flow_feature_finish(
+        &mut self,
+        asked: &Finish,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let flow = self.flow_model().feature(&asked.name)?;
+        let tag = self.finish_tag("feature", asked)?;
         let feat_ref = format!("refs/heads/{}", flow.branch);
         let dev_ref = format!("refs/heads/{}", flow.target);
         let feat = self
@@ -130,26 +75,18 @@ impl NativeRepo<'_> {
                 new: Some(RefTarget::Oid(new_dev)),
             });
         }
+        changes.extend(self.finish_tagged(tag.as_ref(), new_dev)?);
         self.commit_refs_checkout("flow", &changes, &old, &entries)?;
 
-        if json {
-            use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("target", Json::str(&flow.target)),
-                    ("commit", Json::str(new_dev.to_string())),
-                    ("deleted", Json::str(&flow.branch)),
-                ],
-            )?;
-        } else {
-            writeln!(
-                out,
-                "Merged '{}' into '{}' and deleted it",
-                flow.branch, flow.target
-            )?;
-        }
-        Ok(())
+        use crate::json::Json;
+        let fields = vec![
+            ("target", Json::str(&flow.target)),
+            ("commit", Json::str(new_dev.to_string())),
+            ("deleted", Json::str(&flow.branch)),
+        ];
+        let (topic, target) = (&flow.branch, &flow.target);
+        let said = format!("Merged '{topic}' into '{target}' and deleted it");
+        tag::finished(out, json, fields, tag, &said)
     }
 
     /// `alt flow release start <name>`: branch `release/<name>` off
@@ -169,10 +106,15 @@ impl NativeRepo<'_> {
     /// branch, move HEAD to `develop` — all in one ref-tx + one op-log
     /// entry. A conflict on either merge aborts the whole flow (atomicity
     /// keeps the prior state untouched).
-    pub fn flow_release_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = self.flow_model().release(name)?;
-        let dev_ref = format!("refs/heads/{}", "develop");
-        self.flow_topic_finish_dual(&flow, &dev_ref, "release", json, out)
+    pub fn flow_release_finish(
+        &mut self,
+        asked: &Finish,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let flow = self.flow_model().release(&asked.name)?;
+        let tag = self.finish_tag("release", asked)?;
+        self.flow_topic_finish_dual(&flow, tag, "release", json, out)
     }
 
     /// `alt flow hotfix start <name>`: branch `hotfix/<name>` off `main`
@@ -189,10 +131,15 @@ impl NativeRepo<'_> {
     /// `alt flow hotfix finish <name>`: merge `hotfix/<name>` into `main`
     /// and back-merge into `develop`, delete the hotfix branch, move HEAD
     /// to `develop`. Same atomic shape as release finish.
-    pub fn flow_hotfix_finish(&mut self, name: &str, json: bool, out: &mut impl Write) -> Res<()> {
-        let flow = self.flow_model().hotfix(name)?;
-        let dev_ref = format!("refs/heads/{}", "develop");
-        self.flow_topic_finish_dual(&flow, &dev_ref, "hotfix", json, out)
+    pub fn flow_hotfix_finish(
+        &mut self,
+        asked: &Finish,
+        json: bool,
+        out: &mut impl Write,
+    ) -> Res<()> {
+        let flow = self.flow_model().hotfix(&asked.name)?;
+        let tag = self.finish_tag("hotfix", asked)?;
+        self.flow_topic_finish_dual(&flow, tag, "hotfix", json, out)
     }
 
     /// What a finish makes of `into`, at `ours`, when `theirs` is merged
@@ -281,11 +228,12 @@ impl NativeRepo<'_> {
     fn flow_topic_finish_dual(
         &mut self,
         flow: &alt_flow::Flow,
-        back_ref: &str,
+        tag: Option<tag::FinishTag>,
         verb: &str,
         json: bool,
         out: &mut impl Write,
     ) -> Res<()> {
+        let back_ref = "refs/heads/develop";
         let topic_ref = format!("refs/heads/{}", flow.branch);
         let target_ref = format!("refs/heads/{}", flow.target);
         let topic_oid = self
@@ -365,28 +313,22 @@ impl NativeRepo<'_> {
                 new: Some(RefTarget::Oid(new)),
             });
         }
+        changes.extend(self.finish_tagged(tag.as_ref(), new_target)?);
         let old = index_entries(&self.index()?);
         self.commit_refs_checkout("flow", &changes, &old, &back_entries)?;
-        if json {
-            use crate::json::Json;
-            crate::json::emit(
-                out,
-                vec![
-                    ("kind", Json::str(verb)),
-                    ("target", Json::str(&flow.target)),
-                    ("target_commit", Json::str(new_target.to_string())),
-                    ("back", Json::str(back)),
-                    ("back_commit", Json::str(new_back.to_string())),
-                    ("deleted", Json::str(&flow.branch)),
-                ],
-            )?;
-        } else {
-            writeln!(
-                out,
-                "Merged '{}' into '{}' and back-merged into '{back_ref}', deleted '{}'",
-                flow.branch, flow.target, flow.branch
-            )?;
-        }
-        Ok(())
+        use crate::json::Json;
+        let fields = vec![
+            ("kind", Json::str(verb)),
+            ("target", Json::str(&flow.target)),
+            ("target_commit", Json::str(new_target.to_string())),
+            ("back", Json::str(back)),
+            ("back_commit", Json::str(new_back.to_string())),
+            ("deleted", Json::str(&flow.branch)),
+        ];
+        let (topic, target) = (&flow.branch, &flow.target);
+        let said = format!(
+            "Merged '{topic}' into '{target}' and back-merged into '{back_ref}', deleted '{topic}'"
+        );
+        tag::finished(out, json, fields, tag, &said)
     }
 }
