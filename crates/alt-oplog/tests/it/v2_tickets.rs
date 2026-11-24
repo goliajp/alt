@@ -1,7 +1,7 @@
 //! Who is told that frames of a version 2 log were cut: the caller whose
-//! frames they are, by the ticket it holds for them, and nobody else.
-//! No frame that was cut is forgotten before its holder was told, and
-//! one whose holder never asks fails no sync of another.
+//! frames they are, by the ticket they were written on, and nobody
+//! else. No frame that was cut is forgotten before its holder was told,
+//! and one whose holder never asks fails no sync of another.
 
 use std::path::Path;
 
@@ -10,20 +10,20 @@ use alt_oplog::{Answer, OpLog, OpLogError, OpLogSink, Ticket};
 use super::v2_log::{boot, grow, new_log};
 use super::v2_reread::cut_from;
 
-fn cut_back<T: std::fmt::Debug>(told: &Result<T, OpLogError>) -> bool {
+pub fn cut_back<T: std::fmt::Debug>(told: &Result<T, OpLogError>) -> bool {
     matches!(told, Err(OpLogError::CutBack))
 }
 
 /// Appends an op of `payload` for a caller of its own, and gives the
 /// ticket of that caller.
-fn asked(log: &mut OpLog, payload: &[u8]) -> Ticket {
-    log.append("a", 1, payload).unwrap();
-    let ticket = log.ticket();
+pub fn asked(log: &mut OpLog, payload: &[u8]) -> Ticket {
+    let appended = log.ticketed(|log| log.append("a", 1, payload));
+    let (_, ticket) = appended.unwrap();
     assert!(!ticket.is_empty());
     ticket
 }
 
-fn payloads(dir: &Path) -> Vec<Vec<u8>> {
+pub fn payloads(dir: &Path) -> Vec<Vec<u8>> {
     let log = OpLog::open_read_only(dir, None).unwrap();
     let ops = log.ops().unwrap();
     ops.iter().map(|op| op.payload.clone()).collect()
@@ -31,7 +31,7 @@ fn payloads(dir: &Path) -> Vec<Vec<u8>> {
 
 /// A handle of boot 1 on a new log of two synced ops, which syncs by
 /// itself or leaves that to the sink given with it.
-fn shared(dir: &Path, deferred: bool) -> (OpLog, OpLogSink) {
+pub fn shared(dir: &Path, deferred: bool) -> (OpLog, OpLogSink) {
     boot(1);
     let mut log = new_log(dir);
     grow(&mut log, "a", 2);
@@ -42,7 +42,7 @@ fn shared(dir: &Path, deferred: bool) -> (OpLog, OpLogSink) {
 
 /// What the holder of `ticket` is answered: by the handle, and by its
 /// sink where the handle left the frames to it.
-fn answered(
+pub fn answered(
     log: &mut OpLog,
     sink: &OpLogSink,
     deferred: bool,
@@ -71,9 +71,12 @@ fn a_caller_whose_op_was_cut_is_told_so_by_its_ticket_and_one_whose_op_is_in_the
         assert_eq!(synced.unwrap(), Answer::Synced, "deferred: {deferred}");
         assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
         assert_eq!(payloads(dir.path()).len(), 3);
-        // told once: the ticket is spent
-        let again = answered(&mut log, &sink, deferred, &second);
-        assert_eq!(again.unwrap(), Answer::Synced, "deferred: {deferred}");
+        // and told so whenever it asks again, the handle or its sink
+        assert!(cut_back(&log.sync_for(&second)), "deferred: {deferred}");
+        assert!(cut_back(&sink.answer(&second)), "deferred: {deferred}");
+        assert!(cut_back(&sink.fsync_for(&second)), "deferred: {deferred}");
+        let synced = answered(&mut log, &sink, deferred, &first);
+        assert_eq!(synced.unwrap(), Answer::Synced, "deferred: {deferred}");
     }
 }
 
@@ -189,10 +192,15 @@ fn one_fsync_that_finds_ops_cut_tells_every_caller_whose_ticket_holds_one_of_the
     assert!(cut_back(&sink.answer(&tickets[1])));
     assert!(cut_back(&sink.answer(&tickets[2])));
     // the op before them is in the log, with nothing left to sync it
-    // up to: its caller has the handle leave it anew
-    assert_eq!(sink.answer(&tickets[0]).unwrap(), Answer::Owed);
+    // up to: its caller asks the handle, which syncs it itself, and is
+    // answered for good
+    for _ in 0..3 {
+        assert_eq!(sink.answer(&tickets[0]).unwrap(), Answer::Owed);
+    }
     log.sync_for(&tickets[0]).unwrap();
-    assert_eq!(sink.fsync_for(&tickets[0]).unwrap(), Answer::Synced);
+    for _ in 0..3 {
+        assert_eq!(sink.answer(&tickets[0]).unwrap(), Answer::Synced);
+    }
     assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
     assert_eq!(payloads(dir.path()).len(), 3);
 }

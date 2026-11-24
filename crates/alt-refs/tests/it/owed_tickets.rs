@@ -1,6 +1,6 @@
-//! Callers that share one ref store are answered by the tickets they
-//! take for what they appended: each is told of a cut of its own ops,
-//! and of no other.
+//! Callers that share one ref store are answered by the tickets the
+//! store wrote for them on: each is told of a cut of its own ops, and
+//! of no other.
 
 use std::path::Path;
 
@@ -31,15 +31,31 @@ fn in_the_log(dir: &Path, n: u8) -> bool {
         .any(|(_, target)| *target == RefTarget::Oid(oid(n)))
 }
 
-/// What the holder of `ticket` is answered by the sink of `store`, the
-/// store asked again where the sink has nothing to sync its ops up to.
+/// Has `store` commit a ref that points at object `n`, for a caller of
+/// its own; the ticket of that caller.
+fn committed(store: &mut RefStore, n: u8) -> Ticket {
+    let name = format!("refs/heads/b{n}");
+    let committed = store.ticketed(|store| commit(store, &name, n));
+    let ((), ticket) = committed.unwrap();
+    assert!(!ticket.is_empty());
+    ticket
+}
+
+/// What the holder of `ticket` is answered by the sink of `store`.
+/// Where the sink has nothing to sync its ops up to, the store is
+/// asked, and what it answers is what became of them.
 fn answered(store: &mut RefStore, sink: &OpLogSink, ticket: &Ticket) -> Result<(), OpLogError> {
-    loop {
-        match sink.fsync_for(ticket)? {
-            Answer::Synced => return Ok(()),
-            Answer::Owed => store.sync_for(ticket).unwrap(),
-        }
+    if sink.fsync_for(ticket)? == Answer::Synced {
+        return Ok(());
     }
+    let told = match store.sync_for(ticket) {
+        Ok(()) => Ok(()),
+        Err(alt_refs::RefError::OpLog(told)) => Err(told),
+        Err(other) => panic!("{other:?}"),
+    };
+    // and the sink says the same from then on
+    assert_eq!(sink.answer(ticket).is_ok(), told.is_ok());
+    told
 }
 
 #[test]
@@ -51,8 +67,7 @@ fn of_the_commits_one_fsync_was_to_cover_each_whose_transaction_was_cut_is_told_
     let sink = store.sync_handle().unwrap();
     let mut tickets = Vec::new();
     for n in 1..=4 {
-        commit(&mut store, &format!("refs/heads/b{n}"), n).unwrap();
-        tickets.push(store.ticket());
+        tickets.push(committed(&mut store, n));
     }
     // the last two are cut before the fsync all four wait for
     let log = dir.path().join("oplog");
@@ -95,10 +110,7 @@ fn sequence(seed: u64) -> (u64, u64) {
         match rng.below(6) {
             0 | 1 => {
                 next += 1;
-                let name = format!("refs/heads/b{next}");
-                let committed = commit(&mut store, &name, next);
-                assert!(committed.is_ok(), "{case}: {committed:?}");
-                waiting.push((next, store.ticket()));
+                waiting.push((next, committed(&mut store, next)));
             }
             2 => drop(cut_unsynced(dir.path(), synced)),
             3 => goes_on(&mut store, rng.below(2) == 0),

@@ -30,6 +30,11 @@ pub struct Counts {
     pub claims_cut: AtomicU64,
     pub claims_owed: AtomicU64,
     pub claims_late: AtomicU64,
+    /// tickets dropped, tickets told of a cut that asked again, and
+    /// syncs that promised nothing
+    pub claims_dropped: AtomicU64,
+    pub claims_again: AtomicU64,
+    pub unpromised: AtomicU64,
     /// syncs refused a boundary over an op nobody looked at
     pub unjudged: AtomicU64,
     /// of them, over an op the driver knows nobody has to look at
@@ -84,6 +89,9 @@ impl Counts {
             claims_cut: AtomicU64::new(0),
             claims_owed: AtomicU64::new(0),
             claims_late: AtomicU64::new(0),
+            claims_dropped: AtomicU64::new(0),
+            claims_again: AtomicU64::new(0),
+            unpromised: AtomicU64::new(0),
             unjudged: AtomicU64::new(0),
             unjudged_more: AtomicU64::new(0),
             kept_refused: AtomicU64::new(0),
@@ -176,7 +184,13 @@ impl Counts {
             ),
             ("frames left to a sink that it synced", &self.left_synced),
             ("that it told of a cut for", &self.left_told),
-            ("tickets taken", &self.claims),
+            ("tickets written on", &self.claims),
+            ("dropped", &self.claims_dropped),
+            (
+                "told of a cut again when they asked again",
+                &self.claims_again,
+            ),
+            ("syncs that promised nothing", &self.unpromised),
             ("answered as synced", &self.claims_synced),
             ("answered as cut", &self.claims_cut),
             ("answered as owed by a sink still", &self.claims_owed),

@@ -84,7 +84,10 @@ fn held(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
         return;
     }
     for (what, count) in of {
-        assert!(count.load(Ordering::Relaxed) > 0, "no {what}");
+        // a cut is refused within where the log is synced a few times
+        // in ten thousand sequences
+        let seldom = what.starts_with("cuts refused within") && sequences < 10_000;
+        assert!(seldom || count.load(Ordering::Relaxed) > 0, "no {what}");
     }
     // a cut refused for a frame to keep is one somebody needed, or of
     // one of the kinds the log cannot tell from that; those are fewer

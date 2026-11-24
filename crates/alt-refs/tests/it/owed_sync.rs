@@ -39,6 +39,15 @@ pub fn cut_back<T: std::fmt::Debug>(told: Result<T, RefError>) -> bool {
     }
 }
 
+/// Has `store`, which syncs by itself, commit a ref that points at
+/// object `at` with its sync left to a sink nobody asks: the store
+/// answers for it with its next sync.
+fn unsynced(store: &mut RefStore, name: &str, at: u8) {
+    store.set_defer_durability(true);
+    commit(store, name, at).unwrap();
+    store.set_defer_durability(false);
+}
+
 pub fn goes_on(store: &mut RefStore, follows: bool) {
     match follows {
         true => store.follow().unwrap(),
@@ -109,10 +118,7 @@ fn a_store_that_syncs_itself_tells_with_its_next_sync_of_a_transaction_cut_befor
         boot(1);
         let mut store = new_store(dir.path());
         commit(&mut store, "refs/heads/main", 1).unwrap();
-        {
-            let _unsynced = alt_os::durability::leave_unsynced(true);
-            commit(&mut store, "refs/heads/dev", 2).unwrap();
-        }
+        unsynced(&mut store, "refs/heads/dev", 2);
         assert_eq!(cut_unsynced(dir.path(), 1), 1);
         goes_on(&mut store, follows);
         assert_eq!(store.len(), 1);
@@ -182,10 +188,7 @@ fn a_store_whose_sync_tells_of_a_cut_follows_the_log_that_read_itself_anew_for_i
     boot(1);
     let mut store = new_store(dir.path());
     commit(&mut store, "refs/heads/main", 1).unwrap();
-    {
-        let _unsynced = alt_os::durability::leave_unsynced(true);
-        commit(&mut store, "refs/heads/dev", 2).unwrap();
-    }
+    unsynced(&mut store, "refs/heads/dev", 2);
     assert_eq!(cut_unsynced(dir.path(), 1), 1);
     // the store holds the transaction that is gone until the sync
     assert!(cut_back(store.bound()));
@@ -202,10 +205,7 @@ fn an_op_recorded_without_a_sync_that_was_cut_is_told_of_by_the_sync_of_the_op_a
     commit(&mut store, "refs/heads/main", 1).unwrap();
     for round in 0..2 {
         // a sync of the store tells of a cut, and is over with that
-        {
-            let _unsynced = alt_os::durability::leave_unsynced(true);
-            commit(&mut store, "refs/heads/dev", 2).unwrap();
-        }
+        unsynced(&mut store, "refs/heads/dev", 2);
         assert_eq!(cut_unsynced(dir.path(), 1), 1);
         store.refresh().unwrap();
         assert!(cut_back(store.bound()), "round {round}");
@@ -225,4 +225,21 @@ fn an_op_recorded_without_a_sync_that_was_cut_is_told_of_by_the_sync_of_the_op_a
         assert!(cut_back(store.bound()), "round {round}");
         store.bound().unwrap();
     }
+}
+
+#[test]
+fn a_commit_told_to_promise_nothing_is_told_of_by_no_sync_after_it_was_cut() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut store = new_store(dir.path());
+    commit(&mut store, "refs/heads/main", 1).unwrap();
+    {
+        let _unsynced = alt_os::durability::leave_unsynced(true);
+        commit(&mut store, "refs/heads/dev", 2).unwrap();
+    }
+    assert_eq!(cut_unsynced(dir.path(), 1), 1);
+    // its caller was answered, with nothing promised
+    store.bound().unwrap();
+    assert_eq!((store.len(), store.get("refs/heads/dev")), (1, None));
+    assert!(store.confirmed());
 }

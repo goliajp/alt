@@ -63,6 +63,7 @@ impl Run {
         let unsynced = self.rng.one_in(2);
         let fails = !unsynced && self.rng.one_in(8);
         self.to_look = false;
+        let claims = self.handles[index].claims.len();
         if !self.put(index, op.clone(), unsynced, fails) {
             // refused for an op nobody looked at, it looks and appends
             let looks = std::mem::take(&mut self.to_look) && self.settle(index, None, false);
@@ -71,14 +72,16 @@ impl Run {
             }
         }
         if !unsynced && self.rng.one_in(2) {
-            self.sync(index, 0);
+            // the caller of the op asks: with its ticket where it has one
+            let ticketed = self.handles[index].claims.len() > claims;
+            self.sync(index, if ticketed { 2 } else { 0 });
         }
     }
 
     /// Has the handle sync what it holds for a caller without a ticket
     /// (`how` 0), set a boundary over all the log holds as a writer
-    /// does (1), or sync for a caller that takes a ticket now (2) or
-    /// took one before (3).
+    /// does (1), or sync for a caller that had it write on a ticket (2,
+    /// 3).
     pub fn sync(&mut self, index: usize, how: u64) {
         let unsettled = self.unsettled_before(u64::MAX);
         let fails = self.rng.one_in(8);
@@ -89,14 +92,14 @@ impl Run {
         let claims = self.handles[index].claims.len() as u64;
         let synced = match how {
             0 | 1 => self.sync_through(index, how, &unsettled),
-            2 => {
-                self.claim(index);
-                self.ask(index, claims as usize, &unsettled);
-                Ok(())
-            }
             _ if claims != 0 => {
-                let claim = self.rng.below(claims) as usize;
-                self.ask(index, claim, &unsettled);
+                // the ticket written on last, or any
+                let claim = match how {
+                    2 => claims - 1,
+                    _ => self.rng.below(claims),
+                };
+                self.ask(index, claim as usize, &unsettled);
+                self.asks_again(index);
                 Ok(())
             }
             _ => Ok(()),
@@ -221,7 +224,7 @@ impl Run {
             }
             50..51 => {
                 let index = self.writer();
-                self.claim(index);
+                self.drops_a_ticket(index);
             }
             51..58 => {
                 let index = self.rng.below(self.handles.len() as u64) as usize;
@@ -242,6 +245,7 @@ impl Run {
             88..92 => self.receipt(),
             92..95 => self.open_anchored(),
             95..96 => self.owed_by_a_sink(),
+            96..97 => self.sync_unpromised(),
             _ => self.grow_back(),
         }
     }

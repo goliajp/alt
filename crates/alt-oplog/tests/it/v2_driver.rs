@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use alt_oplog::{Anchor, Meta, OpLog, OpLogSink, SyncNamed};
+use alt_oplog::{Anchor, Meta, OpLog, OpLogSink, SyncNamed, Ticket};
 
 use super::v2_owed::{Claim, Wrote};
 
@@ -35,8 +35,10 @@ pub struct Handle {
     /// what it held when it last left its frames to its sink: its last
     /// op, and where its frames ended
     pub head_left: Option<(Option<Anchor>, u64)>,
-    /// the tickets taken from it that nobody was answered for
+    /// the tickets it wrote on that nobody was answered for, and those
+    /// that were told of a cut
     pub claims: Vec<Claim>,
+    pub spent: Vec<Ticket>,
 }
 
 pub struct Run {
@@ -54,7 +56,7 @@ pub struct Run {
     /// whoever syncs what ops name fails while this is set
     pub refuses: Arc<AtomicBool>,
     pub meanwhile: Meanwhile,
-    appended: u64,
+    pub appended: u64,
     /// the request the next ops and the next receipt are of
     pub request: u8,
     /// what a loss of power cannot take from the log
@@ -65,6 +67,8 @@ pub struct Run {
     pub by_sink: bool,
     /// the next handle opened to write leaves its syncs to a sink
     pub to_defer: bool,
+    /// the next op appended is written on a ticket
+    pub to_ticket: bool,
     /// a handle was refused for an op nobody looked at, since this
     /// was last asked
     pub to_look: bool,
@@ -154,6 +158,7 @@ impl Run {
             died: 0,
             by_sink: false,
             to_defer: false,
+            to_ticket: false,
             to_look: false,
             lacked: false,
             trace: Vec::new(),
@@ -198,6 +203,7 @@ impl Run {
             left: Vec::new(),
             head_left: None,
             claims: Vec::new(),
+            spent: Vec::new(),
         });
         self.handles.len() - 1
     }
@@ -246,43 +252,6 @@ impl Run {
     pub fn lacked_now(&mut self) -> bool {
         self.calls();
         std::mem::take(&mut self.lacked)
-    }
-
-    /// A new op to append: what its frame says of it, and its payload.
-    pub fn op(&mut self) -> (Meta, Vec<u8>) {
-        let workspace = match self.rng.below(4) {
-            0 => None,
-            n => Some([n as u8; 8]),
-        };
-        let staged = workspace.filter(|_| !self.rng.one_in(3));
-        let meta = Meta {
-            workspace,
-            linked: self.rng.one_in(3),
-            undoable: self.rng.one_in(2),
-            index_after: staged.map(|workspace| [workspace[0]; 20]),
-            retired: workspace.is_some() && self.rng.one_in(30),
-            request: self.rng.one_in(3).then_some([self.request; 16]),
-            ..Meta::default()
-        };
-        let padding = match self.rng.below(20) {
-            // longer than a block
-            0 => self.block + self.block / 2 + self.rng.below(2 * self.block),
-            _ => self.rng.below(200),
-        };
-        (meta, self.payload(padding))
-    }
-
-    /// How long the name of the next op is.
-    pub fn next_name(&self) -> u64 {
-        format!("op {}", self.appended + 1).len() as u64
-    }
-
-    /// The payload of the next op, with `padding` bytes after its name.
-    pub fn payload(&mut self, padding: u64) -> Vec<u8> {
-        self.appended += 1;
-        let mut payload = format!("op {}", self.appended).into_bytes();
-        payload.resize(payload.len() + padding as usize, b'.');
-        payload
     }
 
     /// Takes in an op `actor` had a handle append, which that handle

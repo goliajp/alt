@@ -72,10 +72,12 @@ impl OpLogSink {
     /// [`Self::fsync`] for the holder of `ticket`: nothing is synced
     /// where a sync is recorded over its records already. It tells of a
     /// cut ([`OpLogError::CutBack`]) where a record on the ticket was
-    /// cut, and of none otherwise. [`Answer::Owed`] where the records
-    /// are in the log and the sink has nothing to sync them up to: what
-    /// the handle left was cut past them, and the handle is asked again
-    /// ([`OpLog::sync_for`]).
+    /// cut, whenever it is asked with that ticket, and of none
+    /// otherwise. [`Answer::Owed`] where the records are in the log and
+    /// the sink has nothing to sync them up to: what the handle left
+    /// was cut past them. The handle is asked then
+    /// ([`OpLog::sync_for`]): it syncs the records itself, and what it
+    /// answers is final.
     pub fn fsync_for(&self, ticket: &Ticket) -> Result<Answer, OpLogError> {
         match &self.0 {
             SinkOf::V1(sink) => sink.fsync().map(|()| Answer::Synced),

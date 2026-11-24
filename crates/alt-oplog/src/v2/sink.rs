@@ -16,8 +16,9 @@ use std::path::PathBuf;
 
 use crate::v2::log::Log;
 use crate::v2::mark::Mark;
-use crate::v2::owed::{Answer, Holder, Owed, Shared, Ticket};
+use crate::v2::owed::{Answer, Holder, Owed, Shared};
 use crate::v2::tail::{Held, Noted, Place, Tail};
+use crate::v2::ticket::Ticket;
 use crate::{Op, OpLogError, SyncNamed};
 
 /// What a handle's appends reached when it last asked for them to be
@@ -241,10 +242,22 @@ impl Sink {
         }
     }
 
-    /// What became of the frames on `ticket`, as far as is known.
+    /// What became of the frames on `ticket`, as far as is known. One
+    /// that was told of a cut is told so again.
     pub fn answer(&self, ticket: &Ticket) -> Result<Answer, OpLogError> {
+        ticket.asked_of(&self.account)?;
+        if ticket.told_cut() {
+            return Err(OpLogError::CutBack);
+        }
         let mut account = self.account.lock().unwrap();
-        account.answer(&|holder| ticket.holds(holder), true)
+        let answer = account.answer(&|holder| ticket.holds(holder), true);
+        drop(account);
+        match &answer {
+            Err(OpLogError::CutBack) => ticket.tell_cut(),
+            Ok(answer) => ticket.owes(*answer == Answer::Owed),
+            Err(_) => {}
+        }
+        answer
     }
 
     /// Fsyncs for the holder of `ticket`, where no sync is recorded

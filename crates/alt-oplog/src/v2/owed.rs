@@ -7,12 +7,19 @@
 //! for, once. Nobody else is: a caller whose frames are in the log is not
 //! told of a cut for the frames of another.
 //!
-//! Who holds a frame is the handle itself until the frames are taken on
-//! a [`Ticket`]: a sync asked without one answers for all the frames on
-//! no ticket, as for the frames of one caller. A caller that shares the
-//! handle with others takes a ticket for the frames written for it, and
-//! asks with that. What is on a ticket nobody ever asks with stays in
-//! the account, told to nobody, and makes no sync of another fail.
+//! Who holds a frame is settled when it is written: the handle itself,
+//! or the ticket the handle was writing on (`ticket`). A sync asked
+//! without a ticket answers for all the frames on none, as for the
+//! frames of one caller; a caller that shares the handle with others
+//! has its frames written on a ticket and asks with that. What is on a
+//! ticket nobody asks with stays in the account, told to nobody, and
+//! makes no sync of another fail, until the ticket is dropped: then the
+//! handle holds it.
+//!
+//! An entry leaves the account when a sync is recorded over its frame,
+//! when its holder is told that it was cut, and when its holder is
+//! answered with nothing promised, by a sync that was told to leave
+//! what is written unsynced.
 //!
 //! The handle shares the account with its sink, which finds frames cut
 //! as the handle does and answers by the same tickets.
@@ -23,9 +30,10 @@ use crate::OpLogError;
 use crate::v2::sink::Reached;
 
 /// Who is answered for a frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Holder {
     /// whoever asks the handle with no ticket
+    #[default]
     Own,
     /// whoever asks the sink of the handle with no ticket: the handle
     /// left the frame to the sink
@@ -33,38 +41,15 @@ pub(crate) enum Holder {
     Ticket(u64),
 }
 
-/// The claim to an answer for frames a handle wrote: whether a sync is
-/// recorded over them, or they were cut off the log. It is good for the
-/// handle it was taken from and for the sinks of that handle, and each
-/// frame is on one ticket at most.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Ticket(Vec<u64>);
-
-impl Ticket {
-    /// Whether no frame is on it: a sync asked with it answers for
-    /// nothing, and succeeds.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Takes the frames of `other` onto this ticket: they are answered
-    /// for together from now on.
-    pub fn join(&mut self, other: Ticket) {
-        self.0.extend(other.0);
-    }
-
-    pub(crate) fn holds(&self, holder: Holder) -> bool {
-        matches!(holder, Holder::Ticket(number) if self.0.contains(&number))
-    }
-}
-
 /// What became of the frames on a ticket that were not cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answer {
     /// a sync is recorded over every one of them
     Synced,
-    /// They are in the log, and no sync is recorded over them yet: the
-    /// handle is asked again, which leaves them to its sink anew.
+    /// They are in the log, no sync is recorded over them yet, and the
+    /// sink has nothing to sync them up to. The handle is asked with
+    /// the ticket ([`crate::OpLog::sync_for`]): it syncs them itself
+    /// then, and what it answers is final.
     Owed,
 }
 
@@ -85,8 +70,10 @@ pub(crate) struct Account {
     owed: Vec<Owed>,
     /// who holds frames that were found cut and was not told yet
     cut: Vec<Holder>,
-    /// how many tickets were taken
+    /// how many tickets frames were written on
     tickets: u64,
+    /// who holds what the handle writes now
+    writing: Holder,
     /// what the handle last left for its sink to sync
     pub left: Reached,
     /// the furthest boundary the handle or its sink saw recorded
@@ -108,8 +95,50 @@ impl Account {
             end,
             closes,
             generation,
-            holder: Holder::Own,
+            holder: self.writing,
         });
+    }
+
+    /// Has what the handle writes from now on be on a new ticket; gives
+    /// its number, and who held what the handle wrote before.
+    pub fn writes_on_a_ticket(&mut self) -> (u64, Holder) {
+        self.tickets += 1;
+        let before = std::mem::replace(&mut self.writing, Holder::Ticket(self.tickets));
+        (self.tickets, before)
+    }
+
+    pub fn writes_for(&mut self, holder: Holder) {
+        self.writing = holder;
+    }
+
+    /// The tickets of `numbers` are dropped: what they held, the handle
+    /// holds.
+    pub fn given_back(&mut self, numbers: &[u64]) {
+        for number in numbers {
+            let ticket = Holder::Ticket(*number);
+            for owed in &mut self.owed {
+                if owed.holder == ticket {
+                    owed.holder = Holder::Own;
+                }
+            }
+            if self.cut.contains(&ticket) {
+                self.cut.retain(|holder| *holder != ticket);
+                self.found_cut(Holder::Own);
+            }
+        }
+    }
+
+    /// Whether `of` holds a frame that is owed an answer or was found
+    /// cut.
+    pub fn holds(&self, of: &dyn Fn(Holder) -> bool) -> bool {
+        self.owes(of) || self.found_cut_of(of)
+    }
+
+    /// How many frames are owed an answer, and how many holders are to
+    /// be told of a cut.
+    #[cfg(test)]
+    pub fn len(&self) -> (usize, usize) {
+        (self.owed.len(), self.cut.len())
     }
 
     /// Whether a frame `of` holds is owed an answer.
@@ -173,17 +202,6 @@ impl Account {
             }
         }
         any
-    }
-
-    /// A ticket for every frame that is on none.
-    pub fn ticket(&mut self) -> Ticket {
-        self.tickets += 1;
-        let onto = Holder::Ticket(self.tickets);
-        let own = self.hand(Holder::Own, onto);
-        match self.hand(Holder::Left, onto) || own {
-            true => Ticket(vec![self.tickets]),
-            false => Ticket::default(),
-        }
     }
 
     /// A sync is recorded up to byte `target`, over frames that are in

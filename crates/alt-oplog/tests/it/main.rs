@@ -66,6 +66,7 @@ mod v2_settling;
 mod v2_sync_cut;
 mod v2_synced;
 mod v2_tables;
+mod v2_ticketed;
 mod v2_tickets;
 mod v2_unconfirmed;
 mod v2_unseen;

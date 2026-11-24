@@ -6,9 +6,9 @@
 //! sync tells so, and never says of a log without it that it is synced.
 //! A sync asked of the store answers for all its ops that are on no
 //! ticket, as for the ops of one caller, an op recorded without a sync
-//! with them. Callers that share one store take a ticket each for what
-//! they appended ([`RefStore::ticket`]) and are answered by it, each of
-//! a cut of its own ops alone.
+//! with them. Callers that share one store have it append for them on
+//! a ticket each ([`RefStore::ticketed`]) and are answered by it, each
+//! of a cut of its own ops alone.
 
 use super::*;
 
@@ -45,12 +45,20 @@ impl RefStore {
         Ok(op_id)
     }
 
-    /// A ticket for the ops this store appended that are on none and
-    /// that no sync has answered for (see [`alt_oplog::OpLog::ticket`]):
-    /// only a sync asked with the ticket answers for them from now on,
-    /// by [`Self::sync_for`] or by a sink of this store.
-    pub fn ticket(&mut self) -> Ticket {
-        self.oplog.ticket()
+    /// Runs `write`, with the ops it appends through this store on a
+    /// ticket of their own, which is given with what `write` gives (see
+    /// [`alt_oplog::OpLog::ticketed`]): only a sync asked with the
+    /// ticket answers for them, by [`Self::sync_for`] or by a sink of
+    /// this store. A sync `write` asks of the store itself, as a commit
+    /// does, syncs them or leaves them to the sink all the same, and
+    /// answers for none of them.
+    pub fn ticketed<T, E>(
+        &mut self,
+        write: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<(T, Ticket), E> {
+        let writing = self.oplog.writing_on_a_ticket();
+        let wrote = write(self)?;
+        Ok((wrote, writing.ticket()))
     }
 
     /// Syncs the log for the holder of `ticket`, or leaves that to the

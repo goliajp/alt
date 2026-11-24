@@ -2,7 +2,7 @@
 //! appends, on a log of either format.
 
 use super::{Inner, OpLog};
-use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Ticket, Unconfirmed};
+use crate::{Discarded, NotePlace, Op, OpLogError, SyncNamed, Ticket, Unconfirmed, Writing};
 
 impl OpLog {
     /// Sees to it, as a writer does before it appends, that the log is
@@ -27,24 +27,46 @@ impl OpLog {
         on!(mut self, log => log.sync())
     }
 
-    /// A ticket for the records this handle wrote that are on none and
-    /// that no sync has answered for: from now on a sync answers for
-    /// them only when asked with the ticket, by [`Self::sync_for`] or
-    /// by a sink of this handle. For a caller that shares the handle
-    /// with others: it takes a ticket once it has appended, and is told
-    /// of a cut of its own records and of no other. A version 1 log
-    /// keeps no such account: its ticket is empty.
-    pub fn ticket(&mut self) -> Ticket {
+    /// Runs `write`, with the records it appends through this handle
+    /// on a ticket of their own, which is given with what `write` gives:
+    /// for a caller that shares the handle with others. The records are
+    /// on the ticket from when they are written, whoever else appends
+    /// before or after, and a sync answers for them only when asked
+    /// with the ticket, by [`Self::sync_for`] or by a sink of this
+    /// handle. What is appended otherwise is held by the handle, and a
+    /// sync asked without a ticket answers for it. A ticket that is
+    /// dropped, as the one of a `write` that fails is, leaves its
+    /// records to the handle. A version 1 log keeps no such account:
+    /// its ticket is empty.
+    pub fn ticketed<T, E>(
+        &mut self,
+        write: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<(T, Ticket), E> {
+        let writing = self.writing_on_a_ticket();
+        let wrote = write(self)?;
+        Ok((wrote, writing.ticket()))
+    }
+
+    /// [`Self::ticketed`] for whoever cannot hand the handle to what
+    /// writes: the records appended through this handle while what is
+    /// given lives are on one ticket, which it gives at last
+    /// ([`Writing::ticket`]).
+    pub fn writing_on_a_ticket(&mut self) -> Writing {
         match &mut self.0 {
-            Inner::V1(_) => Ticket::default(),
-            Inner::V2(log) => log.ticket(),
+            Inner::V1(_) => Writing::default(),
+            Inner::V2(log) => log.writing_on_a_ticket(),
         }
     }
 
-    /// [`Self::sync`] for the holder of `ticket`: it tells of a cut
+    /// [`Self::sync`] for the holder of `ticket`. It tells of a cut
     /// ([`OpLogError::CutBack`]) where a record on the ticket was cut,
-    /// and the ticket is spent with that. A handle that defers leaves
-    /// the records to its sink, which is asked with the same ticket.
+    /// and whenever it is asked with that ticket again. A handle that
+    /// defers leaves the records to its sink, which is asked with the
+    /// same ticket; where the sink answers that it has nothing to sync
+    /// them up to ([`crate::Answer::Owed`]), this is asked again, syncs
+    /// the records itself, and what it answers is what became of them.
+    /// Told to leave what is written unsynced, it promises nothing, and
+    /// the ticket is owed no answer after.
     pub fn sync_for(&mut self, ticket: &Ticket) -> Result<(), OpLogError> {
         match &mut self.0 {
             Inner::V1(log) => log.sync(),

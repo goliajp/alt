@@ -12,6 +12,43 @@ use super::v2_driver::{Run, name};
 use super::v2_owed::Wrote;
 
 impl Run {
+    /// A new op to append: what its frame says of it, and its payload.
+    pub fn op(&mut self) -> (Meta, Vec<u8>) {
+        let workspace = match self.rng.below(4) {
+            0 => None,
+            n => Some([n as u8; 8]),
+        };
+        let staged = workspace.filter(|_| !self.rng.one_in(3));
+        let meta = Meta {
+            workspace,
+            linked: self.rng.one_in(3),
+            undoable: self.rng.one_in(2),
+            index_after: staged.map(|workspace| [workspace[0]; 20]),
+            retired: workspace.is_some() && self.rng.one_in(30),
+            request: self.rng.one_in(3).then_some([self.request; 16]),
+            ..Meta::default()
+        };
+        let padding = match self.rng.below(20) {
+            // longer than a block
+            0 => self.block + self.block / 2 + self.rng.below(2 * self.block),
+            _ => self.rng.below(200),
+        };
+        (meta, self.payload(padding))
+    }
+
+    /// How long the name of the next op is.
+    pub fn next_name(&self) -> u64 {
+        format!("op {}", self.appended + 1).len() as u64
+    }
+
+    /// The payload of the next op, with `padding` bytes after its name.
+    pub fn payload(&mut self, padding: u64) -> Vec<u8> {
+        self.appended += 1;
+        let mut payload = format!("op {}", self.appended).into_bytes();
+        payload.resize(payload.len() + padding as usize, b'.');
+        payload
+    }
+
     /// Appends `payload` through handle `index` as the op `meta` says,
     /// synced or not. Whoever syncs what ops name fails with `fails`.
     /// Whether it was appended.
@@ -29,10 +66,15 @@ impl Run {
         ));
         self.calls();
         self.refuses.store(fails, Ordering::Relaxed);
+        let ticketed = self.to_ticket || self.also.one_in(3);
         let left = unsynced.then(|| alt_os::durability::leave_unsynced(true));
-        let appended = self.handles[index]
-            .log
-            .append_with("driver", 1, &payload, &meta);
+        let log = &mut self.handles[index].log;
+        let appended = match ticketed {
+            true => log
+                .ticketed(|log| log.append_with("driver", 1, &payload, &meta))
+                .map(|(_, ticket)| Some(ticket)),
+            false => log.append_with("driver", 1, &payload, &meta).map(|_| None),
+        };
         drop(left);
         self.refuses.store(false, Ordering::Relaxed);
         if !matches!(appended, Err(OpLogError::CutBack)) {
@@ -42,11 +84,11 @@ impl Run {
         }
         let seen_to = self.calls() != 0;
         self.meanwhile_done(&unsettled);
-        if self.took(index, appended, fails).is_none() {
+        let Some(ticket) = self.took(index, appended, fails) else {
             return false;
-        }
+        };
         let head = self.handles[index].log.anchor().unwrap();
-        self.handles[index].mine.push(Wrote::Op(head));
+        self.wrote(index, Wrote::Op(head), ticket);
         self.appended("driver", payload, (&meta, unsynced), head);
         // a writer that syncs appends after nothing that is not seen to
         if let Some(op) = unsettled.first().filter(|_| !unsynced && !seen_to) {
@@ -84,15 +126,21 @@ impl Run {
             self.request
         ));
         let unsettled = self.unsettled_before(u64::MAX);
+        let ticketed = self.also.one_in(3);
         let left = unsynced.then(|| alt_os::durability::leave_unsynced(true));
-        let appended = self.handles[index].log.append_receipt(&receipt);
+        let log = &mut self.handles[index].log;
+        let appended = match ticketed {
+            true => log
+                .ticketed(|log| log.append_receipt(&receipt))
+                .map(|((), ticket)| Some(ticket)),
+            false => log.append_receipt(&receipt).map(|()| None),
+        };
         drop(left);
         self.meanwhile_done(&unsettled);
-        if self.took(index, appended, false).is_some() {
+        if let Some(ticket) = self.took(index, appended, false) {
             let after = self.ledger.ops.len();
-            let handle = &mut self.handles[index];
-            let end = handle.log.appended_len();
-            handle.mine.push(Wrote::Receipt(request, end));
+            let end = self.handles[index].log.appended_len();
+            self.wrote(index, Wrote::Receipt(request, end), ticket);
             self.ledger.receipts.push((after, !unsynced, request, end));
             self.request += 1;
             self.ledger.begun = None;

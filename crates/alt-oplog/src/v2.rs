@@ -42,6 +42,7 @@ pub mod state;
 mod stream;
 mod sync;
 mod tail;
+mod ticket;
 mod verify;
 
 use std::fs::OpenOptions;
@@ -56,9 +57,10 @@ pub use hooks::{
 };
 pub(crate) use hooks::{cut_asked, cut_reached, cut_taken_back, fsync, note_read};
 pub(crate) use log::Log;
-pub use owed::{Answer, Ticket};
+pub use owed::Answer;
 pub use sink::Reached;
 pub(crate) use sink::Sink;
+pub use ticket::{Ticket, Writing};
 
 use crate::lock::{lock_exclusive, unlock};
 use crate::v2::frame::{OdbBounds, Step};

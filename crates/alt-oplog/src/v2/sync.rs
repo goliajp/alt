@@ -13,15 +13,19 @@
 //! tells of a cut to a caller whose frames are in the log. A sync
 //! answers for the frames its caller holds (`owed`): the ones on the
 //! ticket it is asked with, or, asked with none, the ones on no ticket.
-//! Where one of them was cut it tells so (`CutBack`), once. A handle
-//! that holds frames of other writers which are gone reads the log again
-//! by itself and syncs what is there.
+//! Where one of them was cut it tells so (`CutBack`): a caller without
+//! a ticket once, a ticket whenever it asks from then on. A handle that
+//! holds frames of other writers which are gone reads the log again by
+//! itself and syncs what is there. A sync that is told to leave what is
+//! written unsynced promises nothing, and whoever asks it is owed no
+//! answer after.
 
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::v2::log::Log;
-use crate::v2::owed::{Holder, Ticket};
+use crate::v2::owed::Holder;
 use crate::v2::sink::{Reached, Sink, record};
 use crate::v2::tail::{Held, Tail};
+use crate::v2::ticket::{Ticket, Writing};
 use crate::{OpLogError, SyncNamed, relaxed_durability};
 
 /// The frames on no ticket.
@@ -33,6 +37,7 @@ impl Log {
     pub fn sync(&mut self) -> Result<(), OpLogError> {
         // a handle that may not write the log appended nothing to it
         if relaxed_durability() || !self.writable {
+            self.account.lock().unwrap().spend(&of_the_handle);
             return Ok(());
         }
         if !self.defer {
@@ -47,24 +52,40 @@ impl Log {
         self.leave(&|holder| holder == Holder::Left)
     }
 
-    /// A ticket for the frames this handle wrote that are on none and
-    /// that nobody was answered for yet.
-    pub fn ticket(&mut self) -> Ticket {
-        self.account.lock().unwrap().ticket()
+    /// Has the frames this handle writes be on a new ticket for as
+    /// long as what is given lives.
+    pub fn writing_on_a_ticket(&mut self) -> Writing {
+        Writing::begin(&self.account)
     }
 
-    /// [`Self::sync`] for the holder of `ticket`.
+    /// [`Self::sync`] for the holder of `ticket`. A handle that leaves
+    /// its syncs to a sink syncs by itself for a ticket the sink
+    /// answered it has nothing to sync up to: what it answers then is
+    /// what became of the frames.
     pub fn sync_for(&mut self, ticket: &Ticket) -> Result<(), OpLogError> {
-        if relaxed_durability() || !self.writable {
-            return Ok(());
+        ticket.asked_of(&self.account)?;
+        if ticket.told_cut() {
+            return Err(OpLogError::CutBack);
         }
         let of = |holder| ticket.holds(holder);
-        if !self.defer {
-            return self.sync_as(&of, true);
+        if relaxed_durability() || !self.writable {
+            self.account.lock().unwrap().spend(&of);
+            return Ok(());
         }
-        self.write_count += 1;
-        self.answered(&of, true)?;
-        self.leave(&of)
+        let leaves = self.defer && !ticket.owed();
+        let synced = match leaves {
+            false => self.sync_as(&of, true),
+            true => {
+                self.write_count += 1;
+                self.answered(&of, true).and_then(|()| self.leave(&of))
+            }
+        };
+        match &synced {
+            Err(OpLogError::CutBack) => ticket.tell_cut(),
+            Ok(()) if !leaves => ticket.owes(false),
+            _ => {}
+        }
+        synced
     }
 
     /// Has a handle that may hold frames which are gone, or for which
@@ -173,14 +194,15 @@ impl Log {
         let bounded = self.bounded_to_end();
         let _ = unlock(&self.file);
         bounded?;
-        if relaxed_durability() {
-            return Ok(());
-        }
         // a sink answers for what was left to it
         let of: fn(Holder) -> bool = match self.defer {
             true => |holder| holder == Holder::Own,
             false => of_the_handle,
         };
+        if relaxed_durability() {
+            self.account.lock().unwrap().spend(&of);
+            return Ok(());
+        }
         self.sync_as(&of, false)
     }
 
@@ -261,5 +283,56 @@ impl Log {
         self.synced = self.synced.max(target);
         self.account.lock().unwrap().covered(target);
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "hooks"))]
+mod tests {
+    use crate::v2::log::Log;
+    use crate::{Meta, Op, OpLogError};
+
+    fn append(log: &mut Log) {
+        let payload = |_: &[Op]| Ok::<_, OpLogError>(b"x".to_vec());
+        log.append_checked("a", 1, &Meta::default(), payload)
+            .unwrap();
+    }
+
+    /// How many frames the account of `log` holds as owed an answer, and
+    /// how many holders it has to tell of a cut.
+    fn owed(log: &Log) -> (usize, usize) {
+        log.account.lock().unwrap().len()
+    }
+
+    #[test]
+    fn the_account_of_a_handle_holds_no_frame_its_holder_was_answered_for() {
+        let dir = alt_os::temp::tempdir().unwrap();
+        crate::v2::in_boot(Some([1; 16]));
+        crate::v2::create_with(dir.path(), 12).unwrap();
+        let mut log = Log::open_at(dir.path(), None).unwrap();
+        for round in 0..300 {
+            // synced, by the handle and for a ticket
+            append(&mut log);
+            log.sync().unwrap();
+            let writing = log.writing_on_a_ticket();
+            append(&mut log);
+            log.sync_for(&writing.ticket()).unwrap();
+            assert_eq!(owed(&log), (0, 0), "round {round}");
+            // told to leave what is written unsynced
+            let unsynced = alt_os::durability::leave_unsynced(true);
+            append(&mut log);
+            log.sync().unwrap();
+            append(&mut log);
+            log.bound_now().unwrap();
+            let writing = log.writing_on_a_ticket();
+            append(&mut log);
+            log.sync_for(&writing.ticket()).unwrap();
+            drop(unsynced);
+            assert_eq!(owed(&log), (0, 0), "round {round}");
+            // on a ticket nobody ever asks with
+            let writing = log.writing_on_a_ticket();
+            append(&mut log);
+            drop(writing.ticket());
+            assert_eq!(owed(&log), (1, 0), "round {round}");
+        }
     }
 }

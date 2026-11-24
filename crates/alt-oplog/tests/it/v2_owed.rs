@@ -218,7 +218,7 @@ impl Run {
 
     /// The sink of handle `index` is asked without a ticket: it answers
     /// for the frames the handle left to it.
-    fn sink_asked(&mut self, index: usize, unsettled: &[Laid]) -> Result<(), OpLogError> {
+    pub fn sink_asked(&mut self, index: usize, unsettled: &[Laid]) -> Result<(), OpLogError> {
         let who = format!("the sink of handle {index}, asked without a ticket,");
         let answered = self.handles[index].sink.as_ref().unwrap().fsync();
         self.meanwhile_done(unsettled);
@@ -254,5 +254,29 @@ impl Run {
         }
         self.by_sink = true;
         answered
+    }
+
+    /// A writer is told to leave what is written unsynced and syncs,
+    /// for its caller without a ticket or for one with: nothing is
+    /// promised, and that caller is owed no answer after.
+    pub fn sync_unpromised(&mut self) {
+        let index = self.writer();
+        let handle = &mut self.handles[index];
+        let claim = (!handle.claims.is_empty() && self.also.one_in(2)).then_some(0);
+        let _left = alt_os::durability::leave_unsynced(true);
+        let synced = match claim {
+            Some(claim) => handle.log.sync_for(&handle.claims[claim].ticket),
+            None => handle.log.sync(),
+        };
+        self.trace.push(format!(
+            "handle {index} syncs with nothing promised (ticket: {}): {synced:?}",
+            claim.is_some()
+        ));
+        synced.expect("a sync that promises nothing");
+        match claim {
+            Some(claim) => drop(handle.claims.remove(claim)),
+            None => (handle.mine.clear(), handle.left.clear()).0,
+        }
+        self.counts.unpromised.fetch_add(1, Ordering::Relaxed);
     }
 }
