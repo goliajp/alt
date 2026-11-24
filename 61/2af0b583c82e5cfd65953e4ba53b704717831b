@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a page gives by digest what a ref leads to, and no object at the path of a link
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/reading/again.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/tests/it/database/browser/led_to.rs
