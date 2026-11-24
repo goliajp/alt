@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a segment whose counts add up past its end is refused and not read there
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/format.rs
+touched: crates/alt-pack-segment/tests/it/mend.rs
