@@ -91,20 +91,20 @@ pub(crate) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().expect("spawn altd-server");
-    let stderr = child.stderr.take().expect("server stderr");
-    let mut reader = BufReader::new(stderr);
-    let mut line = String::new();
+    let mut reader = BufReader::new(child.stderr.take().expect("server stderr"));
+    let mut said = String::new();
     let deadline = Instant::now() + Duration::from_secs(5);
     let addr = loop {
-        line.clear();
-        reader.read_line(&mut line).unwrap();
-        if let Some(rest) = line.find("listening on ") {
-            let after = &line[rest + "listening on ".len()..];
-            let addr = after.split_whitespace().next().unwrap().to_owned();
-            break addr;
+        let before = said.len();
+        if reader.read_line(&mut said).unwrap() == 0 {
+            let ended = child.wait();
+            panic!("altd-server ended before it listened ({ended:?}), having said: {said}");
+        }
+        if let Some((_, after)) = said[before..].split_once("listening on ") {
+            break after.split_whitespace().next().unwrap().to_owned();
         }
         if Instant::now() > deadline {
-            panic!("altd-server never logged its listening address");
+            panic!("altd-server never logged its listening address, having said: {said}");
         }
     };
     Server {
@@ -2587,11 +2587,11 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let started = loop {
         line.clear();
-        reader.read_line(&mut line).unwrap();
+        let read = reader.read_line(&mut line).unwrap();
         if line.contains("listening on ") {
             break true;
         }
-        if Instant::now() > deadline {
+        if read == 0 || Instant::now() > deadline {
             break false;
         }
     };
