@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: docs
+summary: what a read may miss of a clock set back, and that a cloud instance is not migrated by hand
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server/README.md
+touched: self-hosted/README.md
