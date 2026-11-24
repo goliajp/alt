@@ -35,6 +35,8 @@ pub struct Handle {
     /// of those, the ones its caller was told of when the handle could
     /// not tell whether they were cut
     pub told: Vec<Wrote>,
+    /// and the ones a caller wrote that was told to leave them unsynced
+    pub loose: Vec<Wrote>,
     /// what it held when it last left its frames to its sink: its last
     /// op, and where its frames ended
     pub head_left: Option<(Option<Anchor>, u64)>,
@@ -208,6 +210,7 @@ impl Run {
             mine: Vec::new(),
             left: Vec::new(),
             told: Vec::new(),
+            loose: Vec::new(),
             head_left: None,
             claims: Vec::new(),
             spent: Vec::new(),

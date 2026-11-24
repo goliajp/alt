@@ -17,9 +17,10 @@
 //! handle holds it.
 //!
 //! An entry leaves the account when a sync is recorded over its frame,
-//! when its holder is told that it was cut, and when its holder is
-//! answered with nothing promised, by a sync that was told to leave
-//! what is written unsynced.
+//! and when its holder is told that it was cut. One whose frame was
+//! written by a caller told to leave what it writes unsynced leaves it
+//! also when its holder asks so told: nothing was promised for it, and
+//! nothing is. A frame of a writer that syncs stays owed through that.
 //!
 //! The handle shares the account with its sink, which finds frames cut
 //! as the handle does and answers by the same tickets.
@@ -27,6 +28,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::v2::sink::Reached;
+use crate::v2::ticket::Answer;
 use crate::{OpLogError, SyncNamed};
 
 /// Who is answered for a frame.
@@ -41,18 +43,6 @@ pub(crate) enum Holder {
     Ticket(u64),
 }
 
-/// What became of the frames on a ticket that were not cut.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Answer {
-    /// a sync is recorded over every one of them
-    Synced,
-    /// They are in the log, no sync is recorded over them yet, and the
-    /// sink has nothing to sync them up to. The handle is asked with
-    /// the ticket ([`crate::OpLog::sync_for`]): it syncs them itself
-    /// then, and what it answers is final.
-    Owed,
-}
-
 /// A frame the handle wrote that no sync is recorded over.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Owed {
@@ -62,6 +52,8 @@ pub(crate) struct Owed {
     /// the generation the log was of when it was written
     pub generation: u32,
     holder: Holder,
+    /// its writer was told to leave what it writes unsynced
+    unpromised: bool,
     /// the last look could not tell whether it is cut
     unsure: bool,
     /// Its holder was told of a cut while that could not be told: found
@@ -73,8 +65,9 @@ pub(crate) struct Owed {
 pub(crate) struct Account {
     /// the frames owed an answer, in the order they were written
     owed: Vec<Owed>,
-    /// who holds frames that were found cut and was not told yet
-    cut: Vec<Holder>,
+    /// who holds frames that were found cut and was not told yet, and
+    /// whether those were written to be left unsynced
+    cut: Vec<(Holder, bool)>,
     /// how many tickets frames were written on
     tickets: u64,
     /// who holds what the handle writes now
@@ -97,13 +90,15 @@ pub(crate) struct Account {
 pub(crate) type Shared = Arc<Mutex<Account>>;
 
 impl Account {
-    /// The handle wrote a frame.
-    pub fn wrote(&mut self, end: u64, closes: [u8; 4], generation: u32) {
+    /// The handle wrote a frame, `unpromised` for a caller told to
+    /// leave what it writes unsynced.
+    pub fn wrote(&mut self, end: u64, closes: [u8; 4], generation: u32, unpromised: bool) {
         self.owed.push(Owed {
             end,
             closes,
             generation,
             holder: self.writing,
+            unpromised,
             unsure: false,
             told: false,
         });
@@ -131,9 +126,11 @@ impl Account {
                     (owed.holder, owed.told) = (Holder::Own, false);
                 }
             }
-            if self.cut.contains(&ticket) {
-                self.cut.retain(|holder| *holder != ticket);
-                self.found_cut(Holder::Own);
+            for unpromised in [false, true] {
+                if self.cut.contains(&(ticket, unpromised)) {
+                    self.cut.retain(|found| *found != (ticket, unpromised));
+                    self.found_cut(Holder::Own, unpromised);
+                }
             }
         }
     }
@@ -172,13 +169,23 @@ impl Account {
     /// Whether `of` holds a frame that was found cut, and has not been
     /// told.
     pub fn found_cut_of(&self, of: &dyn Fn(Holder) -> bool) -> bool {
-        self.cut.iter().any(|holder| of(*holder))
+        self.cut.iter().any(|(holder, _)| of(*holder))
     }
 
     /// `of` is answered for nothing any longer.
     pub fn spend(&mut self, of: &dyn Fn(Holder) -> bool) {
-        self.cut.retain(|holder| !of(*holder));
+        self.cut.retain(|(holder, _)| !of(*holder));
         self.owed.retain(|owed| !of(owed.holder));
+    }
+
+    /// `of` asks, told to leave what is written unsynced: of the frames
+    /// it holds that were written so, it is answered for none any
+    /// longer. What a writer that syncs wrote is owed an answer still.
+    pub fn spend_unpromised(&mut self, of: &dyn Fn(Holder) -> bool) {
+        let spent = |holder: Holder, unpromised: bool| of(holder) && unpromised;
+        self.cut.retain(|(holder, loose)| !spent(*holder, *loose));
+        self.owed
+            .retain(|owed| !spent(owed.holder, owed.unpromised));
     }
 
     /// Answers whoever `of` holds frames for. Where some of them were
@@ -192,7 +199,7 @@ impl Account {
         if self.found_cut_of(of) {
             match spent {
                 true => self.spend(of),
-                false => self.cut.retain(|holder| !of(*holder)),
+                false => self.cut.retain(|(holder, _)| !of(*holder)),
             }
             return Err(OpLogError::CutBack);
         }
@@ -206,7 +213,7 @@ impl Account {
     pub fn hand(&mut self, from: Holder, to: Holder) -> bool {
         let mut any = false;
         let owed = self.owed.iter_mut().map(|owed| &mut owed.holder);
-        for holder in owed.chain(&mut self.cut) {
+        for holder in owed.chain(self.cut.iter_mut().map(|(holder, _)| holder)) {
             if *holder == from {
                 (*holder, any) = (to, true);
             }
@@ -228,9 +235,9 @@ impl Account {
         self.owed.retain(|owed| owed.end > target);
     }
 
-    fn found_cut(&mut self, holder: Holder) {
-        if !self.cut.contains(&holder) {
-            self.cut.push(holder);
+    fn found_cut(&mut self, holder: Holder, unpromised: bool) {
+        if !self.cut.contains(&(holder, unpromised)) {
+            self.cut.push((holder, unpromised));
         }
     }
 
@@ -242,7 +249,7 @@ impl Account {
         self.owed = kept;
         let others = |owed: &&Owed| owed.holder != Holder::Own && !owed.told;
         for owed in gone.iter().filter(others) {
-            self.found_cut(owed.holder);
+            self.found_cut(owed.holder, owed.unpromised);
         }
     }
 
@@ -250,7 +257,7 @@ impl Account {
     /// cut: the ones found cut, and the ones the last look could not
     /// tell of, which are owed a sync still where they are in the log.
     pub fn told(&mut self) {
-        self.cut.retain(|holder| *holder != Holder::Own);
+        self.cut.retain(|(holder, _)| *holder != Holder::Own);
         for owed in &mut self.owed {
             owed.told |= owed.unsure && owed.holder == Holder::Own;
         }
@@ -273,7 +280,7 @@ impl Account {
             };
             match placed {
                 Ok(Some(false)) if owed.told => {}
-                Ok(Some(false)) => self.found_cut(owed.holder),
+                Ok(Some(false)) => self.found_cut(owed.holder, owed.unpromised),
                 Ok(sure) => {
                     owed.unsure = sure.is_none();
                     self.unsure |= owed.unsure;

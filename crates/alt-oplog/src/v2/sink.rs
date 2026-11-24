@@ -16,9 +16,9 @@ use std::path::PathBuf;
 
 use crate::v2::log::Log;
 use crate::v2::mark::Mark;
-use crate::v2::owed::{Answer, Holder, Owed, Shared};
+use crate::v2::owed::{Holder, Owed, Shared};
 use crate::v2::tail::{Held, Noted, Place, Tail};
-use crate::v2::ticket::Ticket;
+use crate::v2::ticket::{Answer, Ticket};
 use crate::{Op, OpLogError, SyncNamed};
 
 /// What a handle's appends reached when it last asked for them to be

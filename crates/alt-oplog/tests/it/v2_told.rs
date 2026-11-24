@@ -2,6 +2,8 @@
 //! of its frames beside the answers of syncs: a handle read the log anew
 //! with that caller told that ops were cut, or cut ops itself.
 
+use std::sync::atomic::Ordering;
+
 use super::v2_driver::Run;
 use super::v2_owed::Wrote;
 
@@ -45,5 +47,45 @@ impl Run {
         let kept = mine.into_iter().zip(had);
         let kept = kept.filter(|(frame, had)| !had || self.has(frame));
         self.handles[index].mine = kept.map(|(frame, _)| frame).collect();
+    }
+
+    /// A writer is told to leave what is written unsynced and syncs or
+    /// sets a boundary, for its caller without a ticket or for one
+    /// with: nothing is promised, and that caller is owed no answer
+    /// after for the frames that were written so told. For what a
+    /// writer that syncs wrote it is owed one still.
+    pub fn sync_unpromised(&mut self) {
+        let index = self.writer();
+        let before = (self.handles[index].log.reads(), self.file_len());
+        let handle = &mut self.handles[index];
+        let claim = (!handle.claims.is_empty() && self.also.one_in(2)).then_some(0);
+        let bounds = self.also.one_in(2);
+        let left = alt_os::durability::leave_unsynced(true);
+        let synced = match claim {
+            Some(claim) => handle.log.sync_for(&handle.claims[claim].ticket),
+            None if bounds => handle.log.bound_now(),
+            None => handle.log.sync(),
+        };
+        drop(left);
+        self.trace.push(format!(
+            "handle {index} syncs with nothing promised (ticket: {}, boundary: {bounds}): \
+             {synced:?}",
+            claim.is_some()
+        ));
+        synced.expect("a sync that promises nothing");
+        let told = handle.log.take_discarded();
+        self.read_anew_since(index, before);
+        self.cuts_told(&told, None);
+        let handle = &mut self.handles[index];
+        match claim {
+            Some(claim) if handle.claims[claim].unsynced => drop(handle.claims.remove(claim)),
+            Some(_) => {}
+            None => {
+                let loose = std::mem::take(&mut handle.loose);
+                handle.mine.retain(|frame| !loose.contains(frame));
+                handle.left.retain(|frame| !loose.contains(frame));
+            }
+        }
+        self.counts.unpromised.fetch_add(1, Ordering::Relaxed);
     }
 }

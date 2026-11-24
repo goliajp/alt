@@ -19,6 +19,18 @@ use std::sync::{Arc, Mutex, Weak};
 use crate::OpLogError;
 use crate::v2::owed::{Account, Holder, Shared};
 
+/// What became of the frames on a ticket that were not cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// a sync is recorded over every one of them
+    Synced,
+    /// They are in the log, no sync is recorded over them yet, and the
+    /// sink has nothing to sync them up to. The handle is asked with
+    /// the ticket ([`crate::OpLog::sync_for`]): it syncs them itself
+    /// then, and what it answers is final.
+    Owed,
+}
+
 /// The claim to an answer for frames a handle wrote: whether a sync is
 /// recorded over them, or they were cut off the log. It is good for the
 /// handle it was written on and for the sinks of that handle.

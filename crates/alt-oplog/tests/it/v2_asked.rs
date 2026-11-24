@@ -16,17 +16,26 @@ use super::v2_owed::{Claim, Wrote};
 
 impl Run {
     /// Handle `index` wrote `frame`: on `ticket`, for a caller of its
-    /// own, or for the caller the handle has without one.
-    pub fn wrote(&mut self, index: usize, frame: Wrote, ticket: Option<Ticket>) {
+    /// own, or for the caller the handle has without one; `unsynced`
+    /// for a writer told to leave what it writes unsynced.
+    pub fn wrote(&mut self, index: usize, frame: Wrote, ticket: Option<Ticket>, unsynced: bool) {
         let handle = &mut self.handles[index];
         match ticket {
             Some(ticket) => {
                 assert!(!ticket.is_empty(), "a frame was written on no ticket");
-                let frames = vec![frame];
-                handle.claims.push(Claim { ticket, frames });
+                handle.claims.push(Claim {
+                    ticket,
+                    frames: vec![frame],
+                    unsynced,
+                });
                 self.counts.claims.fetch_add(1, Ordering::Relaxed);
             }
-            None => handle.mine.push(frame),
+            None => {
+                handle.mine.push(frame);
+                if unsynced {
+                    handle.loose.push(frame);
+                }
+            }
         }
     }
 
@@ -44,6 +53,9 @@ impl Run {
             "a ticket of handle {index} for {} frames is dropped",
             dropped.frames.len()
         ));
+        if dropped.unsynced {
+            handle.loose.extend(&dropped.frames);
+        }
         handle.mine.append(&mut dropped.frames);
         self.counts.claims_dropped.fetch_add(1, Ordering::Relaxed);
     }

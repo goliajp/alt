@@ -17,8 +17,10 @@
 //! a ticket once, a ticket whenever it asks from then on. A handle that
 //! holds frames of other writers which are gone reads the log again by
 //! itself and syncs what is there. A sync that is told to leave what is
-//! written unsynced promises nothing, and whoever asks it is owed no
-//! answer after.
+//! written unsynced promises nothing: it says that the frames were
+//! written, and whoever asks it is owed no answer after for the ones
+//! that were written so told. For a frame a writer that syncs wrote,
+//! and for one found cut, the answer is owed still.
 
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::v2::log::Log;
@@ -37,8 +39,7 @@ impl Log {
     pub fn sync(&mut self) -> Result<(), OpLogError> {
         // a handle that may not write the log appended nothing to it
         if relaxed_durability() || !self.writable {
-            self.account.lock().unwrap().spend(&of_the_handle);
-            return Ok(());
+            return self.promises_nothing(&of_the_handle);
         }
         if !self.defer {
             return self.sync_as(&of_the_handle, false);
@@ -69,8 +70,7 @@ impl Log {
         }
         let of = |holder| ticket.holds(holder);
         if relaxed_durability() || !self.writable {
-            self.account.lock().unwrap().spend(&of);
-            return Ok(());
+            return self.promises_nothing(&of);
         }
         let leaves = self.defer && !ticket.owed();
         let synced = match leaves {
@@ -86,6 +86,14 @@ impl Log {
             _ => {}
         }
         synced
+    }
+
+    /// Answers `of` as a sync does that is told to leave what is written
+    /// unsynced: the frames were written, and of those it holds that
+    /// were written so told, `of` is owed no answer after.
+    fn promises_nothing(&self, of: &dyn Fn(Holder) -> bool) -> Result<(), OpLogError> {
+        self.account.lock().unwrap().spend_unpromised(of);
+        Ok(())
     }
 
     /// Has a handle that may hold frames which are gone, or for which
@@ -194,15 +202,14 @@ impl Log {
         let bounded = self.bounded_to_end();
         let _ = unlock(&self.file);
         bounded?;
+        if relaxed_durability() {
+            return self.promises_nothing(&of_the_handle);
+        }
         // a sink answers for what was left to it
         let of: fn(Holder) -> bool = match self.defer {
             true => |holder| holder == Holder::Own,
             false => of_the_handle,
         };
-        if relaxed_durability() {
-            self.account.lock().unwrap().spend(&of);
-            return Ok(());
-        }
         self.sync_as(&of, false)
     }
 

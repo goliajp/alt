@@ -202,7 +202,13 @@ impl Log {
         let bytes = composer.frame(&mut state, new)?;
         self.put(&bytes, state)?;
         let mut account = self.account.lock().unwrap();
-        account.wrote(self.state.end, self.closes, self.state.generation);
+        let unpromised = new.flags & UNSYNCED != 0;
+        account.wrote(
+            self.state.end,
+            self.closes,
+            self.state.generation,
+            unpromised,
+        );
         Ok(())
     }
 
