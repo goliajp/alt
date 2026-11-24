@@ -11,7 +11,7 @@ use std::path::Path;
 
 use alt_bytes::{BStr, BString};
 
-pub use edit::{Name, add, overlay, set};
+pub use edit::{Name, add, overlay, remove_section, rename_section, set, unset};
 pub use include::{IncludeContext, Moved, Place, place};
 pub use parse::parse_file;
 pub use wildmatch::wildmatch;

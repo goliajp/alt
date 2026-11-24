@@ -5,6 +5,10 @@ use alt_bytes::BString;
 
 use crate::{ConfigError, Entry, parse};
 
+mod sections;
+
+pub use sections::{remove_section, rename_section, unset};
+
 /// A variable by its full name: the section in lower case, the
 /// subsection as written, the name in lower case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

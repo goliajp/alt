@@ -4,7 +4,7 @@
 use std::fs;
 use std::process::Command;
 
-use alt_git_config::{Name, add, overlay, parse_file, set};
+use alt_git_config::{Name, add, overlay, parse_file, remove_section, rename_section, set, unset};
 
 const FILES: &[&str] = &[
     "",
@@ -137,4 +137,76 @@ fn an_overlay_is_the_file_git_makes_of_the_same_commands() {
         read.get_str("user", None, "name").unwrap().to_string(),
         "Own"
     );
+}
+
+/// Files with comments in and around sections, and sections that come
+/// more than once.
+const MORE: &[&str] = &[
+    "[user]\n\tname = A\n",
+    "# about\n[user]\n\tname = A\n[core]\n\tbare = false\n",
+    "[core]\n\tbare = false\n[user]\n\tname = A\n# closing\n",
+    "[core]\n\tbare = false\n\n[user]\n\tname = A\n\n[alias]\n\tst = status\n",
+    "[user]\n\tname = A\n\tname = B\n\temail = e\n",
+    "[user]\n\tname = A\n[core]\n\tx = 1\n[user]\n\tname = B\n",
+    "[remote \"origin\"]\n\turl = u\n[branch \"with space\"]\n\tmerge = m\n\tremote = r\n",
+    "[remote \"origin\"] url = u\n\tfetch = one\n[remote \"o\\\"r\"]\n\turl = v\n",
+    "  [remote \"origin\"]\n\tfetch = one ; said\n; between\n[Remote \"origin\"]\n\tfetch = two\n",
+];
+
+#[test]
+fn a_variable_is_unset_as_git_unsets_it() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let file = tmp.path().join("config");
+    let mut unset_in = 0;
+    for text in FILES.iter().chain(MORE) {
+        for &(section, subsection, key) in NAMES {
+            let name = Name {
+                section,
+                subsection: subsection.map(str::as_bytes),
+                key,
+            };
+            let dotted = dotted((section, subsection, key));
+            fs::write(&file, text).unwrap();
+            let theirs = git(&file, &["--unset-all", &dotted]);
+            let ours = unset(text.as_bytes(), name).unwrap();
+            unset_in += usize::from(ours.is_some());
+            let said = |bytes: Option<Vec<u8>>| bytes.map(|b| String::from_utf8(b).unwrap());
+            assert_eq!(said(ours), said(theirs), "unset {text:?} {dotted}");
+        }
+    }
+    assert!(unset_in >= 15, "{unset_in}");
+}
+
+#[test]
+fn a_section_is_removed_and_renamed_as_git_does_it() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let file = tmp.path().join("config");
+    let mut found = 0;
+    for text in FILES.iter().chain(MORE) {
+        for (section, sub) in [
+            ("remote", "origin"),
+            ("remote", "o\"r"),
+            ("branch", "with space"),
+        ] {
+            let dotted = format!("{section}.{sub}");
+            let said = |bytes: Option<Vec<u8>>| bytes.map(|b| String::from_utf8(b).unwrap());
+            fs::write(&file, text).unwrap();
+            let theirs = git(&file, &["--remove-section", &dotted]);
+            let ours = remove_section(text.as_bytes(), section, sub.as_bytes()).unwrap();
+            found += usize::from(ours.is_some());
+            assert_eq!(said(ours), said(theirs), "remove {text:?} {dotted}");
+            for to in ["other", "a \"q\" \\ b"] {
+                fs::write(&file, text).unwrap();
+                let renamed = format!("{section}.{to}");
+                let theirs = git(&file, &["--rename-section", &dotted, &renamed]);
+                let ours = rename_section(text.as_bytes(), section, sub.as_bytes(), to.as_bytes());
+                assert_eq!(
+                    said(ours.unwrap()),
+                    said(theirs),
+                    "rename {text:?} {dotted} {to:?}"
+                );
+            }
+        }
+    }
+    assert!(found > 5, "{found}");
 }
