@@ -71,6 +71,16 @@ fn an_instance_whose_segments_do_not_give_their_objects_back_is_backed_up_and_re
         let args = ["backup", "--recipient", &recipient, "--output", &to];
         told(&db, &[&args[..], more].concat())
     };
+    // what the operator gave is looked at before the objects are read
+    let unsent = db.run(&[
+        "backup",
+        "--recipient",
+        "nobody",
+        "--output",
+        &db.path("first"),
+    ]);
+    let why = String::from_utf8_lossy(&unsent.stderr).into_owned();
+    assert!(why.contains("age X25519 recipient"), "{why}");
     let (code, refused) = backup("first", &[]);
     assert_eq!((code, &refused["backup_created"]), (Some(1), &json!(false)));
     let unread = refused["unread"].as_array().unwrap();

@@ -117,6 +117,19 @@ pub fn create(
     } else {
         None
     };
+    // what the operator gave is looked at before the objects are read, which
+    // takes long
+    if !recipient.starts_with("age1")
+        || recipient.len() > 128
+        || !recipient
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        return Err(Error::Config("backup requires an age X25519 recipient"));
+    }
+    if output.try_exists().map_err(|_| Error::File)? {
+        return Err(Error::Config("backup output must be a new directory"));
+    }
     // a copy of segments that do not give their objects back is no backup,
     // unless it is asked for as that
     let unread = match &mut store {
@@ -158,14 +171,6 @@ fn create_inner(
 ) -> Result<Manifest> {
     alt_server_store::check_backup_schema(schema).map_err(Error::Config)?;
     config.check_volume()?;
-    if !recipient.starts_with("age1")
-        || recipient.len() > 128
-        || !recipient
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-    {
-        return Err(Error::Config("backup requires an age X25519 recipient"));
-    }
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(output)
