@@ -41,19 +41,13 @@ pub(crate) fn entries(data: &[u8]) -> Result<Vec<Entry<'_>>, Error> {
         let (mode, named) = (&rest[..space], &rest[space + 1..]);
         let nul = named.iter().position(|byte| *byte == 0).ok_or_else(bad)?;
         let oid = named.get(nul + 1..nul + 21).ok_or_else(bad)?;
-        if mode.contains(&0) {
-            return Err(bad());
-        }
-        let entry = |tree| Entry {
-            name: &named[..nul],
-            oid: oid.try_into().unwrap(),
-            tree,
-        };
-        match mode {
-            b"40000" => out.push(entry(true)),
-            // a gitlink names a commit of another repository
-            b"160000" => {}
-            _ => out.push(entry(false)),
+        // as the tree was read when it came in: a mode is its number
+        if let Some(kind) = crate::object::names(mode).ok_or_else(bad)? {
+            out.push(Entry {
+                name: &named[..nul],
+                oid: oid.try_into().unwrap(),
+                tree: kind == Kind::Tree,
+            });
         }
         rest = &named[nul + 21..];
     }
@@ -334,14 +328,29 @@ mod tests {
         data.extend_from_slice(&[2; 20]);
         data.extend_from_slice(b"40000 dir\0");
         data.extend_from_slice(&[3; 20]);
+        // modes with zeros before them, as Git reads them
+        data.extend_from_slice(b"040000 padded\0");
+        data.extend_from_slice(&[4; 20]);
+        data.extend_from_slice(b"0100755 run\0");
+        data.extend_from_slice(&[5; 20]);
+        data.extend_from_slice(b"0160000 other\0");
+        data.extend_from_slice(&[6; 20]);
         let read = entries(&data).unwrap();
         let read: Vec<_> = read.iter().map(|e| (e.name, e.oid[0], e.tree)).collect();
-        assert_eq!(read, [(&b"file"[..], 1, false), (&b"dir"[..], 3, true)]);
+        let all = [
+            (&b"file"[..], 1, false),
+            (&b"dir"[..], 3, true),
+            (&b"padded"[..], 4, true),
+            (&b"run"[..], 5, false),
+        ];
+        assert_eq!(read, all);
         for bad in [
             &data[..data.len() - 1],
             &b"100644 name"[..],
             &b"100644"[..],
             &b"10\x00644 name\0aaaaaaaaaaaaaaaaaaaa"[..],
+            &b"100648 name\0aaaaaaaaaaaaaaaaaaaa"[..],
+            &b"644 name\0aaaaaaaaaaaaaaaaaaaa"[..],
         ] {
             assert!(matches!(entries(bad), Err(Error::Corrupt("tree entry"))));
         }

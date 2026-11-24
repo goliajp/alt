@@ -8,6 +8,7 @@ mod kinds;
 mod many_of_one;
 mod mend;
 mod merge;
+mod modes;
 mod reach;
 mod readable;
 mod waiting;
