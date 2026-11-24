@@ -207,3 +207,33 @@ fn a_note_of_a_log_of_another_generation_says_nothing_of_what_is_left_to_look_at
         assert!(opened.unsettled(), "read only: {read_only}");
     }
 }
+
+#[test]
+fn reading_a_note_that_does_not_read_makes_no_lock_beside_the_log() {
+    for kept in [false, true] {
+        let dir = alt_os::temp::tempdir().unwrap();
+        left_by_another_boot(dir.path());
+        if kept {
+            // a log this build reads and does not append to
+            let bytes = fs::read(dir.path().join("log")).unwrap();
+            let header = alt_oplog::v2::block::FileHeader {
+                read_compatible: 1,
+                ..alt_oplog::v2::block::FileHeader::decode(&bytes).unwrap()
+            };
+            super::v2_features::with_header(dir.path(), header);
+        }
+        spoil(dir.path(), "a byte");
+        let lock = dir.path().join("lock");
+        fs::remove_file(&lock).unwrap();
+        let reader = OpLog::open_read_only(dir.path(), None).unwrap();
+        assert!(reader.unsettled());
+        if kept {
+            // a look notes nothing beside such a log
+            assert_eq!(reader.unconfirmed(but_left).unwrap().unwrap().ops, 1);
+        }
+        let mut opened = OpLog::open(dir.path()).unwrap();
+        opened.follow().unwrap();
+        assert!(alt_oplog::bounded_in(dir.path()).is_none());
+        assert!(!lock.exists(), "kept from appending: {kept}");
+    }
+}

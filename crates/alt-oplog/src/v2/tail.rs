@@ -124,6 +124,22 @@ impl Held {
     }
 }
 
+impl Held {
+    /// Waits for whoever holds `lock` in `dir` and takes it, where the
+    /// file is there: `None` where it is not, and nobody holds it then.
+    /// For a reader, which makes nothing beside a log.
+    pub fn after_its_holder(dir: &Path) -> std::io::Result<Option<Self>> {
+        match OpenOptions::new().write(true).open(dir.join("lock")) {
+            Ok(file) => {
+                lock_exclusive(&file)?;
+                Ok(Some(Held(file)))
+            }
+            Err(none) if none.kind() == ErrorKind::NotFound => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+}
+
 impl Drop for Held {
     fn drop(&mut self) {
         let _ = unlock(&self.0);
@@ -199,9 +215,10 @@ impl Tail {
     /// not hold it.
     pub fn noted(dir: &Path, boot: Option<[u8; 16]>) -> Noted {
         match Self::noted_now(dir, boot) {
-            Noted::Unread => match Held::take(dir) {
-                Ok(held) => Self::noted_held(dir, boot, &held),
-                Err(_) => Noted::Unread,
+            // without the file nobody was writing the note
+            Noted::Unread => match Held::after_its_holder(dir) {
+                Ok(Some(held)) => Self::noted_held(dir, boot, &held),
+                Ok(None) | Err(_) => Noted::Unread,
             },
             noted => noted,
         }
