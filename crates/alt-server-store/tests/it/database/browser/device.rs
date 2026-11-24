@@ -210,7 +210,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         matches!(
             f.store
                 .device_consent(&parent, &origin(), "CCCC-4444", peer),
-            Err(alt_server_store::Error::Precondition(_))
+            Err(alt_server_store::Error::Attempts(_))
         ),
         "incorrect guesses consume the actor budget"
     );
@@ -222,114 +222,6 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .reset_local_password(&f.credential, "bob", "a replacement local password")
         .unwrap();
     assert!(f.store.authenticate(&tokens[2]).is_err());
-}
-
-/// how many attempts the row of `key` has counted in its minute
-fn attempts(f: &Fixture, key: &str) -> i32 {
-    f.client()
-        .query_one(
-            "SELECT attempts FROM alt_login_budgets WHERE key=$1",
-            &[&key],
-        )
-        .unwrap()
-        .get(0)
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL; a network past its budget and the budget every network shares"]
-fn an_attempt_refused_for_its_network_takes_nothing_from_what_every_network_shares() {
-    let mut f = Fixture::new();
-    f.store.enable_browser(&f.credential, &origin()).unwrap();
-    let mut begun = 0;
-    let mut begin = |f: &mut Fixture, network: &str| {
-        begun += 1;
-        let token = alt_browser_auth::token();
-        f.store.begin_device_authorization(
-            &origin(),
-            &format!("{begun:064x}"),
-            &format!("AAAA-222{}", begun + 1),
-            &alt_server_store::cloud_credential_digest(&token).unwrap(),
-            network.parse().unwrap(),
-        )
-    };
-    let spent = |f: &Fixture, network: &str| {
-        let key = format!("network:{}", alt_browser_auth::digest(network));
-        let set = "UPDATE alt_login_budgets SET attempts=100 WHERE key=$1";
-        assert_eq!(f.client().execute(set, &[&key]).unwrap(), 1, "{network}");
-    };
-
-    begin(&mut f, "192.0.2.1").unwrap();
-    spent(&f, "192.0.2.1");
-    let shared = attempts(&f, "global");
-    for _ in 0..3 {
-        assert!(matches!(
-            begin(&mut f, "192.0.2.1"),
-            Err(alt_server_store::Error::Precondition(_))
-        ));
-    }
-    assert_eq!(attempts(&f, "global"), shared);
-    begin(&mut f, "192.0.2.2").unwrap();
-    assert_eq!(attempts(&f, "global"), shared + 1);
-
-    // the addresses of one /64 are one network, those of the next /64 another
-    begin(&mut f, "2001:db8::1").unwrap();
-    spent(&f, "2001:db8::");
-    assert!(begin(&mut f, "2001:db8::2").is_err());
-    begin(&mut f, "2001:db8:0:1::2").unwrap();
-}
-
-/// Past what one address may attempt there is what the network around it may, and
-/// past what everybody attempts in a minute an address is held to a few attempts:
-/// nobody is refused for the attempts of others alone.
-#[test]
-#[ignore = "requires isolated PostgreSQL; the budgets of an address, of its network and of everybody"]
-fn everybody_being_busy_refuses_an_address_for_its_own_attempts_alone() {
-    let mut f = Fixture::new();
-    f.store.enable_browser(&f.credential, &origin()).unwrap();
-    let mut begun = 0;
-    let mut begin = |f: &mut Fixture, network: &str| {
-        begun += 1;
-        let token = alt_browser_auth::token();
-        f.store.begin_device_authorization(
-            &origin(),
-            &format!("{begun:064x}"),
-            &format!("BBBB-{begun:04}"),
-            &alt_server_store::cloud_credential_digest(&token).unwrap(),
-            network.parse().unwrap(),
-        )
-    };
-    let set = |f: &Fixture, key: &str, attempts: i32| {
-        let set = "UPDATE alt_login_budgets SET attempts=$2 WHERE key=$1";
-        assert_eq!(
-            f.client().execute(set, &[&key, &attempts]).unwrap(),
-            1,
-            "{key}"
-        );
-    };
-    let of = |kind: &str, network: &str| format!("{kind}:{}", alt_browser_auth::digest(network));
-
-    // a /24 that has made what it may: another address of it is refused, one of the next is not
-    begin(&mut f, "198.51.100.1").unwrap();
-    set(&f, &of("wider", "198.51.100.0"), 400);
-    assert!(begin(&mut f, "198.51.100.2").is_err());
-    begin(&mut f, "198.51.101.2").unwrap();
-    // an IPv4 address written as an IPv6 one counts as the address it is
-    assert!(begin(&mut f, "::ffff:198.51.100.3").is_err());
-    begin(&mut f, "2001:db8:1::1").unwrap();
-    set(&f, &of("wider", "2001:db8:1::"), 400);
-    assert!(begin(&mut f, "2001:db8:1:ffff::1").is_err());
-    begin(&mut f, "2001:db8:2::1").unwrap();
-
-    // everybody together is far past what a minute usually has
-    set(&f, "global", 1_000_000);
-    for _ in 0..4 {
-        begin(&mut f, "203.0.113.5").unwrap();
-    }
-    begin(&mut f, "203.0.113.5").unwrap();
-    assert!(begin(&mut f, "203.0.113.5").is_err());
-    // and whoever has attempted little is let in still
-    begin(&mut f, "203.0.113.6").unwrap();
-    begin(&mut f, "198.51.101.2").unwrap();
 }
 
 /// An approved code is exchanged once. Eight devices that hold the same code ask
@@ -423,10 +315,7 @@ fn the_attempts_for_a_login_from_one_address_keep_no_other_address_out() {
         ));
     }
     let limited = looked(&mut f, "192.0.2.1");
-    assert!(matches!(
-        limited,
-        Err(alt_server_store::Error::Precondition(_))
-    ));
+    assert!(matches!(limited, Err(alt_server_store::Error::Attempts(_))));
     let elsewhere = looked(&mut f, "198.51.100.9");
     assert!(matches!(
         elsewhere,

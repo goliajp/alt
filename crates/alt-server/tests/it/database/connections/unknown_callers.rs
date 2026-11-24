@@ -41,15 +41,22 @@ fn a_body_that_does_not_come_keeps_no_worker_from_a_caller_not_yet_known() {
     drop(waiting);
 }
 
-fn device_code(server: &Running, forwarded: &str) -> u16 {
+/// the status a device that asks for a code is answered with, and after how many
+/// seconds it is told to ask again
+fn device_code_answer(server: &Running, forwarded: &str) -> (u16, Option<u64>) {
     let request = ureq::post(&format!("{}/oauth/device/code", server.url))
         .set("Content-Type", "application/x-www-form-urlencoded")
         .set("X-Forwarded-For", forwarded);
-    match request.send_string("client_id=alt-cli&scope=account") {
-        Ok(response) => response.status(),
-        Err(ureq::Error::Status(status, _)) => status,
+    let response = match request.send_string("client_id=alt-cli&scope=account") {
+        Ok(response) | Err(ureq::Error::Status(_, response)) => response,
         Err(error) => panic!("{error}"),
-    }
+    };
+    let again = response.header("Retry-After").map(|v| v.parse().unwrap());
+    (response.status(), again)
+}
+
+fn device_code(server: &Running, forwarded: &str) -> u16 {
+    device_code_answer(server, forwarded).0
 }
 
 #[test]
@@ -58,7 +65,7 @@ fn sign_in_attempts_are_counted_for_the_address_the_proxy_names() {
     let mut f = Fixture::new();
     let server = start(&mut f, |_, _| ());
     assert_eq!(device_code(&server, "203.0.113.7"), 200);
-    let key = |address: &str| format!("network:{}", alt_browser_auth::digest(address));
+    let key = |address: &str| format!("code:{}", alt_browser_auth::digest(address));
     let spent = f
         .client()
         .execute(
@@ -67,7 +74,13 @@ fn sign_in_attempts_are_counted_for_the_address_the_proxy_names() {
         )
         .unwrap();
     assert_eq!(spent, 1, "no attempt was counted for the address named");
-    assert_eq!(device_code(&server, "203.0.113.7"), 503);
+    // refused, and told when the minute its codes were counted in is over
+    let (status, again) = device_code_answer(&server, "203.0.113.7");
+    assert_eq!(status, 503);
+    assert!(
+        again.is_some_and(|seconds| (1..=60).contains(&seconds)),
+        "{again:?}"
+    );
     // what the sender wrote comes first; the proxy names whom it heard from last
     assert_eq!(device_code(&server, "203.0.113.7, 203.0.113.8"), 200);
     assert_eq!(device_code(&server, "203.0.113.8,203.0.113.7"), 503);

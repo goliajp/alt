@@ -2,6 +2,7 @@ use super::*;
 use alt_browser_auth::PublicOrigin;
 
 const PASSWORD: &str = "a local password for the browser test";
+mod budgets;
 mod device;
 fn origin() -> PublicOrigin {
     PublicOrigin::parse("https://alt.example.test").unwrap()

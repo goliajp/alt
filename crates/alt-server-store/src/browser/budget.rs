@@ -54,6 +54,26 @@ const LOGIN_EVERYWHERE: i32 = 100;
 const BUSY: i32 = 400;
 const BUSY_ATTEMPTS: i32 = 5;
 
+/// One more attempt of `key` in the minute it is in, which begins anew where
+/// the last one is over: how many that makes, and how long until the minute ends.
+fn counted(tx: &mut Transaction<'_>, key: &str, time: i64) -> Result<(i32, u64)> {
+    let row=tx.query_one("INSERT INTO alt_login_budgets(key,window_start,attempts) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window_start=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN $2 ELSE alt_login_budgets.window_start END,attempts=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN 1 ELSE alt_login_budgets.attempts+1 END RETURNING attempts,window_start", &[&key,&time])?;
+    let left = row.get::<_, i64>(1) + 60_000 - time;
+    Ok((row.get(0), left.clamp(1, 60_000) as u64))
+}
+
+fn key(kind: &str, of: &str) -> String {
+    format!("{kind}:{}", alt_browser_auth::digest(of))
+}
+
+fn stale(tx: &mut Transaction<'_>, time: i64) -> Result<()> {
+    tx.execute(
+        "DELETE FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000",
+        &[&time],
+    )?;
+    Ok(())
+}
+
 /// Where this refuses, the caller lets go of its transaction: committed, the attempt
 /// would still count against what every network and login share.
 pub(crate) fn login_budget(
@@ -63,7 +83,6 @@ pub(crate) fn login_budget(
 ) -> Result<()> {
     let time = integer(now(tx)?)?;
     let [address, wider] = networks(network);
-    let key = |kind: &str, of: &str| format!("{kind}:{}", alt_browser_auth::digest(of));
     // A single stable global row serializes admission. Stale keys are removed here.
     let rows = [
         ("global".to_owned(), i32::MAX),
@@ -81,18 +100,31 @@ pub(crate) fn login_budget(
     ];
     let mut busy = false;
     for (index, (key, max)) in rows.into_iter().enumerate() {
-        let row=tx.query_one("INSERT INTO alt_login_budgets(key,window_start,attempts) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window_start=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN $2 ELSE alt_login_budgets.window_start END,attempts=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN 1 ELSE alt_login_budgets.attempts+1 END RETURNING attempts", &[&key,&time])?;
-        let attempts = row.get::<_, i32>(0);
+        let (attempts, left) = counted(tx, &key, time)?;
         busy |= index == 0 && attempts > BUSY;
         if attempts > max || (index == 1 && busy && attempts > BUSY_ATTEMPTS) {
-            return Err(Error::Precondition(
-                "login admission limit; retry after one minute",
-            ));
+            return Err(Error::Attempts(left));
         }
     }
-    tx.execute(
-        "DELETE FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000",
-        &[&time],
-    )?;
-    Ok(())
+    stale(tx, time)
+}
+
+/// The codes an address and the network around it may ask for in a minute. They
+/// are counted apart from the sign-ins: a code costs no password to be checked,
+/// so those asked for make nobody busy, and take nothing from what an address
+/// may attempt of sign-ins. The caller lets go of its transaction as above.
+pub(crate) fn code_budget(tx: &mut Transaction<'_>, network: std::net::IpAddr) -> Result<()> {
+    let time = integer(now(tx)?)?;
+    let [address, wider] = networks(network);
+    let rows = [
+        (key("code", &address.to_string()), ADDRESS_ATTEMPTS),
+        (key("code-wider", &wider.to_string()), NETWORK_ATTEMPTS),
+    ];
+    for (key, max) in rows {
+        let (attempts, left) = counted(tx, &key, time)?;
+        if attempts > max {
+            return Err(Error::Attempts(left));
+        }
+    }
+    stale(tx, time)
 }

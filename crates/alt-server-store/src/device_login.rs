@@ -78,7 +78,7 @@ impl Store {
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         crate::browser::binding(&mut tx, origin)?;
-        crate::browser::login_budget(&mut tx, device_digest, network)?;
+        crate::browser::code_budget(&mut tx, network)?;
         let time = now(&mut tx)?;
         let expires = time.saturating_add(DEVICE_LIFETIME_MS);
         tx.execute(

@@ -61,6 +61,10 @@ fn form(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceError> {
 fn mapped(error: Error) -> Refused {
     match error {
         Error::Unauthorized => DeviceError::AccessDenied.into(),
+        Error::Attempts(left) => Refused(
+            DeviceError::TemporarilyUnavailable,
+            Some(left.div_ceil(1000)),
+        ),
         _ => DeviceError::TemporarilyUnavailable.into(),
     }
 }

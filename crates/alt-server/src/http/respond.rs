@@ -160,6 +160,18 @@ pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<R
             key,
             Retry::NewIntent,
         ),
+        Error::Attempts(left) => {
+            let mut output = failure(
+                409,
+                ErrorCode::PreconditionFailed,
+                "As many sign-ins were attempted in the minute as may be; retry when it is over",
+                key,
+                Retry::SameRequest,
+            );
+            let again = left.div_ceil(1000).into();
+            output.headers_mut().insert(header::RETRY_AFTER, again);
+            output
+        }
         Error::Precondition(_)
         | Error::Repository(alt_repository_service::Error::Precondition(_)) => failure(
             409,

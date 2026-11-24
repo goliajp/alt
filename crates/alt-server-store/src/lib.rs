@@ -59,6 +59,9 @@ pub enum Error {
     /// in the time it had to wait
     Busy(&'static str),
     Precondition(&'static str),
+    /// as many sign-ins or device codes were attempted in the minute as may be;
+    /// the milliseconds until the minute is over
+    Attempts(u64),
     AuthorityUnavailable,
     Unauthorized,
     OutcomeUnknown,
@@ -78,6 +81,13 @@ impl std::fmt::Display for Error {
             Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
             Self::Busy(what) => write!(f, "busy with other requests: {what}"),
             Self::Precondition(what) => write!(f, "precondition failed: {what}"),
+            Self::Attempts(left) => {
+                write!(
+                    f,
+                    "admission limit; retry after {} seconds",
+                    left.div_ceil(1000)
+                )
+            }
             Self::AuthorityUnavailable => {
                 f.write_str("current account authority is temporarily unavailable")
             }
@@ -103,6 +113,7 @@ impl std::error::Error for Error {
             | Self::Limit(_)
             | Self::Busy(_)
             | Self::Precondition(_)
+            | Self::Attempts(_)
             | Self::AuthorityUnavailable
             | Self::Unauthorized
             | Self::OutcomeUnknown => None,
