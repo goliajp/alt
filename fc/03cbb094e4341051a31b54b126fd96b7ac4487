@@ -1,0 +1,24 @@
+schema: alt-meta/1
+type: fix
+summary: the bases of a pack are in so many files at once, and a chain beyond the depth is not resolved to its end
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/budget.rs
+touched: crates/alt-git-pack/src/index_pack/files.rs
+touched: crates/alt-git-pack/src/index_pack/held.rs
+touched: crates/alt-git-pack/src/index_pack/kept.rs
+touched: crates/alt-git-pack/src/index_pack/objects.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/src/index_pack/walk.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-pack-segment/src/chosen.rs
+touched: crates/alt-pack-segment/src/descend.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/passes.rs
+touched: crates/alt-pack-segment/src/settled.rs
+touched: crates/alt-pack-segment/tests/it/base_files.rs
+touched: crates/alt-pack-segment/tests/it/deep.rs
+touched: crates/alt-pack-segment/tests/it/main.rs
+touched: crates/alt-pack-segment/tests/it/readable.rs
