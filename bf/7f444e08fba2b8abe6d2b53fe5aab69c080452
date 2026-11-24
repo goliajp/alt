@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a cut that would take a frame a sync may have covered
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/op.rs
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/append.rs
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/kept.rs
+touched: crates/alt-oplog/src/v2/open.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_chain.rs
+touched: crates/alt-oplog/tests/it/v2_faults.rs
+touched: crates/alt-oplog/tests/it/v2_kept.rs
+touched: crates/alt-oplog/tests/it/v2_synced.rs
+touched: crates/alt-oplog/tests/it/v2_unconfirmed.rs
