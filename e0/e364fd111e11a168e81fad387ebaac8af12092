@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: pass a path as it is where no borrow of it is needed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/import_config.rs
