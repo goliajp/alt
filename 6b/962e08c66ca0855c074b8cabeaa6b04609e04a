@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: build what a test has a log do that no machine does, a boot of its choosing and a cut that dies or waits, with a feature of the crate alone
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-oplog/Cargo.toml
+touched: crates/alt-oplog/src/v2.rs
+touched: crates/alt-oplog/src/v2/hooks.rs
+touched: crates/alt-refs/Cargo.toml
