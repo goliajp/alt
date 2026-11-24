@@ -82,7 +82,8 @@ pub(super) fn handle_upload_pack(
                     return respond_logged(req, r, log).map_err(Into::into);
                 }
             };
-            let sent = match fetch::response(repo, &fetch_req, sending::Room::shared()) {
+            let (room, from) = (sending::Room::shared(), req.from());
+            let sent = match fetch::response(repo, &fetch_req, room, from) {
                 Ok(sent) => sent,
                 Err(e) if limits::refusal(&*e) == 503 => {
                     let mut r = Response::from_string(format!("{e}")).with_status_code(503);

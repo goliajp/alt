@@ -282,6 +282,12 @@ impl Request {
         body.receive(most, held)
     }
 
+    /// The address the peer is counted under; none for this host.
+    pub(crate) fn from(&self) -> Option<std::net::IpAddr> {
+        let body = self.body.as_ref().expect("a request not yet answered");
+        body.source.from()
+    }
+
     /// The body. Where it was not received it is read off the wire, and
     /// may take `most` bytes there: reading past them is an error.
     pub(crate) fn body(&mut self, most: u64) -> &mut dyn Read {

@@ -193,10 +193,15 @@ fn reached(repo: &Repository, req: &FetchRequest) -> Res<Vec<ObjectId>> {
 ///
 /// The file is written within the room responses have between them, and has
 /// its part of it until it is sent.
-pub(super) fn response(repo: &Repository, req: &FetchRequest, room: &Room) -> Res<Sent> {
+pub(super) fn response(
+    repo: &Repository,
+    req: &FetchRequest,
+    room: &Room,
+    from: Option<std::net::IpAddr>,
+) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
-    let mut framed = BufWriter::new(room.writing(File::create(&path)?));
+    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from));
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };
