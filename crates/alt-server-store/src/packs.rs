@@ -13,6 +13,7 @@ use alt_repository_service::{Graph, validate_publication};
 use std::{path::PathBuf, sync::Arc};
 
 mod published;
+pub use published::{HeldPublication, HeldSegment};
 
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;
@@ -230,34 +231,47 @@ impl Store {
         repository: &str,
         ids: &[(String, bool)],
     ) -> Result<SegmentSet> {
-        let mut segments = Vec::with_capacity(ids.len());
-        for (id, inline) in ids {
-            let path = self.pack_path(repository, id)?;
-            let cached = crate::open_segments::get(&path);
-            let segment = match cached {
-                Some(segment) => segment,
-                None => {
-                    if *inline {
-                        // the file of an unsettled segment was never flushed; the row is the truth
-                        let bytes: Vec<u8> = self
-                            .client
-                            .query_one("SELECT inline FROM alt_pack_segments WHERE repository=$1 AND segment_id=$2", &[&repository, id])?
-                            .get::<_, Option<Vec<u8>>>(0)
-                            .ok_or(Error::Integrity("pack segment bytes"))?;
-                        let staging = path.with_extension("restore");
-                        std::fs::write(&staging, &bytes)?;
-                        std::fs::rename(&staging, &path)?;
-                    }
-                    let segment = Arc::new(
-                        Segment::open(&path)
-                            .map_err(|_| Error::Integrity("pack segment unavailable"))?,
-                    );
-                    crate::open_segments::insert(path, segment.clone());
-                    segment
-                }
-            };
-            segments.push(segment);
-        }
-        Ok(SegmentSet::new(segments))
+        self.pack_directory(repository)?;
+        let client = &mut self.client;
+        opened(self.bytes.root(), repository, ids, &mut |id| {
+            Ok(client.query_one(INLINE, &[&repository, &id])?.get(0))
+        })
     }
+}
+
+const INLINE: &str = "SELECT inline FROM alt_pack_segments WHERE repository=$1 AND segment_id=$2";
+
+/// The segments `ids` of a repository, opened. `inline` gives what the row of
+/// a segment holds of it.
+pub(crate) fn opened(
+    root: &std::path::Path,
+    repository: &str,
+    ids: &[(String, bool)],
+    inline: &mut dyn FnMut(&str) -> Result<Option<Vec<u8>>>,
+) -> Result<SegmentSet> {
+    let mut segments = Vec::with_capacity(ids.len());
+    for (id, held) in ids {
+        let path = segment_file(root, repository, id)?;
+        let cached = crate::open_segments::get(&path);
+        let segment = match cached {
+            Some(segment) => segment,
+            None => {
+                if *held {
+                    // the file of an unsettled segment was never flushed; the row is the truth
+                    let bytes = inline(id)?.ok_or(Error::Integrity("pack segment bytes"))?;
+                    let staging = path.with_extension("restore");
+                    std::fs::write(&staging, &bytes)?;
+                    std::fs::rename(&staging, &path)?;
+                }
+                let segment = Arc::new(
+                    Segment::open(&path)
+                        .map_err(|_| Error::Integrity("pack segment unavailable"))?,
+                );
+                crate::open_segments::insert(path, segment.clone());
+                segment
+            }
+        };
+        segments.push(segment);
+    }
+    Ok(SegmentSet::new(segments))
 }

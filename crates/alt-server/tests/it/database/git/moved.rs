@@ -2,6 +2,8 @@
 use super::*;
 use alt_pack_segment::Segment;
 
+mod bounded;
+
 fn id(kind: ObjectKind, data: &[u8]) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, kind, data)
 }

@@ -14,6 +14,7 @@ use std::{
     sync::Arc,
 };
 
+mod made;
 mod published;
 use published::{Spooled, publish, spool};
 
