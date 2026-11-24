@@ -134,7 +134,7 @@ for, up to 96 MiB, beyond which they are kept in files of their own up to
 1536 MiB and beyond those made again; and four times its largest object for each
 thread that resolves its deltas. Where others leave less than that, a pack is
 resolved by fewer threads, down to one. A push that finds the memory taken waits
-for as long as a request may run (`http.work_timeout_ms`) and is then refused
+for half as long as a request may run (`http.work_timeout_ms`) and is then refused
 with nothing applied: Git shows `the packs of other pushes are being verified;
 push again`, and a client that reads no report is answered `503` with
 `retry: same_request`. What a pack inflates to counts its entries and the objects

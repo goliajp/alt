@@ -15,7 +15,7 @@ fn repository(directory: &Path, token: &str) {
 fn a_push_waits_for_the_memory_other_packs_are_verified_in_and_is_told_when_it_waited_too_long() {
     let f = Fixture::new();
     let (factory, mut options) = Running::parts(&f, None, vec![]);
-    options.work_timeout = Duration::from_secs(3);
+    options.work_timeout = Duration::from_secs(8);
     let memory = options.verifying;
     let server = Running::serve(factory, options, None, false);
     let temp = alt_os::temp::tempdir().unwrap();
@@ -34,7 +34,8 @@ fn a_push_waits_for_the_memory_other_packs_are_verified_in_and_is_told_when_it_w
         stderr.contains("the packs of other pushes are being verified; push again"),
         "{stderr}"
     );
-    assert!(waited >= Duration::from_millis(2500), "{waited:?}");
+    // for half as long as its answer is waited for
+    assert!(waited >= Duration::from_millis(3900), "{waited:?}");
     assert_eq!(f.counts().0, 0);
 
     // given back: the same push goes through, and gives back what it took

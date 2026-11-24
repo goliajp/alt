@@ -124,10 +124,11 @@ pub(super) async fn handle(
         compaction: state.compaction.clone(),
         protocol_v2,
         view,
-        // no one waits for the answer longer than for the work
+        // half the time the answer is waited for: a push that waited in vain is
+        // told so while whoever sent it still listens
         verifying: crate::git::Verifying {
             memory: state.options.verifying,
-            by: std::time::Instant::now() + state.options.work_timeout,
+            by: std::time::Instant::now() + state.options.work_timeout / 2,
         },
     };
     let result = tokio::time::timeout(
