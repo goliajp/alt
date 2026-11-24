@@ -11,13 +11,7 @@ mod observation;
 mod paced;
 mod pack_body;
 use alt_server_telemetry::{Outcome, Phase};
-pub(crate) use observation::{scope as trace_scope, spawn_blocking};
-pub(crate) fn spawn_observed<T: Send + 'static>(
-    phase: Phase,
-    work: impl FnOnce() -> alt_server_store::Result<T> + Send + 'static,
-) -> tokio::task::JoinHandle<alt_server_store::Result<T>> {
-    spawn_blocking(move || alt_server_store::telemetry::observe(phase, work))
-}
+pub(crate) use observation::{scope as trace_scope, spawn_blocking, spawn_observed};
 mod pool;
 mod provision;
 mod receiving;
@@ -143,6 +137,8 @@ pub struct HttpOptions {
     /// where the bases of deltas that memory has no room for are written, and what
     /// the packs may take there; among the host's temporary files where not told
     pub base_files: Option<&'static alt_pack_segment::BaseFiles>,
+    /// the room on disk for the responses to fetches that are files until they are sent
+    pub sending: Arc<alt_shares::Shares>,
     /// how often requests whose time to upload ran out are ended
     pub expiry_interval: Duration,
     /// the passwords that are checked at once: each takes the memory of one hash

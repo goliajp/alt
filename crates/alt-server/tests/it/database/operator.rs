@@ -87,6 +87,7 @@ impl OperatorDb {
                 connections_each: None,
                 receiving_megabytes: None,
                 indexing_megabytes: None,
+                sending_megabytes: None,
             },
         };
         std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();

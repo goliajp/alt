@@ -288,7 +288,11 @@ memory and disk requests may take, are set through the environment;
 bound what the server holds at once: `ALT_SERVER_MAX_OPEN_REPOS`, the
 repositories of a root kept open, and `ALT_SERVER_MAX_INDEX_BYTES`, the memory
 the packs of pushes are indexed in between them and as much on disk for the
-bases of their deltas.
+bases of their deltas. A pack has what it holds throughout out of that memory,
+and room for its largest object is kept free once for all the packs being
+indexed; pushes that find no memory wait in the order they came, for
+`ALT_SERVER_MAX_INDEX_WAIT_MS` at the longest and no longer than their client
+stays, and are then answered `503` with `Retry-After`.
 
 ## Status and roadmap
 

@@ -200,11 +200,13 @@ pub(crate) fn execute_git_with_cache(
         }
         _ => view,
     };
-    crate::git_read::read(store.limits(), receive, &command, view)
+    let sending = room.map(|room| room.sending.0.share(room.sending.1));
+    crate::git_read::read(store.limits(), receive, &command, view, sending)
 }
 
-/// The memory the packs of pushes are verified in, all at once, and until when the
-/// pack of one request waits for its part of it.
+/// What a Git request takes of what the instance has for all of them: the memory
+/// the packs of pushes are verified in, and until when the pack of one request
+/// waits for its part of it; the room on disk the responses to fetches have.
 #[derive(Clone)]
 pub(crate) struct Verifying {
     pub memory: &'static alt_pack_segment::Memory,
@@ -212,6 +214,9 @@ pub(crate) struct Verifying {
     /// set once nobody waits for the answer: the pack is verified no further
     pub given_up: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub files: Option<&'static alt_pack_segment::BaseFiles>,
+    /// the room the responses to fetches have on disk, and the address the
+    /// caller is counted under there
+    pub sending: (std::sync::Arc<alt_shares::Shares>, Option<std::net::IpAddr>),
 }
 
 /// Held by whoever waits for the answer to a request. Dropped, when the answer is

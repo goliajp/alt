@@ -14,6 +14,7 @@ pub(super) async fn handle(
     request: Request,
     state: Arc<App>,
     route: Option<Route>,
+    from: std::net::IpAddr,
 ) -> Response<ResponseBody> {
     let Some(route) = route else {
         return unknown();
@@ -132,6 +133,7 @@ pub(super) async fn handle(
             by: std::time::Instant::now() + state.options.work_timeout / 2,
             given_up: waiting.0.clone(),
             files: state.options.base_files,
+            sending: (state.options.sending.clone(), alt_shares::address(from)),
         },
     };
     let result = tokio::time::timeout(

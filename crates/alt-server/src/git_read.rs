@@ -36,6 +36,7 @@ pub(crate) fn read(
     receive: bool,
     command: &Command,
     view: PackView,
+    sending: Option<alt_shares::Share>,
 ) -> Result<Output> {
     let bytes = |content_type, bytes| {
         Ok(Output::Bytes {
@@ -177,12 +178,14 @@ pub(crate) fn read(
         }
     }
     // the pack is framed as it is written; a large one is not kept in memory
-    let mut body = crate::git_response::Spill::new();
-    pkt::write_data(&mut body, b"packfile\n")?;
-    let mut band = crate::git_response::Band::new(&mut body);
-    set.write_selected(&selection, request.thin_pack, &mut band)
-        .map_err(segment_error)?;
-    band.finish()?;
-    pkt::write_flush(&mut body)?;
-    body.into_output(UPLOAD_RESULT)
+    let mut body = crate::git_response::Spill::within(sending);
+    let written = (|| {
+        pkt::write_data(&mut body, b"packfile\n")?;
+        let mut band = crate::git_response::Band::new(&mut body);
+        set.write_selected(&selection, request.thin_pack, &mut band)
+            .map_err(segment_error)?;
+        band.finish()?;
+        Ok(pkt::write_flush(&mut body)?)
+    })();
+    body.into_output(UPLOAD_RESULT, written)
 }

@@ -11,7 +11,7 @@ const FILES: usize = 6;
 const FILE: usize = 8 << 20;
 
 /// bytes no compression makes fewer, and no two files share
-fn noise(file: usize, count: usize) -> Vec<u8> {
+pub(super) fn noise(file: usize, count: usize) -> Vec<u8> {
     let mut state =
         0x9e37_79b9_7f4a_7c15_u64 ^ (file as u64 + 1).wrapping_mul(0xff51_afd7_ed55_8ccd);
     let mut next = || {

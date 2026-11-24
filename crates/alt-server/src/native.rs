@@ -32,6 +32,12 @@ pub enum Output {
         bytes: u64,
         file: alt_os::temp::NamedTempFile,
     },
+    /// a file that takes of the room responses have on disk until it is sent
+    Sending {
+        content_type: &'static str,
+        file: alt_os::temp::NamedTempFile,
+        held: alt_shares::Share,
+    },
     File {
         bytes: u64,
         digest: String,

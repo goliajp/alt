@@ -80,10 +80,15 @@ async fn asset(state: Arc<App>, request: Request) -> Reply {
     let trace = start(&state, request.method(), MetricRoute::Asset);
     respond(trace, async move { web::asset(&state, &request) }).await
 }
-async fn native(State(state): State<Arc<App>>, request: Request) -> Reply {
+async fn native(
+    State(state): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> Reply {
     if is_asset(&state, &request) {
         return asset(state, request).await;
     }
+    let caller = caller::caller(peer, request.headers(), &state.options.trusted_proxies);
     let route = parse_route(
         request.method().as_str(),
         request.uri().path(),
@@ -97,7 +102,7 @@ async fn native(State(state): State<Arc<App>>, request: Request) -> Reply {
     if let Some(route) = &route {
         observation::native(&trace, route);
     }
-    respond(trace, handle::handle(request, state, route)).await
+    respond(trace, handle::handle(request, state, route, caller)).await
 }
 async fn resource(State(state): State<Arc<App>>, request: Request) -> Reply {
     if is_asset(&state, &request) {

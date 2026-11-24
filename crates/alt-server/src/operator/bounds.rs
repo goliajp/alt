@@ -40,4 +40,10 @@ pub struct HttpBounds {
     /// `temporary` in the directory of the stored bytes, and may take as much.
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub indexing_megabytes: Option<u64>,
+    /// How many megabytes the responses to fetches that are written to files may
+    /// take on disk until they are sent, all at once, of which one address has a
+    /// quarter; half of what is free on the disk of the stored bytes when the
+    /// server starts where it is not given.
+    #[json(default, skip_serializing_if = "Option::is_none")]
+    pub sending_megabytes: Option<u64>,
 }

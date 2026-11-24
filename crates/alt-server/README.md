@@ -132,22 +132,38 @@ a request body that comes, from everything that is sent and from each answer.
 The packs of pushes are verified in `http.indexing_megabytes` of memory between
 them: 4096 by default, or what one pack that holds an object of
 `limits.object_bytes` takes where that is more, which is also the least the key
-may be set to. A pack takes what it needs before it allocates: what its entries
-inflate to while it is scanned, up to 256 MiB; 268 bytes for each entry it says
-it has and 88 more for each delta; the objects further deltas wait for, up to
-96 MiB, beyond which they are kept in files of their own up to 1536 MiB and
-beyond those made again; and four times its largest object for each thread that
-resolves its deltas. Where others leave less than that, a pack is resolved by
-fewer threads, down to one. A pack of ten million small objects takes 2.5 GiB
-for its entries alone, and is refused (`index memory`) where the key is set
-lower than what it needs.
+may be set to. A pack has some of it for as long as it is verified: 268 bytes
+for each entry, of as many entries as it says it has and its bytes can hold, and
+88 more for each delta; what its entries inflate to while it is scanned, taken
+as it is kept, up to 256 MiB, and not kept where others leave no memory for it;
+the objects further deltas wait for, up to 96 MiB, beyond which they are kept in
+files of their own up to 1536 MiB and beyond those made again; and 4 MiB for
+each thread that resolves its deltas. A large object, of more than those 4 MiB,
+has memory for the time it is there: four times the largest object of its pack
+(as the base, the instructions of the delta, and the result twice), taken by the
+thread that comes to it. What the largest object of a pack takes is only what
+its sender says until the object is made, so nothing is taken for it
+beforehand: room for the largest that any pack being verified may make is kept
+free once for all of them, and the threads that come to a large object have it
+in turn, or at once where the packs leave more free. A pack of ten million
+small objects takes 2.5 GiB for its entries alone, and is refused (`index
+memory`) where the key is set lower than what it needs. Packs that find no
+memory wait in the order they came, and so do those that find no room for a
+base among the files while they have none there.
 
 What the serving process writes for a time is under `temporary` in
 `bytes_directory`, on the disk of the stored bytes and not among the temporary
 files of the host, which a container often keeps in memory: request bodies while
 they are received, responses to fetches while they are sent, and the files of
 the bases above under `temporary/bases`. The directory is the server's alone
-(mode 0700) and is emptied whenever the server starts. The files of bases of
+(mode 0700) and is emptied whenever the server starts. The responses to fetches
+that are written to files (those of more than 8 MiB that are not a whole
+repository as it is stored) take no more than `http.sending_megabytes` between
+them until they are sent: half of what is free on that disk when the server
+starts where the key is absent. The responses to one address have a quarter of
+that; a single response of an address may pass the quarter as far as the room
+goes, and one that is alone on the server is written whatever its size. A fetch
+whose response has no room is answered `503` with `Retry-After`. The files of bases of
 all the packs verified at once take no more than `http.indexing_megabytes`
 between them; a base that has no room there, or cannot be written, is made
 again instead, which counts against what its pack may inflate to. A pack that
@@ -156,7 +172,8 @@ is verified when the caller is gone or its answer has been given up
 for half as long as a request may run (`http.work_timeout_ms`) and is then refused
 with nothing applied: Git shows `the packs of other pushes are being verified;
 push again`, and a client that reads no report is answered `503` with
-`retry: same_request`. What a pack inflates to counts its entries and the objects
+`retry: same_request` and `Retry-After`. A push whose client has gone leaves the
+line at once. What a pack inflates to counts its entries and the objects
 its deltas make, an object again each time it has to be made again, and may be
 128 times `limits.total_bytes`. The commits of one pack may name two parents for
 each of its entries and 65,536 beside (`commit parents` beyond that).

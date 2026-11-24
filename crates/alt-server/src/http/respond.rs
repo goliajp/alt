@@ -48,9 +48,14 @@ impl hyper::body::Body for ResponseBody {
 pub(super) fn full(bytes: impl Into<Bytes>) -> ResponseBody {
     ResponseBody::Full(Full::new(bytes.into()))
 }
-/// a file of known length, declared in the headers
-fn file(content_type: &str, file: std::fs::File, bytes: u64) -> Response<ResponseBody> {
-    let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes);
+/// A file of known length, declared in the headers, with what it has of the room
+/// of responses kept until it is sent.
+fn file(
+    content_type: &str,
+    (file, bytes): (std::fs::File, u64),
+    held: Option<alt_shares::Share>,
+) -> Response<ResponseBody> {
+    let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes).holding(held);
     let mut output = response(200, content_type, ResponseBody::File(body));
     output
         .headers_mut()
@@ -257,7 +262,12 @@ pub(super) fn render_output(
             content_type,
             bytes,
             file,
-        }) => self::file(content_type, file.into_file(), bytes),
+        }) => self::file(content_type, (file.into_file(), bytes), None),
+        Ok(Output::Sending {
+            content_type,
+            file,
+            held,
+        }) => self::file(content_type, (file.into_file(), held.bytes()), Some(held)),
         Ok(Output::Json(value)) => match alt_json::to_vec(&value) {
             Ok(bytes) => response(200, "application/json", full(bytes)),
             Err(_) => failure(
@@ -277,7 +287,7 @@ pub(super) fn render_output(
                 Ok(file) => file,
                 Err(error) => return store_failure(error.into(), request_key),
             };
-            let mut output = self::file("application/octet-stream", file, bytes);
+            let mut output = self::file("application/octet-stream", (file, bytes), None);
             output.headers_mut().insert(
                 "Alt-Content-Blake3",
                 digest.parse().expect("validated digest"),

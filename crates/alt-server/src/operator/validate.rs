@@ -117,6 +117,7 @@ impl Config {
             || h.connections_each == Some(0)
             || h.receiving_each == Some(0)
             || h.receiving_megabytes == Some(0)
+            || h.sending_megabytes == Some(0)
             || h.indexing_megabytes.is_some_and(|megabytes| {
                 megabytes.saturating_mul(1 << 20) < crate::git::least_verifying_bytes(self.limits)
             })
@@ -171,6 +172,11 @@ impl Config {
         let bases = directory.join("bases");
         let files = alt_pack_segment::BaseFiles::open(&bases, options.verifying.all());
         options.base_files = Some(Box::leak(Box::new(files.map_err(|_| Error::File)?)));
+        if self.http.sending_megabytes.is_none() {
+            let free = alt_shares::half_of_what_is_free(&directory);
+            let free = free.map_err(|_| Error::File)?;
+            options.sending = alt_shares::Shares::passed_by_one_alone(free);
+        }
         Ok(options)
     }
     pub fn http_options(&self) -> HttpOptions {
@@ -207,6 +213,11 @@ impl Config {
                 },
             ))),
             base_files: None,
+            // told, or as much as there is until the disk it is on is known
+            sending: alt_shares::Shares::passed_by_one_alone(
+                (h.sending_megabytes)
+                    .map_or(u64::MAX, |megabytes| megabytes.saturating_mul(1 << 20)),
+            ),
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,
