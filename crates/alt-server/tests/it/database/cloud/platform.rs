@@ -5,7 +5,8 @@ use super::*;
 pub(in crate::database) struct Platform {
     pub audience: Audience,
     pub claims: AccountAuthorization,
-    /// 0 answers, 1 is out, 2 refuses what it is asked to look at, 3 fails exchanges
+    /// 0 answers, 1 is out, 2 refuses what it is asked to look at, 3 fails exchanges,
+    /// 4 is out and says so half a second after it is asked
     pub mode: Arc<AtomicUsize>,
     pub calls: Arc<AtomicUsize>,
     pub challenge: Arc<std::sync::Mutex<String>>,
@@ -79,6 +80,10 @@ impl Platform {
                             (503, alt_json::json!({}))
                         }
                         1 => (503, alt_json::json!({})),
+                        4 => {
+                            std::thread::sleep(Duration::from_millis(500));
+                            (503, alt_json::json!({}))
+                        }
                         _ if request.url().ends_with("/exchange") => {
                             exchanges.fetch_add(1, Ordering::SeqCst);
                             assert_eq!(input["ticket"], "ff".repeat(32));

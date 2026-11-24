@@ -4,11 +4,14 @@ use alt_cloud_client::{Client, GrantSealer};
 use alt_server_store::{Error, Result, Store};
 use golia_platform_contract::{Audience, Secret};
 
+mod asking;
+
 pub struct Runtime {
     pub(crate) client: Client,
     pub(crate) sealer: GrantSealer,
     key_digest: String,
     provision_digest: Option<String>,
+    asking: asking::Asking,
 }
 pub(crate) fn clock() -> u64 {
     std::time::SystemTime::now()
@@ -25,6 +28,7 @@ impl Runtime {
             client: Client::new(audience, credential)?,
             key_digest,
             provision_digest: None,
+            asking: asking::Asking::default(),
         })
     }
     pub fn provisioned(mut self, digest: String) -> alt_cloud_client::Result<Self> {
@@ -111,10 +115,18 @@ impl Runtime {
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
         // Check that a local credential exists before admitting control traffic.
         store.cloud_refresh(token)?;
-        if store.cloud_service_refresh_needed()? {
+        if store.cloud_service_refresh_needed()?
+            && let Some(turn) = self.asking.turn(None)
+        {
             match self.client.service(clock) {
-                Ok(service) => store.refresh_cloud_service(&service)?,
-                Err(alt_cloud_client::Error::Unauthorized) => store.revoke_cloud_service()?,
+                Ok(service) => {
+                    turn.answered();
+                    store.refresh_cloud_service(&service)?
+                }
+                Err(alt_cloud_client::Error::Unauthorized) => {
+                    turn.answered();
+                    store.revoke_cloud_service()?
+                }
                 Err(_) => (), // Never extend the persisted lease on failure.
             }
         }
@@ -125,15 +137,24 @@ impl Runtime {
                 .sealer
                 .open(&descriptor.sealed_grant, &descriptor.credential_digest)
                 .map_err(|_| Error::Unauthorized)?;
-            match self.client.introspect(&grant, clock) {
-                Ok(claims) => {
+            // whoever has no turn to ask goes on as one whose asking failed
+            let asked = self.asking.turn(Some(&descriptor.credential_digest));
+            let asked = asked.map(|turn| {
+                let told = self.client.introspect(&grant, clock);
+                if matches!(told, Ok(_) | Err(alt_cloud_client::Error::Unauthorized)) {
+                    turn.answered();
+                }
+                told
+            });
+            match asked {
+                Some(Ok(claims)) => {
                     store.refresh_cloud_account(&descriptor.credential_digest, &claims)?
                 }
-                Err(alt_cloud_client::Error::Unauthorized) => {
+                Some(Err(alt_cloud_client::Error::Unauthorized)) => {
                     store.revoke_cloud_credential(&descriptor.credential_digest)?;
                     return Err(Error::Unauthorized);
                 }
-                Err(_) => match store.authenticate(token) {
+                Some(Err(_)) | None => match store.authenticate(token) {
                     Ok(_) => (),
                     Err(Error::Unauthorized) => return Err(Error::AuthorityUnavailable),
                     Err(error) => return Err(error),

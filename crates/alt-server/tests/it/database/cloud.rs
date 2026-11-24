@@ -8,6 +8,7 @@ use tiny_http::{Header, Response, Server};
 
 mod held_bodies;
 mod platform;
+mod unanswered;
 pub(super) use platform::{Instance, Platform, instance};
 
 pub(super) fn secret(value: &str) -> Secret {
@@ -82,6 +83,13 @@ fn cloud_http_refresh_outage_revocation_and_browser_identity() {
         503
     );
     mode.store(2, Ordering::SeqCst);
+    // the platform is not asked again at once after it gave no answer: until
+    // it is, the answer is the one of the outage
+    let began = std::time::Instant::now();
+    while server.command("GET", "/v1/capabilities", &token).0 == 503 {
+        assert!(began.elapsed() < Duration::from_secs(30), "not asked again");
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(server.command("GET", "/v1/capabilities", &token).0, 403);
     assert_eq!(
         server
