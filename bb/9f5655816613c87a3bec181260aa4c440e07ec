@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a request the database does not let go of is passed, and those behind it go
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/retention.rs
+touched: crates/alt-server-store/src/retention/requests.rs
+touched: crates/alt-server-store/tests/it/database/retention.rs
+touched: crates/alt-server-store/tests/it/database/retention/refused.rs
