@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the directory of a server has its name once its lock is held, and only this account's are removed
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/work.rs
