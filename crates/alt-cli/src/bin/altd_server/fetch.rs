@@ -231,6 +231,17 @@ pub(super) fn response(
     Ok(written.sent_from(File::open(&path)?))
 }
 
+/// What a response looks for deltas with. It is the memory of one
+/// request, beside its largest object: the last few objects of a kind, and
+/// none over a size that is told apart from the rest of a file by more
+/// than its neighbours in history.
+const DELTAS: alt_git_pack::DeltaOptions = alt_git_pack::DeltaOptions {
+    window: 3,
+    memory_bytes: 32 << 20,
+    max_object_bytes: 8 << 20,
+    max_depth: 32,
+};
+
 /// The objects `req` asks for, as a pack written under `dir` and framed
 /// into `framed`.
 fn pack(
@@ -243,29 +254,33 @@ fn pack(
 ) -> Res<()> {
     let mut roots = req.wants.clone();
     roots.extend(&shallow.parents);
-    let outgoing = repo.reachable_objects_between(&roots, common, &shallow.ends)?;
+    let outgoing = repo.reachable_named_between(&roots, common, &shallow.ends)?;
     let filter = parse_filter_spec(req.filter.as_deref());
     // only a limit on the size of blobs has an object read to tell
     // whether it goes
     let sized = filter.blob_limit.is_some() && !filter.omit_blobs && !filter.omit_trees;
     let asked: KeyedIdSet<ObjectId> = req.wants.iter().copied().collect();
     let mut going = Vec::new();
-    for (oid, kind) in &outgoing {
-        let bytes = match sized && *kind == ObjectKind::Blob {
-            true => read(repo, oid)?.data.len(),
+    for at in outgoing {
+        let bytes = match sized && at.kind == ObjectKind::Blob {
+            true => read(repo, &at.oid)?.data.len(),
             false => 0,
         };
         // what is asked for by its id goes whatever the filter: it is how
         // a partial clone gets what it left out
-        if asked.contains(oid) || !filter.excludes(*kind, bytes) {
-            going.push((*oid, *kind));
+        if asked.contains(&at.oid) || !filter.excludes(at.kind, bytes) {
+            going.push(at);
         }
     }
+    // the versions of a file follow each other, and each is written as
+    // what it has that the ones before it have not
+    going.sort_by_key(|at| (at.kind as u8, at.name));
     let count =
         u32::try_from(going.len()).map_err(|_| "outgoing object set exceeds u32 (server-side)")?;
-    let mut writer = alt_git_pack::PackWriter::create(dir, repo.algo()?, count)?;
-    for (oid, kind) in going {
-        writer.add(oid, kind, &read(repo, &oid)?.data)?;
+    let mut writer =
+        alt_git_pack::PackWriter::create_with_deltas(dir, repo.algo()?, count, DELTAS)?;
+    for at in going {
+        writer.add(at.oid, at.kind, &read(repo, &at.oid)?.data)?;
     }
     let pack = File::open(writer.finish()?.pack_path)?;
     // the file is this request's own and is not written to again

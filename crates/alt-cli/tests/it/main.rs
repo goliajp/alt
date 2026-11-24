@@ -37,6 +37,7 @@ mod altd_server_told;
 mod altd_server_trees;
 mod altd_server_unsynced_objects;
 mod altd_server_untrusted;
+mod altd_server_versions;
 mod altd_server_wants;
 mod amend;
 mod argument_bindings;
