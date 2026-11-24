@@ -5,9 +5,7 @@
 //! [0..4)   "ALTT"            [8..24)  the boot it was written in
 //! [4]      bit 0, pending: among the frames from `judged` on are some
 //!          another boot left that nobody vouched for
-//!          bit 1, cutting: a cut of the log at `ends` was begun, and
-//!          `generation` is the one the log is of once it is cut
-//! [24..28) the generation of the log
+//! [24..28) the generation of the log it speaks of
 //! [28..32) the four bytes of the log before `synced`
 //! [32..40) synced: up to here the log was fsynced, and what its frames
 //!          name with it
@@ -36,17 +34,14 @@
 //! grown or been cut since it read: it notes its look only where nothing
 //! there says more than it knows.
 //!
-//! A cut is noted before the log is touched. Until the file is made
-//! shorter, what lies in it past `ends` is no log: frames written before
-//! the cut, in blocks whose checkpoints would be begun at for being of
-//! this boot. Whoever opens a file of that length reads it to `ends`, and
-//! a handle that holds frames past it is told they were cut.
-//!
-//! The length of a file tells nothing once the log in it is cut: it may
-//! grow back to that length. What is said of a file of some length is
-//! said of the log of a generation, and holds for no other. The next
-//! writer that reads the log to its end under its lock forgets a cut
-//! that is noted as begun, whether it was made or never came to the log.
+//! What it says, it says of the log of one generation. A cut is told in
+//! the log (`mark`), and writes the note anew, of the log as it is once
+//! cut, before it lays its checkpoint: the checkpoint is of this boot,
+//! and whoever begins at it finds noted what is left to look at before
+//! it. Until the cut is made, and for good when it never is, the note
+//! speaks of another log than the one in the file. Whoever reads that
+//! one takes ops for left to be looked at, and the length of a file for
+//! telling nothing, as a file made shorter may grow back to it.
 
 use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
@@ -62,7 +57,6 @@ const MAGIC: [u8; 4] = *b"ALTT";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Tail {
     pub pending: bool,
-    pub cutting: bool,
     pub generation: u32,
     pub closes: [u8; 4],
     pub synced: u64,
@@ -134,36 +128,20 @@ impl Tail {
         }
     }
 
-    /// Whether it speaks of a log of `generation`: the one it names, or,
-    /// while a cut is not known to be finished, the log before that cut.
-    pub fn tells(&self, generation: u32) -> bool {
-        self.generation == generation || (self.cutting && generation < self.generation)
-    }
-
-    /// Whether a handle that holds the log of `generation` up to `end`
-    /// holds frames a cut that was begun takes away.
-    pub fn cuts(&self, generation: u32, end: u64) -> bool {
-        self.cutting && generation < self.generation && self.ends < end
-    }
-
     /// Whether a file `len` bytes long is, to whoever reads it without
     /// cutting it, a log up to `ends` and no further, when the log in it
-    /// is of `generation`. A reader says so of the log of the generation
-    /// it read, a cut that was begun of the log as it was before the cut.
-    /// A file that a cut made shorter and that grew back to the length is
-    /// of a later generation than either.
+    /// is of `generation`: a reader said so of the log it read. A file
+    /// that a cut made shorter and that grew back to the length is of a
+    /// later generation.
     pub fn hides(&self, len: u64, generation: u32) -> bool {
-        let of_that_log = match self.cutting {
-            true => generation < self.generation,
-            false => generation == self.generation,
-        };
-        self.hidden != 0 && self.hidden == len && of_that_log
+        self.hidden != 0 && self.hidden == len && self.generation == generation
     }
 
-    /// Forgets a cut that was begun: for a writer that holds the lock of
-    /// the log and has read it to its end, as the cut left it.
+    /// Speaks of the log of `generation` as a writer has it that holds
+    /// its lock and has read it to its end: what a reader noted of where
+    /// the log ends holds no longer.
     pub fn stands(&mut self, generation: u32) {
-        (self.generation, self.cutting, self.hidden, self.ends) = (generation, false, 0, 0);
+        (self.generation, self.hidden, self.ends) = (generation, 0, 0);
     }
 
     /// What `tail` in `dir` says in `boot`, as the file is at this moment.
@@ -181,7 +159,7 @@ impl Tail {
             return Noted::Unread;
         }
         let sum = alt_hash::blake3::hash(&bytes[..SUMMED]);
-        if bytes[..4] != MAGIC || sum.as_bytes()[..8] != bytes[SUMMED..] {
+        if bytes[..4] != MAGIC || sum.as_bytes()[..8] != bytes[SUMMED..] || bytes[4] > 1 {
             return Noted::Unread;
         }
         if boot != bytes[8..24] {
@@ -190,7 +168,6 @@ impl Tail {
         let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
         Noted::Says(Tail {
             pending: bytes[4] & 1 != 0,
-            cutting: bytes[4] & 2 != 0,
             generation: u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
             closes: bytes[28..32].try_into().unwrap(),
             synced: word(32),
@@ -233,7 +210,7 @@ impl Tail {
         };
         let mut bytes = [0u8; LEN];
         bytes[..4].copy_from_slice(&MAGIC);
-        bytes[4] = self.pending as u8 | (self.cutting as u8) << 1;
+        bytes[4] = self.pending as u8;
         bytes[8..24].copy_from_slice(&boot);
         bytes[24..28].copy_from_slice(&self.generation.to_le_bytes());
         bytes[28..32].copy_from_slice(&self.closes);
@@ -259,8 +236,18 @@ impl Tail {
         change: impl FnOnce(&mut Tail),
     ) -> std::io::Result<()> {
         let held = Held::take(dir)?;
-        let mut tail = Tail::noted_held(dir, boot, &held).to_change();
+        Self::update_held(dir, boot, &held, change)
+    }
+
+    /// [`Self::update`] for whoever holds the lock already.
+    pub fn update_held(
+        dir: &Path,
+        boot: Option<[u8; 16]>,
+        held: &Held,
+        change: impl FnOnce(&mut Tail),
+    ) -> std::io::Result<()> {
+        let mut tail = Tail::noted_held(dir, boot, held).to_change();
         change(&mut tail);
-        tail.write(dir, boot, &held)
+        tail.write(dir, boot, held)
     }
 }

@@ -6,6 +6,7 @@ use std::io::Write;
 
 use alt_oplog::OpLog;
 
+use super::v2_cut_told::tell_cut;
 use super::v2_driver::Run;
 use super::v2_log::boot;
 
@@ -79,7 +80,12 @@ impl Run {
             self.ledger.lost_from(same, self.model.synced);
         }
         self.ledger.hides.clear();
-        self.ledger.begun = None;
+        // what the header of the log tells of a cut that never came to
+        // it was not synced: it is there after, or it is not
+        if self.ledger.begun.is_some() && !whole && self.also.one_in(2) {
+            tell_cut(self.path(), (0, 0));
+            self.ledger.begun = None;
+        }
         let log = self.log();
         self.model.rebooted(&log);
         boot(self.model.boot);

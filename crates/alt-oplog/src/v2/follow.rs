@@ -6,6 +6,7 @@ use std::io::ErrorKind;
 use crate::lock::{lock_shared, unlock};
 use crate::v2::frame::{KIND_OP, View};
 use crate::v2::log::Log;
+use crate::v2::mark::Mark;
 use crate::v2::open::op_of;
 use crate::v2::salvage::{Salvaged, salvage};
 use crate::v2::scan::Stop;
@@ -55,18 +56,19 @@ impl Log {
         }
     }
 
-    /// Whether frames this handle holds are cut off the log, or noted in
-    /// `tail` as being cut off it. What a handle that holds no lock on
-    /// the log does not find where those frames say it is, is then no
-    /// damage: from the note on a cut writes over them before it makes
-    /// the file shorter.
+    /// Whether frames this handle holds are cut off the log, or told in
+    /// its header as being cut off it. What a handle that holds no lock
+    /// on the log does not find where those frames say it is, is then no
+    /// damage: once the header tells it, a cut writes over them before it
+    /// makes the file shorter. The header is read first: a cut that is
+    /// told there stays told until it is made, and one that is made
+    /// between the two looks has taken the last frame away.
     pub(super) fn cut_away(&self) -> Result<bool, OpLogError> {
-        if !self.holds_head(self.file.metadata()?.len())? {
-            return Ok(true);
-        }
+        let told = Mark::read_unlocked(&self.file)?;
+        crate::v2::cut_asked();
         let (generation, end) = (self.state.generation, self.state.end);
-        let noted = Tail::read(&self.dir, self.boot);
-        Ok(noted.is_some_and(|tail| tail.cuts(generation, end)))
+        let cut = told.cuts(generation, self.synced, end);
+        Ok(cut || !self.holds_head(self.file.metadata()?.len())?)
     }
 
     /// The log through the frames that follow the ones held in a file of
@@ -118,51 +120,31 @@ impl Log {
         Ok(found)
     }
 
-    /// Where the log ends for a reader in a file of `size` bytes whose
-    /// end `tail` hides from it, and otherwise what it read to find that
-    /// the note holds no longer. A reader's note is of the log of the
-    /// generation this handle holds. A cut that was begun is noted of
-    /// the log before it, which is what this handle holds whether or not
-    /// the cut was made since: when it was, its checkpoint is among the
-    /// frames that follow, and with it the log is of the generation
-    /// noted, in a file of any length, also one grown back to the length
-    /// the cut found.
+    /// Where the log ends for a reader in a file of `size` bytes, and
+    /// otherwise what it read to find that it ends nowhere short of
+    /// that. It ends where a reader noted in `tail` that it does, of the
+    /// log of the generation this handle holds in a file this long. And
+    /// it ends where its header tells of a cut that the frames past the
+    /// ones held do not hold: when the cut was made, its checkpoint is
+    /// among them, and with it the log is of the generation told, in a
+    /// file of any length.
     fn hidden_from(
         &self,
-        noted: Option<Tail>,
+        (noted, told): (Option<Tail>, Mark),
         size: u64,
     ) -> Result<(Option<u64>, Option<Past>), OpLogError> {
         let (generation, end) = (self.state.generation, self.state.end);
         let hides = |tail: &Tail| tail.hides(size, generation) && tail.ends >= end;
-        let Some(tail) = noted.filter(hides) else {
-            return Ok((None, None));
+        let noted = noted.filter(hides).map(|tail| tail.ends);
+        let begun = told.begun_at(generation, self.synced);
+        let Some(begun) = begun.filter(|at| *at < size) else {
+            return Ok((noted, None));
         };
-        if tail.cutting {
-            let past = self.read_past(size)?;
-            if past.0.generation >= tail.generation {
-                return Ok((None, Some(past)));
-            }
+        let past = self.read_past(noted.unwrap_or(size))?;
+        match past.0.generation >= told.generation {
+            true => Ok((noted, Some(past))),
+            false => Ok((Some(noted.map_or(begun, |ends| ends.min(begun))), None)),
         }
-        Ok((Some(tail.ends), None))
-    }
-
-    /// Forgets in `tail` a cut it notes as begun: for a writer that holds
-    /// the lock of the log and has read it to its end, where nothing
-    /// follows the last frame. Either the log is of a generation before
-    /// the cut's: the cut never came to it, and its frames are all there.
-    /// Or the cut was made and the note not written again: what was left
-    /// to be looked at from where it cut is gone, and every frame since
-    /// is of this boot.
-    fn cut_over(&self) -> std::io::Result<()> {
-        let (generation, end) = (self.state.generation, self.state.end);
-        Tail::update(&self.dir, self.boot, |tail| {
-            let made = tail.cutting && tail.generation <= generation;
-            let left = tail.pending && tail.judged < tail.ends;
-            tail.stands(generation);
-            if made && !left {
-                (tail.pending, tail.judged) = (false, end);
-            }
-        })
     }
 
     /// Takes in the frames past the ones held, under a lock on the log.
@@ -170,18 +152,19 @@ impl Log {
     /// when `cut`, under the exclusive lock, and stays in it otherwise.
     fn read_on(&mut self, cut: bool) -> Result<(), OpLogError> {
         let mut size = self.file.metadata()?.len();
+        let told = self.told()?;
         let noted = self.tail();
         // a cut that was begun leaves the file as long as it was at first
-        let cut_away = |tail: Tail| tail.cuts(self.state.generation, self.state.end);
-        if !self.holds_head(size)? || noted.is_some_and(cut_away) {
+        let cut_away = told.cuts(self.state.generation, self.synced, self.state.end);
+        if cut_away || !self.holds_head(size)? {
             return Err(OpLogError::CutBack);
         }
         // to a reader the log ends where `tail` says it does in a file of
-        // this length, while that is said of the log as it is
+        // this length, or where a cut of it was begun and not made
         let end = self.state.end;
         let (ends, ahead) = match cut {
             true => (None, None),
-            false => self.hidden_from(noted, size)?,
+            false => self.hidden_from((noted, told), size)?,
         };
         self.hidden = ends.map(|_| size);
         size = ends.unwrap_or(size);
@@ -201,8 +184,9 @@ impl Log {
                 ops: found.ops,
             };
             self.cut_end(discarded)?;
-        } else if cuts && noted.is_some_and(|tail| tail.cutting) {
-            self.cut_over()?;
+        } else if cuts && told.begun(self.state.generation) {
+            // the log was read to its end, and the cut never came to it
+            Mark::default().write(&self.file)?;
         }
         Ok(())
     }

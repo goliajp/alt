@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::v2::log::Log;
+use crate::v2::mark::Mark;
 use crate::v2::tail::{Held, Tail};
 use crate::{Op, OpLogError, SyncNamed};
 
@@ -45,6 +46,7 @@ impl Log {
         (reached.target, reached.closes) = (target, closes);
         reached.generation = self.state.generation;
         reached.pending = pending;
+        reached.synced = reached.synced.max(self.synced);
         Ok(())
     }
 
@@ -89,14 +91,17 @@ impl Sink {
         }
         let held = Held::take(&self.dir)?;
         let mut closes = [0u8; 4];
-        let mut tail = Tail::noted_held(&self.dir, self.boot, &held).to_change();
-        let in_place = self.file.metadata()?.len() >= reached.target
+        let noted = Tail::noted_held(&self.dir, self.boot, &held);
+        let mut tail = noted.to_change();
+        let synced = tail.synced.max(reached.synced);
+        let cut = Mark::read(&self.file)?.cuts(reached.generation, synced, reached.target);
+        let in_place = !cut
+            && self.file.metadata()?.len() >= reached.target
             && self
                 .file
                 .read_exact_at(&mut closes, reached.target - 4)
                 .is_ok()
-            && closes == reached.closes
-            && !tail.cuts(reached.generation, reached.target);
+            && closes == reached.closes;
         if !in_place {
             // the frames were cut: there is nothing of this handle's to
             // sync until it appends again

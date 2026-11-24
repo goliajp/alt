@@ -32,11 +32,14 @@ fn held_to(handle: &OpLog, unsettled: &[&Laid], model: &Model, who: &str) {
 
 impl Run {
     /// Whether a handle that holds `held` ops of the log up to byte `end`
-    /// holds as many as it may: all of them, or those before a place the
-    /// log is noted to end at in a file as long as this one.
+    /// holds as many as it may: all of them, those before a place the
+    /// log is noted to end at in a file as long as this one, or those
+    /// before where the log tells of a cut that never came to it.
     pub fn holds_enough(&self, held: usize, end: u64) -> bool {
         let hidden = (self.file_len(), end);
-        held == self.ledger.ops.len() || self.ledger.hides.contains(&hidden)
+        held == self.ledger.ops.len()
+            || self.ledger.hides.contains(&hidden)
+            || self.ledger.begun == Some(end)
     }
 
     /// Holds a handle opened now, as a reader and as a writer, to the

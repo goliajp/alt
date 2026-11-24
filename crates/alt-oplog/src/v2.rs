@@ -20,6 +20,7 @@ mod hooks;
 mod lift;
 mod locate;
 mod log;
+mod mark;
 mod named;
 mod notes;
 mod open;
@@ -41,10 +42,10 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
-pub(crate) use hooks::cut_reached;
+pub(crate) use hooks::{cut_asked, cut_reached};
 #[cfg(feature = "hooks")]
 #[doc(hidden)]
-pub use hooks::{cut_dies_after, cut_waits_after, in_boot, in_no_boot};
+pub use hooks::{cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot};
 pub(crate) use log::Log;
 pub use sink::Reached;
 pub(crate) use sink::Sink;

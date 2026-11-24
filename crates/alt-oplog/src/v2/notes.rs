@@ -4,7 +4,7 @@
 
 use crate::OpLogError;
 use crate::v2::log::Log;
-use crate::v2::tail::Tail;
+use crate::v2::tail::{Held, Tail};
 
 impl Log {
     /// Notes in `tail` what a reader's look came to: every op it holds
@@ -19,10 +19,15 @@ impl Log {
         }
         let (generation, synced) = (self.state.generation, self.synced);
         let (end, seen) = (self.state.end, self.seen);
-        Tail::update(&self.dir, self.boot, |tail| {
-            let other = *tail != Tail::default() && tail.generation != generation;
+        // a cut holds this lock from before it tells the log of itself
+        let held = Held::take(&self.dir)?;
+        if self.told()?.begun(generation) {
+            return Ok(());
+        }
+        Tail::update_held(&self.dir, self.boot, &held, |tail| {
+            let other = tail.generation != generation && *tail != Tail::default();
             let further = unheld.is_some_and(|at| tail.judged > at || tail.synced > at);
-            if other || tail.cutting || tail.pending || further {
+            if other || tail.pending || further {
                 return;
             }
             tail.generation = generation;
@@ -57,7 +62,7 @@ impl Log {
     /// after is of this boot, and there is nothing left to look at.
     pub(super) fn vouched_since(&mut self) -> Result<bool, OpLogError> {
         let generation = self.state.generation;
-        let vouched = |tail: Tail| !tail.pending && !tail.cutting && tail.generation == generation;
+        let vouched = |tail: Tail| !tail.pending && tail.generation == generation;
         let judged = self
             .tail()
             .filter(|tail| vouched(*tail))
@@ -79,8 +84,9 @@ impl Log {
         let (generation, synced) = (self.state.generation, self.synced);
         let judged = self.judged.get();
         Tail::update(&self.dir, self.boot, |tail| {
-            // what was noted of a log of another generation says nothing here
-            let noted = tail.pending && tail.tells(generation);
+            // what was noted of the log before a cut tells of ops left
+            // from where that log was synced
+            let noted = tail.pending && tail.generation == generation;
             tail.stands(generation);
             tail.raise(synced, None);
             if !noted {

@@ -191,7 +191,11 @@ fn the_file_header_tells_what_a_build_may_do_with_the_log() {
     for at in 0..FILE_HEADER_LEN {
         let mut other = bytes;
         other[at] ^= 0x10;
-        assert!(FileHeader::decode(&other).is_err(), "byte {at}");
+        // where a cut tells of itself the header is the same one
+        match (44..56).contains(&at) {
+            true => assert_eq!(FileHeader::decode(&other).unwrap(), plain, "byte {at}"),
+            false => assert!(FileHeader::decode(&other).is_err(), "byte {at}"),
+        }
     }
     assert!(FileHeader::decode(&bytes[..63]).is_err());
     let mut older = bytes;

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 
 use alt_oplog::v2::frame::frame_len;
 use alt_oplog::v2::receipt::{Outcome, Receipt};
-use alt_oplog::{Anchor, Meta, OpLog, ROOT};
+use alt_oplog::{Anchor, Meta, OpLog, OpLogError, ROOT};
 
 use super::v2_driver::{Run, name};
 
@@ -34,6 +34,11 @@ impl Run {
             .append_with("driver", 1, &payload, &meta);
         drop(left);
         self.refuses.store(false, Ordering::Relaxed);
+        if !matches!(appended, Err(OpLogError::CutBack)) {
+            // it read the log to its end under the lock, whatever came
+            // of the append after
+            self.ledger.begun = None;
+        }
         let seen_to = self.calls() != 0;
         self.meanwhile_done(&unsettled);
         if self.took(index, appended, fails).is_none() {

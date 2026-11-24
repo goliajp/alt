@@ -29,6 +29,8 @@ mod told {
         static BOOT: Cell<Told> = const { Cell::new(Told::ByTheKernel) };
         static CUT_DIES: Cell<u8> = const { Cell::new(0) };
         static CUT_WAITS: RefCell<Option<Waits>> = const { RefCell::new(None) };
+        static ASKED_WAITS: RefCell<Option<(Sender<()>, Receiver<()>)>> =
+            const { RefCell::new(None) };
     }
 
     /// Makes the handles this thread opens from now on take `boot` for
@@ -45,7 +47,7 @@ mod told {
     }
 
     /// Makes a cut of a log on this thread end after step `step` of it
-    /// as if its process had died there (1 the note in `tail`,
+    /// as if its process had died there (1 the log and `tail` told of it,
     /// 2 the checkpoint, 3 its sync, 4 the file made shorter, 5 the sync
     /// of that), and every cut run through with `None`: for a test of
     /// what such a death leaves.
@@ -59,6 +61,22 @@ mod told {
     /// while a log is being cut.
     pub fn cut_waits_after(step: u8, reached: Sender<()>, go: Receiver<()>) {
         CUT_WAITS.set(Some((step, reached, go)));
+    }
+
+    /// Makes the next handle on this thread that asks, with no lock on
+    /// the log, whether frames it holds were cut stop between the two
+    /// things it looks at for that: it says so on `reached` and goes on
+    /// when `go` is sent to or closed. For a test of a cut that is made
+    /// in between.
+    pub fn cut_asked_waits(reached: Sender<()>, go: Receiver<()>) {
+        ASKED_WAITS.set(Some((reached, go)));
+    }
+
+    pub(crate) fn cut_asked() {
+        if let Some((reached, go)) = ASKED_WAITS.take() {
+            let _ = reached.send(());
+            let _ = go.recv();
+        }
     }
 
     pub(crate) fn running_boot() -> Option<[u8; 16]> {
@@ -84,9 +102,9 @@ mod told {
 }
 
 #[cfg(feature = "hooks")]
-pub use told::{cut_dies_after, cut_waits_after, in_boot, in_no_boot};
+pub(crate) use told::{cut_asked, cut_reached, running_boot};
 #[cfg(feature = "hooks")]
-pub(crate) use told::{cut_reached, running_boot};
+pub use told::{cut_asked_waits, cut_dies_after, cut_waits_after, in_boot, in_no_boot};
 
 /// The boot a handle opened now runs in, as the kernel tells it.
 #[cfg(not(feature = "hooks"))]
@@ -100,3 +118,9 @@ pub(crate) fn running_boot() -> Option<[u8; 16]> {
 pub(crate) fn cut_reached(_step: u8) -> std::io::Result<()> {
     Ok(())
 }
+
+/// A handle that holds no lock on the log is between the two things it
+/// looks at to tell whether frames it holds were cut.
+#[cfg(not(feature = "hooks"))]
+#[inline(always)]
+pub(crate) fn cut_asked() {}

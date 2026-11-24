@@ -152,21 +152,18 @@ fn a_cut_whose_process_dies_at_any_step_leaves_a_log_that_is_whole_or_ends_where
                 }
             }
             drop(staging);
-            // without the note beside it, the log is cut once the
-            // checkpoint lies over the ops
-            let whole = step == 1 && next_boot;
+            // the log tells of the cut from its first step on, in any
+            // boot: it ends where it is cut for whoever opens it
             for read_only in [true, false] {
                 let log = match read_only {
                     true => OpLog::open_read_only(dir.path(), None).unwrap(),
                     false => OpLog::open(dir.path()).unwrap(),
                 };
-                assert_eq!(
-                    log.ops().unwrap().len(),
-                    if whole { 43 } else { 2 },
-                    "{case}"
-                );
+                assert_eq!(log.ops().unwrap().len(), 2, "{case}");
                 log.verify().unwrap();
-                assert!(log.unsettled(), "{case}");
+                // once the file ends with the checkpoint of the cut, the
+                // boot that made it has looked at every op before it
+                assert_eq!(log.unsettled(), next_boot || step < 4, "{case}");
             }
             let mut next = OpLog::open(dir.path()).unwrap();
             let cut = next.settle(but_left).unwrap();

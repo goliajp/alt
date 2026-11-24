@@ -99,18 +99,17 @@ impl Log {
             sync(&self.named_unlocked(self.synced)?)?;
         }
         let held = Held::take(&self.dir)?;
-        // records were cut since the append: not this one's, or there is
-        // nothing of it to sync
-        if !self.holds_head(self.file.metadata()?.len())? {
+        // frames up to there were cut since the append, or the log tells
+        // of a cut that takes them: no boundary is set over them
+        let generation = self.state.generation;
+        let cut = self.told()?.cuts(generation, self.synced, target);
+        if cut || !self.holds_head(self.file.metadata()?.len())? {
             return Err(OpLogError::CutBack);
         }
         let mut tail = Tail::noted_held(&self.dir, self.boot, &held).to_change();
-        if tail.cuts(self.state.generation, target) {
-            return Err(OpLogError::CutBack);
-        }
         if tail.synced < target {
             self.file.sync_all()?;
-            tail.generation = tail.generation.max(self.state.generation);
+            tail.generation = tail.generation.max(generation);
             tail.raise(target, Some(closes));
             tail.judged = tail.judged.max(target);
             tail.write(&self.dir, self.boot, &held)?;

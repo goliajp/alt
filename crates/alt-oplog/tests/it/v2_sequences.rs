@@ -128,6 +128,10 @@ impl Run {
         if let (Ok(()), Some(sink)) = (&synced, &handle.sink) {
             synced = sink.fsync();
         }
+        if how != 0 && !matches!(synced, Err(OpLogError::CutBack)) {
+            // it read the log to its end under the lock first
+            self.ledger.begun = None;
+        }
         self.refuses.store(false, Ordering::Relaxed);
         self.meanwhile_done(&unsettled);
         self.took(index, synced, fails);

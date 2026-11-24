@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::lock::{lock_shared, unlock};
-use crate::read::read_at;
 use crate::v2::block::{FILE_HEADER_LEN, FileHeader, Layout};
 use crate::v2::cuts::Cuts;
+use crate::v2::mark::{Mark, header_of};
 use crate::v2::open::{Loaded, Source, load};
 use crate::v2::sink::Deferred;
 use crate::v2::state::State;
@@ -86,8 +86,28 @@ impl Log {
     }
 
     fn opened(dir: &Path, file: File, anchor: Option<Anchor>) -> Result<Self, OpLogError> {
-        let header = FileHeader::decode(&read_at(&file, 0, FILE_HEADER_LEN)?)?;
-        let mut log = Log {
+        // only the read needs the lock: writers append under the exclusive
+        // one, so a frame cut short here is a crashed writer's. The header
+        // is read under it too: a cut writes there
+        lock_shared(&file)?;
+        let (header, told) = match header_of(&file) {
+            Ok(read) => read,
+            Err(unread) => {
+                let _ = unlock(&file);
+                return Err(unread);
+            }
+        };
+        let mut log = Self::unread(dir, file, &header);
+        let read = log.read_in(false, Some(told));
+        let read = read.and_then(|()| log.begin_after(anchor));
+        let _ = unlock(&log.file);
+        read.map(|()| log)
+    }
+
+    /// A handle on the log `file` of `dir` that has read nothing of it
+    /// but its header.
+    fn unread(dir: &Path, file: File, header: &FileHeader) -> Log {
+        Log {
             file,
             dir: dir.to_owned(),
             layout: header.layout(),
@@ -118,13 +138,7 @@ impl Log {
             named: None,
             discarded: Vec::new(),
             read: Cell::new((FILE_HEADER_LEN as u64, 1)),
-        };
-        // only the read needs the lock: writers append under the exclusive
-        // one, so a frame cut short here is a crashed writer's
-        lock_shared(&log.file)?;
-        let read = log.read_in(false).and_then(|()| log.begin_after(anchor));
-        let _ = unlock(&log.file);
-        read.map(|()| log)
+        }
     }
 
     pub(super) fn source(&self) -> Source<'_> {
@@ -135,9 +149,16 @@ impl Log {
     }
 
     /// Reads the log as an open does, from its first frame when `all`,
-    /// and holds what that read found. The caller holds a lock on it.
-    pub(super) fn read_in(&mut self, all: bool) -> Result<(), OpLogError> {
-        let loaded = load(&self.source(), &self.dir, &self.layout, self.boot, all)?;
+    /// and holds what that read found. The caller holds a lock on it,
+    /// and gives what the header tells of a cut where it has read that
+    /// under the lock.
+    pub(super) fn read_in(&mut self, all: bool, told: Option<Mark>) -> Result<(), OpLogError> {
+        let told = match told {
+            Some(told) => told,
+            None => self.told()?,
+        };
+        let of = (self.boot, told);
+        let loaded = load(&self.source(), &self.dir, &self.layout, of, all)?;
         let Loaded {
             state,
             ops,

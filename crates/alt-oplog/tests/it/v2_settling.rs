@@ -13,7 +13,6 @@ impl Run {
     /// if the process had died: the handle is gone. `refused` is the op
     /// the cut was of, when it was of ops nobody vouches for.
     pub fn cut_died(&mut self, index: usize, step: u8, refused: Option<&[u8]>) {
-        let len = self.file_len();
         self.counts.cuts_died.fetch_add(1, Ordering::Relaxed);
         self.died += 1;
         self.handles.remove(index);
@@ -25,13 +24,9 @@ impl Run {
             return;
         };
         match step {
-            // noted beside the log and nothing else: its ops are all there
-            1 => {
-                let at = self.ledger.ops.iter().find(|op| op.payload == refused);
-                let at = at.expect("the op refused is in the log").at;
-                self.ledger.begun = Some(at);
-                self.ledger.hides.push((len, at));
-            }
+            // told in the header of the log and nothing else: its ops
+            // are all there
+            1 => self.ledger.begun = Some(self.ledger.place_of(refused)),
             // the checkpoint lies over the first of them
             _ => drop(self.ledger.cut_from(refused, self.model.synced)),
         }
@@ -74,9 +69,10 @@ impl Run {
         true
     }
 
-    /// A cut is begun and comes to no more than the note of it, and a
-    /// handle that holds ops past where it would have cut does what reads
-    /// that note: it is told its ops were cut, while the log holds them.
+    /// A cut is begun and comes to no more than the log telling of it,
+    /// and a handle that holds ops past where it would have cut does
+    /// what finds that told: it is told its ops were cut, while the log
+    /// holds them.
     pub fn cut_begun(&mut self) {
         // what is not synced is another boot's to look at
         for _ in 0..2 {
@@ -92,7 +88,7 @@ impl Run {
         }
         let way = self.rng.below(4);
         self.trace.push(format!(
-            "handle {held} comes upon the note of the cut (way {way})"
+            "handle {held} comes upon the cut the log tells of (way {way})"
         ));
         let handle = &mut self.handles[held];
         let mut did = match way {

@@ -10,6 +10,8 @@
 //! [16..20) features nobody has to know
 //! [20..36) the identity of this log, random
 //! [36..44) when it was created, in milliseconds
+//! [44..56) the cut last begun (`mark`); written while the log is cut,
+//!          and taken for zeros by the checksum
 //! [56..64) checksum = blake3(the 56 bytes before it)[..8]
 //!
 //! block header (32 bytes), at every multiple of the block size but zero
@@ -42,6 +44,9 @@ pub const BLOCK_EXP: u8 = 14;
 /// settles the format writes no such log and opens none.
 pub const DRAFT: u32 = 1;
 
+/// where in the header the bytes begin that its checksum takes for zeros
+const SUMMED: usize = 44;
+
 const MAGIC: [u8; 4] = *b"ALTL";
 const BLOCK_MAGIC: [u8; 4] = *b"ALTB";
 
@@ -66,9 +71,17 @@ impl FileHeader {
         out[16..20].copy_from_slice(&self.compatible.to_le_bytes());
         out[20..36].copy_from_slice(&self.id);
         out[36..44].copy_from_slice(&self.created_ms.to_le_bytes());
-        let sum = alt_hash::blake3::hash(&out[..56]);
-        out[56..].copy_from_slice(&sum.as_bytes()[..8]);
+        let sum = Self::sum(&out);
+        out[56..].copy_from_slice(&sum);
         out
+    }
+
+    /// The checksum of the header `bytes`: of what a cut does not write.
+    fn sum(bytes: &[u8; FILE_HEADER_LEN]) -> [u8; 8] {
+        let mut summed = [0u8; 56];
+        summed[..SUMMED].copy_from_slice(&bytes[..SUMMED]);
+        let sum = alt_hash::blake3::hash(&summed);
+        sum.as_bytes()[..8].try_into().unwrap()
     }
 
     /// The header `bytes` begin with. A log with a feature this build
@@ -83,8 +96,7 @@ impl FileHeader {
         if bytes[4] != VERSION {
             return Err(OpLogError::Format("unsupported oplog version"));
         }
-        let sum = alt_hash::blake3::hash(&bytes[..56]);
-        if sum.as_bytes()[..8] != bytes[56..] || !(10..=30).contains(&bytes[5]) {
+        if Self::sum(bytes) != bytes[56..] || !(10..=30).contains(&bytes[5]) {
             return Err(OpLogError::Format("oplog header corrupt"));
         }
         let part = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());

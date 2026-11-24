@@ -61,7 +61,7 @@ impl Log {
 
     /// Holds every op of the log, read from its first frame.
     pub(super) fn read_all(&mut self) -> Result<(), OpLogError> {
-        self.read_in(true)?;
+        self.read_in(true, None)?;
         self.full = OnceLock::new();
         Ok(())
     }

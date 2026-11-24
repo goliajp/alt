@@ -129,3 +129,25 @@ fn a_note_that_is_being_written_is_read_once_its_writer_has_written_it() {
     alt_os::sys::flock(&lock, alt_os::sys::LOCK_UN).unwrap();
     assert_eq!(read.join().unwrap(), (Some(synced), Some(synced)));
 }
+
+#[test]
+fn a_note_of_a_log_of_another_generation_says_nothing_of_what_is_left_to_look_at() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    left_by_another_boot(dir.path());
+    let mut staging = OpLog::open(dir.path()).unwrap();
+    stage(&mut staging, 40);
+    drop(staging);
+    let synced = alt_oplog::bounded_in(dir.path()).unwrap();
+    let len = fs::metadata(dir.path().join("log")).unwrap().len();
+    // as a writer leaves it that has looked at every op, of a log that
+    // was cut five times
+    let note = super::v2_note_fields::tail(2, 5, false, [synced, len, 0, 0]);
+    fs::write(dir.path().join("tail"), note).unwrap();
+    for read_only in [true, false] {
+        let opened = match read_only {
+            true => OpLog::open_read_only(dir.path(), None).unwrap(),
+            false => OpLog::open(dir.path()).unwrap(),
+        };
+        assert!(opened.unsettled(), "read only: {read_only}");
+    }
+}

@@ -10,7 +10,7 @@ use super::v2_bounds::stage;
 use super::v2_log::{boot, file_len, grow, new_log};
 use super::v2_named::{Given, collecting};
 
-fn but_left(op: &Op) -> Result<bool, OpLogError> {
+pub fn but_left(op: &Op) -> Result<bool, OpLogError> {
     Ok(op.payload != b"left")
 }
 
@@ -20,7 +20,7 @@ fn but_left(op: &Op) -> Result<bool, OpLogError> {
 /// to be known to append after it when `required`: the handle begins at
 /// a checkpoint of its boot, past `left`, and syncs what a sync has to
 /// see to.
-fn held_past_left(dir: &Path, deferred: bool, required: bool) -> (OpLog, Given) {
+pub fn held_past_left(dir: &Path, deferred: bool, required: bool) -> (OpLog, Given) {
     boot(1);
     let mut log = new_log(dir);
     grow(&mut log, "a", 2);
@@ -53,12 +53,12 @@ fn held_past_left(dir: &Path, deferred: bool, required: bool) -> (OpLog, Given) 
 /// What a handle is told by each of the things it reads without a lock
 /// on the log: its sync, its full check, the ops before the ones it
 /// holds.
-fn told(held: &mut OpLog) -> String {
+pub fn told(held: &mut OpLog) -> String {
     let synced = held.sync().err();
     format!("{:?}", (synced, held.verify().err(), held.ops().err()))
 }
 
-const CUT_BACK: &str = "(Some(CutBack), Some(CutBack), Some(CutBack))";
+pub const CUT_BACK: &str = "(Some(CutBack), Some(CutBack), Some(CutBack))";
 
 #[test]
 fn the_sink_of_a_handle_that_holds_no_frame_syncs_and_is_told_of_no_cut() {

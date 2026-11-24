@@ -28,6 +28,8 @@ pub struct Handle {
 pub struct Run {
     dir: alt_os::temp::TempDir,
     pub rng: Rng,
+    /// numbers for what a sequence draws beside what it is drawn to do
+    pub also: Rng,
     pub model: Model,
     pub ledger: Ledger,
     pub handles: Vec<Handle>,
@@ -93,6 +95,7 @@ impl Run {
         Run {
             dir,
             rng: Rng(seed),
+            also: Rng(seed ^ 0x6a09_e667_f3bc_c908),
             model: Model {
                 boot: 1,
                 ..Model::default()

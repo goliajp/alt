@@ -165,7 +165,9 @@ fn a_cut_says_what_it_cuts_in_the_log_and_syncs_that_before_the_file_is_made_sho
     let said = all.last().unwrap();
     assert_eq!((said.0, said.2), (at, KIND_CHECKPOINT));
     let step = |what: &str, at: u64, len: u64| (what.to_owned(), at, len);
+    // the header of the log tells of the cut first
     let expected = [
+        step("pwrite", 44, 12),
         step("pwrite", at, said.1 - at),
         step("fsync", 0, 0),
         step("truncate", said.1, 0),

@@ -12,11 +12,14 @@
 //! Every cut is told: the frames that read among what was cut are kept
 //! for the caller ([`Discarded`]), and the log gets a checkpoint where it
 //! was cut that says how many bytes went, under the next generation, so
-//! that nothing written before the cut reads in a place after it.
+//! that nothing written before the cut reads in a place after it. Before
+//! that the header of the log tells where it is cut (`mark`): a handle
+//! that holds frames past that place appends after none of them.
 
 use crate::v2::cut_reached;
 use crate::v2::frame::{Cut, UNSYNCED};
 use crate::v2::log::Log;
+use crate::v2::mark::Mark;
 use crate::v2::tail::{Held, Tail};
 use crate::{Discarded, Op, OpLogError, Unconfirmed};
 
@@ -142,7 +145,7 @@ impl Log {
     /// nothing of the frames before it.
     fn left_after(&self, noted: Option<Tail>, at: u64, looked: bool) -> (bool, u64) {
         let judged = self.judged.get().min(at);
-        let noted = noted.filter(|tail| tail.pending && tail.tells(self.state.generation));
+        let noted = noted.filter(|tail| tail.pending && tail.generation == self.state.generation);
         match (looked, noted) {
             (true, _) => (false, at),
             (false, Some(tail)) => (true, tail.judged.max(judged).min(at)),
@@ -174,18 +177,31 @@ impl Log {
         Ok(())
     }
 
+    /// The generation the log is of once it is cut: above the generation
+    /// of every frame that reads in the file, also past where it is cut.
+    /// A cut made again after the power went while its checkpoint was
+    /// written takes the generation that one was of: nothing else was
+    /// written under it, a cut syncs its checkpoint before a frame is
+    /// appended after.
+    fn generation_cut(&self) -> Result<u32, OpLogError> {
+        let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
+        self.state.generation.checked_add(1).ok_or(cut_before)
+    }
+
     /// Cuts the log at `at`, where a frame this handle holds starts or
     /// the last one ends, under the exclusive lock of the log. Nothing is
     /// cut that was recorded as synced. `looked` says that every op
     /// before `at` was vouched for.
     ///
     /// The order holds through a power cut and through the death of this
-    /// process alike. `tail` first says that a file as long as this one
-    /// is a log up to `at`: the frames past it stay readable until the
-    /// file is made shorter, and are no log from the next step on. Then
-    /// the log says what is cut, in a checkpoint under the next
-    /// generation written over it and synced. Only then is the file made
-    /// to end with that checkpoint.
+    /// process alike. The header of the log first tells that it is cut
+    /// at `at`: the frames past it stay readable until the file is made
+    /// shorter, and are no log from the next step on. Then the log says
+    /// what is cut, in a checkpoint under the next generation written
+    /// over them and synced. Only then is the file made to end with that
+    /// checkpoint. `tail` speaks of the log as it is once cut from the
+    /// first step on: it says nothing of the log before, and whoever
+    /// reads that one takes its ops for left to be looked at.
     fn cut_at(&mut self, at: u64, discarded: Discarded, looked: bool) -> Result<(), OpLogError> {
         self.may_write()?;
         // neither a frame that must be known is cut nor the log after one
@@ -198,35 +214,31 @@ impl Log {
             return Err(OpLogError::Lost { synced, holds: at });
         }
         let (pending, judged) = self.left_after(noted, at, looked);
-        // above the generation of every frame that reads in the file,
-        // also past `at`. A cut made again after the power went while its
-        // checkpoint was written takes the generation that one was of:
-        // nothing else was written under it, a cut syncs its checkpoint
-        // before a frame is appended after
-        let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
-        let generation = self.state.generation.checked_add(1).ok_or(cut_before)?;
+        let generation = self.generation_cut()?;
         if at != self.state.end {
             self.read_to(at)?;
             self.may_append()?;
         }
+        Mark { generation, at }.write(&self.file)?;
+        // the checkpoint of the cut is of this boot: whoever begins at it
+        // finds noted what is left to look at before it
         let mut tail = Tail {
-            // the ops from `at` on are there until the checkpoint lies over them
-            pending: pending || looked,
-            cutting: true,
+            pending,
             generation,
             closes: [0; 4],
             synced,
             judged: if pending { judged } else { at },
-            hidden: self.file.metadata()?.len(),
-            ends: at,
+            hidden: 0,
+            ends: 0,
         };
         tail.write(&self.dir, self.boot, &held)?;
         cut_reached(1)?;
         self.lay_cut(&discarded, generation)?;
         self.unsynced = false;
-        tail.stands(generation);
-        // with nothing left to look at, the checkpoint is covered too
-        (tail.pending, tail.judged) = (pending, if pending { judged } else { self.state.end });
+        if !pending {
+            // with nothing left to look at, the checkpoint is covered too
+            tail.judged = self.state.end;
+        }
         tail.write(&self.dir, self.boot, &held)?;
         if looked {
             self.judged.set(u64::MAX);

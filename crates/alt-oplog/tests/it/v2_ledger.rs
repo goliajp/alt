@@ -86,11 +86,14 @@ pub struct Ledger {
     pub was: Vec<Entry>,
     /// Where a handle may take the log to end before its last op: at the
     /// second place, in a file as long as the first says. A reader found
-    /// an op there it does not vouch for, or a cut at it was begun and
-    /// never came to the log. None holds beyond the next cut.
+    /// an op there it does not vouch for and may have noted so beside
+    /// the log. None holds beyond the next cut.
     pub hides: Vec<(u64, u64)>,
-    /// where a cut was begun that never came to the log: a handle that
-    /// holds frames past it is told they were cut
+    /// Where a cut was begun that never came to the log, which tells of
+    /// it in its header: a handle that holds frames past it is told they
+    /// were cut, and to whoever reads the log without cutting it the log
+    /// ends there, in a file of any length and in any boot, until a
+    /// writer reads it to its end.
     pub begun: Option<u64>,
 }
 
