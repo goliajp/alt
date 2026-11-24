@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: a signed push is signed over a certificate of the nonce and the repository, and altd-server takes no other
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/push_signed.rs
+touched: crates/alt-cli/tests/it/altd_server_certified.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-wire/src/certificate.rs
+touched: crates/alt-wire/src/lib.rs
+touched: crates/alt-wire/src/push.rs
