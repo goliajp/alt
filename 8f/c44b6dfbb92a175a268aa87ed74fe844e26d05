@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: the archive of a migration and a file of it take of the room for responses, over a connection
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/migration.rs
+touched: crates/alt-server/tests/it/database/browser/migration_room.rs
+touched: crates/alt-server/tests/it/database/portable.rs
