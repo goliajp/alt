@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: tell a push that waited in vain for the memory of other packs while its sender still listens
+author-type: human
+author: doracawl
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/tests/it/database/git/verifying.rs
+touched: self-hosted/README.md
