@@ -14,6 +14,7 @@ mod open_segments;
 mod pack_compaction;
 mod pack_native;
 mod pack_scrub;
+mod pack_sweep;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
 pub use pack_scrub::{NO_REPOSITORY, Scrubbed, Unread};
 mod pack_view;
