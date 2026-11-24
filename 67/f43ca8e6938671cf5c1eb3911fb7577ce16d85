@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: the remote commands of a task, its publications and what is adopted have files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/task/transfer.rs
+touched: crates/alt-cli/src/native/task/transfer/command.rs
+touched: crates/alt-cli/src/native/task/transfer/publication.rs
+touched: crates/alt-cli/src/native/task/transfer/received.rs
