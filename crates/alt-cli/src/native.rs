@@ -2606,7 +2606,7 @@ impl<'a> NativeRepo<'a> {
         // what a signature of this push is over: the nonce the server gave for
         // it, and where the server takes them, the repository as it is named here
         let server_nonce: Option<String> = ad.cap_value(alt_wire::CAP_ALT_NONCE).map(str::to_owned);
-        let pushee = push_signed::pushee(&ad, &transport)?;
+        let pushee = push_signed::pushee(&ad, &transport, self.signs_pushes()?)?;
         let signed_for = server_nonce.as_deref().zip(pushee.as_deref());
 
         // resolve the refspecs to (local oid, remote ref name) pairs

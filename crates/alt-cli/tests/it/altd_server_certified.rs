@@ -246,3 +246,36 @@ fn a_server_told_where_it_is_reached_takes_a_signed_push_for_that_address_only()
     let said = server.drain_stderr();
     assert!(said.contains("ALT_SERVER_ORIGINS is not set"), "{said}");
 }
+
+/// A client that signs nothing has no certificate a server could refuse: its
+/// push goes to a server that tells where it is reached by whatever other
+/// name reaches it, as a push by Git does.
+#[test]
+fn a_push_that_is_not_signed_goes_to_a_server_by_a_name_it_does_not_tell() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let dir = tmp.path();
+    let origin = dir.join("origin");
+    repository(&origin);
+    let env = [
+        ("ALT_SERVER_REPO", origin.to_str().unwrap()),
+        ("ALT_SERVER_ORIGINS", "https://alt.example"),
+    ];
+    let server = spawn_server_with_env(&env);
+    let url = format!("http://{}/", server.addr);
+    let clone = dir.join("clone");
+    let out = alt(dir, &["clone", &url, clone.to_str().unwrap()]);
+    assert!(out.status.success(), "{out:?}");
+    fs::write(clone.join("new.txt"), "new\n").unwrap();
+    assert!(alt(&clone, &["add", "."]).status.success());
+    assert!(alt(&clone, &["commit", "-m", "new"]).status.success());
+    let out = alt(
+        &clone,
+        &["push", "origin", "refs/heads/main:refs/heads/main"],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let pushed = alt(&clone, &["rev-parse", "HEAD"]).stdout;
+    assert_eq!(
+        alt(&origin, &["rev-parse", "refs/heads/main"]).stdout,
+        pushed
+    );
+}
