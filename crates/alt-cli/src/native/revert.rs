@@ -2,9 +2,12 @@
 //! sequence stops at the first conflict; its state lives next to the
 //! workspace's index until `--continue` or `--abort`.
 
+use std::collections::HashSet;
+
 use super::commit::NewCommit;
 use super::*;
 
+mod resume;
 mod state;
 pub(super) use state::RevertState;
 
@@ -37,70 +40,15 @@ impl NativeRepo<'_> {
             .collect::<Res<Vec<ObjectId>>>()?;
         self.ensure_reverts_allowed(&todo, mainline)?;
         let orig = self.branch_tip("revert")?;
-        self.run_reverts(todo, mainline, orig, json, out)
+        self.run_reverts(todo, mainline, orig, &HashSet::new(), json, out)
     }
 
-    /// `alt revert --continue`: commit the resolved revert, then go on with
-    /// the rest of the sequence.
-    pub fn revert_continue(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
-        let state = self
-            .revert_state()?
-            .ok_or("revert --continue: no revert in progress")?;
-        self.ensure_signing()?;
-        if let Some(current) = state.current {
-            if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-                return Err(
-                    "revert --continue: resolve the conflicts and `alt add` them first".into(),
-                );
-            }
-            let head = self.branch_tip("revert --continue")?;
-            let head_tree = self.commit_tree(head)?;
-            let tree = self.staged_tree(Some(head_tree))?;
-            let msg = self.revert_message(current, state.mainline)?;
-            // the rest of the sequence waits from this commit on
-            let rest = RevertState {
-                current: None,
-                todo: state.todo.clone(),
-                ..state
-            };
-            self.save_revert_rest(&rest)?;
-            let commit = self.commit_revert(head, tree, &msg)?;
-            self.report_revert(commit, &msg, json, out)?;
-        }
-        self.run_reverts(state.todo, state.mainline, state.orig, json, out)
-    }
-
-    /// `alt revert --abort`: put the branch, index and working tree back to
-    /// where they were before the sequence started.
-    pub fn revert_abort(&mut self, out: &mut impl Write) -> Res<()> {
-        let state = self
-            .revert_state()?
-            .ok_or("revert --abort: no revert in progress")?;
-        let branch = self.head_branch()?;
-        let head = self.branch_tip("revert --abort")?;
-        // the branch moves back with the reset, in one ref transaction
-        let back = RefChange {
-            name: branch,
-            old: Some(RefTarget::Oid(head)),
-            new: Some(RefTarget::Oid(state.orig)),
-        };
-        let moved = if head != state.orig {
-            vec![back]
-        } else {
-            Vec::new()
-        };
-        self.clear_revert_state()?;
-        self.reset_merge(state.orig, "revert --abort", &moved)?;
-        self.settle_state()?;
-        writeln!(out, "Revert aborted.")?;
-        Ok(())
-    }
-
-    fn run_reverts(
+    pub(super) fn run_reverts(
         &mut self,
         todo: Vec<ObjectId>,
         mainline: Option<usize>,
         orig: ObjectId,
+        dirty: &HashSet<BString>,
         json: bool,
         out: &mut impl Write,
     ) -> Res<bool> {
@@ -112,7 +60,7 @@ impl NativeRepo<'_> {
                 mainline,
                 orig,
             };
-            match self.revert_one(target, rest)? {
+            match self.revert_one(target, rest, dirty)? {
                 Reverted::Committed(commit) => {
                     let msg = self.revert_message(target, mainline)?;
                     self.report_revert(commit, &msg, json, out)?;
@@ -142,7 +90,13 @@ impl NativeRepo<'_> {
     /// the commit and whose other side is its (mainline) parent. `rest` is
     /// what the sequence remembers after it, which holds with its commit;
     /// where it stops, that it stopped at this one holds with the conflict.
-    fn revert_one(&mut self, target: ObjectId, rest: RevertState) -> Res<Reverted> {
+    /// Refused where it would write one of the files `dirty`.
+    fn revert_one(
+        &mut self,
+        target: ObjectId,
+        rest: RevertState,
+        dirty: &HashSet<BString>,
+    ) -> Res<Reverted> {
         let mainline = rest.mainline;
         let head = self.branch_tip("revert")?;
         let parent = self.revert_parent(target, mainline)?;
@@ -152,8 +106,10 @@ impl NativeRepo<'_> {
             Some(p) => self.commit_entries(p)?,
             None => Vec::new(), // reverting a root commit removes what it added
         };
-        let label = format!("parent of {}", &target.to_string()[..7]);
+        let subject = self.subject_of(target)?;
+        let label = format!("parent of {} ({subject})", &target.to_string()[..7]);
         let resolved = self.merge_trees(&base, &ours, &theirs, &label)?;
+        resume::ensure_none_overwritten(&ours, &resolved, dirty, "revert")?;
         self.store.odb.flush()?;
         if resolved.iter().any(|r| r.conflicted) {
             let current = Some(target);
@@ -181,7 +137,12 @@ impl NativeRepo<'_> {
 
     /// Records a revert commit on top of `head`, refusing one that changes
     /// nothing (git stops there too).
-    fn commit_revert(&mut self, head: ObjectId, tree: ObjectId, msg: &str) -> Res<ObjectId> {
+    pub(super) fn commit_revert(
+        &mut self,
+        head: ObjectId,
+        tree: ObjectId,
+        msg: &str,
+    ) -> Res<ObjectId> {
         let head_tree = self.commit_tree(head)?;
         if head_tree == tree {
             return Err("revert: nothing to commit, the revert changes nothing".into());
@@ -237,7 +198,7 @@ impl NativeRepo<'_> {
 
     /// Git's revert message: `Revert "<subject>"` (or `Reapply "…"` when the
     /// subject is itself a revert) and a line naming the reverted commit.
-    fn revert_message(&self, target: ObjectId, mainline: Option<usize>) -> Res<String> {
+    pub(super) fn revert_message(&self, target: ObjectId, mainline: Option<usize>) -> Res<String> {
         let obj = self
             .store
             .odb
@@ -265,7 +226,7 @@ impl NativeRepo<'_> {
         Ok(format!("{title}\n\n{body}\n"))
     }
 
-    fn report_revert(
+    pub(super) fn report_revert(
         &self,
         commit: ObjectId,
         msg: &str,
@@ -290,7 +251,7 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
-    fn branch_tip(&self, verb: &str) -> Res<ObjectId> {
+    pub(super) fn branch_tip(&self, verb: &str) -> Res<ObjectId> {
         let branch = self.head_branch()?;
         Ok(self
             .store

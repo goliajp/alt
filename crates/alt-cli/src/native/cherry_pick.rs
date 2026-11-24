@@ -45,8 +45,9 @@ impl NativeRepo<'_> {
         let label = target_oid.to_string();
         let label_short = &label[..label.len().min(8)];
 
-        let resolved =
-            self.merge_trees(&base_entries, &ours_entries, &theirs_entries, label_short)?;
+        // the side picked is named in a conflict as git names it
+        let theirs = format!("{} ({})", &label[..7], self.subject_of(target_oid)?);
+        let resolved = self.merge_trees(&base_entries, &ours_entries, &theirs_entries, &theirs)?;
         self.store.odb.flush()?;
 
         if resolved.iter().any(|r| r.conflicted) {

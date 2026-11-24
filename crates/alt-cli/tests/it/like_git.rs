@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const SIGNING: [(&str, &str); 6] = [
+pub const SIGNING: [(&str, &str); 6] = [
     ("GIT_AUTHOR_NAME", "tester"),
     ("GIT_AUTHOR_EMAIL", "t@e"),
     ("GIT_COMMITTER_NAME", "tester"),

@@ -253,6 +253,7 @@ mod git_settings;
 #[cfg(debug_assertions)]
 mod recover_shared_refs;
 mod recovery_kinds;
+mod sequence_resumed;
 mod stack_overflow;
 mod value_hints;
 

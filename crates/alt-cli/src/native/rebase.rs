@@ -99,10 +99,8 @@ impl NativeRepo<'_> {
             .ok_or("rebase --continue: no rebase in progress")?;
         self.committer()?;
         if let Some((action, commit)) = state.current {
-            if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-                return Err(
-                    "rebase --continue: resolve the conflicts and `alt add` them first".into(),
-                );
+            if !self.resolved_and_staged(json, out)? {
+                return Ok(true);
             }
             let head_tree = self.commit_tree(self.rebase_head()?)?;
             let tree = self.staged_tree(Some(head_tree))?;
@@ -117,10 +115,8 @@ impl NativeRepo<'_> {
             self.save_rebase_state(&state)?;
             self.apply_step(action, commit, tree, state.fresh_dates)?;
         } else if let Some((commit, theirs)) = state.merging {
-            if self.index()?.entries.iter().any(|e| e.stage() > 0) {
-                return Err(
-                    "rebase --continue: resolve the conflicts and `alt add` them first".into(),
-                );
+            if !self.resolved_and_staged(json, out)? {
+                return Ok(true);
             }
             let head_tree = self.commit_tree(self.rebase_head()?)?;
             let tree = self.staged_tree(Some(head_tree))?;
@@ -146,8 +142,7 @@ impl NativeRepo<'_> {
                 return Ok(stopped);
             }
         }
-        // HEAD goes back to the branch and the branch to the commits made,
-        // in one ref transaction that the state ends with
+        // HEAD goes back to the branch and the branch to the commits made
         let new = self.rebase_head()?;
         let moved = (new != state.orig).then_some((state.orig, new));
         let moved = self.scratch_left(&state.branch, moved)?;
@@ -181,7 +176,11 @@ impl NativeRepo<'_> {
         };
         let ours = self.commit_entries(head)?;
         let theirs = self.commit_entries(commit)?;
-        let label = commit.to_string()[..7].to_owned();
+        let label = format!(
+            "{} ({})",
+            &commit.to_string()[..7],
+            self.subject_of(commit)?
+        );
         let resolved = self.merge_trees(&base, &ours, &theirs, &label)?;
         self.store.odb.flush()?;
         if resolved.iter().any(|r| r.conflicted) {
