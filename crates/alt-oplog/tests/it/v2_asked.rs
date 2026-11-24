@@ -8,7 +8,7 @@ use alt_oplog::{Answer, OpLog, OpLogError};
 
 use super::v2_beside::Beside;
 use super::v2_driver::{Run, name};
-use super::v2_meanwhile::says;
+use super::v2_meanwhile::{refused_of, says};
 use super::v2_model::Laid;
 use super::v2_owed::Claim;
 
@@ -149,19 +149,21 @@ impl Run {
         if read.is_err() || left.is_err() {
             return;
         }
-        // and a writer that finds no note beside the log cuts that op
+        // what that op names is gone, and a writer that finds no note
+        // beside the log looks
         let unsettled = self.unsettled_before(u64::MAX);
+        self.model.stored.lock().unwrap().remove(&after);
         let _ = std::fs::remove_file(self.path().join("tail"));
         let mut cutter = OpLog::open(self.path()).expect("the log opens");
-        let (refused, mut asked) = (Some(after), Vec::new());
-        let cut = cutter.settle(says(&refused, &mut asked));
+        let (stored, mut asked) = (self.model.stored.clone(), Vec::new());
+        let cut = cutter.settle(says(&stored, &mut asked));
         let told = cutter.take_discarded();
         drop(cutter);
-        self.trace.push("a writer cuts that op".into());
+        self.trace.push("a writer looks".into());
         match cut {
-            Ok(cut) => drop(self.settled(&unsettled, &refused, &asked, (cut, told))),
+            Ok(cut) => drop(self.settled(&unsettled, &asked, (cut, told))),
             Err(why @ (OpLogError::Kept { .. } | OpLogError::Lost { .. })) => {
-                return self.cut_refused(&refused, &asked, &why, &told);
+                return self.cut_refused(&refused_of(&asked), &asked, &why, &told);
             }
             Err(other) => panic!("{other:?}"),
         }

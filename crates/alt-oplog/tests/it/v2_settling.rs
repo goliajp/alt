@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use alt_oplog::OpLogError;
 
 use super::v2_driver::{Run, name};
-use super::v2_meanwhile::says;
+use super::v2_meanwhile::{refused_of, says};
 
 impl Run {
     /// The cut of a call on a handle ended after `step` of its steps as
@@ -28,34 +28,37 @@ impl Run {
             // are all there
             1 => self.ledger.begun = Some(self.ledger.place_of(refused)),
             // the checkpoint lies over the first of them
-            _ => drop(self.ledger.cut_from(refused, self.model.synced)),
+            _ => drop(self.cut_took(refused)),
         }
     }
 
     /// A writer looks at what was left, as it does before it appends, and
-    /// cuts what is not vouched for; with `surely`, it refuses an op
-    /// wherever there is one. With `dies`, a cut ends after that step of
-    /// it as if the process had died.
+    /// cuts what is not vouched for; with `surely`, what an op names is
+    /// gone first, wherever there is one that may be. With `dies`, a cut
+    /// ends after that step of it as if the process had died.
     pub fn settle(&mut self, index: usize, dies: Option<u8>, surely: bool) -> bool {
         let unsettled = self.unsettled_before(u64::MAX);
-        let refused = self.refusal(surely, true);
-        let refuses = refused.as_deref().map(name);
-        self.trace.push(format!(
-            "handle {index} settles, refusing {refuses:?}, dies: {dies:?}"
-        ));
-        let mut asked = Vec::new();
+        if surely || self.rng.one_in(3) {
+            self.lose_one();
+        }
+        self.trace
+            .push(format!("handle {index} settles, dies: {dies:?}"));
+        let (stored, mut asked) = (self.model.stored.clone(), Vec::new());
         alt_oplog::v2::cut_dies_after(dies);
-        let cut = self.handles[index].log.settle(says(&refused, &mut asked));
+        let cut = self.handles[index].log.settle(says(&stored, &mut asked));
         alt_oplog::v2::cut_dies_after(None);
+        let refused = refused_of(&asked);
         if let (Some(step), Err(OpLogError::Io(_))) = (dies, &cut) {
             // what it was told before it died it was told
-            self.trace.push("  the cut dies".into());
-            let vouched = asked.iter().filter(|(_, held)| *held);
+            self.trace.push(format!(
+                "  the cut dies, of {:?}",
+                refused.as_deref().map(name)
+            ));
+            let vouched = asked.iter().take_while(|(_, held)| *held);
             self.model
                 .vouched
                 .extend(vouched.map(|(payload, _)| payload.clone()));
-            let cut_of = asked.iter().any(|(_, held)| !held);
-            self.cut_died(index, step, refused.as_deref().filter(|_| cut_of));
+            self.cut_died(index, step, refused.as_deref());
             return false;
         }
         let told = self.handles[index].log.take_discarded();
@@ -67,7 +70,7 @@ impl Run {
             return false;
         };
         let had = self.in_the_log(index);
-        let cut = self.settled(&unsettled, &refused, &asked, (cut, told));
+        let cut = self.settled(&unsettled, &asked, (cut, told));
         self.counts.cuts.fetch_add(cut as u64, Ordering::Relaxed);
         // of the frames on no ticket that it cut itself, its caller is
         // told by the look, and of no other
@@ -128,8 +131,11 @@ impl Run {
         }
         let synced = self.sync_through(held, way - 2, &[]);
         self.by_sink = false;
-        if let Err(OpLogError::Unjudged { at }) = synced {
-            self.unjudged(held, at);
+        match synced {
+            Err(OpLogError::Unjudged { at }) => self.unjudged(held, at),
+            // what an op it has seen to names is gone
+            Err(OpLogError::Io(_)) if self.lacked_now() => return,
+            _ => {}
         }
         // one that leaves its syncs to a sink learns nothing by that
         let handle = &self.handles[held];

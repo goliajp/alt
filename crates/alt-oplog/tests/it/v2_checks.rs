@@ -86,7 +86,6 @@ impl Run {
         if super::v2_cut_told::cut_told(self.path()).0 <= log.cut.0 {
             self.ledger.begun = None;
         }
-        self.ledger.cut_at = log.cut_at;
         if self.cut_synced {
             self.model.fsynced = self.model.fsynced.max(log.cut.1);
         }

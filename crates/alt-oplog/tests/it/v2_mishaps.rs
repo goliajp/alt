@@ -85,6 +85,9 @@ impl Run {
             tell_cut(self.path(), (0, 0));
             self.ledger.begun = None;
         }
+        if !whole {
+            self.lose_unsynced();
+        }
         let log = self.log();
         self.model.rebooted(&log);
         Self::in_boot(self.beside, self.model.boot);

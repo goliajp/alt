@@ -28,6 +28,18 @@ fn all_of(batch: usize, block_exp: u8, sequences: u64) {
     for (what, count) in of {
         assert!(count.load(Ordering::Relaxed) > 0, "no {what}");
     }
+    // a cut refused for a frame to keep is one somebody needed, or of
+    // one of the kinds the log cannot tell from that; those are fewer
+    let count = |of: &std::sync::atomic::AtomicU64| of.load(Ordering::Relaxed);
+    let needed = count(&counts.kept_needed);
+    let unneeded = count(&counts.kept_uncovered)
+        + count(&counts.kept_unanswered)
+        + count(&counts.kept_receipt);
+    assert_eq!(needed + unneeded, count(&counts.kept_refused));
+    assert!(
+        unneeded < needed,
+        "{unneeded} cuts refused that nobody needed"
+    );
 }
 
 #[test]

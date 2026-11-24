@@ -74,6 +74,15 @@ impl Run {
                 frame.end() <= synced,
                 "{who} says {frame:?} is synced: the log is up to {synced}"
             );
+            // from now on somebody was answered for it
+            match frame {
+                Wrote::Op(anchor) => {
+                    let op = self.ledger.ops.iter().find(|op| op.id == anchor.op);
+                    let payload = op.expect("the log holds it").payload.clone();
+                    self.model.answered.insert(payload);
+                }
+                Wrote::Receipt(of, _) => drop(self.model.answered_receipts.insert(*of)),
+            }
         }
     }
 

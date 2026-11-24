@@ -14,7 +14,7 @@ use super::v2_counts::Counts;
 use super::v2_ledger::Ledger;
 use super::v2_log::file_len;
 use super::v2_meanwhile::Meanwhile;
-use super::v2_model::{Model, Reference, Rng, reference};
+use super::v2_model::{Model, Reference, Rng, Stored, reference};
 
 /// What each call gave to whoever syncs what ops name, by payload, and
 /// whether that one did.
@@ -67,6 +67,9 @@ pub struct Run {
     /// a handle was refused for an op nobody looked at, since this
     /// was last asked
     pub to_look: bool,
+    /// whoever syncs what ops name did not, in a call taken in since
+    /// this was last asked
+    pub lacked: bool,
     /// what was done, for a run that fails
     pub trace: Vec<String>,
     pub counts: &'static Counts,
@@ -78,20 +81,23 @@ pub fn name(payload: &[u8]) -> String {
     text.trim_end_matches('.').to_owned()
 }
 
-/// Whoever syncs what ops name: it notes what it is given in `calls` and
-/// does as `refuses` says. With `meanwhile`, another handle on the log in
-/// the directory given does what is planned there while it is at it.
+/// Whoever syncs what ops name: it notes what it is given in `calls`,
+/// and syncs it unless `refuses` says otherwise or what one of the ops
+/// names is not among `stored`. With `meanwhile`, another handle on the
+/// log in the directory given does what is planned there while it is at
+/// it.
 fn seer(
     calls: Calls,
-    refuses: Arc<AtomicBool>,
+    (refuses, stored): (Arc<AtomicBool>, Stored),
     meanwhile: Option<(Meanwhile, PathBuf)>,
 ) -> SyncNamed {
     let alone = meanwhile
         .is_some()
-        .then(|| seer(calls.clone(), refuses.clone(), None));
+        .then(|| seer(calls.clone(), (refuses.clone(), stored.clone()), None));
     Arc::new(move |ops| {
-        let given = ops.iter().map(|op| op.payload.clone()).collect();
-        let does = !refuses.load(Ordering::Relaxed);
+        let given: Vec<Vec<u8>> = ops.iter().map(|op| op.payload.clone()).collect();
+        let there = given.iter().all(|op| stored.lock().unwrap().contains(op));
+        let does = there && !refuses.load(Ordering::Relaxed);
         calls.lock().unwrap().push((given, does));
         if let (Some((meanwhile, dir)), Some(alone)) = (&meanwhile, &alone) {
             meanwhile.run(dir, alone);
@@ -123,6 +129,7 @@ impl Run {
         let mut named = super::v2_image::header(block_exp);
         named.id[..8].copy_from_slice(&seed.to_le_bytes());
         super::v2_features::with_header(dir.path(), named);
+        let stored = Stored::default();
         Run {
             dir,
             rng: Rng(seed),
@@ -130,6 +137,7 @@ impl Run {
             beside,
             model: Model {
                 boot: 1,
+                stored: stored.clone(),
                 ..Model::default()
             },
             ledger: Ledger::default(),
@@ -137,7 +145,7 @@ impl Run {
             block: 1 << block_exp,
             calls: Calls::default(),
             refuses: Arc::default(),
-            meanwhile: Meanwhile::default(),
+            meanwhile: Meanwhile::with(stored),
             appended: 0,
             request: 1,
             cut_synced: false,
@@ -145,6 +153,7 @@ impl Run {
             by_sink: false,
             to_defer: false,
             to_look: false,
+            lacked: false,
             trace: Vec::new(),
             counts,
         }
@@ -171,11 +180,8 @@ impl Run {
             self.handles.remove(gone);
         }
         let meanwhile = (self.meanwhile.clone(), self.path().to_owned());
-        log.sync_named_with(seer(
-            self.calls.clone(),
-            self.refuses.clone(),
-            Some(meanwhile),
-        ));
+        let sees = (self.refuses.clone(), self.model.stored.clone());
+        log.sync_named_with(seer(self.calls.clone(), sees, Some(meanwhile)));
         let deferred = !read_only && (self.rng.one_in(4) || self.to_defer);
         log.set_defer_durability(deferred);
         let sink = deferred.then(|| log.sync_handle().unwrap());
@@ -221,11 +227,23 @@ impl Run {
             let names: Vec<String> = given.iter().map(|payload| name(payload)).collect();
             self.trace
                 .push(format!("  given {names:?}, sees to it: {did}"));
-            if *did {
-                self.model.seen_to.extend(given.iter().cloned());
+            match did {
+                true => {
+                    self.model.seen_to.extend(given.iter().cloned());
+                    self.model.durable.extend(given.iter().cloned());
+                }
+                false => self.lacked = true,
             }
         }
         calls.len()
+    }
+
+    /// Whether whoever syncs what ops name did not, in a call made
+    /// since this was last asked: it was made to fail, or what an op it
+    /// was given names is gone.
+    pub fn lacked_now(&mut self) -> bool {
+        self.calls();
+        std::mem::take(&mut self.lacked)
     }
 
     /// A new op to append: what its frame says of it, and its payload.
@@ -271,6 +289,7 @@ impl Run {
     pub fn appended(&mut self, actor: &str, payload: Vec<u8>, of: (&Meta, bool), head: Anchor) {
         let log = (self.dir.path(), self.block);
         self.ledger.appended(log, (actor, &payload), of, head);
+        self.model.stored.lock().unwrap().insert(payload.clone());
         self.model.written.insert(payload, self.model.boot);
         // it read the log to its end under the lock: a cut that was
         // begun and never came to the log is forgotten

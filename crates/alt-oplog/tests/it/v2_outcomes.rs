@@ -7,7 +7,7 @@ use alt_oplog::{Discarded, OpLogError, Unconfirmed};
 
 use super::v2_driver::{Run, name};
 use super::v2_ledger::Entry;
-use super::v2_meanwhile::Outcome;
+use super::v2_meanwhile::{Outcome, refused_of};
 use super::v2_model::Laid;
 
 impl Run {
@@ -22,9 +22,6 @@ impl Run {
             self.ledger.begun = None;
         }
         self.ledger.reconciled(told, cut);
-        if let Some(last) = told.last() {
-            self.ledger.cut_at = last.from;
-        }
     }
 
     /// What a call on handle `index` came to that reads the log or
@@ -67,7 +64,7 @@ impl Run {
                 self.counts.cut_back.fetch_add(1, Ordering::Relaxed);
                 None
             }
-            Err(OpLogError::Io(_)) if may_fail => {
+            Err(OpLogError::Io(_)) if may_fail || self.lacked_now() => {
                 self.trace.push("  it fails as it was made to".into());
                 None
             }
@@ -104,7 +101,9 @@ impl Run {
         let names: Vec<String> = asked.iter().map(|(payload, _)| name(payload)).collect();
         self.trace
             .push(format!("  asked of {names:?}, stopped at {stopped:?}"));
-        let vouched = asked.iter().filter(|(_, held)| *held);
+        // what it asks about past an op it was told is not held, it
+        // asks to tell whether a frame there is one to keep
+        let vouched = asked.iter().take_while(|(_, held)| *held);
         self.model
             .vouched
             .extend(vouched.map(|(payload, _)| payload.clone()));
@@ -123,28 +122,16 @@ impl Run {
 
     /// Takes in what a writer's look came to. It cut the log when it was
     /// told of an op that it is not held, and then only: the ops cut are
-    /// that one, `refused`, and all after it, what the look gives back
-    /// says so, and what the handle tells as cut is those. Whether it
-    /// cut.
+    /// that one and all after it, what the look gives back says so, and
+    /// what the handle tells as cut is those. Whether it cut.
     pub fn settled(
         &mut self,
         unsettled: &[Laid],
-        refused: &Option<Vec<u8>>,
         asked: &[(Vec<u8>, bool)],
         (cut, told): (Option<Unconfirmed>, Vec<Discarded>),
     ) -> bool {
-        // what was never finished at the end of the log was cut before
-        // the look's own cut
-        let own = asked.iter().any(|(_, held)| !held);
-        if let Some(last) = told[..told.len().saturating_sub(own as usize)].last() {
-            self.ledger.cut_at = last.from;
-        }
-        let gone = own.then(|| {
-            let refused = refused.as_ref().expect("an op was refused");
-            let index = self.ledger.ops.iter().position(|op| op.payload == *refused);
-            self.cut_kept_nothing(index.expect("the op to cut is in the log"));
-            self.ledger.cut_from(refused, self.model.synced)
-        });
+        let refused = refused_of(asked);
+        let gone = refused.as_ref().map(|refused| self.cut_took(refused));
         let cut_at = gone.as_ref().map(|gone| (gone[0].at, gone.len()));
         assert_eq!(
             cut.map(|cut| (cut.at, cut.ops)),
@@ -179,23 +166,12 @@ impl Run {
                     self.cuts_told(&told, None);
                     self.appended("meanwhile", payload, (&meta, unsynced), head);
                 }
-                Outcome::Refused {
-                    refused,
-                    asked,
-                    why,
-                    told,
-                } => self.cut_refused(&refused, &asked, &why, &told),
-                Outcome::Looked {
-                    refused,
-                    asked,
-                    cut,
-                    told,
-                } => {
-                    let refuses = refused.as_deref().map(name);
-                    self.trace.push(format!(
-                        "  meanwhile a writer settles, refusing {refuses:?}"
-                    ));
-                    let cut = self.settled(unsettled, &refused, &asked, (cut, told));
+                Outcome::Refused { asked, why, told } => {
+                    self.cut_refused(&refused_of(&asked), &asked, &why, &told)
+                }
+                Outcome::Looked { asked, cut, told } => {
+                    self.trace.push("  meanwhile a writer settles".into());
+                    let cut = self.settled(unsettled, &asked, (cut, told));
                     let cuts = &self.counts.meanwhile_cuts;
                     cuts.fetch_add(cut as u64, Ordering::Relaxed);
                 }

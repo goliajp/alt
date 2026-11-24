@@ -16,8 +16,8 @@ use std::sync::atomic::Ordering;
 use alt_oplog::OpLogError;
 
 use super::v2_counts::Counts;
-use super::v2_driver::{Run, name};
-use super::v2_meanwhile::{Plan, says};
+use super::v2_driver::Run;
+use super::v2_meanwhile::{Plan, refused_of, says};
 use super::v2_model::Laid;
 
 impl Run {
@@ -45,9 +45,10 @@ impl Run {
                     unsynced,
                 })
             }
-            1 => Some(Plan::Look {
-                refused: self.refusal(true, true),
-            }),
+            1 => {
+                let _ = self.rng.one_in(2) && self.lose_one().is_some();
+                Some(Plan::Look)
+            }
             _ => None,
         };
         self.meanwhile.plan(plan);
@@ -66,8 +67,8 @@ impl Run {
         self.to_look = false;
         if !self.put(index, op.clone(), unsynced, fails) {
             // refused for an op nobody looked at, it looks and appends
-            let looks = std::mem::take(&mut self.to_look);
-            if !(looks && self.settle(index, None, false) && self.put(index, op, unsynced, false)) {
+            let looks = std::mem::take(&mut self.to_look) && self.settle(index, None, false);
+            if !(looks && self.put(index, op, unsynced, false)) {
                 return;
             }
         }
@@ -111,7 +112,7 @@ impl Run {
             Err(OpLogError::CutBack) => self.trace.push(format!(
                 "  its caller is told of a cut (by the sink: {by_sink})"
             )),
-            Err(OpLogError::Io(_)) if fails => {
+            Err(OpLogError::Io(_)) if fails || self.lacked_now() => {
                 self.trace.push("  it fails as it was made to".into())
             }
             Err(OpLogError::Unjudged { at }) => self.unjudged(index, at),
@@ -129,26 +130,25 @@ impl Run {
         }
         let end = self.handles[index].log.appended_len();
         let unsettled = self.unsettled_before(end);
-        let refused = self.refusal(surely, false);
-        let refuses = refused.as_deref().map(name);
-        self.trace
-            .push(format!("handle {index} looks, refusing {refuses:?}"));
-        let mut asked = Vec::new();
+        if surely || self.rng.one_in(3) {
+            self.lose_one();
+        }
+        self.trace.push(format!("handle {index} looks"));
+        let (stored, mut asked) = (self.model.stored.clone(), Vec::new());
         let found = self.handles[index]
             .log
-            .unconfirmed(says(&refused, &mut asked));
-        // a reader is refused as a writer is that would not cut there;
-        // it has not read the log to its end as that one has
+            .unconfirmed(says(&stored, &mut asked));
+        // a reader is refused as a writer is, short of the end of the log
         if let Err(why @ OpLogError::Kept { .. }) = &found {
             let begun = self.ledger.begun;
-            self.cut_refused(&refused, &asked, why, &[]);
+            self.cut_refused(&refused_of(&asked), &asked, why, &[]);
             self.ledger.begun = begun;
             return;
         }
         if let Some(found) = self.took(index, found, false) {
             // it ends at the op it was told is not held, and nowhere else
-            let unheld = asked.iter().find(|(_, held)| !held);
-            let ends = unheld.map(|(payload, _)| self.ledger.place_of(payload));
+            let unheld = refused_of(&asked);
+            let ends = unheld.map(|payload| self.ledger.place_of(&payload));
             assert_eq!(
                 found.map(|found| found.at),
                 ends,
@@ -203,6 +203,8 @@ impl Run {
         if self.handles.is_empty() {
             self.open(false);
         }
+        self.calls();
+        self.lacked = false;
         match self.rng.below(100) {
             0..7 => {
                 let read_only = self.rng.one_in(2);

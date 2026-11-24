@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use alt_oplog::v2::block::FileHeader;
 use alt_oplog::v2::frame::{KIND_OP, KIND_RECEIPT};
@@ -134,6 +135,10 @@ impl Reference {
     }
 }
 
+/// The ops whose content is on disk, by payload: for whoever is asked
+/// whether what an op names is stored, on any thread.
+pub type Stored = Arc<Mutex<HashSet<Vec<u8>>>>;
+
 /// What whoever drives the handles knows of the ops beside the file.
 #[derive(Default)]
 pub struct Model {
@@ -151,6 +156,17 @@ pub struct Model {
     /// up to where the file was fsynced at least: no power cut takes
     /// what lies before
     pub fsynced: u64,
+    /// What an op names is on disk from when the op is appended, and
+    /// may be gone when the machine goes down
+    pub stored: Stored,
+    /// unless a sync saw to the op: what these name stays
+    pub durable: HashSet<Vec<u8>>,
+    /// up to where the log was ever recorded as synced, in any boot
+    pub covered: u64,
+    /// the ops, and the receipts by their requests, that a sync
+    /// answered a caller for as synced
+    pub answered: HashSet<Vec<u8>>,
+    pub answered_receipts: HashSet<[u8; 16]>,
 }
 
 impl Model {
@@ -184,6 +200,7 @@ impl Model {
         }
         self.synced = claimed;
         self.fsynced = self.fsynced.max(claimed);
+        self.covered = self.covered.max(claimed);
     }
 
     /// The machine went down and came up: what its last boot knew beside
