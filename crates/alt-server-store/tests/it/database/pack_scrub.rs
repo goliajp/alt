@@ -3,7 +3,7 @@
 use super::*;
 
 /// Has the first record of the bytes of a segment tell of the entry of the second.
-fn turned(bytes: &mut [u8]) {
+pub(super) fn turned(bytes: &mut [u8]) {
     let end = bytes.len() - 64;
     let pack = u64::from_le_bytes(bytes[end..end + 8].try_into().unwrap()) as usize;
     let records = pack + 1024;
@@ -17,7 +17,7 @@ fn turned(bytes: &mut [u8]) {
 }
 
 /// A live segment of `bytes` behind those the repository has.
-fn planted(f: &Fixture, id: &str, sequence: i64, bytes: &[u8]) {
+pub(super) fn planted(f: &Fixture, id: &str, sequence: i64, bytes: &[u8]) {
     std::fs::write(f.store.pack_path("repository", id).unwrap(), bytes).unwrap();
     f.client()
         .execute(
@@ -27,7 +27,7 @@ fn planted(f: &Fixture, id: &str, sequence: i64, bytes: &[u8]) {
         .unwrap();
 }
 
-fn states(f: &Fixture) -> Vec<(String, String)> {
+pub(super) fn states(f: &Fixture) -> Vec<(String, String)> {
     f.client()
         .query(
             "SELECT segment_id,state FROM alt_pack_segments ORDER BY sequence,state,segment_id",
