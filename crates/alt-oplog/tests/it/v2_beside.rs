@@ -59,6 +59,15 @@ pub fn meddled(seed: u64, counts: &'static Counts) {
     alt_oplog::v2::before_note_read(Some(Box::new(meddles)));
 }
 
+/// A new log in `dir`, named after `seed`: a sequence lays the same
+/// bytes every time it runs.
+pub fn new_log(dir: &Path, block_exp: u8, seed: u64) {
+    alt_oplog::v2::create_with(dir, block_exp).unwrap();
+    let mut named = super::v2_image::header(block_exp);
+    named.id[..8].copy_from_slice(&seed.to_le_bytes());
+    super::v2_features::with_header(dir, named);
+}
+
 impl Run {
     /// Has the handles this thread opens from now on run in boot `n`, as
     /// far as the kernel tells one where the sequence runs.

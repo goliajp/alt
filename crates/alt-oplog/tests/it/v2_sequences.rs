@@ -219,7 +219,8 @@ impl Run {
                 self.trace.push(format!("handle {gone} is closed"));
                 self.handles.remove(gone);
             }
-            10..41 => self.append(),
+            10..40 => self.append(),
+            40..41 => self.staged_committed_staged(),
             41..42 => self.cut_begun(),
             42..50 => {
                 let (index, how) = (self.writer(), self.rng.below(4));

@@ -37,8 +37,10 @@ pub struct Counts {
     pub unpromised: AtomicU64,
     /// syncs refused a boundary over an op nobody looked at
     pub unjudged: AtomicU64,
-    /// of them, over an op the driver knows nobody has to look at
+    /// of them, over an op the driver knows nobody has to look at: with
+    /// the note beside the log gone or never written, and with it kept
     pub unjudged_more: AtomicU64,
+    pub unjudged_more_noted: AtomicU64,
     /// cuts refused before a frame to keep, and within what is synced
     pub kept_refused: AtomicU64,
     pub lost_refused: AtomicU64,
@@ -50,6 +52,8 @@ pub struct Counts {
     pub meanwhile: AtomicU64,
     pub meanwhile_cuts: AtomicU64,
     pub receipts: AtomicU64,
+    /// changes of an index replaced with a commit in between, and synced
+    pub replaced: AtomicU64,
     pub anchored: AtomicU64,
     pub anchored_gone: AtomicU64,
     pub grown_back: AtomicU64,
@@ -91,6 +95,7 @@ impl Counts {
             unpromised: AtomicU64::new(0),
             unjudged: AtomicU64::new(0),
             unjudged_more: AtomicU64::new(0),
+            unjudged_more_noted: AtomicU64::new(0),
             kept_refused: AtomicU64::new(0),
             lost_refused: AtomicU64::new(0),
             kept_needed: AtomicU64::new(0),
@@ -98,6 +103,7 @@ impl Counts {
             meanwhile: AtomicU64::new(0),
             meanwhile_cuts: AtomicU64::new(0),
             receipts: AtomicU64::new(0),
+            replaced: AtomicU64::new(0),
             anchored: AtomicU64::new(0),
             anchored_gone: AtomicU64::new(0),
             grown_back: AtomicU64::new(0),
@@ -127,8 +133,6 @@ impl Counts {
         let untold = "of them read the log anew with nobody told";
         vec![
             ("sequences", &self.sequences),
-            ("of them with their fsyncs made", &self.real),
-            ("fsyncs asked for", &self.fsyncs),
             ("with the note beside the log kept", &self.kept),
             ("with it meddled with", &self.meddled),
             ("with none ever written", &self.never),
@@ -149,6 +153,10 @@ impl Counts {
             ),
             ("of them looks that cut the log", &self.meanwhile_cuts),
             ("receipts", &self.receipts),
+            (
+                "changes of an index replaced past a commit and synced",
+                &self.replaced,
+            ),
             ("opens at an anchor that holds", &self.anchored),
             (
                 "opens at the anchor of an op that is gone",
@@ -173,6 +181,8 @@ impl Counts {
     /// The counts of what became of syncs and of cuts that were refused.
     fn named_of_syncs(&self) -> Vec<(&'static str, &AtomicU64)> {
         vec![
+            ("sequences with their fsyncs made", &self.real),
+            ("fsyncs asked for", &self.fsyncs),
             (
                 "callers without a ticket told of a cut by a handle",
                 &self.own_cut,
@@ -195,9 +205,10 @@ impl Counts {
                 &self.unjudged,
             ),
             (
-                "of them over an op the driver knows needs no look",
+                "of them over an op that needs no look, the note beside the log not kept",
                 &self.unjudged_more,
             ),
+            ("and with the note kept", &self.unjudged_more_noted),
             ("cuts refused before a frame to keep", &self.kept_refused),
             (
                 "of them with a frame to keep past the op that a sync covered",

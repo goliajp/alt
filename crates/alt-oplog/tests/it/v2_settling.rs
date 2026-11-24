@@ -74,7 +74,9 @@ impl Run {
         // told by the look, and of no other
         self.forget_cut_now(index, had);
         let len = self.file_len();
-        self.handles[index].seen.push(len);
+        let handle = &mut self.handles[index];
+        handle.seen.push(len);
+        handle.looked = true;
         true
     }
 

@@ -14,6 +14,7 @@ use std::sync::atomic::Ordering;
 
 use alt_oplog::{Anchor, OpLogError, Ticket};
 
+use super::v2_beside::Beside;
 use super::v2_driver::Run;
 use super::v2_model::Laid;
 
@@ -99,11 +100,15 @@ impl Run {
     }
 
     /// Handle `index` was refused a boundary over the op at `at`, which
-    /// it takes for one nobody looked at: the op is in the log. A handle
-    /// may know less than was done, and ask for a look where the driver
-    /// knows of nothing left to look at: the note beside the log may be
-    /// gone or speak of a cut that never was made, and of an op it read
-    /// when it opened the log nothing tells which boot left it.
+    /// it takes for one nobody looked at: the op is in the log, and the
+    /// handle has not looked at all that was left itself. A handle may
+    /// know less than was done, and ask for a look where the driver
+    /// knows of nothing left to look at: of an op it read when it
+    /// opened the log, only the note beside the log tells which boot
+    /// left it and whether somebody looked, and that note may be gone,
+    /// speak of a cut that never was made, or not say what a reader
+    /// found: a reader that vouched for all it read notes nothing where
+    /// ops were noted as left.
     pub fn unjudged(&mut self, index: usize, at: u64) {
         self.trace
             .push(format!("  no boundary is set over the op at {at}"));
@@ -114,8 +119,17 @@ impl Run {
             known,
             "handle {index} is refused a boundary over no op, at {at}"
         );
+        assert!(
+            !self.handles[index].looked,
+            "handle {index}, which looked at all that was left, is refused a boundary over \
+             the op at {at}"
+        );
         if left.iter().all(|op| op.at != at) {
-            self.counts.unjudged_more.fetch_add(1, Ordering::Relaxed);
+            let more = match self.beside == Beside::Kept {
+                true => &self.counts.unjudged_more_noted,
+                false => &self.counts.unjudged_more,
+            };
+            more.fetch_add(1, Ordering::Relaxed);
         }
         self.counts.unjudged.fetch_add(1, Ordering::Relaxed);
         self.to_look = true;
@@ -237,7 +251,11 @@ impl Run {
                     "{who} tells of a cut: the log holds the {} frames it was left",
                     left.len()
                 );
-                // with that it has answered for all of them
+                // with that it has answered for all of them: asked
+                // again, it tells of no cut
+                let again = self.handles[index].sink.as_ref().unwrap().fsync();
+                let twice = matches!(again, Err(OpLogError::CutBack));
+                assert!(!twice, "{who} tells of a cut twice");
                 let told = &self.counts.left_told;
                 told.fetch_add(left.len() as u64, Ordering::Relaxed);
             }

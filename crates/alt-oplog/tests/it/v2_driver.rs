@@ -39,6 +39,8 @@ pub struct Handle {
     /// that were told of a cut
     pub claims: Vec<Claim>,
     pub spent: Vec<Ticket>,
+    /// it looked at all that was left, as a writer does
+    pub looked: bool,
 }
 
 pub struct Run {
@@ -133,12 +135,7 @@ impl Run {
             meddled(seed, counts);
         }
         Self::in_boot(beside, 1);
-        alt_oplog::v2::create_with(dir.path(), block_exp).unwrap();
-        // the log is named after the seed: a sequence lays the same bytes
-        // every time it runs
-        let mut named = super::v2_image::header(block_exp);
-        named.id[..8].copy_from_slice(&seed.to_le_bytes());
-        super::v2_features::with_header(dir.path(), named);
+        super::v2_beside::new_log(dir.path(), block_exp, seed);
         let stored = Stored::default();
         Run {
             dir,
@@ -210,6 +207,7 @@ impl Run {
             head_left: None,
             claims: Vec::new(),
             spent: Vec::new(),
+            looked: false,
         });
         self.handles.len() - 1
     }

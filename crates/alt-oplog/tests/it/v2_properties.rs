@@ -89,8 +89,9 @@ fn held(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
         let seldom = what.starts_with("cuts refused within") && sequences < 10_000;
         assert!(seldom || count.load(Ordering::Relaxed) > 0, "no {what}");
     }
-    // a cut refused for a frame to keep is one somebody needed, or of
-    // one of the kinds the log cannot tell from that; those are fewer
+    // a cut refused for a frame to keep is one the log had to refuse,
+    // a sync having covered a frame, or one it cannot tell from that;
+    // those are fewer
     let count = |of: &std::sync::atomic::AtomicU64| of.load(Ordering::Relaxed);
     let needed = count(&counts.kept_needed);
     let unneeded = count(&counts.kept_uncovered);
@@ -98,6 +99,15 @@ fn held(first: u64, block_exp: u8, sequences: u64, counts: &'static Counts) {
     assert!(
         unneeded < needed,
         "{unneeded} cuts refused that nobody needed"
+    );
+    // a handle is refused a boundary over an op that needs no look
+    // where nothing tells it so: less than every other time, and where
+    // the note beside the log is kept, less than one time in ten
+    let (refused, more) = (count(&counts.unjudged), count(&counts.unjudged_more));
+    let noted = count(&counts.unjudged_more_noted);
+    assert!(
+        (more + noted) * 2 < refused && noted * 10 < refused,
+        "{more} and {noted} of {refused} boundaries refused over ops that need no look"
     );
 }
 

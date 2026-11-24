@@ -188,9 +188,7 @@ impl Run {
         self.settle(index, None, false);
         let (meta, payload) = self.op();
         self.to_ticket = true;
-        let put = self.put(index, (meta, payload), false, false);
-        self.to_ticket = false;
-        if !put {
+        if !self.put(index, (meta, payload), false, false) {
             return;
         }
         let handle = &mut self.handles[index];

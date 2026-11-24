@@ -63,6 +63,7 @@ mod v2_passed;
 mod v2_power;
 mod v2_properties;
 mod v2_refusals;
+mod v2_replaced;
 mod v2_reread;
 mod v2_scan;
 mod v2_sequences;

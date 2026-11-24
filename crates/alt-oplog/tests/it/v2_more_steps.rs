@@ -66,7 +66,7 @@ impl Run {
         ));
         self.calls();
         self.refuses.store(fails, Ordering::Relaxed);
-        let ticketed = self.to_ticket || self.also.one_in(3);
+        let ticketed = std::mem::take(&mut self.to_ticket) || self.also.one_in(3);
         let left = unsynced.then(|| alt_os::durability::leave_unsynced(true));
         let log = &mut self.handles[index].log;
         let appended = match ticketed {
