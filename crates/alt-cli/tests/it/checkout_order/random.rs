@@ -1,23 +1,25 @@
 //! Two trees made at random of files, symlinks and directories that take
 //! each other's places and names, checked out one after the other.
 
+mod extras;
+
 use super::{Bench, Leaf, Tree, alt_with, file, listing, there_and_back};
 
-struct Rng(u64);
+pub(super) struct Rng(pub(super) u64);
 
 impl Rng {
-    fn below(&mut self, n: usize) -> usize {
+    pub(super) fn below(&mut self, n: usize) -> usize {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         (self.0 >> 11) as usize % n
     }
 
-    fn pick<'a>(&mut self, from: &[&'a str]) -> &'a str {
+    pub(super) fn pick<'a>(&mut self, from: &[&'a str]) -> &'a str {
         from[self.below(from.len())]
     }
 
-    fn path(&mut self) -> String {
+    pub(super) fn path(&mut self) -> String {
         let steps = 1 + self.below(3);
         let names: Vec<&str> = (0..steps)
             .map(|_| self.pick(&["a", "b", "c", "d"]))
@@ -25,7 +27,7 @@ impl Rng {
         names.join("/")
     }
 
-    fn leaf(&mut self) -> Leaf {
+    pub(super) fn leaf(&mut self) -> Leaf {
         match self.below(5) {
             0 => Leaf::Link(
                 self.pick(&["../decoy", "../decoy/sub", "b", "a/b", "gone"])
@@ -38,7 +40,7 @@ impl Rng {
         }
     }
 
-    fn held(&mut self, tree: &Tree) -> Option<String> {
+    pub(super) fn held(&mut self, tree: &Tree) -> Option<String> {
         let paths: Vec<&String> = tree.keys().collect();
         (!paths.is_empty()).then(|| paths[self.below(paths.len())].clone())
     }
@@ -46,7 +48,7 @@ impl Rng {
 
 /// Puts `leaf` at `path`: what was above it as a file or beneath it as
 /// a directory gives way.
-fn put(tree: &mut Tree, path: &str, leaf: Leaf) {
+pub(super) fn put(tree: &mut Tree, path: &str, leaf: Leaf) {
     let beneath = |inner: &str, outer: &str| {
         inner.len() > outer.len()
             && inner.starts_with(outer)
@@ -56,7 +58,7 @@ fn put(tree: &mut Tree, path: &str, leaf: Leaf) {
     tree.insert(path.to_owned(), leaf);
 }
 
-fn changed(rng: &mut Rng, tree: &mut Tree) {
+pub(super) fn changed(rng: &mut Rng, tree: &mut Tree) {
     let Some(path) = rng.held(tree) else {
         return put(tree, &rng.path(), rng.leaf());
     };
