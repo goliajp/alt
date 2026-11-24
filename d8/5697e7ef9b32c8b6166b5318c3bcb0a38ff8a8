@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: look for the frames an oplog handle could not tell of before it cuts what an append left
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/tests/it/v2_reread.rs
