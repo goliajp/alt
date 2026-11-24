@@ -21,9 +21,8 @@
 //! reads more of the log, looks at more ops and syncs more, and takes
 //! nothing for looked at or synced that it would not have with it. One
 //! of another boot says nothing, and the next command reads more of the
-//! log instead. Whoever writes it holds `lock`,
-//! as does whoever fsyncs the log to move `synced` and whoever cuts the
-//! log.
+//! log instead. Whoever writes it holds `lock`, as does whoever fsyncs
+//! the log to move `synced` and whoever cuts the log.
 //!
 //! It is written in place, in one write, and read without the lock. A
 //! read that finds it not to read may have met the write halfway: it
@@ -122,9 +121,7 @@ impl Held {
         lock_exclusive(&file)?;
         Ok(Held(file))
     }
-}
 
-impl Held {
     /// Waits for whoever holds `lock` in `dir` and takes it, where the
     /// file is there: `None` where it is not, and nobody holds it then.
     /// For a reader, which makes nothing beside a log.
