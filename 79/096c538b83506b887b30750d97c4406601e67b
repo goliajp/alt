@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: give a file or a directory another spelling of its name with mv, where the file system ignores case
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/mv.rs
+touched: crates/alt-cli/tests/it/casefold.rs
+touched: crates/alt-cli/tests/it/like_git.rs
+touched: crates/alt-cli/tests/it/main.rs
