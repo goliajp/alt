@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a backup is made, and a restoration activated, of segments whose objects are read
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/restore.rs
+touched: crates/alt-server/tests/it/database/operator/scrubbed.rs
