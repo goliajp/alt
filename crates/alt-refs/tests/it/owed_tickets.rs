@@ -199,3 +199,29 @@ fn whatever_a_store_does_past_cuts_each_caller_is_told_what_became_of_its_own_co
     );
     assert!(ends.iter().all(|times| *times > 100), "{ends:?}");
 }
+
+#[test]
+fn a_commit_for_a_caller_with_a_ticket_fails_for_no_transaction_another_caller_gave_up() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    boot(1);
+    let mut store = new_store(dir.path());
+    commit(&mut store, "refs/heads/main", 1).unwrap();
+    // a caller has the store commit, its sync left to a sink nobody
+    // asks, and drops its ticket; the transaction is cut
+    store.set_defer_durability(true);
+    drop(committed(&mut store, 2));
+    store.set_defer_durability(false);
+    assert_eq!(cut_unsynced(dir.path(), 1), 1);
+    goes_on(&mut store, false);
+    // the commit of another is made, and that caller is answered: the
+    // sync of its commit covered its transaction
+    let committed = store.ticketed(|store| commit(store, "refs/heads/b3", 3));
+    let ((), ticket) = committed.unwrap();
+    store.sync_for(&ticket).unwrap();
+    assert!(in_the_log(dir.path(), 3) && !in_the_log(dir.path(), 2));
+    // the caller the store has without a ticket is told of the
+    // transaction that was given up, once
+    assert!(super::owed_sync::cut_back(store.bound()));
+    store.bound().unwrap();
+    assert!(store.confirmed());
+}

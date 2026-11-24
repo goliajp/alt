@@ -116,6 +116,11 @@ impl Account {
         self.writing = holder;
     }
 
+    /// Whether what the handle writes now is on a ticket.
+    pub fn on_a_ticket(&self) -> bool {
+        matches!(self.writing, Holder::Ticket(_))
+    }
+
     /// The tickets of `numbers` are dropped: what they held, the handle
     /// holds.
     pub fn given_back(&mut self, numbers: &[u64]) {

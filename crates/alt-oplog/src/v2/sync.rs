@@ -21,6 +21,13 @@
 //! written, and whoever asks it is owed no answer after for the ones
 //! that were written so told. For a frame a writer that syncs wrote,
 //! and for one found cut, the answer is owed still.
+//!
+//! A sync asked without a ticket while the handle writes on one is
+//! asked by the caller of that ticket, which is answered by the ticket:
+//! it syncs what the handle holds, or leaves that to the sink, and
+//! answers for no frame. What is on no ticket, as the frames of a
+//! ticket that was dropped are, is answered for by the next sync asked
+//! without a ticket while the handle writes on none.
 
 use crate::lock::{lock_exclusive, lock_shared, unlock};
 use crate::v2::log::Log;
@@ -35,22 +42,37 @@ fn of_the_handle(holder: Holder) -> bool {
     matches!(holder, Holder::Own | Holder::Left)
 }
 
+fn of_nobody(_: Holder) -> bool {
+    false
+}
+
 impl Log {
+    /// Whom a sync asked without a ticket answers: the frames on no
+    /// ticket, or nobody while the handle writes on one.
+    fn asked_without(&self) -> fn(Holder) -> bool {
+        match self.account.lock().unwrap().on_a_ticket() {
+            true => of_nobody,
+            false => of_the_handle,
+        }
+    }
+
     pub fn sync(&mut self) -> Result<(), OpLogError> {
+        let of = self.asked_without();
         // a handle that may not write the log appended nothing to it
         if relaxed_durability() || !self.writable {
-            return self.promises_nothing(&of_the_handle);
+            return self.promises_nothing(&of);
         }
         if !self.defer {
-            return self.sync_as(&of_the_handle, false);
+            return self.sync_as(&of, false);
         }
         // the sink fsyncs off the write path, records how far, and
         // answers for the frames left to it
         self.write_count += 1;
-        let mut account = self.account.lock().unwrap();
-        account.hand(Holder::Own, Holder::Left);
-        drop(account);
-        self.leave(&|holder| holder == Holder::Left)
+        let leaves = of(Holder::Own);
+        if leaves {
+            self.account.lock().unwrap().hand(Holder::Own, Holder::Left);
+        }
+        self.leave(&|holder| leaves && holder == Holder::Left)
     }
 
     /// Has the frames this handle writes be on a new ticket for as
@@ -202,15 +224,16 @@ impl Log {
         let bounded = self.bounded_to_end();
         let _ = unlock(&self.file);
         bounded?;
+        let asked = self.asked_without();
         if relaxed_durability() {
-            return self.promises_nothing(&of_the_handle);
+            return self.promises_nothing(&asked);
         }
         // a sink answers for what was left to it
-        let of: fn(Holder) -> bool = match self.defer {
-            true => |holder| holder == Holder::Own,
-            false => of_the_handle,
-        };
-        self.sync_as(&of, false)
+        let own = self.defer;
+        self.sync_as(
+            &|holder| asked(holder) && !(own && holder == Holder::Left),
+            false,
+        )
     }
 
     /// With the lock held: what a writer does before it appends, by a

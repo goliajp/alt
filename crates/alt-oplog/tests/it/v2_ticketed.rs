@@ -172,3 +172,40 @@ fn a_sync_that_is_told_to_promise_nothing_leaves_its_caller_owed_no_answer() {
         assert!(log.confirmed(), "deferred: {deferred}");
     }
 }
+
+#[test]
+fn a_sync_asked_while_a_handle_writes_on_a_ticket_tells_of_no_cut_of_what_another_caller_left() {
+    for (deferred, how) in [
+        (false, "sync"),
+        (false, "bound"),
+        (true, "sync"),
+        (true, "bound"),
+    ] {
+        let case = format!("deferred: {deferred}, {how}");
+        let dir = alt_os::temp::tempdir().unwrap();
+        let (mut log, sink) = shared(dir.path(), deferred);
+        // a caller gave up its ticket, and its op is cut
+        drop(asked(&mut log, b"given up"));
+        assert_eq!(cut_from(dir.path(), b"given up"), 1, "{case}");
+        assert!(cut_back(&log.follow()), "{case}");
+        log.reread().unwrap();
+        // another has the handle append and sync, as a commit does
+        let written = log.ticketed(|log| {
+            log.append("b", 2, b"mine")?;
+            match how {
+                "bound" => log.bound_now(),
+                _ => log.sync(),
+            }
+        });
+        let ((), ticket) = written.unwrap_or_else(|told| panic!("{case}: {told:?}"));
+        told(&mut log, &sink, deferred, &ticket).unwrap();
+        assert_eq!(payloads(dir.path()).len(), 3, "{case}");
+        // whoever asks without a ticket, with the handle on none, is
+        // told of what the dropped ticket held, once
+        let of_handle = log.sync().and_then(|()| sink.fsync());
+        assert!(cut_back(&of_handle), "{case}: {of_handle:?}");
+        log.sync().unwrap();
+        sink.fsync().unwrap();
+        assert!(log.confirmed(), "{case}");
+    }
+}

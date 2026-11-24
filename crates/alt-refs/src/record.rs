@@ -51,7 +51,8 @@ impl RefStore {
     /// ticket answers for them, by [`Self::sync_for`] or by a sink of
     /// this store. A sync `write` asks of the store itself, as a commit
     /// does, syncs them or leaves them to the sink all the same, and
-    /// answers for none of them.
+    /// answers for no op: neither for them nor for an op another caller
+    /// had the store append, which was cut.
     pub fn ticketed<T, E>(
         &mut self,
         write: impl FnOnce(&mut Self) -> Result<T, E>,
