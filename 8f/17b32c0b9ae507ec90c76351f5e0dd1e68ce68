@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a nonce of a signed push is sealed and kept nowhere until a signature over it verified
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_certified.rs
