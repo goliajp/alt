@@ -11,9 +11,9 @@ use crate::casefold_dirs::{read, told};
 use crate::casefold_wider::cut;
 use crate::like_git::{alt, alt_daemon, git, heads, index, ok};
 
-const MEET: &str = "meet in one name here";
+pub(crate) const MEET: &str = "meet in one name here";
 
-fn put(root: &Path, file: &str, content: &str) {
+pub(crate) fn put(root: &Path, file: &str, content: &str) {
     let path = root.join(file);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
@@ -22,7 +22,7 @@ fn put(root: &Path, file: &str, content: &str) {
 /// A git repository, made where case is told apart: `only-file` has the
 /// file `d`, `only-dir` the file `D/y`, `both` has both, and `deep` has
 /// such pairs further down and with a symbolic link.
-fn source() -> TempDir {
+pub(crate) fn source() -> TempDir {
     let made = alt_os::temp::tempdir().unwrap();
     let root = made.path();
     let commit = |message: &str| {
@@ -61,7 +61,7 @@ fn source() -> TempDir {
 
 /// The store an import of `source` at `branch` makes on the file system
 /// that ignores case, and what the import said.
-fn imported(source: &Path, branch: &str) -> (TempDir, PathBuf, String) {
+pub(crate) fn imported(source: &Path, branch: &str) -> (TempDir, PathBuf, String) {
     ok(git(source, &["switch", "-q", branch]));
     let held = alt_os::temp::tempdir_in(place()).unwrap();
     let repo = held.path().join("r");
@@ -69,19 +69,24 @@ fn imported(source: &Path, branch: &str) -> (TempDir, PathBuf, String) {
     (held, repo, said)
 }
 
-fn nothing_pending(repo: &Path) {
+pub(crate) fn nothing_pending(repo: &Path) {
     assert_eq!(ok(alt(repo, &["operation", "pending"])), "");
     assert!(!repo.join(".alt/names-asked").exists());
 }
 
-/// Each command fails saying which two paths meet, and leaves the
-/// branches, the index and the tree as they are.
-fn refused(repo: &Path, commands: &[&[&str]], first: &str, second: &str) {
+/// Each command fails saying which two paths meet, as it fails over a
+/// file that is not tracked, and leaves everything as it is.
+pub(crate) fn refused(repo: &Path, commands: &[&[&str]], first: &str, second: &str) {
     let (at, staged, tree) = (heads(repo), index(repo), folded(repo));
     for command in commands {
         let out = alt(repo, command);
         let said = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(code(&out), Some(1), "{command:?}: {said}");
+        let fails = if matches!(command[0], "merge" | "cherry-pick") {
+            75
+        } else {
+            1
+        };
+        assert_eq!(code(&out), Some(fails), "{command:?}: {said}");
         let named = format!("'{first}' and '{second}' {MEET}");
         assert!(said.contains(&named), "{command:?}: {said}");
         assert_eq!(heads(repo), at, "{command:?}");
@@ -182,11 +187,6 @@ fn a_tree_with_a_file_and_a_directory_of_one_name_is_not_checked_out() {
     ok(alt(&repo, &["switch", "only-dir"]));
     ok(alt(&repo, &["stash", "pop"]));
     assert_eq!(read(&repo, "D/y"), "changed\n");
-    // a merge that stops on another path writes neither over the other
-    let (_held, repo, _) = imported(source.path(), "ours");
-    refused(&repo, &[&["merge", "theirs"]], "d", "D/y");
-    assert_eq!(read(&repo, "D/y"), "y\n");
-    assert_eq!(read(&repo, "keep"), "ours\n");
 }
 
 #[test]

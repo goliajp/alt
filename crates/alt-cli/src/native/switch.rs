@@ -239,7 +239,7 @@ impl NativeRepo<'_> {
         let mut in_the_way = Vec::new();
         let both = old.iter().map(|e| e.path.as_slice()).collect();
         let coming = Coming::of(&old, &kept, &both);
-        let respelled = self.respelled_by(&coming)?;
+        let respelled = self.kept_apart(&coming)?;
         let tracked =
             |path: &[u8]| staged.contains_key(&BString::from(path)) || respelled.contains_key(path);
         for entry in kept.iter().filter(|e| !staged.contains_key(&e.path)) {

@@ -83,7 +83,8 @@ impl NativeRepo<'_> {
     /// What refuses a checkout before anything is written.
     pub(super) fn preflight_checkout(&self, old: &[WorkEntry], target: &[WorkEntry]) -> Res<()> {
         self.preflight_paths(old, target)?;
-        self.ensure_new_apart(&Coming::of(old, target, &unchanged(old, target)))
+        let coming = Coming::of(old, target, &unchanged(old, target));
+        self.ensure_new_apart(&coming).map_err(plainly)
     }
 
     /// The checks of [`preflight_checkout`](Self::preflight_checkout) but
@@ -94,7 +95,7 @@ impl NativeRepo<'_> {
             old.iter().map(|e| e.path.as_slice()).collect();
         let same = unchanged(old, target);
         let coming = Coming::of(old, target, &same);
-        let respelled = self.respelled_by(&coming)?;
+        let respelled = self.respelled_by(&coming).map_err(plainly)?;
         let tracked = |p: &[u8]| old_paths.contains(p) || respelled.contains_key(p);
         let mut visible = Visible::default();
         for entry in old.iter().filter(|e| !same.contains(e.path.as_slice())) {
@@ -142,7 +143,8 @@ impl NativeRepo<'_> {
         let old_paths: std::collections::HashSet<&[u8]> =
             old.iter().map(|e| e.path.as_slice()).collect();
         let same = unchanged(old, target);
-        let respelled = self.respelled_by(&Coming::of(old, target, &same))?;
+        let respelled = self.respelled_by(&Coming::of(old, target, &same));
+        let respelled = respelled.map_err(plainly)?;
         let tracked = |p: &[u8]| old_paths.contains(p) || respelled.contains_key(p);
         let paths: std::collections::BTreeSet<_> = old
             .iter()
@@ -250,6 +252,15 @@ fn target_index(target: &[WorkEntry]) -> Res<Index> {
     };
     index_file::ensure_sound(&index)?;
     Ok(index)
+}
+
+/// A refusal as a checkout says what stands in its way: as its own
+/// failure, like a file that is not tracked.
+fn plainly(error: Box<dyn std::error::Error>) -> Box<dyn std::error::Error> {
+    match error.downcast::<crate::machine::Failure>() {
+        Ok(refusal) => refusal.message.into(),
+        Err(other) => other,
+    }
 }
 
 /// Says of a submodule directory left in place what git says. A command
