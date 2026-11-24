@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use super::super::checkout_recovery::FileChange;
+use super::super::checkout_recovery::{EMPTY_DIRECTORY, FileChange, FileState};
 use super::super::*;
 use super::Listed;
 
@@ -36,11 +36,12 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 impl NativeRepo<'_> {
-    /// Renames `from` to `to`, where nothing else is; whether it did. One
-    /// that would pass a file or a symlink above either path is not
-    /// made, nor one the file system cannot make from one of its parts
-    /// to another: it is left to be made as any other change.
-    fn renamed(&self, from: &[u8], to: &[u8], listed: &mut Listed) -> Res<bool> {
+    /// Renames `from` to `to`, where nothing else is, or `over` the file
+    /// that is there; whether it did. One that would pass a file or a
+    /// symlink above either path is not made, nor one the file system
+    /// cannot make from one of its parts to another: it is left to be
+    /// made as any other change.
+    fn renamed(&self, from: &[u8], to: &[u8], over: bool, listed: &mut Listed) -> Res<bool> {
         if !self.may_stand(to)? || !self.beneath_directories(from)? {
             return Ok(false);
         }
@@ -52,8 +53,11 @@ impl NativeRepo<'_> {
             self.abs(&BString::from(from))?,
             self.abs(&BString::from(to))?,
         );
-        if target.symlink_metadata().is_ok() && !same_file(&source, &target) {
-            return Ok(false);
+        match target.symlink_metadata() {
+            Ok(there) if there.is_dir() || !(over || same_file(&source, &target)) => {
+                return Ok(false);
+            }
+            _ => {}
         }
         crash_point!("checkout-move:before");
         self.make_directories_above(to)?;
@@ -112,7 +116,7 @@ impl NativeRepo<'_> {
             if files.is_empty() || !apart || !files.iter().all(goes) || expected != files.len() {
                 continue;
             }
-            if self.renamed(from, to, &mut listed)? {
+            if self.renamed(from, to, false, &mut listed)? {
                 for (gone, come) in moves.iter().filter(|(gone, _)| inside(gone, from)) {
                     done.extend([*gone, *come]);
                 }
@@ -126,8 +130,9 @@ impl NativeRepo<'_> {
         waiting.sort();
         loop {
             let mut blocked = Vec::new();
+            let replaced = |to: &[u8]| changes.iter().any(|c| c.path == to && c.before.is_some());
             for (from, to) in &waiting {
-                match self.renamed(from, to, &mut listed)? {
+                match self.renamed(from, to, replaced(to), &mut listed)? {
                     true => done.extend([*from, *to]),
                     false => blocked.push((*from, *to)),
                 }
@@ -156,16 +161,18 @@ impl NativeRepo<'_> {
 }
 
 /// The moves among `changes`: a path whose file goes, with a path where
-/// nothing was and the same file comes to be. Of several such paths the
-/// one that ends most like the first is taken.
+/// the same file comes to be, in place of nothing or of another file. Of
+/// several such paths the one that ends most like the first is taken.
 fn moves_among<'c>(changes: &[&'c FileChange]) -> HashMap<&'c [u8], &'c [u8]> {
     let file = |c: &FileChange| c.before.as_ref().or(c.after.as_ref()).map(|s| s.mode);
     let plain = |c: &&&'c FileChange| file(c).is_some_and(|mode| mode != 0o160000);
     let gone = changes.iter().filter(plain).filter(|c| c.after.is_none());
+    // a file or a symlink gives way to what is renamed over it
+    let replaceable = |s: &FileState| s.mode != 0o160000 && s.mode != EMPTY_DIRECTORY;
     let mut come: Vec<&'c FileChange> = changes
         .iter()
         .filter(plain)
-        .filter(|c| c.before.is_none())
+        .filter(|c| c.before != c.after && c.before.as_ref().is_none_or(replaceable))
         .copied()
         .collect();
     let alike = |a: &[u8], b: &[u8]| {

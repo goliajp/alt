@@ -90,6 +90,33 @@ fn a_file_moves_with_its_permissions_and_its_times() {
     }
 }
 
+#[test]
+fn a_file_moved_over_another_keeps_its_permissions_and_its_times() {
+    let pair = with_directory();
+    pair.write("other", "o\n");
+    pair.commit_all("two");
+    for root in [&pair.alt, &pair.git] {
+        let private = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(root.join("top"), private).unwrap();
+    }
+    let was = std::fs::symlink_metadata(pair.alt.join("top")).unwrap();
+    pair.both(&["mv", "-f", "top", "other"]);
+    pair.assert_same_state();
+    for root in [&pair.alt, &pair.git] {
+        assert_eq!(mode(&root.join("other")), 0o600);
+        assert!(!root.join("top").exists());
+    }
+    let now = std::fs::symlink_metadata(pair.alt.join("other")).unwrap();
+    assert_eq!(
+        (now.ino(), now.mtime(), now.mtime_nsec()),
+        (was.ino(), was.mtime(), was.mtime_nsec())
+    );
+    // taken back, each has what it held
+    ok(alt(&pair.alt, &["undo"]));
+    let read = |name: &str| std::fs::read_to_string(pair.alt.join(name)).unwrap();
+    assert_eq!((read("top"), read("other")), ("top\n".into(), "o\n".into()));
+}
+
 /// A second link to a file is another name, not another spelling of
 /// the one: git does not move the file to it unless forced, and then
 /// the rename leaves both links where they are.
