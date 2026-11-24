@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the sign-ins begun through the platform are counted apart from the sign-ins
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/browser.rs
+touched: crates/alt-server-store/src/browser/budget.rs
+touched: crates/alt-server-store/src/cloud_login.rs
+touched: crates/alt-server-store/tests/it/database/cloud.rs
+touched: crates/alt-server-store/tests/it/database/cloud/started.rs
