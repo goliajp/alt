@@ -195,8 +195,9 @@ impl Log {
     /// of every frame that reads in the file, also past where it is cut.
     /// A cut made again after the power went while its checkpoint was
     /// written takes the generation that one was of: nothing else was
-    /// written under it, a cut syncs its checkpoint before a frame is
-    /// appended after.
+    /// written under it. A cut fsyncs its checkpoint before it goes on,
+    /// and a writer that finds the log to end with the checkpoint of a
+    /// cut fsyncs it before it writes after it (`cut_fsynced`).
     fn generation_cut(&self) -> Result<u32, OpLogError> {
         let cut_before = OpLogError::Format("the oplog was cut as often as it can count");
         self.state.generation.checked_add(1).ok_or(cut_before)
@@ -262,6 +263,7 @@ impl Log {
         // the checkpoint is synced with the cut; of a frame this handle
         // wrote that was cut, its caller is told by the look
         self.unsynced = false;
+        self.cut_on_disk = self.state.end;
         self.left_to = self.left_to.min(at);
         self.account.lock().unwrap().cut_at(at);
         if !pending {

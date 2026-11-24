@@ -59,6 +59,9 @@ pub(crate) struct Log {
     pub(super) left_to: u64,
     /// this handle noted that ops are left to be looked at
     pub(super) left_noted: bool,
+    /// where the log ended with the checkpoint of a cut when this handle
+    /// fsynced it or found it synced, zero before
+    pub(super) cut_on_disk: u64,
     pub(super) defer: bool,
     pub(super) write_count: u64,
     pub(super) unsynced: bool,
@@ -130,6 +133,7 @@ impl Log {
             seen: 0,
             left_to: 0,
             left_noted: false,
+            cut_on_disk: 0,
             defer: false,
             write_count: 0,
             unsynced: false,

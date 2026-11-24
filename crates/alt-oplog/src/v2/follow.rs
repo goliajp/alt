@@ -157,6 +157,24 @@ impl Log {
         }
     }
 
+    /// With the log read to its end under the exclusive lock: fsyncs it
+    /// where it ends with the checkpoint of a cut that nothing tells is
+    /// on disk. Whoever cut the log may have died before it fsynced
+    /// that, and nothing is written after such a checkpoint. A loss of
+    /// power could take a part of it and leave what follows: the cut is
+    /// then made again, of the generation the lost checkpoint was of,
+    /// and frames of that generation which were cut or lost before
+    /// would follow the new checkpoint as if appended after it.
+    fn cut_fsynced(&mut self) -> Result<(), OpLogError> {
+        let (cut, end) = (self.state.cut, self.state.end);
+        if cut == 0 || self.state.last != cut || self.cut_on_disk == end || self.synced >= end {
+            return Ok(());
+        }
+        crate::v2::fsync(&self.file)?;
+        self.cut_on_disk = end;
+        Ok(())
+    }
+
     /// Takes in the frames past the ones held, under a lock on the log.
     /// What follows the last of them that is no frame is cut off the file
     /// when `cut`, under the exclusive lock, and stays in it otherwise.
@@ -183,6 +201,9 @@ impl Log {
             None if size > end => self.take_in(self.read_past(size)?, noted)?,
             None => None,
         };
+        if cut {
+            self.cut_fsynced()?;
+        }
         // a cut is said in a frame appended where the log is cut
         let cuts = cut && self.knows_all()?;
         self.passed = self.hidden.is_some() || (!cuts && found.is_some());

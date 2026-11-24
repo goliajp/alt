@@ -26,6 +26,7 @@ mod v2_cut_ends;
 mod v2_cut_ends_told;
 mod v2_cut_notes;
 mod v2_cut_told;
+mod v2_cut_unsynced;
 mod v2_cuts;
 mod v2_driver;
 mod v2_ended_short;
