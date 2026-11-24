@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: feat
+summary: the packaged edge is told of a proxy in front of it, on a network whose gateway is written down
+author-type: human
+author: doracawl
+touched: self-hosted/Caddyfile
+touched: self-hosted/README.md
+touched: self-hosted/compose.yaml
+touched: self-hosted/manage.py
+touched: self-hosted/tests/install_smoke.py
