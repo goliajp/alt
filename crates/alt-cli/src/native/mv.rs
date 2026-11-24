@@ -224,6 +224,7 @@ impl NativeRepo<'_> {
         edit: &mut TreeEdit,
     ) -> Res<(Vec<Renamed>, bool)> {
         let (is_dir, spelling) = self.ensure_movable(index, moving)?;
+        self.ensure_one_device(moving)?;
         let (from, to) = (moving.from, moving.to);
         let moved = |path: &[u8]| -> BString {
             let mut name = to.to_vec();

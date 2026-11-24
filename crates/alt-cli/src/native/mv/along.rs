@@ -5,6 +5,7 @@ use std::os::unix::fs::MetadataExt;
 
 use super::super::tree_edit::{Put, TreeEdit};
 use super::super::*;
+use super::Moving;
 
 impl NativeRepo<'_> {
     /// Whether the file `there`, at the new name `to`, is the source
@@ -38,5 +39,20 @@ impl NativeRepo<'_> {
             edit.files.push((hollow, Put::NoDirectory));
         }
         Ok(())
+    }
+
+    /// Refuses, in git's words, a move to another file system: git
+    /// renames, and no rename goes from one file system to another.
+    pub(super) fn ensure_one_device(&self, moving: &Moving) -> Res<()> {
+        let device = |path: &Path| path.symlink_metadata().map(|found| found.dev());
+        let target = self.abs(moving.to)?;
+        let into = target.parent().ok_or("a path without a directory")?;
+        if device(&self.abs(moving.from)?)? == device(into)? {
+            return Ok(());
+        }
+        // what the system says of such a rename
+        let crossed = std::io::Error::from_raw_os_error(18);
+        let (from, why) = (moving.from, settings::reason(&crossed));
+        Err(settings::fatal(format!("renaming '{from}' failed: {why}")))
     }
 }

@@ -2,6 +2,8 @@
 //! permissions, its times and its inode, and a directory goes whole,
 //! with the files in it that are not tracked and its empty directories.
 
+#[cfg(target_os = "linux")]
+mod across_devices;
 mod directories;
 mod on_casefold;
 
