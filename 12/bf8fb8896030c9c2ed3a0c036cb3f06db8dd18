@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: have a checkout spell a file on disk as the tree it brings names it, and compare the spellings beside git's
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/tests/it/casefold.rs
