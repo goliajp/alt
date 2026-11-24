@@ -30,9 +30,18 @@ fn listed(url: &str) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+/// The files the process has open. The sockets of its connections are not
+/// among them: one that its peer has closed is closed when its thread comes
+/// to it, which is whenever.
 #[cfg(target_os = "linux")]
 fn open_files(pid: u32) -> usize {
-    fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
+    let open = fs::read_dir(format!("/proc/{pid}/fd")).unwrap();
+    let file = |entry: &fs::DirEntry| {
+        // one closed between the listing and the look at it is no file
+        let to = fs::read_link(entry.path());
+        to.is_ok_and(|to| !to.to_string_lossy().starts_with("socket:"))
+    };
+    open.map(|entry| entry.unwrap()).filter(file).count()
 }
 
 /// Has the one worker of the server at `address` answer a request for a
