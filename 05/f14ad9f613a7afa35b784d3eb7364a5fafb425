@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: feat
+summary: scrub, backup and restore tell how far the reading of the objects has come
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/mend.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/tests/it/database/cloud/scrubbed.rs
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/restore.rs
+touched: crates/alt-server/src/operator/backup/unread.rs
+touched: crates/alt-server/src/operator/reading.rs
+touched: crates/alt-server/src/operator/scrub.rs
+touched: crates/alt-server/tests/it/database/git/moved.rs
+touched: crates/alt-server/tests/it/database/git/reverted.rs
