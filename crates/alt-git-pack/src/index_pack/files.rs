@@ -7,16 +7,22 @@
 //! as long as it takes to write it, and is read through a mapping from
 //! then on; what a process that was ended left under a name is removed
 //! when the next one opens the directory.
+//!
+//! A base there is no room for is waited for by a pack that has none in
+//! files yet, in the order the packs came, for as long as the pack waits
+//! for anything; one that has some makes the base again instead. So no
+//! pack waits for the room another that waits has.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
+use super::memory::{Memory, Taken, Wait};
+
 #[derive(Debug)]
 pub struct BaseFiles {
     directory: PathBuf,
-    most: u64,
-    taken: AtomicU64,
+    room: Memory,
     most_taken: AtomicU64,
     failed: AtomicU64,
 }
@@ -29,8 +35,7 @@ impl BaseFiles {
         alt_os::temp::emptied(directory)?;
         Ok(BaseFiles {
             directory: directory.to_owned(),
-            most,
-            taken: AtomicU64::new(0),
+            room: Memory::new(most),
             most_taken: AtomicU64::new(0),
             failed: AtomicU64::new(0),
         })
@@ -40,18 +45,22 @@ impl BaseFiles {
         &self.directory
     }
 
-    /// Takes `bytes` where they are there to be taken.
-    pub(super) fn take(&self, bytes: u64) -> bool {
-        let room = |taken: u64| taken.checked_add(bytes).filter(|all| *all <= self.most);
-        let Ok(before) = self.taken.try_update(Relaxed, Relaxed, room) else {
-            return false;
+    /// Takes `bytes` where they are there to be taken, or, where `wait` is
+    /// told, once those before in line have theirs and there is room.
+    pub(super) fn take(&self, bytes: u64, wait: Option<Wait<'_>>) -> Option<Taken<'_>> {
+        let now = Wait {
+            by: Some(std::time::Instant::now()),
+            gone: None,
         };
-        self.most_taken.fetch_max(before + bytes, Relaxed);
-        true
+        let taken = self.room.let_in(bytes, 0, wait.unwrap_or(now)).ok()?;
+        self.most_taken.fetch_max(self.room.taken().0, Relaxed);
+        Some(taken)
     }
 
-    pub(super) fn give_back(&self, bytes: u64) {
-        self.taken.fetch_sub(bytes, Relaxed);
+    /// room taken as a base in a file takes it, for a test to keep
+    #[doc(hidden)]
+    pub fn occupy(&self, bytes: u64) -> Option<Taken<'_>> {
+        self.take(bytes, None)
     }
 
     pub(super) fn failed(&self) {
@@ -60,7 +69,12 @@ impl BaseFiles {
 
     /// The bytes the bases in files take now, and the most they took at once.
     pub fn taken(&self) -> (u64, u64) {
-        (self.taken.load(Relaxed), self.most_taken.load(Relaxed))
+        (self.room.taken().0, self.most_taken.load(Relaxed))
+    }
+
+    /// How many packs wait for room to write a base in.
+    pub fn waiting(&self) -> usize {
+        self.room.waiting().0
     }
 
     /// How many bases could not be written, and were made again instead.

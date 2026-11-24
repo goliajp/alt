@@ -48,26 +48,26 @@ fn a_push_waits_for_the_memory_another_is_indexed_in_and_is_told_when_it_waited_
             .unwrap()
             .success()
     );
-    // room for one pack of a hundred thousand bytes and no second pack
-    // beside it
+    // room for one pack with an object of a hundred thousand bytes and no
+    // second such pack beside it
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_ROOT", root.to_str().unwrap()),
         ("ALT_SERVER_MAX_PUSH_BYTES", "400000"),
-        ("ALT_SERVER_MAX_INDEX_BYTES", "600000"),
+        ("ALT_SERVER_MAX_INDEX_BYTES", "500000"),
         ("ALT_SERVER_MAX_INDEX_WAIT_MS", "10000"),
     ]);
     let url = |name: &str| format!("http://{}/{name}/", server.addr);
     let said = |out: &Output| String::from_utf8_lossy(&out.stderr).into_owned();
     let (large, small, waits) = (
         source(tmp.path(), "large"),
-        source(tmp.path(), "small"),
+        source(tmp.path(), "second"),
         source(tmp.path(), "waits"),
     );
     commit(&large, "noise", 100_000);
     commit(&waits, "noise", 100_000);
-    // small, and still more than is left beside the large one: a pack is
-    // given room for all its bytes can inflate to while it is scanned
-    commit(&small, "noise", 2_000);
+    // as large: while it is scanned, room is kept free for all that one of
+    // its entries can inflate to, and beside the first pack there is none
+    commit(&small, "noise", 100_000);
 
     let (reach, reached) = mpsc::channel();
     let (release, released) = mpsc::channel::<()>();

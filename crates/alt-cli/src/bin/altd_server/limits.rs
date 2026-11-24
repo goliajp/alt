@@ -85,13 +85,15 @@ pub(super) fn body_cap(suffix: &str) -> u64 {
 ///
 /// The memory of the packs indexed at once is one amount, and a pack
 /// waits for its part of it for `ALT_SERVER_MAX_INDEX_WAIT_MS`.
-pub(super) fn pack_limits() -> alt_git_pack::IndexLimits {
+pub(super) fn pack_limits() -> alt_git_pack::IndexLimits<'static> {
     static INDEXING: std::sync::OnceLock<alt_git_pack::Memory> = std::sync::OnceLock::new();
     let told = super::told::told();
     alt_git_pack::IndexLimits {
         object_bytes: told.push_bytes,
         inflated_bytes: told.inflated_bytes,
         kept: false,
+        // a server told to index in little memory still has some for each pack
+        each_bytes: alt_git_pack::EACH.min(told.index_bytes / 16),
         memory: Some(INDEXING.get_or_init(|| alt_git_pack::Memory::new(told.index_bytes))),
         memory_by: Some(std::time::Instant::now() + told.index_wait),
         files: told.bases.as_ref(),

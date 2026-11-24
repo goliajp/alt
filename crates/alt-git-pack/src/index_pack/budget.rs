@@ -1,12 +1,48 @@
 //! What resolving the deltas of one pack may take.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
+use super::memory::{Taken, Wait};
 use crate::PackError;
 
+/// The memory the walks of a pack make large objects in.
+#[derive(Clone, Copy)]
+pub struct Objects<'a> {
+    /// what the pack was let in with, which says what its largest object
+    /// takes
+    pub of: &'a Taken<'static>,
+    /// what each walk has without asking, as a part of what the pack has
+    /// throughout: an object that takes no more is taken for nowhere
+    pub each: u64,
+}
+
+impl<'a> Objects<'a> {
+    /// of the memory a pack was let in with, where it was let in with any
+    pub fn of(taken: &'a Option<Taken<'static>>, each: u64) -> Option<Self> {
+        taken.as_ref().map(|of| Objects { of, each })
+    }
+
+    /// Makes `held` the memory of a walk that has, or is about to make, an
+    /// object that takes `bytes`: none where each walk has as much, and
+    /// otherwise what the largest object of the pack takes, which the walk
+    /// keeps until it has no large object any more.
+    pub fn room(
+        &self,
+        held: &mut Option<Taken<'static>>,
+        bytes: u64,
+        wait: Wait<'_>,
+    ) -> Result<(), PackError> {
+        match held {
+            _ if bytes <= self.each => *held = None,
+            Some(_) => {}
+            None => *held = Some(self.of.object(wait)?),
+        }
+        Ok(())
+    }
+}
+
 /// What the walks of one pack may take, and what they have between them.
-pub struct Budget {
+pub struct Budget<'a> {
     /// the most bytes one object may have
     pub object_bytes: u64,
     /// the most bytes the entries and the objects may inflate to
@@ -16,13 +52,17 @@ pub struct Budget {
     pub spill_bytes: u64,
     /// the deepest a delta may lie below a plain entry
     pub depth: u32,
-    /// set by whoever waits for the pack once it waits no longer: the walks end
-    /// at the next delta they come to
-    pub given_up: Option<Arc<AtomicBool>>,
     /// where the bases in files are written, and what the packs indexed at
     /// once may take there between them; among the temporary files of the
     /// host, and no common amount, where this is not told
     pub files: Option<&'static super::BaseFiles>,
+    /// where the walks take the memory of large objects, one at a time; out
+    /// of nothing where this is not told
+    pub objects: Option<Objects<'a>>,
+    /// How long a walk waits for memory, and for room among the files. Once
+    /// whoever waits for the pack is gone, the walks end at the next delta
+    /// they come to.
+    pub wait: Wait<'a>,
     pub(super) inflated: AtomicU64,
     pub(super) held: AtomicUsize,
     pub(super) spilled: AtomicU64,
@@ -30,7 +70,7 @@ pub struct Budget {
     pub(super) most_spilled: AtomicU64,
 }
 
-impl Budget {
+impl Budget<'_> {
     /// `inflated` is what the entries inflated to when they were scanned.
     pub fn new(
         (object_bytes, inflated_bytes): (u64, u64),
@@ -44,8 +84,9 @@ impl Budget {
             base_bytes,
             spill_bytes,
             depth,
-            given_up: None,
             files: None,
+            objects: None,
+            wait: Wait::default(),
             inflated: AtomicU64::new(inflated),
             held: AtomicUsize::new(0),
             spilled: AtomicU64::new(0),
@@ -67,8 +108,8 @@ impl Budget {
     }
 
     pub(super) fn waited_for(&self) -> Result<(), PackError> {
-        match &self.given_up {
-            Some(given_up) if given_up.load(Relaxed) => Err(PackError::GivenUp),
+        match self.wait.gone {
+            Some(gone) if gone.load(Relaxed) => Err(PackError::GivenUp),
             _ => Ok(()),
         }
     }

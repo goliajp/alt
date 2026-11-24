@@ -37,7 +37,7 @@ pub fn take_in<T>(
     store: &Held<Store>,
     pack: Option<(
         &std::path::Path,
-        alt_git_pack::IndexLimits,
+        alt_git_pack::IndexLimits<'_>,
         alt_git_pack::Bases<'_>,
     )>,
     updates: &[RefUpdate],

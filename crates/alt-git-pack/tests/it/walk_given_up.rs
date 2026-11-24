@@ -47,7 +47,7 @@ fn walked(patience: usize) -> (Result<(), PackError>, Vec<u32>) {
     };
     let deltas = Deltas::new([Of::Nothing, Of::Entry(0), Of::Entry(1), Of::Entry(2)]);
     let mut budget = Budget::new((1 << 20, 1 << 20), (1 << 20, 0), 100, 0);
-    budget.given_up = Some(given_up);
+    budget.wait.gone = Some(&given_up);
     let mut walk = Walk::new(chain, &deltas, &budget);
     let walked = walk.below(0, &0, 0);
     (walked, walk.objects.made)

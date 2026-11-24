@@ -6,9 +6,15 @@ use std::ops::Deref;
 
 use alt_os::map::Mmap;
 
+use super::memory::Taken;
+
 pub(super) enum Base {
     Held(Vec<u8>),
-    Spilled(Mmap),
+    Spilled {
+        map: Mmap,
+        /// what it has of the room all the packs have for their files
+        _room: Option<Taken<'static>>,
+    },
 }
 
 impl Deref for Base {
@@ -17,7 +23,7 @@ impl Deref for Base {
     fn deref(&self) -> &[u8] {
         match self {
             Base::Held(bytes) => bytes,
-            Base::Spilled(map) => map,
+            Base::Spilled { map, .. } => map,
         }
     }
 }
@@ -27,7 +33,7 @@ impl Base {
     pub(super) fn held(&self) -> usize {
         match self {
             Base::Held(bytes) => bytes.len(),
-            Base::Spilled(_) => 0,
+            Base::Spilled { .. } => 0,
         }
     }
 
@@ -35,13 +41,18 @@ impl Base {
     pub(super) fn spilled(&self) -> u64 {
         match self {
             Base::Held(_) => 0,
-            Base::Spilled(map) => map.len() as u64,
+            Base::Spilled { map, .. } => map.len() as u64,
         }
     }
 
     /// The same bytes in a file that has no name any more, made in
-    /// `directory` or among the temporary files of the host.
-    pub(super) fn spill(&self, directory: Option<&std::path::Path>) -> std::io::Result<Base> {
+    /// `directory` or among the temporary files of the host, with the
+    /// `room` it was given there.
+    pub(super) fn spill(
+        &self,
+        directory: Option<&std::path::Path>,
+        room: Option<Taken<'static>>,
+    ) -> std::io::Result<Base> {
         let mut private = alt_os::temp::Builder::new();
         let private = private.owner_only();
         let dir = match directory {
@@ -57,6 +68,6 @@ impl Base {
         file.write_all(self)?;
         // the file is this pack's own and is not written to again
         let map = unsafe { Mmap::map(&file)? };
-        Ok(Base::Spilled(map))
+        Ok(Base::Spilled { map, _room: room })
     }
 }

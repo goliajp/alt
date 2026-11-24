@@ -65,3 +65,54 @@ fn a_pack_that_needs_more_memory_than_packs_are_verified_in_is_refused_and_told_
     );
     assert_eq!(f.counts().0, 0);
 }
+
+/// A push waits for the memory other packs are verified in, and the client of it
+/// goes away: the push leaves the line long before it would have waited to its end.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_that_waits_for_memory_leaves_the_line_once_its_client_is_gone() {
+    use std::os::unix::process::CommandExt;
+    let f = Fixture::new();
+    let (factory, mut options) = Running::parts(&f, None, vec![]);
+    // the push would wait for half of this
+    options.work_timeout = Duration::from_secs(240);
+    let memory = options.verifying;
+    let server = Running::serve(factory, options, None, false);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let first = temp.path().join("first");
+    repository(&first, &f.token);
+    let url = format!("{}/git/repository", server.url);
+    let others = memory.take(memory.all()).unwrap();
+    // git and what it runs for it, in a group of their own
+    let auth = alt_base64::STANDARD.encode(format!("alt:{}", f.token));
+    let mut pushing = Command::new("git")
+        .args([
+            "-c",
+            &format!("http.extraHeader=Authorization: Basic {auth}"),
+        ])
+        .args(["push", &url, "main"])
+        .current_dir(&first)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let until = |waiting: usize, within: Duration| {
+        let began = std::time::Instant::now();
+        while memory.waiting().0 != waiting {
+            assert!(began.elapsed() < within, "{:?} wait", memory.waiting());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    until(1, Duration::from_secs(60));
+    let group = format!("-{}", pushing.id());
+    let killed = Command::new("kill").args(["-KILL", "--", &group]).status();
+    assert!(killed.unwrap().success());
+    pushing.wait().unwrap();
+    until(0, Duration::from_secs(30));
+    drop(others);
+    assert_eq!(f.counts().0, 0);
+    drop(memory.take(memory.all()).unwrap());
+}

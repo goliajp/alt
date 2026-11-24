@@ -3,7 +3,7 @@
 
 use alt_git_codec::{ObjectId, ObjectKind};
 
-use super::{IndexLimits, IndexWork};
+use super::{IndexLimits, IndexWork, ObjectMemory};
 use crate::{EntryKind, Pack, PackError};
 
 /// The fewest bytes an entry takes: a byte of header and the zlib stream
@@ -45,7 +45,8 @@ pub(super) struct Scanned {
 pub(super) fn scan(
     pack: &Pack,
     count: u32,
-    limits: &IndexLimits,
+    limits: &IndexLimits<'_>,
+    objects: Option<ObjectMemory<'_>>,
     work: &mut IndexWork,
 ) -> Result<Scanned, PackError> {
     let map = pack.bytes();
@@ -58,6 +59,8 @@ pub(super) fn scan(
     let mut inflated = 0u64;
     let mut largest = 0u64;
     let mut payload = Vec::new();
+    // the memory of the entry being inflated, where it is a large one
+    let mut room = None;
     let mut pos = 12usize;
     for _ in 0..count {
         if pos >= body_end {
@@ -71,6 +74,9 @@ pub(super) fn scan(
             .checked_add(info.size)
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(PackError::Limit("inflated bytes"))?;
+        if let Some(objects) = &objects {
+            objects.room(&mut room, info.size, limits.wait())?;
+        }
         let next = pack.inflate_into(info.data_at, info.size, body_end, &mut payload)?;
         work.inflated += 1;
         let made = match info.kind {

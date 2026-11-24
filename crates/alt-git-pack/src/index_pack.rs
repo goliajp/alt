@@ -53,11 +53,11 @@ mod scan;
 mod thin;
 mod walk;
 
-pub use budget::Budget;
+pub use budget::{Budget, Objects as ObjectMemory};
 pub use deltas::{Deltas, Of};
 pub use files::BaseFiles;
 pub use limits::IndexLimits;
-pub use memory::{Memory, Taken};
+pub use memory::{Memory, Taken, Wait};
 pub use thin::Bases;
 pub use walk::{Objects, Walk};
 
@@ -72,6 +72,11 @@ use crate::{Pack, PackError};
 /// The deepest chain of deltas a pack may hold, the deepest
 /// `git pack-objects` makes.
 pub const MAX_DELTA_DEPTH: u32 = 4095;
+
+/// What a pack has for the objects it inflates and makes one at a time
+/// without asking for it: the objects of a history are far smaller, and
+/// only one that is larger has memory taken for it alone.
+pub const EACH: u64 = 4 << 20;
 
 /// The work indexing a pack took.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +130,7 @@ pub fn index_pack_within(
     pack_path: &Path,
     algo: HashAlgo,
     rename: bool,
-    limits: &IndexLimits,
+    limits: &IndexLimits<'_>,
 ) -> Result<IndexedPackOnDisk, PackError> {
     index_pack_thin(pack_path, algo, rename, limits, None)
 }
@@ -137,7 +142,7 @@ pub fn index_pack_thin(
     pack_path: &Path,
     algo: HashAlgo,
     rename: bool,
-    limits: &IndexLimits,
+    limits: &IndexLimits<'_>,
     bases: Option<Bases<'_>>,
 ) -> Result<IndexedPackOnDisk, PackError> {
     // the file is not modified for the lifetime of a map: we hold the
@@ -155,20 +160,15 @@ pub fn index_pack_thin(
     // an entry is inflated whole to be scanned: no larger than an object
     // may be, nor than what its stream can inflate to
     let body = (map.len() as u64).saturating_mul(1032);
-    let take = |bytes| (limits.memory.map(|of| of.take_by(bytes, limits.memory_by))).transpose();
-    let scanning = take(body.min(limits.object_bytes))?;
-    let mut scanned = scan::scan(&pack, count, limits, &mut work)?;
+    let scanning = limits.let_in(0, body.min(limits.object_bytes))?;
+    let room = limits.objects(&scanning);
+    let mut scanned = scan::scan(&pack, count, limits, room, &mut work)?;
     drop(scanning);
-    // resolved, the largest object is there as a base, as the instructions
-    // of a delta and as what they make, beside the bases that are held
-    let needed = |scanned: &scan::Scanned| {
-        let held = (limits.base_bytes as u64).min(scanned.inflated);
-        scanned.largest.saturating_mul(3).saturating_add(held)
-    };
-    let before = needed(&scanned);
-    let mut memory = take(before)?;
+    let before = limits.resolving(scanned.inflated, scanned.largest);
+    let mut memory = limits.let_in(before.0, before.1)?;
     let mut oids = scanned.oids.clone();
-    resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, &mut work)?;
+    let room = limits.objects(&memory);
+    resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, room, &mut work)?;
     drop(pack);
     let came = oids.len();
     if let Some(bases) = bases
@@ -178,12 +178,22 @@ pub fn index_pack_thin(
     {
         trailer = whole;
         // a base that was appended may be larger than all the pack came with
-        if needed(&scanned) > before {
+        let after = limits.resolving(scanned.inflated, scanned.largest);
+        if after != before {
             drop(memory.take());
-            memory = take(needed(&scanned))?;
+            memory = limits.let_in(after.0, after.1)?;
         }
         let pack = Pack::open(pack_path, algo)?;
-        resolve::resolve(&pack, &mut scanned, &mut oids, came, limits, &mut work)?;
+        let room = limits.objects(&memory);
+        resolve::resolve(
+            &pack,
+            &mut scanned,
+            &mut oids,
+            came,
+            limits,
+            room,
+            &mut work,
+        )?;
     }
     let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
     let oids: Vec<ObjectId> = oids.into_iter().collect::<Option<_>>().ok_or(stuck)?;

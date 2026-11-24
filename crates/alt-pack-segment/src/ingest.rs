@@ -10,7 +10,7 @@ use crate::{
     told::Told,
 };
 use alt_git_pack::{
-    IndexWork,
+    IndexWork, Wait,
     walk::{Budget, Deltas, Of},
 };
 use std::io::Write;
@@ -20,7 +20,7 @@ use std::sync::{
 };
 
 /// plain blobs above this size are hashed during the scan and not kept in memory
-const KEEP: usize = 1 << 20;
+pub(crate) const KEEP: usize = 1 << 20;
 /// Inflated bytes kept in memory between the scan and the later passes. Up to here a
 /// pack is inflated once and hashed on every core; what lies beyond is hashed by the
 /// scan itself and inflated again where a delta needs it, so that the memory a pack
@@ -149,16 +149,16 @@ fn verified(
     held: u64,
     given_up: Option<&Arc<AtomicBool>>,
 ) -> Result<Ingested, Error> {
-    let going = || match given_up {
-        Some(given_up) if given_up.load(Relaxed) => Err(Error::GivenUp),
+    let wait = Wait::new(limits.memory_by, given_up.map(|given_up| &**given_up));
+    let going = || match wait.gone {
+        Some(gone) if gone.load(Relaxed) => Err(Error::GivenUp),
         _ => Ok(()),
     };
     let said = pack.get(8..12).map_or(0, |count| {
         u32::from_be_bytes(count.try_into().expect("four bytes")) as usize
     });
     let told = Told::new(existing, said, limits.parents_beside);
-    // an entry is inflated whole to be scanned, beside what the scan keeps
-    let memory = room::scanning(pack.len() as u64, said as u64, limits, held)?;
+    let mut memory = room::scanning(pack.len() as u64, said as u64, limits, (held, wait))?;
     let mut unkept: Vec<(usize, Meta)> = Vec::new();
     let mut commits: Vec<CommitRow> = Vec::new();
     let mut refused = None;
@@ -166,7 +166,7 @@ fn verified(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
             // what the scan does not keep is hashed and taken in as it goes by
-            scan::scan(pack, limits, KEEP, held, going, |index, kind, data| {
+            scan::scan(pack, limits, &mut memory, going, |index, kind, data| {
                 let (oid, blake3) = digest(kind, data);
                 match told.object(index as u32, &oid, kind, data) {
                     Ok(row) => commits.extend(row),
@@ -232,8 +232,8 @@ fn verified(
         u32::from(limits.delta_depth),
         scanned.inflated,
     );
-    (budget.given_up, budget.files) = (given_up.cloned(), limits.files);
-    let (walks, _memory) = room::resolving(limits, &mut scanned, memory)?;
+    let memory = memory.resolving(limits, &mut scanned)?;
+    memory.told_to(&mut budget, limits.files);
     let mut work = IndexWork::default();
     let taken: Vec<AtomicBool> = (scanned.entries.iter())
         .map(|_| AtomicBool::new(false))
@@ -249,7 +249,7 @@ fn verified(
             outside: &outside,
             taken: &taken,
         };
-        let made = descend::below(&shared, pass, walks)?;
+        let made = descend::below(&shared, pass, memory.walks)?;
         commits.extend(made.commits);
         work.inflated += made.work.inflated;
         work.applied += made.work.applied;

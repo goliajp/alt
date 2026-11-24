@@ -19,7 +19,7 @@ pub(crate) struct Shared<'a> {
     pub existing: &'a SegmentSet,
     pub told: &'a Told<'a>,
     pub deltas: &'a Deltas<Oid>,
-    pub budget: &'a Budget,
+    pub budget: &'a Budget<'a>,
     /// the bases that earlier segments hold: the numbers behind the last entry of
     /// the pack are theirs
     pub outside: &'a [Oid],

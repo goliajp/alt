@@ -19,6 +19,9 @@ pub struct Limits {
     /// of those written to files of their own when memory has no room for them
     pub base_bytes: usize,
     pub spill_bytes: u64,
+    /// the bytes an object may take without memory being taken for it alone:
+    /// each walk has as many throughout
+    pub each_bytes: u64,
     /// what the pack takes its memory out of, and until when it waits for it
     pub memory: Option<&'static Memory>,
     pub memory_by: Option<Instant>,
@@ -40,6 +43,7 @@ impl Limits {
             parents_beside: 1 << 16,
             base_bytes: 96 << 20,
             spill_bytes: 16 * (96 << 20),
+            each_bytes: alt_git_pack::EACH,
             memory: None,
             memory_by: None,
             files: None,

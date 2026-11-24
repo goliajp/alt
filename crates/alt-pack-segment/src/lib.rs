@@ -28,7 +28,7 @@ mod stream;
 mod told;
 mod wanted;
 
-pub use alt_git_pack::{BaseFiles, IndexWork, Memory};
+pub use alt_git_pack::{BaseFiles, IndexWork, Memory, Wait};
 pub use build::{Builder, Built, Compress};
 pub use format::{CommitInfo, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_while_waited_for};

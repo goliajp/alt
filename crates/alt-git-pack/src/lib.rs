@@ -23,12 +23,12 @@ use cache::DeltaBaseCache;
 pub use delta_window::DeltaOptions;
 pub use idx::PackIndex;
 pub use index_pack::{
-    BaseFiles, Bases, IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH, Memory, Taken,
-    index_pack, index_pack_thin, index_pack_within,
+    BaseFiles, Bases, EACH, IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH, Memory,
+    Taken, Wait, index_pack, index_pack_thin, index_pack_within,
 };
 /// The walk below the bases of a pack, for whoever verifies packs its own way.
 pub mod walk {
-    pub use crate::index_pack::{Budget, Deltas, Objects, Of, Walk};
+    pub use crate::index_pack::{Budget, Deltas, ObjectMemory, Objects, Of, Walk};
 }
 pub use ingress::*;
 pub use pack::{EntryInfo, EntryKind, Pack};

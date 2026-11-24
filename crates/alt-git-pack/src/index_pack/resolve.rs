@@ -7,7 +7,7 @@ use super::budget::Budget;
 use super::deltas::{Deltas, Of};
 use super::scan::{Entry, Form, Scanned};
 use super::walk::{Objects, Walk};
-use super::{IndexLimits, IndexWork, MAX_DELTA_DEPTH};
+use super::{IndexLimits, IndexWork, MAX_DELTA_DEPTH, ObjectMemory};
 use crate::{Pack, PackError};
 
 /// The entries of a pack and the ids its objects were found to have.
@@ -53,7 +53,8 @@ pub(super) fn resolve(
     scanned: &mut Scanned,
     oids: &mut Vec<Option<ObjectId>>,
     roots: usize,
-    limits: &IndexLimits,
+    limits: &IndexLimits<'_>,
+    objects: Option<ObjectMemory<'_>>,
     work: &mut IndexWork,
 ) -> Result<(), PackError> {
     let entries = &scanned.entries;
@@ -68,7 +69,7 @@ pub(super) fn resolve(
         MAX_DELTA_DEPTH,
         scanned.inflated,
     );
-    budget.files = limits.files;
+    (budget.files, budget.objects, budget.wait) = (limits.files, objects, limits.wait());
     let hashed = Hashed {
         pack,
         entries,

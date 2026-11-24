@@ -96,18 +96,8 @@ pub(crate) struct Scanned {
     pub largest: u64,
 }
 
-/// Inflated payloads stay in memory for the later passes while they fit: a plain blob
-/// larger than `keep` never does, and nothing does once `budget` bytes are held. A
-/// plain payload that is not kept is handed to `unkept`, which hashes and parses it; a
-/// delta that is not kept is inflated again when it is resolved.
-pub(crate) fn scan(
-    pack: &[u8],
-    limits: &crate::Limits,
-    keep: usize,
-    budget: u64,
-    waited_for: impl Fn() -> Result<(), Error>,
-    mut unkept: impl FnMut(usize, Kind, &[u8]),
-) -> Result<Scanned, Error> {
+/// how many entries the pack says it has, where it is a pack and may have as many
+fn said(pack: &[u8], limits: &crate::Limits) -> Result<usize, Error> {
     if pack.len() < 32 || &pack[..4] != b"PACK" {
         return Err(Error::Format("not a pack"));
     }
@@ -118,8 +108,27 @@ pub(crate) fn scan(
     if count as u64 > limits.objects {
         return Err(Error::Limit("objects"));
     }
+    Ok(count)
+}
+
+/// Inflated payloads stay in memory for the later passes while they fit: a plain blob
+/// larger than [`KEEP`](crate::ingest::KEEP) never does, and nothing does once `room`
+/// has as many bytes as it may keep, or no memory for more. A plain payload that is
+/// not kept is handed to `unkept`, which hashes and parses it; a delta that is not
+/// kept is inflated again when it is resolved.
+pub(crate) fn scan(
+    pack: &[u8],
+    limits: &crate::Limits,
+    room: &mut crate::room::Room<'_>,
+    waited_for: impl Fn() -> Result<(), Error>,
+    mut unkept: impl FnMut(usize, Kind, &[u8]),
+) -> Result<Scanned, Error> {
+    let count = said(pack, limits)?;
     let body_end = pack.len() - 20;
-    let mut entries = Vec::with_capacity(count);
+    // the count is as the sender wrote it: room is made for no more entries
+    // than the bytes can hold
+    let most = body_end / crate::room::ENTRY_LEAST as usize;
+    let mut entries = Vec::with_capacity(count.min(most));
     let mut inflated = 0u64;
     let mut held = 0u64;
     let mut largest = 0u64;
@@ -143,6 +152,7 @@ pub(crate) fn scan(
             .checked_add(size)
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(Error::Limit("inflated bytes"))?;
+        room.inflating(size)?;
         let (data, compressed) = inflate(&pack[pos + head..body_end], size as usize)?;
         let made = match form {
             Form::Plain(_) => 0,
@@ -152,9 +162,10 @@ pub(crate) fn scan(
         };
         largest = largest.max(size).max(made);
         let len = head + compressed;
-        let fits = held + data.len() as u64 <= budget;
+        let large = matches!(form, Form::Plain(Kind::Blob)) && data.len() > crate::ingest::KEEP;
+        let fits = !large && room.keeping(data.len() as u64);
         let data = match form {
-            Form::Plain(kind) if !fits || (kind == Kind::Blob && data.len() > keep) => {
+            Form::Plain(kind) if !fits => {
                 unkept(index, kind, &data);
                 None
             }

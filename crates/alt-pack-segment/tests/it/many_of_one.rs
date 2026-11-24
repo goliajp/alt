@@ -85,6 +85,7 @@ fn what_is_told_of_each_delta_is_within_the_memory_of_the_pack() {
     let within = |memory: u64| {
         let limits = Limits {
             base_bytes: bases as usize,
+            each_bytes: 0,
             memory: Some(Box::leak(Box::new(Memory::new(memory)))),
             ..Limits::of(1 << 20, BYTES as u64, 1 << 30)
         };
@@ -97,19 +98,27 @@ fn what_is_told_of_each_delta_is_within_the_memory_of_the_pack() {
         matches!(refused, Err(Error::Limit("index memory"))),
         "{refused:?}"
     );
-    // a pack that says it has a million entries is refused for what they would
-    // take, before anything is set aside for them
+    // A pack that says it has a million entries has memory taken for as many as
+    // its bytes can hold, and no more: it is refused for the memory where that is
+    // a byte less, and otherwise for the entries it does not have.
     let mut said = base();
     said[8..12].copy_from_slice(&1_000_000u32.to_be_bytes());
-    let limits = Limits {
-        memory: Some(Box::leak(Box::new(Memory::new(1 << 20)))),
-        ..LIMITS
+    let entries = said.len() as u64 / 9 * ENTRY_BYTES;
+    let scanned = |memory: u64| {
+        let limits = Limits {
+            each_bytes: 0,
+            memory: Some(Box::leak(Box::new(Memory::new(memory)))),
+            ..Limits::of(1 << 20, BYTES as u64, 1 << 30)
+        };
+        ingest_holding(&said, &none, &limits, 0).map(|ingested| ingested.objects())
     };
-    let refused = ingest_holding(&said, &none, &limits, 0).map(|ingested| ingested.objects());
+    let refused = scanned(entries + BYTES as u64 - 1);
     assert!(
         matches!(refused, Err(Error::Limit("index memory"))),
         "{refused:?}"
     );
+    let refused = scanned(entries + BYTES as u64);
+    assert!(matches!(refused, Err(Error::Format(_))), "{refused:?}");
 }
 
 #[test]

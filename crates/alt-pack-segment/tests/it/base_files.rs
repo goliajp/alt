@@ -5,6 +5,7 @@
 use super::waiting::{BYTES, pack};
 use alt_pack_segment::{BaseFiles, Limits, SegmentSet, ingest};
 use std::os::unix::fs::PermissionsExt;
+use std::time::{Duration, Instant};
 
 const DEPTH: usize = 200;
 
@@ -15,10 +16,19 @@ fn files(directory: &std::path::Path, most: u64) -> &'static BaseFiles {
 /// The index of the pack and the work it took, with room for five bases in
 /// memory and for all of them in the files of this pack.
 fn indexed(files: Option<&'static BaseFiles>) -> (Vec<u8>, alt_pack_segment::IndexWork) {
+    indexed_by(files, None)
+}
+
+/// [`indexed`], waiting for what others have no longer than until `by`.
+fn indexed_by(
+    files: Option<&'static BaseFiles>,
+    by: Option<Instant>,
+) -> (Vec<u8>, alt_pack_segment::IndexWork) {
     let limits = Limits {
         base_bytes: 5 * BYTES,
         spill_bytes: 1 << 20,
         files,
+        memory_by: by,
         ..Limits::of(1 << 20, 1 << 20, 1 << 30)
     };
     let ingested = ingest(&pack(DEPTH), &SegmentSet::default(), &limits).unwrap();
@@ -94,4 +104,50 @@ fn a_base_that_cannot_be_written_is_made_again() {
     assert_eq!(work.spilled, 0);
     assert!(work.applied > 2 * DEPTH as u64, "{work:?}");
     assert!(files.unwritten() > 0 && files.taken().0 == 0);
+}
+
+/// A pack that has no base in files waits for the room another has there: until
+/// it is given back, and no longer than it waits for anything. One that has some
+/// there does not wait for more, which may be its own to give back.
+#[test]
+fn a_pack_with_no_base_in_files_waits_for_room_there_and_one_with_some_does_not() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let files = files(&work.path().join("bases"), 5 * BYTES as u64);
+    let expected = indexed(None).0;
+
+    // another has all of it for as long as this pack waits: it makes its bases again
+    let other = files.occupy(5 * BYTES as u64).unwrap();
+    let began = Instant::now();
+    let wait = Duration::from_millis(400);
+    let (index, took) = indexed_by(Some(files), Some(began + wait));
+    assert!(began.elapsed() >= wait, "{:?}", began.elapsed());
+    assert_eq!((index, took.spilled), (expected.clone(), 0));
+    assert!(took.applied > 2 * DEPTH as u64, "{took:?}");
+
+    // given back while the pack waits: it goes on with its bases in files
+    let long = Instant::now() + Duration::from_secs(60);
+    let (index, took) = std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| indexed_by(Some(files), Some(long)));
+        while files.waiting() == 0 {
+            assert!(!waiting.is_finished(), "the pack did not wait for room");
+            std::thread::yield_now();
+        }
+        drop(other);
+        waiting.join().unwrap()
+    });
+    assert_eq!(index, expected);
+    assert!(took.spilled > 0, "{took:?}");
+
+    // Room for one base, which the pack takes: the next has none, and waiting for
+    // it would be waiting for this pack itself.
+    let files = self::files(&work.path().join("one"), BYTES as u64);
+    let began = Instant::now();
+    let (index, took) = indexed_by(Some(files), Some(began + Duration::from_secs(30)));
+    assert!(
+        began.elapsed() < Duration::from_secs(15),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!((index, took.spilled), (expected, BYTES as u64));
+    assert_eq!(files.taken(), (0, BYTES as u64));
 }

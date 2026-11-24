@@ -1,21 +1,23 @@
 //! The memory a pack takes out of what the packs verified at once have between them.
 //!
-//! Scanned, a pack has in memory what the scan keeps and the one entry being
-//! inflated, and what is known of each entry it is said to have: where it lies,
-//! what it is found to be, and the record of it in the index. Resolved, it has what the scan kept, the bases that wait, and for each
-//! walk below a base the object being made: as the base it is made of, as the
-//! instructions of the delta and as the result, whose buffer grows to twice its
-//! size at the most, and for each delta what is told of the object it made. A pack
-//! takes each amount before it allocates, and waits for none while it holds
-//! another.
+//! A pack has some of it for as long as it is verified: what is known of each
+//! entry it is said to have, no more of them than its bytes can hold; the payloads
+//! the scan keeps, taken as they are kept and not kept where there is no room; the
+//! bases that wait, and what is told of each object a delta made; and for each walk
+//! what a small object takes while it is made. For a large object, inflated by the
+//! scan or made of a delta, memory is taken while a large one is there: as the base
+//! it is made of, as the instructions of the delta and as the result, whose buffer
+//! grows to twice its size at the most. The pack says how much the largest takes
+//! when it is let in, and as much is kept free once for all the packs.
 
 use crate::{
     Error, Limits,
     scan::{Form, Scanned},
 };
-use alt_git_pack::Taken;
-
-type Room = Option<Taken<'static>>;
+use alt_git_pack::{
+    Taken, Wait,
+    walk::{Budget, ObjectMemory},
+};
 
 /// What verifying a pack holds for each of its deltas, beside the objects: what
 /// the walk that resolved it tells of the object it made.
@@ -32,6 +34,10 @@ pub const ENTRY_BYTES: u64 = (std::mem::size_of::<crate::scan::Raw>()
 
 /// what one byte of a pack inflates to at the most
 const DEFLATE_MOST: u64 = 1032;
+/// the fewest bytes an entry has: a byte of header and the stream of nothing
+pub(crate) const ENTRY_LEAST: u64 = 9;
+/// the payloads the scan keeps are taken for so many bytes at a time
+const KEPT_STEP: u64 = 4 << 20;
 
 /// The least memory a pack can be verified in that holds an object as large as one
 /// may be: scanned, and then resolved one delta at a time.
@@ -41,62 +47,174 @@ pub fn least_memory(limits: &Limits) -> u64 {
     scanned.max(resolved.saturating_add(crate::ingest::HELD))
 }
 
-/// `entries` is how many the pack says it has.
-pub(crate) fn scanning(
+/// what an object takes of the memory kept free for objects: nothing where a walk
+/// has as much throughout
+fn large(bytes: u64, limits: &Limits) -> u64 {
+    if bytes > limits.each_bytes { bytes } else { 0 }
+}
+
+/// The memory of a pack while it is verified.
+pub(crate) struct Room<'a> {
+    taken: Option<Taken<'static>>,
+    wait: Wait<'a>,
+    each: u64,
+    /// what the pack has throughout beside the payloads kept
+    fixed: u64,
+    /// the most bytes of payloads that are kept
+    budget: u64,
+    /// the bytes of payloads there is memory for, and those kept; whether none
+    /// was there for one more
+    room: u64,
+    kept: u64,
+    full: bool,
+    /// the memory of the entry being inflated, where it is a large one
+    entry: Option<Taken<'static>>,
+}
+
+/// Lets the pack in to be scanned. `entries` is how many it says it has, and
+/// `budget` the most bytes of payloads that are kept.
+pub(crate) fn scanning<'a>(
     pack_bytes: u64,
     entries: u64,
     limits: &Limits,
-    held: u64,
-) -> Result<Room, Error> {
+    (budget, wait): (u64, Wait<'a>),
+) -> Result<Room<'a>, Error> {
     if entries > limits.objects {
         return Err(Error::Limit("objects"));
     }
-    let Some(memory) = limits.memory else {
-        return Ok(None);
+    let table = entries.min(pack_bytes / ENTRY_LEAST) * ENTRY_BYTES;
+    let fixed = table.saturating_add(limits.each_bytes);
+    let entry = pack_bytes
+        .saturating_mul(DEFLATE_MOST)
+        .min(limits.object_bytes);
+    let taken = match limits.memory {
+        Some(memory) => Some(memory.let_in(fixed, large(entry, limits), wait)?),
+        None => None,
     };
-    let body = pack_bytes.saturating_mul(DEFLATE_MOST);
-    let needed = body.min(held).saturating_add(body.min(limits.object_bytes));
-    let needed = needed.saturating_add(entries.saturating_mul(ENTRY_BYTES));
-    Ok(Some(memory.take_by(needed, limits.memory_by)?))
+    Ok(Room {
+        taken,
+        wait,
+        each: limits.each_bytes,
+        fixed,
+        budget,
+        room: 0,
+        kept: 0,
+        full: false,
+        entry: None,
+    })
 }
 
-/// How many walks may resolve at once, where the memory there is bounds them, and
-/// the memory they take. Where others leave too little for what the scan kept and
-/// the walks beside it, what the scan kept is let go of, to be inflated again where
-/// it is needed, and one walk waits for its room.
-pub(crate) fn resolving(
-    limits: &Limits,
-    scanned: &mut Scanned,
-    scanning: Room,
-) -> Result<(Option<usize>, [Room; 2]), Error> {
-    let (Some(memory), Some(mut kept)) = (limits.memory, scanning) else {
-        return Ok((None, [None, None]));
-    };
-    let table = (scanned.entries.len() as u64).saturating_mul(ENTRY_BYTES);
-    kept.keep(scanned.held.saturating_add(table));
-    // each delta is resolved once, and told of once
-    let deltas = (scanned.entries.iter())
-        .filter(|raw| !matches!(raw.form, Form::Plain(_)))
-        .count() as u64;
-    let bases = (limits.base_bytes as u64).saturating_add(deltas.saturating_mul(DELTA_BYTES));
-    let walk = scanned.largest.saturating_mul(4);
-    let threads = std::thread::available_parallelism().map_or(1, |count| count.get() as u64);
-    let taken = scanned.held.saturating_add(table).saturating_add(bases);
-    let room = memory.all().saturating_sub(taken);
-    let walks = room
-        .checked_div(walk)
-        .map_or(threads, |fit| fit.min(threads));
-    if walks > 0
-        && let Some(more) = memory.take_now(bases.saturating_add(walks.saturating_mul(walk)))
-    {
-        return Ok((Some(walks as usize), [Some(kept), Some(more)]));
+impl<'a> Room<'a> {
+    /// Memory for an entry that inflates to `bytes`, in place of what the one
+    /// before it had.
+    pub(crate) fn inflating(&mut self, bytes: u64) -> Result<(), Error> {
+        if let Some(objects) = ObjectMemory::of(&self.taken, self.each) {
+            objects.room(&mut self.entry, bytes, self.wait)?;
+        }
+        Ok(())
     }
-    for raw in &mut scanned.entries {
-        raw.data = None;
+
+    /// Whether a payload of `bytes` may be kept: no more are kept with it than may
+    /// be, and there is memory for it, or more is there to be taken now. Nothing is
+    /// waited for to keep a payload.
+    pub(crate) fn keeping(&mut self, bytes: u64) -> bool {
+        if self.kept + bytes > self.budget {
+            return false;
+        }
+        if let Some(taken) = &mut self.taken
+            && self.kept + bytes > self.room
+        {
+            let needed = self.kept + bytes - self.room;
+            let has = self.fixed + self.room;
+            let most = taken.most();
+            let more = [needed.max(KEPT_STEP), needed]
+                .into_iter()
+                .find(|more| !self.full && taken.have_now(has + more, most));
+            let Some(more) = more else {
+                self.full = true;
+                return false;
+            };
+            self.room += more;
+        }
+        self.kept += bytes;
+        true
     }
-    scanned.held = 0;
-    drop(kept);
-    let alone = table.saturating_add(bases).saturating_add(walk);
-    let alone = memory.take_by(alone, limits.memory_by)?;
-    Ok((Some(1), [Some(alone), None]))
+
+    /// The memory the pack is resolved in, how many walks may resolve at once, and
+    /// what each has for the objects it makes. Where others leave too little for
+    /// what the scan kept and the walks beside it, what the scan kept is let go
+    /// of, to be inflated again where it is needed, and the pack goes back into
+    /// the line with what it needs at the least.
+    pub(crate) fn resolving(
+        mut self,
+        limits: &Limits,
+        scanned: &mut Scanned,
+    ) -> Result<Resolving<'a>, Error> {
+        self.entry = None;
+        let wait = self.wait;
+        let Some(mut taken) = self.taken.take() else {
+            let (walks, taken, each) = (None, None, 0);
+            return Ok(Resolving {
+                walks,
+                taken,
+                each,
+                wait,
+            });
+        };
+        let table = (scanned.entries.len() as u64).saturating_mul(ENTRY_BYTES);
+        // each delta is resolved once, and told of once
+        let deltas = (scanned.entries.iter())
+            .filter(|raw| !matches!(raw.form, Form::Plain(_)))
+            .count() as u64;
+        let bases = (limits.base_bytes as u64).saturating_add(deltas.saturating_mul(DELTA_BYTES));
+        let object = large(scanned.largest.saturating_mul(4), limits);
+        let each = limits.each_bytes.min(scanned.largest.saturating_mul(4));
+        let threads = std::thread::available_parallelism().map_or(1, |count| count.get() as u64);
+        let with = |kept: u64, walks: u64| {
+            (table.saturating_add(bases))
+                .saturating_add(kept)
+                .saturating_add(walks.saturating_mul(each))
+        };
+        let mut walks = threads;
+        if !taken.have_now(with(scanned.held, walks), object) {
+            for raw in &mut scanned.entries {
+                raw.data = None;
+            }
+            scanned.held = 0;
+            walks = 1;
+            if !taken.have_now(with(0, 1), object) {
+                drop(taken);
+                let memory = limits.memory.expect("taken of it");
+                taken = memory.let_in(with(0, 1), object, self.wait)?;
+            }
+        }
+        Ok(Resolving {
+            walks: Some(walks as usize),
+            taken: Some(taken),
+            each,
+            wait: self.wait,
+        })
+    }
+}
+
+/// The memory a pack is resolved in.
+pub(crate) struct Resolving<'a> {
+    /// how many walks resolve at once, where the memory bounds them
+    pub walks: Option<usize>,
+    taken: Option<Taken<'static>>,
+    each: u64,
+    wait: Wait<'a>,
+}
+
+impl<'a> Resolving<'a> {
+    /// Tells the walks where their memory is, how long they wait, and where the
+    /// bases in files go.
+    pub(crate) fn told_to(
+        &'a self,
+        budget: &mut Budget<'a>,
+        files: Option<&'static alt_git_pack::BaseFiles>,
+    ) {
+        budget.objects = ObjectMemory::of(&self.taken, self.each);
+        (budget.files, budget.wait) = (files, self.wait);
+    }
 }

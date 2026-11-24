@@ -18,7 +18,9 @@
 //!
 //! Several walks may go below different bases of one pack at once. What
 //! they hold is one amount between them, and each keeps at least the
-//! object it is working on.
+//! object it is working on. Where that object is a large one, the walk
+//! has memory of its own for it: taken when the walk comes to it, and
+//! kept for as long as the walk has a large object.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -27,6 +29,7 @@ use super::IndexWork;
 use super::budget::Budget;
 use super::deltas::Deltas;
 use super::held::Base;
+use super::memory::Taken;
 use crate::{PackError, delta};
 
 /// The pack a walk goes through, and what is done with what it makes.
@@ -75,7 +78,9 @@ struct Frame {
 pub struct Walk<'a, O: Objects> {
     pub objects: O,
     deltas: &'a Deltas<O::Id>,
-    budget: &'a Budget,
+    budget: &'a Budget<'a>,
+    /// the memory of the object being worked on, where it is a large one
+    object: Option<Taken<'static>>,
     /// the streams inflated, deltas applied and objects made
     pub work: IndexWork,
     stack: Vec<Frame>,
@@ -85,11 +90,12 @@ pub struct Walk<'a, O: Objects> {
 }
 
 impl<'a, O: Objects> Walk<'a, O> {
-    pub fn new(objects: O, deltas: &'a Deltas<O::Id>, budget: &'a Budget) -> Self {
+    pub fn new(objects: O, deltas: &'a Deltas<O::Id>, budget: &'a Budget<'a>) -> Self {
         Walk {
             objects,
             deltas,
             budget,
+            object: None,
             work: IndexWork::default(),
             stack: Vec::new(),
             lowest: 0,
@@ -113,6 +119,13 @@ impl<'a, O: Objects> Walk<'a, O> {
     fn apply(&mut self, base: &[u8], index: u32) -> Result<Vec<u8>, O::Error> {
         self.work.inflated += 1;
         let script = self.objects.payload(index, &mut self.scratch)?;
+        // the base, the instructions, and the result, whose buffer grows
+        // to twice what it holds
+        let made = delta::target_size(script)?.min(self.budget.object_bytes);
+        let all = (base.len() as u64 + script.len() as u64).saturating_add(made.saturating_mul(2));
+        if let Some(objects) = &self.budget.objects {
+            objects.room(&mut self.object, all, self.budget.wait)?;
+        }
         self.work.applied += 1;
         Ok(delta::apply_bounded(
             base,
@@ -131,6 +144,11 @@ impl<'a, O: Objects> Walk<'a, O> {
         self.stack.push(frame);
         self.lowest = 0;
         while let Some(top) = self.stack.last_mut() {
+            // the walk has no more than the base of the top frame now
+            let has = top.data.as_ref().map_or(0, |data| data.held() as u64);
+            if let Some(objects) = &self.budget.objects {
+                objects.room(&mut self.object, has, self.budget.wait)?;
+            }
             let next = (top.refs.next().map(|at| self.deltas.by_id[at].1))
                 .or_else(|| top.ofs.next().map(|at| self.deltas.by_offset[at].1));
             let Some(child) = next else {
@@ -169,6 +187,7 @@ impl<'a, O: Objects> Walk<'a, O> {
                 self.let_go()?;
             }
         }
+        self.object = None;
         Ok(())
     }
 
@@ -182,9 +201,6 @@ impl<'a, O: Objects> Walk<'a, O> {
         if let Some(data) = data {
             self.budget.held.fetch_sub(data.held(), Relaxed);
             self.budget.spilled.fetch_sub(data.spilled(), Relaxed);
-            if let Some(files) = self.budget.files {
-                files.give_back(data.spilled());
-            }
         }
     }
 
@@ -200,8 +216,11 @@ impl<'a, O: Objects> Walk<'a, O> {
             None => {
                 self.work.inflated += 1;
                 let root = self.stack[0].entry;
-                let bytes = self.objects.payload(root, &mut self.scratch)?.to_vec();
-                (Arc::new(Base::Held(bytes)), 0)
+                let bytes = self.objects.payload(root, &mut self.scratch)?;
+                if let Some(objects) = &self.budget.objects {
+                    objects.room(&mut self.object, bytes.len() as u64, self.budget.wait)?;
+                }
+                (Arc::new(Base::Held(bytes.to_vec())), 0)
             }
         };
         for at in from..=top {
@@ -225,6 +244,10 @@ impl<'a, O: Objects> Walk<'a, O> {
     /// those, for this pack and for all the packs there are, and is
     /// otherwise let go of; so is one whose file could not be written.
     /// The top frame keeps its own.
+    ///
+    /// Room among the files is waited for by a pack that has none there, in
+    /// a walk that has no memory of an object taken: whoever waits has
+    /// nothing another waits for.
     fn let_go(&mut self) -> Result<(), PackError> {
         let top = self.stack.len() - 1;
         let budget = self.budget;
@@ -239,16 +262,16 @@ impl<'a, O: Objects> Walk<'a, O> {
                 };
                 if waited_for && let Ok(before) = budget.spilled.try_update(Relaxed, Relaxed, room)
                 {
-                    let files = budget.files;
-                    let written = if files.is_none_or(|files| files.take(bytes)) {
-                        let written = data.spill(files.map(|files| files.directory()));
-                        if let (Err(_), Some(files)) = (&written, files) {
-                            files.give_back(bytes);
-                            files.failed();
-                        }
-                        written.ok()
-                    } else {
-                        None
+                    let wait = (before == 0 && self.object.is_none()).then_some(budget.wait);
+                    let written = match budget.files {
+                        None => data.spill(None, None).ok(),
+                        Some(files) => files.take(bytes, wait).and_then(|room| {
+                            let written = data.spill(Some(files.directory()), Some(room));
+                            if written.is_err() {
+                                files.failed();
+                            }
+                            written.ok()
+                        }),
                     };
                     match written {
                         Some(written) => {

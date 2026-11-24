@@ -80,7 +80,7 @@ pub type PackMemory = Option<alt_git_pack::Taken<'static>>;
 /// them. Nothing else of the store is needed.
 pub fn prepare_pack(
     path: &std::path::Path,
-    limits: &alt_git_pack::IndexLimits,
+    limits: &alt_git_pack::IndexLimits<'_>,
     bases: alt_git_pack::Bases<'_>,
 ) -> Res<(PreparedPack, PackMemory)> {
     let indexed = alt_git_pack::index_pack_thin(path, HashAlgo::Sha1, true, limits, Some(bases))?;
