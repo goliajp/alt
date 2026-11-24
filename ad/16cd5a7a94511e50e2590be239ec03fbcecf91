@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: the bodies being received are counted by the address they come from and as they come on the wire, and move by what they have
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/paced.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/shares.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers.rs
+touched: crates/alt-cli/src/bin/altd_server/http/tests/workers/sources.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
