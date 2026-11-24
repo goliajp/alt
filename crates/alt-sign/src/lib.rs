@@ -30,8 +30,10 @@
 //! ## Verification rule
 //!
 //! Signing and verification come from `alt-crypto`. [`PublicKey::verify`]
-//! requires a canonical S and compares the recomputed R byte for byte; it
-//! does not reject keys of small order.
+//! requires a canonical S and compares the recomputed R byte for byte, and
+//! takes no key and no R of small order: under such a key a signature can be
+//! made that verifies over every message, by whoever has no secret key at all.
+//! A key of small order is no key when it is read either.
 
 use alt_crypto::ed25519::{
     SECRET_KEY_LENGTH, SIGNATURE_LENGTH, Signature, SigningKey, VerifyingKey,
@@ -153,7 +155,7 @@ impl PublicKey {
     /// the distinction or surface it).
     pub fn verify(&self, msg: &[u8], sig: &Sig) -> Result<(), SignError> {
         self.0
-            .verify(msg, &sig.0)
+            .verify_strict(msg, &sig.0)
             .map_err(|_| SignError::BadSignature)
     }
 
@@ -174,6 +176,9 @@ impl PublicKey {
             .try_into()
             .map_err(|_| SignError::BadKey("public key length".into()))?;
         let key = VerifyingKey::from_bytes(&bytes).map_err(|e| SignError::BadKey(e.to_string()))?;
+        if key.is_weak() {
+            return Err(SignError::BadKey("public key of small order".into()));
+        }
         Ok(PublicKey(key))
     }
 }
@@ -214,6 +219,26 @@ fn decode_with_prefix(expected_kind: &str, text: &str) -> Result<Vec<u8>, SignEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The point every other is unchanged by, and the one of order two: under
+    /// such a key a signature of zeros verifies over whatever is signed. They
+    /// are read as no keys.
+    #[test]
+    fn a_key_of_small_order_is_no_key() {
+        let mut one = [0u8; 32];
+        one[0] = 1;
+        let mut minus_one = [0xffu8; 32];
+        (minus_one[0], minus_one[31]) = (0xec, 0x7f);
+        for bytes in [one, minus_one] {
+            let text = encode_with_prefix("pubkey", &bytes);
+            match PublicKey::from_text(&text) {
+                Err(SignError::BadKey(why)) => assert_eq!(why, "public key of small order"),
+                other => panic!("{:?}", other.map(|_| ())),
+            }
+        }
+        let (_, public) = SecretKey::generate();
+        assert!(PublicKey::from_text(&public.to_text()).is_ok());
+    }
 
     /// The full keygen → sign → verify loop returns Ok and any single
     /// byte flip in the message surfaces as `BadSignature`.
