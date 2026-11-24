@@ -2,6 +2,13 @@
     admin off
     auto_https off
     persist_config off
+    # ALT_FRONT_PROXY, from the environment file of the installation: the
+    # address a proxy in front of this edge connects from. Only what that
+    # proxy says of the address of a caller is passed on; with none named,
+    # the caller is whoever connects.
+    servers {
+        trusted_proxies static {$ALT_FRONT_PROXY}
+    }
 }
 https://:8443 {
     tls /run/tls/certificate.pem /run/tls/private-key.pem

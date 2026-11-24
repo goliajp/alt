@@ -40,6 +40,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    environment:
+      ALT_FRONT_PROXY: "${ALT_FRONT_PROXY:-}"
     ports:
       - "${ALT_BIND_ADDRESS:-127.0.0.1}:${ALT_HTTPS_PORT:?}:8443"
     volumes:
@@ -58,6 +60,11 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    # Read by `migrate` alone, for a configuration that names no proxy: the
+    # edge, which shares this network namespace, and the gateway of the
+    # network, which is where a proxy on the host connects to the edge from.
+    environment:
+      ALT_TRUSTED_PROXIES: "127.0.0.1,::1,${ALT_GATEWAY:-172.30.91.1}"
     depends_on:
       database: {condition: service_healthy}
       edge: {condition: service_started}
@@ -78,6 +85,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+# The network of the edge has addresses that are written down, so that the
+# gateway a proxy on the host is seen as can be named: in ALT_FRONT_PROXY, and
+# in http.trusted_proxies of the configuration.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: "${ALT_SUBNET:-172.30.91.0/24}"
+          gateway: "${ALT_GATEWAY:-172.30.91.1}"
 volumes:
   postgres:
   socket:

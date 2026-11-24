@@ -2,6 +2,7 @@
 """Prepare and operate an explicit local alt installation. Never auto-migrate."""
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -98,6 +99,10 @@ def prepare(args):
         raise ValueError('application and TLS edge require non-root uid/gid')
     if os.geteuid() != 0 and (uid != os.geteuid() or gid != os.getegid()):
         raise ValueError('preparing another uid/gid requires root')
+    subnet = ipaddress.ip_network(args.subnet)
+    if subnet.version != 4 or not subnet.is_private or subnet.num_addresses < 8:
+        raise ValueError('the subnet of the edge must be a private IPv4 network of eight addresses or more')
+    gateway = str(subnet.network_address + 1)
     certificate = regular(args.certificate).read_bytes()
     private_key = regular(args.private_key).read_bytes()
     # Verify that the supplied certificate/key pair can actually serve TLS.
@@ -129,8 +134,13 @@ def prepare(args):
     # takes, and the application container has 2g unless ALT_MEMORY says more:
     # the least the limits above allow. Raise the two together.
     config['http']['indexing_megabytes'] = 1376
+    # The edge shares the network namespace of the application. A proxy on the
+    # host reaches the edge from the gateway of its network, and the edge
+    # passes on what that proxy says of a caller only where ALT_FRONT_PROXY
+    # names it: naming the gateway here gives nothing to an edge that does not.
+    config['http']['trusted_proxies'] = ['127.0.0.1', '::1', gateway]
     write(target / 'config/config.json', json.dumps(config, indent=2) + '\n', uid, gid)
-    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={args.https_port or origin.port or 443}\n', uid, gid)
+    write(target / '.env', f'COMPOSE_PROJECT_NAME={args.project}\nALT_IMAGE={local_images["application_image"]}\nALT_DATABASE_IMAGE={local_images["database_image"]}\nALT_EDGE_IMAGE={local_images["edge_image"]}\nALT_UID={uid}\nALT_GID={gid}\nALT_BIND_ADDRESS={args.bind}\nALT_HTTPS_PORT={args.https_port or origin.port or 443}\nALT_SUBNET={subnet}\nALT_GATEWAY={gateway}\nALT_FRONT_PROXY={gateway if args.front_proxy else ""}\n', uid, gid)
     write(target / 'bundle-identity.json', json.dumps({'source_digest': manifest['source_digest'], 'architecture': manifest['architecture'], 'bundle_manifest_sha256': sha(source / 'bundle.json'), **local_images}, indent=2) + '\n', uid, gid)
     if os.geteuid() == 0:
         os.chown(target, uid, gid)
@@ -180,6 +190,8 @@ def main():
     prep.add_argument('--private-key', type=Path, required=True)
     prep.add_argument('--bind', default='127.0.0.1', choices=['127.0.0.1', '0.0.0.0'])
     prep.add_argument('--https-port', type=int, help='host port of the HTTPS edge when a front proxy owns the public port (default: the port of --origin)')
+    prep.add_argument('--front-proxy', action='store_true', help='another reverse proxy on this host forwards to the edge: the edge takes the address of a caller from what that proxy says (default: from the connection, whatever the caller says)')
+    prep.add_argument('--subnet', default='172.30.91.0/24', help='private IPv4 network of the edge container; a second installation on one host needs another (default: %(default)s)')
     prep.add_argument('--uid', type=int)
     prep.add_argument('--gid', type=int)
     init = sub.add_parser('initialize', help='initialize explicitly; never resume or migrate on restart')
