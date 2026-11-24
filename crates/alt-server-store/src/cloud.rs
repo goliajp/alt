@@ -16,7 +16,7 @@ use golia_platform_contract::{
 pub(crate) use held::check_instance;
 use held::{binding, check_revision};
 mod service;
-pub(crate) use service::{repository_quota, service, writes_enabled};
+pub(crate) use service::{lease_over, repository_quota, service, writes_enabled};
 mod restore;
 pub use restore::CloudRestoreBinding;
 pub(crate) use restore::restore_binding;

@@ -64,6 +64,9 @@ impl Store {
         }
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         if !review {
+            // writes are off while the lease is over, which is not what the
+            // request is refused for: it comes again as it is
+            crate::cloud::lease_over(&mut tx, &self.spec)?;
             alt_repository_service::authorize_intent(
                 &publication,
                 &current,

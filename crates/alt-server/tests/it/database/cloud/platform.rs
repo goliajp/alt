@@ -14,6 +14,8 @@ pub(in crate::database) struct Platform {
     pub told: Arc<std::sync::Mutex<Vec<(Instant, Instant)>>>,
     pub challenge: Arc<std::sync::Mutex<String>>,
     pub exchanges: Arc<AtomicUsize>,
+    /// whether the service is told it may write
+    pub writes: Arc<std::sync::atomic::AtomicBool>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     worker: std::thread::JoinHandle<()>,
 }
@@ -46,9 +48,10 @@ impl Platform {
         let challenge = Arc::new(std::sync::Mutex::new(String::new()));
         let exchanges = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writes = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = {
             let challenge = challenge.clone();
-            let (exchanges, told) = (exchanges.clone(), told.clone());
+            let (exchanges, told, writes) = (exchanges.clone(), told.clone(), writes.clone());
             let (mode, calls, stop, audience, mut claims) = (
                 mode.clone(),
                 calls.clone(),
@@ -108,7 +111,7 @@ impl Platform {
                             200,
                             alt_json_serde::to_value(&AltServiceAuthorization {
                                 lease: lease(&audience, sequence),
-                                writes_enabled: false,
+                                writes_enabled: writes.load(Ordering::SeqCst),
                                 limits: AltLimits {
                                     repositories: Counter(2),
                                     stored_bytes: Counter(100_000),
@@ -144,6 +147,7 @@ impl Platform {
             told,
             challenge,
             exchanges,
+            writes,
             stop,
             worker,
         }

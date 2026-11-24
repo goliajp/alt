@@ -37,6 +37,24 @@ pub(crate) fn service(
     }
     Ok(Some(service))
 }
+/// Refuses, as what may come again as it is, where the lease of the service is
+/// over and nothing else is wrong with it. A request that is found so before
+/// its publication begins is told what one is told that finds it so there.
+pub(crate) fn lease_over(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<()> {
+    if spec.deployment_mode != DeploymentMode::Cloud {
+        return Ok(());
+    }
+    let row = binding(tx)?;
+    let Some(value) = row.get::<_, Option<Jsonb>>("service") else {
+        return Ok(());
+    };
+    let service: AltServiceAuthorization = value.read_serde()?;
+    let audience: Audience = row.get::<_, Jsonb>("audience").read_serde()?;
+    match service.check(&audience, now(tx)?) {
+        Err(golia_platform_contract::Error::Expired) => Err(Error::Precondition(UNLEASED)),
+        _ => Ok(()),
+    }
+}
 pub(crate) fn writes_enabled(tx: &mut Transaction<'_>, spec: &InstanceSpec) -> Result<bool> {
     if spec.deployment_mode != DeploymentMode::Cloud {
         return Ok(true);
