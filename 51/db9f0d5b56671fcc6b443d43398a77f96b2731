@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: write the store's own configuration by its lines, under the lock of the file, and refuse what is no key
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/config_cmd.rs
+touched: crates/alt-cli/tests/it/config_written.rs
+touched: crates/alt-cli/tests/it/main.rs
+touched: crates/alt-repo/src/kept_config.rs
+touched: crates/alt-repo/src/kept_config/own.rs
