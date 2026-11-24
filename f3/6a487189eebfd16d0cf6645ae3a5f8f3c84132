@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: have a sink of the oplog sync what ops name by whoever its handle was given for that, whenever it was given
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/owed.rs
+touched: crates/alt-oplog/src/v2/sink.rs
+touched: crates/alt-oplog/src/v2/sync.rs
+touched: crates/alt-oplog/tests/it/v2_unseen.rs
