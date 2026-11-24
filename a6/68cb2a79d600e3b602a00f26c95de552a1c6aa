@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: spell a directory as git does where names fold, in a checkout, its undo and its recovery
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files.rs
+touched: crates/alt-cli/src/native/checkout_files/folded.rs
+touched: crates/alt-cli/src/native/checkout_files/moves.rs
+touched: crates/alt-cli/src/native/checkout_files/spelled.rs
+touched: crates/alt-cli/src/native/checkout_plan.rs
+touched: crates/alt-cli/src/native/checkout_recovery/finish.rs
+touched: crates/alt-cli/tests/it/casefold_dir_spelled.rs
+touched: crates/alt-cli/tests/it/main.rs
