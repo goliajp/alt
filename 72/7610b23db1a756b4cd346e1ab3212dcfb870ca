@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: test
+summary: hold the driven oplog sequences to a boundary over no op left unlooked at, and a reader to the refusals of a writer
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/tests/it/v2_counts.rs
+touched: crates/alt-oplog/tests/it/v2_model.rs
+touched: crates/alt-oplog/tests/it/v2_outage.rs
+touched: crates/alt-oplog/tests/it/v2_scenes.rs
+touched: crates/alt-oplog/tests/it/v2_sequences.rs
