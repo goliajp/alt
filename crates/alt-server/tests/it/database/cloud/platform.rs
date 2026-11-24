@@ -1,6 +1,7 @@
 //! The platform a Cloud instance asks, as far as these tests need it, and an
 //! instance bound to it.
 use super::*;
+use std::time::Instant;
 
 pub(in crate::database) struct Platform {
     pub audience: Audience,
@@ -9,6 +10,8 @@ pub(in crate::database) struct Platform {
     /// 4 is out and says so half a second after it is asked
     pub mode: Arc<AtomicUsize>,
     pub calls: Arc<AtomicUsize>,
+    /// when each call came, and when what it was told was about to be sent
+    pub told: Arc<std::sync::Mutex<Vec<(Instant, Instant)>>>,
     pub challenge: Arc<std::sync::Mutex<String>>,
     pub exchanges: Arc<AtomicUsize>,
     stop: Arc<std::sync::atomic::AtomicBool>,
@@ -39,12 +42,13 @@ impl Platform {
         };
         let mode = Arc::new(AtomicUsize::new(0));
         let calls = Arc::new(AtomicUsize::new(0));
+        let told = Arc::new(std::sync::Mutex::new(Vec::new()));
         let challenge = Arc::new(std::sync::Mutex::new(String::new()));
         let exchanges = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker = {
             let challenge = challenge.clone();
-            let exchanges = exchanges.clone();
+            let (exchanges, told) = (exchanges.clone(), told.clone());
             let (mode, calls, stop, audience, mut claims) = (
                 mode.clone(),
                 calls.clone(),
@@ -59,6 +63,7 @@ impl Platform {
                     else {
                         continue;
                     };
+                    let came = Instant::now();
                     assert!(
                         request
                             .headers()
@@ -118,6 +123,7 @@ impl Platform {
                             (200, alt_json_serde::to_value(&&claims).unwrap())
                         }
                     };
+                    told.lock().unwrap().push((came, Instant::now()));
                     request
                         .respond(
                             Response::from_string(body.to_string())
@@ -135,6 +141,7 @@ impl Platform {
             claims,
             mode,
             calls,
+            told,
             challenge,
             exchanges,
             stop,
