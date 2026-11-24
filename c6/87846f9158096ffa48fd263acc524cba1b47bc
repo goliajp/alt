@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: fsync the checkpoint of a cut another writer left before anything is written after it
+author-type: human
+author: doracawl
+touched: crates/alt-oplog/src/v2/cut.rs
+touched: crates/alt-oplog/src/v2/follow.rs
+touched: crates/alt-oplog/src/v2/log.rs
+touched: crates/alt-oplog/tests/it/main.rs
+touched: crates/alt-oplog/tests/it/v2_cut_unsynced.rs
