@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: ask of reflog and of the log of a ref in a revision whether they only read
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/readers/commands.rs
