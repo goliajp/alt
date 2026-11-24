@@ -13,7 +13,7 @@ pub(crate) fn object(n: usize) -> Vec<u8> {
     data
 }
 
-fn id(data: &[u8]) -> [u8; 20] {
+pub(crate) fn id(data: &[u8]) -> [u8; 20] {
     let mut whole = format!("blob {}\0", data.len()).into_bytes();
     whole.extend_from_slice(data);
     alt_hash::sha1(&whole)

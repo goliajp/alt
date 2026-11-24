@@ -43,7 +43,9 @@ pub trait Objects {
     ) -> Result<&'a [u8], Self::Error>;
 
     /// Whether the delta was resolved before, through another entry of
-    /// the object it is made of.
+    /// the object it is made of, or is another walk's to resolve. A delta
+    /// this says no of is resolved by the walk that asked: where several
+    /// walks go through one pack, it is said of each delta to one of them.
     fn reached(&self, delta: u32) -> bool;
 
     /// Takes the object a delta made, of the base `of` and `depth` deltas
@@ -140,6 +142,7 @@ impl<'a, O: Objects> Walk<'a, O> {
             if self.objects.reached(child) {
                 continue;
             }
+            self.budget.waited_for()?;
             let depth = depth.saturating_add(self.stack.len() as u32);
             if depth > self.budget.depth {
                 return Err(PackError::Limit("delta depth").into());

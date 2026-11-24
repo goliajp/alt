@@ -4,13 +4,21 @@
 //! inflated. Resolved, it has what the scan kept, the bases that wait, and for each
 //! walk below a base the object being made: as the base it is made of, as the
 //! instructions of the delta and as the result, whose buffer grows to twice its
-//! size at the most. A pack takes each amount before it allocates, and waits for
-//! none while it holds another.
+//! size at the most, and for each delta what is told of the object it made. A pack
+//! takes each amount before it allocates, and waits for none while it holds
+//! another.
 
-use crate::{Error, Limits, scan::Scanned};
+use crate::{
+    Error, Limits,
+    scan::{Form, Scanned},
+};
 use alt_git_pack::Taken;
 
 type Room = Option<Taken<'static>>;
+
+/// What verifying a pack holds for each of its deltas, beside the objects: what
+/// the walk that resolved it tells of the object it made.
+pub const DELTA_BYTES: u64 = std::mem::size_of::<(usize, crate::ingest::Meta)>() as u64;
 
 /// what one byte of a pack inflates to at the most
 const DEFLATE_MOST: u64 = 1032;
@@ -45,7 +53,11 @@ pub(crate) fn resolving(
         return Ok((None, [None, None]));
     };
     kept.keep(scanned.held);
-    let bases = limits.base_bytes as u64;
+    // each delta is resolved once, and told of once
+    let deltas = (scanned.entries.iter())
+        .filter(|raw| !matches!(raw.form, Form::Plain(_)))
+        .count() as u64;
+    let bases = (limits.base_bytes as u64).saturating_add(deltas.saturating_mul(DELTA_BYTES));
     let walk = scanned.largest.saturating_mul(4);
     let threads = std::thread::available_parallelism().map_or(1, |count| count.get() as u64);
     let room = (memory.all().saturating_sub(scanned.held)).saturating_sub(bases);

@@ -13,6 +13,7 @@ mod descend;
 mod format;
 mod generation;
 mod ingest;
+mod limits;
 mod merge;
 mod object;
 mod plain;
@@ -30,9 +31,11 @@ mod wanted;
 pub use alt_git_pack::{IndexWork, Memory};
 pub use build::{Builder, Built, Compress};
 pub use format::{CommitInfo, Record, Segment};
-pub use ingest::{Ingested, Limits, ingest, ingest_holding};
+pub use ingest::{Ingested, ingest, ingest_holding, ingest_while_waited_for};
+pub use limits::Limits;
 pub use merge::merge;
 pub use readback::UNREADABLE;
+pub use room::DELTA_BYTES;
 pub use room::least_memory;
 pub use select::Selection;
 pub use send::{Piece, build_pack};
@@ -91,6 +94,8 @@ pub enum Error {
     /// what the pack needs is taken by others, and was not given back in the time
     /// the pack had to wait
     Busy(&'static str),
+    /// whoever asked for the pack waits for it no longer
+    GivenUp,
 }
 
 impl std::fmt::Display for Error {
@@ -109,6 +114,7 @@ impl std::fmt::Display for Error {
             Self::Corrupt(v) => write!(f, "segment corrupt: {v}"),
             Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
             Self::Busy(v) => write!(f, "pack waits: {v}"),
+            Self::GivenUp => f.write_str("pack given up"),
         }
     }
 }
@@ -136,6 +142,7 @@ impl From<alt_git_pack::PackError> for Error {
             PackError::Limit(what) => Self::Limit(what),
             PackError::Format(_) => Self::Format("delta instructions"),
             PackError::Busy(what) => Self::Busy(what),
+            PackError::GivenUp => Self::GivenUp,
         }
     }
 }

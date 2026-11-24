@@ -3,7 +3,7 @@
 //! out of one amount.
 
 use super::waiting::{BYTES, delta, distance, header, object, zlib};
-use alt_pack_segment::{Error, Limits, Memory, SegmentSet, ingest, ingest_holding};
+use alt_pack_segment::{DELTA_BYTES, Error, Limits, Memory, SegmentSet, ingest, ingest_holding};
 use std::time::{Duration, Instant};
 
 /// `bases` plain objects, each followed by one delta of it.
@@ -53,10 +53,11 @@ fn the_bases_of_a_pack_are_in_memory_one_to_a_walk_however_many_they_are() {
     // memory for the bases that wait and one walk: one base at a time
     let bases = 2 * BYTES as u64;
     let walk = 4 * BYTES as u64;
+    let told = BASES as u64 * DELTA_BYTES;
     let small = Limits::of(1 << 20, BYTES as u64, 1 << 30);
     let limits = Limits {
         base_bytes: bases as usize,
-        memory: Some(memory(bases + walk + walk / 2)),
+        memory: Some(memory(bases + told + walk + walk / 2)),
         ..small
     };
     let (most, alone) = index(&pack, &limits, 0).unwrap();

@@ -205,17 +205,29 @@ pub(crate) fn execute_git_with_cache(
 
 /// The memory the packs of pushes are verified in, all at once, and until when the
 /// pack of one request waits for its part of it.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Verifying {
     pub memory: &'static alt_pack_segment::Memory,
     pub by: std::time::Instant,
+    /// set once nobody waits for the answer: the pack is verified no further
+    pub given_up: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Held by whoever waits for the answer to a request. Dropped, when the answer is
+/// there, the time for it is over or the caller is gone, it sets its mark.
+#[derive(Default)]
+pub(crate) struct Waiting(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// What verifying the pack of a push may take. A base held while its deltas are
 /// resolved is held as an index of a pack holds it.
 pub(crate) fn pack_limits(
     limits: alt_remote_protocol::Limits,
-    room: Option<Verifying>,
+    room: Option<&Verifying>,
 ) -> alt_pack_segment::Limits {
     alt_pack_segment::Limits {
         memory: room.map(|room| room.memory),
@@ -226,6 +238,24 @@ pub(crate) fn pack_limits(
             inflated_bytes(limits.total_bytes),
         )
     }
+}
+
+/// The pack of a push verified against the segments there are, for as long as
+/// its answer is waited for.
+pub(crate) fn verified(
+    pack: &[u8],
+    segments: &alt_pack_segment::SegmentSet,
+    limits: alt_remote_protocol::Limits,
+    room: Option<&Verifying>,
+) -> Result<alt_pack_segment::Ingested> {
+    let within = pack_limits(limits, room);
+    match room {
+        Some(room) => {
+            alt_pack_segment::ingest_while_waited_for(pack, segments, &within, &room.given_up)
+        }
+        None => alt_pack_segment::ingest(pack, segments, &within),
+    }
+    .map_err(crate::git_packs::segment_error)
 }
 
 /// The least memory the packs of pushes can be verified in: what one pack takes

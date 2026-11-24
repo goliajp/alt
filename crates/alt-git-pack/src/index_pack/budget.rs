@@ -1,6 +1,7 @@
 //! What resolving the deltas of one pack may take.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 use crate::PackError;
 
@@ -15,6 +16,9 @@ pub struct Budget {
     pub spill_bytes: u64,
     /// the deepest a delta may lie below a plain entry
     pub depth: u32,
+    /// set by whoever waits for the pack once it waits no longer: the walks end
+    /// at the next delta they come to
+    pub given_up: Option<Arc<AtomicBool>>,
     pub(super) inflated: AtomicU64,
     pub(super) held: AtomicUsize,
     pub(super) spilled: AtomicU64,
@@ -36,6 +40,7 @@ impl Budget {
             base_bytes,
             spill_bytes,
             depth,
+            given_up: None,
             inflated: AtomicU64::new(inflated),
             held: AtomicUsize::new(0),
             spilled: AtomicU64::new(0),
@@ -54,6 +59,13 @@ impl Budget {
             self.most_held.load(Relaxed),
             self.most_spilled.load(Relaxed),
         )
+    }
+
+    pub(super) fn waited_for(&self) -> Result<(), PackError> {
+        match &self.given_up {
+            Some(given_up) if given_up.load(Relaxed) => Err(PackError::GivenUp),
+            _ => Ok(()),
+        }
     }
 
     /// Counts an object made of a delta, or made again, against what the

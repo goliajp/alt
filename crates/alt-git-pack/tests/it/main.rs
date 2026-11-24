@@ -9,5 +9,6 @@ mod pack_write;
 mod regained;
 mod representation;
 mod thin_pack;
+mod walk_given_up;
 
 mod ingress;

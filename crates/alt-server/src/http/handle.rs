@@ -115,6 +115,7 @@ pub(super) async fn handle(
         Err(refusal) => return *refusal,
     };
     let factory = state.factory.clone();
+    let waiting = crate::git::Waiting::default();
     let work = work::Work {
         factory: factory.clone(),
         credential,
@@ -129,6 +130,7 @@ pub(super) async fn handle(
         verifying: crate::git::Verifying {
             memory: state.options.verifying,
             by: std::time::Instant::now() + state.options.work_timeout / 2,
+            given_up: waiting.0.clone(),
         },
     };
     let result = tokio::time::timeout(

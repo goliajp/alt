@@ -3,7 +3,7 @@
 
 use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_pack_segment::{Oid, Segment, SegmentSet, ingest};
+use alt_pack_segment::{Oid, Segment, SegmentSet};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
@@ -28,6 +28,7 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
         E::Io(error) => Error::Io(error),
         E::Limit(reason) => Error::Limit(reason),
         E::Busy(reason) => Error::Busy(reason),
+        E::GivenUp => Error::Busy("the request is waited for no longer"),
         E::Format(reason) | E::Corrupt(reason) => Error::Integrity(reason),
         E::Dangling(..) | E::MissingBase(_) | E::NotFound(_) => {
             Error::Integrity("pack references an unavailable object")
@@ -319,8 +320,7 @@ fn publish(
     if !pack.is_empty() {
         let ingested =
             alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Decode, || {
-                let within = crate::git::pack_limits(limits, room);
-                ingest(pack, &view.segments, &within).map_err(segment_error)
+                crate::git::verified(pack, &view.segments, limits, room.as_ref())
             })?;
         if ingested.objects() > 0 {
             let (segment_id, path, bytes, inline) = match spooled {

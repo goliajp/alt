@@ -1,7 +1,7 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
 use crate::{
-    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Oid, Record, SegmentSet,
+    Error, FLAG_DUPLICATES, FLAG_OVERLAP, Kind, Limits, Oid, Record, SegmentSet,
     carried::Carried,
     descend::{self, Root, Shared},
     format::{self, CommitRow, Delta, NO_BASE},
@@ -10,50 +10,14 @@ use crate::{
     told::Told,
 };
 use alt_git_pack::{
-    IndexWork, Memory,
+    IndexWork,
     walk::{Budget, Deltas, Of},
 };
-use std::{io::Write, time::Instant};
-
-#[derive(Debug, Clone, Copy)]
-pub struct Limits {
-    pub objects: u64,
-    pub object_bytes: u64,
-    /// what the entries and the objects deltas make inflate to, all together, an
-    /// object counted again each time it has to be made again
-    pub inflated_bytes: u64,
-    pub delta_depth: u16,
-    /// The parents the commits may name beyond two for each entry of the pack. They
-    /// are written into the index of the segment and read with it, and deltas make
-    /// commits of many parents out of few bytes.
-    pub parents_beside: usize,
-    /// the bytes of delta bases held in memory while their deltas are resolved, and
-    /// of those written to files of their own when memory has no room for them
-    pub base_bytes: usize,
-    pub spill_bytes: u64,
-    /// what the pack takes its memory out of, and until when it waits for it
-    pub memory: Option<&'static Memory>,
-    pub memory_by: Option<Instant>,
-}
-
-impl Limits {
-    /// The bases held as an index of a pack holds them, out of no common amount. The
-    /// commits of a history have little more than one parent each; one that joins
-    /// sixty thousand branches still fits.
-    pub const fn of(objects: u64, object_bytes: u64, inflated_bytes: u64) -> Self {
-        Limits {
-            objects,
-            object_bytes,
-            inflated_bytes,
-            delta_depth: 4095,
-            parents_beside: 1 << 16,
-            base_bytes: 96 << 20,
-            spill_bytes: 16 * (96 << 20),
-            memory: None,
-            memory_by: None,
-        }
-    }
-}
+use std::io::Write;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering::Relaxed},
+};
 
 /// plain blobs above this size are hashed during the scan and not kept in memory
 const KEEP: usize = 1 << 20;
@@ -152,7 +116,18 @@ pub(crate) fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
 
 /// `pack` is the complete received pack including its trailer
 pub fn ingest(pack: &[u8], existing: &SegmentSet, limits: &Limits) -> Result<Ingested, Error> {
-    ingest_holding(pack, existing, limits, HELD)
+    verified(pack, existing, limits, HELD, None)
+}
+
+/// [`ingest`] for as long as it is waited for: once `given_up` is set, the work
+/// ends at the next entry or delta it comes to.
+pub fn ingest_while_waited_for(
+    pack: &[u8],
+    existing: &SegmentSet,
+    limits: &Limits,
+    given_up: &Arc<AtomicBool>,
+) -> Result<Ingested, Error> {
+    verified(pack, existing, limits, HELD, Some(given_up))
 }
 
 /// `ingest` with a chosen bound on the inflated bytes kept in memory; the result does
@@ -164,6 +139,20 @@ pub fn ingest_holding(
     limits: &Limits,
     held: u64,
 ) -> Result<Ingested, Error> {
+    verified(pack, existing, limits, held, None)
+}
+
+fn verified(
+    pack: &[u8],
+    existing: &SegmentSet,
+    limits: &Limits,
+    held: u64,
+    given_up: Option<&Arc<AtomicBool>>,
+) -> Result<Ingested, Error> {
+    let going = || match given_up {
+        Some(given_up) if given_up.load(Relaxed) => Err(Error::GivenUp),
+        _ => Ok(()),
+    };
     let said = pack.get(8..12).map_or(0, |count| {
         u32::from_be_bytes(count.try_into().expect("four bytes")) as usize
     });
@@ -177,7 +166,7 @@ pub fn ingest_holding(
         || -> Oid { alt_hash::sha1(&pack[..pack.len().saturating_sub(20)]) },
         || {
             // what the scan does not keep is hashed and taken in as it goes by
-            scan::scan(pack, limits, KEEP, held, |index, kind, data| {
+            scan::scan(pack, limits, KEEP, held, &going, |index, kind, data| {
                 let (oid, blake3) = digest(kind, data);
                 match told.object(index as u32, &oid, kind, data) {
                     Ok(row) => commits.extend(row),
@@ -237,14 +226,18 @@ pub fn ingest_holding(
             scanned.largest = scanned.largest.max(record.size);
         }
     }
-    let budget = Budget::new(
+    let mut budget = Budget::new(
         (limits.object_bytes, limits.inflated_bytes),
         (limits.base_bytes, limits.spill_bytes),
         u32::from(limits.delta_depth),
         scanned.inflated,
     );
+    budget.given_up = given_up.cloned();
     let (walks, _memory) = room::resolving(limits, &mut scanned, memory)?;
     let mut work = IndexWork::default();
+    let taken: Vec<AtomicBool> = (scanned.entries.iter())
+        .map(|_| AtomicBool::new(false))
+        .collect();
     for pass in [roots, outer] {
         let shared = Shared {
             pack,
@@ -254,7 +247,7 @@ pub fn ingest_holding(
             deltas: &deltas,
             budget: &budget,
             outside: &outside,
-            metas: &metas,
+            taken: &taken,
         };
         let made = descend::below(&shared, pass, walks)?;
         commits.extend(made.commits);

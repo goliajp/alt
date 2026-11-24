@@ -11,6 +11,7 @@ use alt_git_pack::{
     IndexWork,
     walk::{Budget, Deltas, Objects, Walk},
 };
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 pub(crate) struct Shared<'a> {
     pub pack: &'a [u8],
@@ -22,8 +23,10 @@ pub(crate) struct Shared<'a> {
     /// the bases that earlier segments hold: the numbers behind the last entry of
     /// the pack are theirs
     pub outside: &'a [Oid],
-    /// what was resolved before this pass, by entry
-    pub metas: &'a [Option<Meta>],
+    /// By entry, whether a walk has taken the delta to resolve. Several deltas
+    /// may make one object, and each of them comes to every delta of that
+    /// object: the first that does resolves it, in whichever walk and pass.
+    pub taken: &'a [AtomicBool],
 }
 
 /// An object no delta of this pack made, which deltas are made of.
@@ -72,7 +75,7 @@ impl Objects for Verified<'_> {
     }
 
     fn reached(&self, delta: u32) -> bool {
-        self.shared.metas[delta as usize].is_some()
+        self.shared.taken[delta as usize].swap(true, Relaxed)
     }
 
     fn made(&mut self, delta: u32, of: u32, depth: u32, object: &[u8]) -> Result<Oid, Error> {

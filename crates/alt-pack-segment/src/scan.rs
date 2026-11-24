@@ -105,6 +105,7 @@ pub(crate) fn scan(
     limits: &crate::Limits,
     keep: usize,
     budget: u64,
+    waited_for: impl Fn() -> Result<(), Error>,
     mut unkept: impl FnMut(usize, Kind, &[u8]),
 ) -> Result<Scanned, Error> {
     if pack.len() < 32 || &pack[..4] != b"PACK" {
@@ -124,6 +125,7 @@ pub(crate) fn scan(
     let mut largest = 0u64;
     let mut pos = 12;
     for index in 0..count {
+        waited_for()?;
         let (form, size, head) = header(&pack[..body_end], pos)?;
         let form = match form {
             Form::Offset(distance) => Form::Offset(

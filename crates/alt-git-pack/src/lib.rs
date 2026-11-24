@@ -43,6 +43,8 @@ pub enum PackError {
     /// what the pack needs is taken by others, and was not given back in
     /// the time the pack had to wait
     Busy(&'static str),
+    /// whoever asked for the pack waits for it no longer
+    GivenUp,
 }
 
 impl std::fmt::Display for PackError {
@@ -52,6 +54,7 @@ impl std::fmt::Display for PackError {
             Self::Limit(v) => write!(f, "pack resource limit: {v}"),
             Self::Format(v) => write!(f, "pack format: {v}"),
             Self::Busy(v) => write!(f, "busy: {v}"),
+            Self::GivenUp => f.write_str("given up"),
         }
     }
 }
