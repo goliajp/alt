@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: leave the sockets of connections out of the files a server of many repositories has open
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_many_repos.rs
