@@ -66,3 +66,34 @@ fn a_note_that_names_a_place_past_the_end_of_the_file_says_nothing_of_the_log() 
     log.sync().unwrap();
     assert_eq!(alt_oplog::bounded_in(dir.path()), Some(log.appended_len()));
 }
+
+#[test]
+fn a_log_that_ends_short_of_what_was_synced_is_refused_by_the_handle_that_synced_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let mut log = new_log(dir.path());
+    let anchors = grow(&mut log, "a", 3);
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(dir.path().join("log"))
+        .unwrap();
+    file.set_len(anchors[1].end).unwrap();
+    // the note beside the log names a place past the end of the file
+    // and is taken for gone: the handle that synced the log knows how
+    // far it was synced, and is held to that once it has read it anew
+    assert!(matches!(log.refresh(), Err(OpLogError::CutBack)));
+    log.reopen().unwrap();
+    assert_eq!(log.len(), 2);
+    let lost = |said: Result<(), OpLogError>| match said {
+        Err(OpLogError::Lost { synced, holds }) => {
+            assert_eq!((synced, holds), (anchors[2].end, anchors[1].end))
+        }
+        other => panic!("{other:?}"),
+    };
+    lost(log.check_synced());
+    lost(log.append("a", 1, b"x").map(|_| ()));
+    lost(log.settle(|_| Ok::<_, OpLogError>(true)).map(|_| ()));
+    assert_eq!(
+        fs::metadata(dir.path().join("log")).unwrap().len(),
+        anchors[1].end
+    );
+}

@@ -14,7 +14,7 @@ pub fn oid(n: u8) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, ObjectKind::Blob, &[n])
 }
 
-fn point(store: &mut RefStore, name: &str, at: u8) {
+pub fn point(store: &mut RefStore, name: &str, at: u8) {
     let change = RefChange {
         old: store.get(name).cloned(),
         new: Some(RefTarget::Oid(oid(at))),
@@ -155,7 +155,7 @@ fn without_a_snapshot_that_reads_the_log_is_read_from_its_first_op() {
 
 /// In boot 1: `main` at object 1, synced; then, never synced, `main` at
 /// object 2, `dev` at object 3, and an op that is no ref transaction.
-fn store_with_unsynced(dir: &Path) -> RefStore {
+pub fn store_with_unsynced(dir: &Path) -> RefStore {
     boot(1);
     let mut store = new_store(dir);
     point(&mut store, "refs/heads/main", 1);
@@ -167,7 +167,7 @@ fn store_with_unsynced(dir: &Path) -> RefStore {
 }
 
 /// Object 2 is not stored.
-fn held(op: &alt_oplog::Op) -> Result<bool, RefError> {
+pub fn held(op: &alt_oplog::Op) -> Result<bool, RefError> {
     Ok(!named_objects(op)?.contains(&oid(2)))
 }
 
@@ -273,84 +273,4 @@ fn unsynced_transactions_whose_objects_are_stored_stay() {
     assert!(!store.unsettled() && !store.confirmed());
     assert_eq!(store.get("refs/heads/dev"), Some(&RefTarget::Oid(oid(3))));
     assert!(!RefStore::open(dir.path()).unwrap().unsettled());
-}
-
-#[test]
-fn a_store_held_open_follows_a_cut_made_by_another() {
-    for deferred in [false, true] {
-        let dir = alt_os::temp::tempdir().unwrap();
-        let mut held_open = store_with_unsynced(dir.path());
-        held_open.set_defer_durability(deferred);
-        boot(2);
-        let mut writer = RefStore::open(dir.path()).unwrap();
-        assert!(writer.settle(held).unwrap().is_some());
-        drop(writer);
-
-        // a transaction built on the ops that were cut
-        let stale = RefChange {
-            name: "refs/heads/main".to_owned(),
-            old: Some(RefTarget::Oid(oid(2))),
-            new: Some(RefTarget::Oid(oid(7))),
-        };
-        let refused = held_open.commit("a", 7, &[stale]).unwrap_err();
-        match deferred {
-            // it may have appended ops that were cut: it is told, and goes
-            // on once it has read the log again
-            true => {
-                assert!(matches!(
-                    refused,
-                    RefError::OpLog(alt_oplog::OpLogError::CutBack)
-                ));
-                held_open.refresh().unwrap();
-            }
-            // it reads the log again by itself and finds the conflict
-            false => assert!(matches!(refused, RefError::Conflict { .. }), "{refused:?}"),
-        }
-        assert_eq!(
-            held_open.get("refs/heads/main"),
-            Some(&RefTarget::Oid(oid(1)))
-        );
-        assert_eq!(held_open.get("refs/heads/dev"), None);
-        // the sync that was to cover the ops that were cut tells of them,
-        // once: the sink they were left to, or, with the store syncing
-        // by itself since, its next sync
-        let cut_back = |told: &RefError| match told {
-            RefError::Recorded { cause, .. } => {
-                matches!(**cause, RefError::OpLog(alt_oplog::OpLogError::CutBack))
-            }
-            _ => false,
-        };
-        let main_at = |store: &RefStore, at: u8| RefChange {
-            name: "refs/heads/main".to_owned(),
-            old: store.get("refs/heads/main").cloned(),
-            new: Some(RefTarget::Oid(oid(at))),
-        };
-        match deferred {
-            true => {
-                let sink = held_open.sync_handle().unwrap();
-                let told = sink.fsync();
-                assert!(
-                    matches!(told, Err(alt_oplog::OpLogError::CutBack)),
-                    "{told:?}"
-                );
-                point(&mut held_open, "refs/heads/main", 8);
-                sink.fsync().unwrap();
-            }
-            false => {
-                let change = main_at(&held_open, 8);
-                let told = held_open.commit("a", 8, &[change]).unwrap_err();
-                assert!(cut_back(&told), "{told:?}");
-                // the transaction is in the log, and is synced by the next
-                held_open.bound().unwrap();
-            }
-        }
-        assert_eq!(
-            held_open.get("refs/heads/main"),
-            Some(&RefTarget::Oid(oid(8)))
-        );
-        drop(held_open);
-        let store = RefStore::open(dir.path()).unwrap();
-        assert_eq!(store.get("refs/heads/main"), Some(&RefTarget::Oid(oid(8))));
-        store.check().unwrap();
-    }
 }

@@ -25,6 +25,7 @@ use crate::v2::log::Log;
 use crate::v2::receipt::Receipt;
 use crate::v2::state::State;
 use crate::v2::stream::walk_file;
+use crate::v2::tail::Tail;
 use crate::{Discarded, Op, OpLogError};
 
 impl Log {
@@ -90,5 +91,44 @@ impl Log {
             }
         }
         Ok(receipt.filter(|_| unseen))
+    }
+
+    /// Up to where the log is known synced to a writer about to cut it
+    /// at `at`, which `tail` says `noted` to; the cut is refused within
+    /// that, and before a frame to keep at `kept`. This writer holds the
+    /// log as it is: a note of a generation after is of a cut that never
+    /// came to it, and says how far the log was synced when that began;
+    /// one of a generation before was left by a handle that knew of no
+    /// sync since the log was cut.
+    pub(super) fn may_cut(
+        &mut self,
+        at: u64,
+        noted: Option<Tail>,
+        kept: Option<u64>,
+    ) -> Result<u64, OpLogError> {
+        let said = noted.filter(|tail| tail.generation >= self.state.generation);
+        let known = self.synced.max(self.state.synced).max(self.synced_here());
+        let synced = said.map_or(0, |tail| tail.synced).max(known);
+        self.synced = synced;
+        if at < synced {
+            return Err(OpLogError::Lost { synced, holds: at });
+        }
+        match kept {
+            Some(kept) => Err(OpLogError::Kept { unheld: at, kept }),
+            None => Ok(synced),
+        }
+    }
+
+    /// The cut at `at` is made: its checkpoint is synced with it and
+    /// awaits no answer. The frame this handle wrote before the cut, and
+    /// whether it awaited an answer from a sync, is `wrote`: one before
+    /// `at` awaits its answer as before; of one that was cut the caller
+    /// is told by the look.
+    pub(super) fn cut_laid(&mut self, at: u64, wrote: ((u64, [u8; 4]), bool)) {
+        self.unsynced = false;
+        (self.wrote, self.owes) = match wrote.0.0 > at {
+            true => (self.wrote, false),
+            false => wrote,
+        };
     }
 }

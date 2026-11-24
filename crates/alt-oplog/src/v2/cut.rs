@@ -227,20 +227,7 @@ impl Log {
         self.may_append()?;
         let held = Held::take(&self.dir)?;
         let noted = Tail::noted_held(&self.beside(), &held).says();
-        // this writer holds the log as it is: a note of a generation
-        // after is of a cut that never came to it, and says how far the
-        // log was synced when that began; one of a generation before was
-        // left by a handle that knew of no sync since the log was cut
-        let said = noted.filter(|tail| tail.generation >= self.state.generation);
-        let known = self.synced.max(self.state.synced).max(self.synced_here());
-        let synced = said.map_or(0, |tail| tail.synced).max(known);
-        self.synced = synced;
-        if at < synced {
-            return Err(OpLogError::Lost { synced, holds: at });
-        }
-        if let Some(kept) = kept {
-            return Err(OpLogError::Kept { unheld: at, kept });
-        }
+        let synced = self.may_cut(at, noted, kept)?;
         let (pending, judged) = self.left_after(noted, at, looked);
         let generation = self.generation_cut()?;
         if at != self.state.end {
@@ -263,14 +250,7 @@ impl Log {
         cut_reached(1)?;
         let wrote = (self.wrote, self.owes);
         self.lay_cut(&discarded, generation)?;
-        // the checkpoint is synced with the cut and awaits no answer. A
-        // frame this handle wrote before it awaits its own as before; of
-        // one that was cut the caller is told by the look
-        self.unsynced = false;
-        (self.wrote, self.owes) = match wrote.0.0 > at {
-            true => (self.wrote, false),
-            false => wrote,
-        };
+        self.cut_laid(at, wrote);
         if !pending {
             // with nothing left to look at, the checkpoint is covered too
             tail.judged = self.state.end;

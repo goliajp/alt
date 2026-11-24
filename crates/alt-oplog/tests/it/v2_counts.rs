@@ -98,21 +98,6 @@ impl Counts {
             ("handles told their ops were cut", &self.cut_back),
             (told_begun, &self.cut_back_begun),
             (told_by_sink, &self.told_by_sink),
-            (
-                "of them told by a sync of an op they wrote, the ops held in the log",
-                &self.lost_told,
-            ),
-            ("syncs left to a sink that it synced", &self.left_synced),
-            ("that it told of as cut", &self.left_told),
-            (
-                "syncs not left to a sink over what it still owed",
-                &self.refused_over,
-            ),
-            ("cuts refused before a frame to keep", &self.kept_refused),
-            (
-                "cuts refused within where the log is synced",
-                &self.lost_refused,
-            ),
             ("handles past a cut that died after step 1", came(1)),
             ("after step 2", came(2)),
             ("after step 3", came(3)),
@@ -138,6 +123,30 @@ impl Counts {
             (
                 "reads that ended where the log was noted to end",
                 &self.hidden,
+            ),
+        ]
+        .into_iter()
+        .chain(self.named_of_syncs())
+        .collect()
+    }
+
+    /// The counts of what became of syncs and of cuts that were refused.
+    fn named_of_syncs(&self) -> Vec<(&'static str, &AtomicU64)> {
+        vec![
+            (
+                "handles told by a sync of an op they wrote, the ops held in the log",
+                &self.lost_told,
+            ),
+            ("syncs left to a sink that it synced", &self.left_synced),
+            ("that it told of as cut", &self.left_told),
+            (
+                "syncs not left to a sink over what it still owed",
+                &self.refused_over,
+            ),
+            ("cuts refused before a frame to keep", &self.kept_refused),
+            (
+                "cuts refused within where the log is synced",
+                &self.lost_refused,
             ),
         ]
     }

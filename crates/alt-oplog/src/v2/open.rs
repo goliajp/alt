@@ -252,7 +252,6 @@ pub(crate) fn load(
     told: Mark,
     all: bool,
 ) -> Result<Loaded, OpLogError> {
-    let (dir, boot) = (of.dir, of.boot);
     let meta = source.file.metadata()?;
     let size = crate::settle::read_end(&meta);
     let clamped = size < meta.len();
@@ -260,7 +259,7 @@ pub(crate) fn load(
     let noted = Tail::noted(of);
     let tail = noted.says();
     let lens = (size, meta.len());
-    let mut found = Found::up_to(source, layout, (boot, noted), lens, all)?;
+    let mut found = Found::up_to(source, layout, (of.boot, noted), lens, all)?;
     // to whoever opens a file of the length a reader of this boot noted,
     // the log ends where that says, while the log in the file is of the
     // generation it was said of: a file that was cut since and grew back
@@ -270,15 +269,14 @@ pub(crate) fn load(
     let generation = found.state.generation;
     let ends = |tail: &Tail| tail.hides(meta.len(), generation);
     let noted_end = tail.filter(ends).map(|tail| tail.ends);
-    // the boundary is the one a handle reads on with: what the frames
-    // say and what the note says of this log
+    // the boundary a handle reads on with: the note's with the frames'
     let synced = found.tail.map_or(0, |tail| tail.synced);
     let begun = told.begun_at(generation, found.state.synced.max(synced));
     let hidden = [noted_end, begun].into_iter().flatten().min();
     let hidden = hidden.filter(|ends| *ends < size);
     let size = hidden.map_or(size, |ends| ends.max(FILE_HEADER_LEN as u64));
     if hidden.is_some() {
-        found = Found::up_to(source, layout, (boot, noted), (size, meta.len()), all)?;
+        found = Found::up_to(source, layout, (of.boot, noted), (size, meta.len()), all)?;
     }
     let (stop, window) = (found.stop, std::mem::take(&mut found.window));
     let mut loaded = found.loaded(hidden.map(|_| meta.len()), meta.len(), clamped);
@@ -293,7 +291,7 @@ pub(crate) fn load(
         Stop::End => Vec::new(),
     };
     if stop == Stop::Unread && loaded.stopped(&mut read, layout, (size, &held))? {
-        crate::settle::note_damage(&dir.join("durable"), loaded.state.end, size);
+        crate::settle::note_damage(&of.dir.join("durable"), loaded.state.end, size);
     }
     Ok(loaded)
 }
