@@ -89,3 +89,37 @@ fn a_file_moves_with_its_permissions_and_its_times() {
         assert!(root.join("into/d/empty").is_dir() && !root.join("d").exists());
     }
 }
+
+/// A second link to a file is another name, not another spelling of
+/// the one: git does not move the file to it unless forced, and then
+/// the rename leaves both links where they are.
+pub(crate) fn a_link_is_another_name(pair: &Pair) {
+    pair.write("linked", "l\n");
+    pair.commit_all("linked");
+    for root in [&pair.alt, &pair.git] {
+        std::fs::hard_link(root.join("linked"), root.join("second")).unwrap();
+    }
+    let refused = pair.same_failure(&["mv", "linked", "second"], 128);
+    assert_eq!(
+        refused,
+        "fatal: destination exists, source=linked, destination=second\n"
+    );
+    pair.both(&["mv", "-f", "linked", "second"]);
+    assert_eq!(
+        crate::like_git::index(&pair.alt),
+        ok(crate::like_git::git(&pair.git, &["ls-files", "-s"]))
+    );
+    for root in [&pair.alt, &pair.git] {
+        assert!(root.join("linked").is_file() && root.join("second").is_file());
+    }
+    let said = ok(alt(&pair.alt, &["status"]));
+    assert!(
+        said.contains("new file:   second") && said.contains("Untracked files:\n\tlinked"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_second_link_to_a_file_is_not_moved_to_unless_forced() {
+    a_link_is_another_name(&Pair::new());
+}

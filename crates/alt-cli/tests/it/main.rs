@@ -38,6 +38,7 @@ mod casefold_composed;
 mod casefold_dir_spelled;
 mod casefold_dirs;
 mod casefold_left;
+mod casefold_links;
 mod casefold_meet;
 mod casefold_undo;
 mod casefold_untracked;

@@ -138,8 +138,14 @@ impl NativeRepo<'_> {
             return Ok(None);
         }
         let there = self.file_there(path)?;
+        let mut listed = Listed::default();
         for other in tracked.filter(|other| *other != path) {
-            if there.is_some() && self.file_there(other)? == there {
+            // two links to a file are two names, each listed as it is spelled
+            if there.is_some()
+                && self.file_there(other)? == there
+                && (self.spelled_otherwise(path, &mut listed)?
+                    || self.spelled_otherwise(other, &mut listed)?)
+            {
                 return Ok(Some(other.clone()));
             }
         }

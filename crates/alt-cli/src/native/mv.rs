@@ -157,8 +157,9 @@ impl NativeRepo<'_> {
 
     /// Refuses the move as git refuses it where it cannot be made.
     /// Returns whether the source is a directory, and whether the two
-    /// names are one file to a file system that ignores case, so that
-    /// only the spelling changes.
+    /// names are one file: one name spelled in two ways to a file
+    /// system that ignores case, or two links, which a rename of the
+    /// one to the other leaves both as they are.
     fn ensure_movable(&self, index: &Index, moving: &Moving) -> Res<(bool, bool)> {
         let Moving {
             from,
@@ -180,10 +181,12 @@ impl NativeRepo<'_> {
         }
         let target = self.abs(to)?;
         let there = target.symlink_metadata();
-        let one = |there: &std::fs::Metadata| {
-            folds && (there.dev(), there.ino()) == (found.dev(), found.ino())
-        };
-        let spelling = there.as_ref().is_ok_and(one);
+        let one =
+            |there: &std::fs::Metadata| (there.dev(), there.ino()) == (found.dev(), found.ino());
+        let one = there.as_ref().is_ok_and(one);
+        // two links to a file are two names, each listed as it is spelled
+        let mut listed = super::checkout_files::Listed::default();
+        let spelling = one && folds && self.spelled_otherwise(to, &mut listed)?;
         if found.is_dir() {
             let inside = |e: &&IndexEntry| beneath(&e.path, from);
             if !index.entries.iter().any(|e| inside(&e)) {
@@ -209,14 +212,14 @@ impl NativeRepo<'_> {
         if !target.parent().is_some_and(Path::is_dir) {
             return refused("destination directory does not exist");
         }
-        Ok((found.is_dir(), spelling))
+        Ok((found.is_dir(), one))
     }
 
     /// Adds the move to `edit`, refused as git refuses it where it
     /// cannot be made. Returns the renames of the tracked files beneath
-    /// the source where that is a directory, and whether only the
-    /// spelling of a name changes: the files then stay where they are
-    /// and the edit is of the index alone.
+    /// the source where that is a directory, and whether the two names
+    /// are one file: the files then stay where they are and the edit is
+    /// of the index alone.
     fn plan_move(
         &self,
         index: &Index,
