@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the error of the native transport and its agent requests are files of their own
+author-type: human
+author: doracawl
+touched: crates/alt-wire-http/src/native.rs
+touched: crates/alt-wire-http/src/native/agents.rs
+touched: crates/alt-wire-http/src/native/error.rs
