@@ -69,8 +69,7 @@ impl Drop for Asked {
 }
 
 pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, state: &Arc<App>) {
-    let options = &state.options;
-    let sources = state.sources.clone();
+    let (options, sources) = (&state.options, state.sources.clone());
     let life = Arc::new(Life {
         each: options.connection_timeout,
         until: Mutex::new(tokio::time::Instant::now() + options.connection_timeout),
@@ -85,6 +84,7 @@ pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, s
         .max_buf_size(options.header_bytes);
     let router = TowerToHyperService::new(router);
     let service = service_fn(move |request: Request<Incoming>| {
+        let bodiless = request.body().is_end_stream();
         // of the address the request is from, where a proxy says whose it is
         let asked = sources.asked(peer, request.headers()).map(|place| {
             let (parts, body) = request.into_parts();
@@ -103,7 +103,7 @@ pub(super) async fn serve(socket: TcpStream, peer: SocketAddr, router: Router, s
         async move {
             let Ok((response, asked, (head, ended), place)) = asked else {
                 let refused = super::respond::crowded().map(Body::new);
-                return Ok(outgoing(false, false, refused, None));
+                return Ok(outgoing(false, bodiless, refused, None));
             };
             let response = response.await?;
             drop(asked);
@@ -168,6 +168,8 @@ impl hyper::body::Body for Received {
 /// A response to a request whose body was not read to its end is the last one on
 /// its connection: the unread rest cannot be told apart from a next request. The
 /// response says so, or the client sends its next request into a closed connection.
+/// A request that is refused unread and brought no body leaves nothing behind: its
+/// connection, which is a proxy's, goes on for the next caller.
 fn outgoing(
     head: bool,
     ended: bool,

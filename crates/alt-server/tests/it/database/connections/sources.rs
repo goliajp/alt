@@ -24,6 +24,30 @@ fn answered(server: &Running, from: Option<&str>) -> Option<String> {
     Some(answer)
 }
 
+/// The status line of the next response on a connection and its headers in small
+/// letters, with its body read and let go of.
+fn head_of(reader: &mut std::io::BufReader<std::net::TcpStream>) -> (String, String) {
+    use std::io::BufRead;
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let status = line.trim_end().to_owned();
+    let mut headers = String::new();
+    loop {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        if line.trim_end().is_empty() {
+            break;
+        }
+        headers.push_str(&line.to_ascii_lowercase());
+    }
+    let length = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"));
+    let mut body = vec![0; length.map_or(0, |length| length.trim().parse().unwrap())];
+    reader.read_exact(&mut body).unwrap();
+    (status, headers)
+}
+
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
 fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
@@ -46,6 +70,23 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
         .unwrap()
         .to_ascii_lowercase();
     assert!(told.contains("\r\nretry-after: 1\r\n"), "{told}");
+    // The refusal of a request without a body leaves the connection, which is
+    // the proxy's, to the next request on it; that of one whose body was not
+    // read ends it.
+    let (mut socket, mut reader) = connect(&server);
+    let get =
+        |from: &str| format!("GET /livez HTTP/1.1\r\nHost: alt\r\nX-Forwarded-For: {from}\r\n\r\n");
+    socket.write_all(get("203.0.113.9").as_bytes()).unwrap();
+    let (status, headers) = head_of(&mut reader);
+    assert_eq!(status, "HTTP/1.1 429 Too Many Requests");
+    assert!(!headers.contains("connection: close"), "{headers}");
+    socket.write_all(get("203.0.113.10").as_bytes()).unwrap();
+    assert_eq!(head_of(&mut reader).0, "HTTP/1.1 200 OK");
+    let post = head.replace("Content-Length: 30", "Content-Length: 3");
+    socket.write_all(post.as_bytes()).unwrap();
+    let (status, headers) = head_of(&mut reader);
+    assert_eq!(status, "HTTP/1.1 429 Too Many Requests");
+    assert!(headers.contains("connection: close"), "{headers}");
     let fine = Some("HTTP/1.1 200 OK".to_owned());
     assert_eq!(alive(&server, Some("203.0.113.10")), fine);
     // what the proxy names nobody for is the proxy's own, and has no limit
@@ -74,12 +115,28 @@ fn outward() -> std::net::IpAddr {
     address
 }
 
+/// Whether a connection of its own is closed with nothing said on it: answered
+/// with nothing, and not left to wait for an answer either.
+fn closed_unheard(server: &Running) -> bool {
+    let (mut socket, _) = connect(server);
+    let request = b"GET /livez HTTP/1.1\r\nHost: alt\r\nConnection: close\r\n\r\n";
+    let _ = socket.write_all(request);
+    let unanswered = [std::io::ErrorKind::WouldBlock, std::io::ErrorKind::TimedOut];
+    match socket.read(&mut [0]) {
+        Ok(read) => read == 0,
+        Err(error) => !unanswered.contains(&error.kind()),
+    }
+}
+
 #[test]
 #[ignore = "requires isolated PostgreSQL and an address of this host beside its loopback; exercised by server acceptance and closing gate"]
 fn a_peer_that_is_no_proxy_and_not_this_host_has_so_many_connections_and_no_more() {
     let f = Fixture::new();
     let (factory, mut options) = Running::parts(&f, None, vec![]);
     options.connections_each = 2;
+    // the two that say nothing are still there when the third comes, however
+    // long the host takes to come to it
+    options.header_timeout = Duration::from_secs(120);
     let server = Running::serve_at(outward(), factory, options, None, false);
     let fine = Some("HTTP/1.1 200 OK".to_owned());
     assert_eq!(alive(&server, None), fine);
@@ -87,7 +144,7 @@ fn a_peer_that_is_no_proxy_and_not_this_host_has_so_many_connections_and_no_more
     let silent: Vec<_> = (0..2).map(|_| connect(&server)).collect();
     std::thread::sleep(Duration::from_millis(300));
     // the third is closed unheard
-    assert_eq!(alive(&server, None), None);
+    assert!(closed_unheard(&server));
     drop(silent);
     let until = std::time::Instant::now() + Duration::from_secs(10);
     while alive(&server, None) != fine {
