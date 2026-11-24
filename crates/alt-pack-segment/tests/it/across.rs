@@ -21,14 +21,19 @@ fn written(dir: &Path, name: &str, bytes: &[u8]) -> Arc<Segment> {
     Arc::new(Segment::open(&path).unwrap())
 }
 
-/// Every object a segment of `segments` tells of, read out of them together.
+/// Every object a segment of `segments` tells of, read out of them together;
+/// and each segment read by its own records, behind those before it: a read
+/// by id goes by the newest record of an object and tells nothing of the others.
 fn all_read(segments: &[Arc<Segment>], what: &str) -> BTreeSet<[u8; 20]> {
     let set = SegmentSet::new(segments.to_vec());
     let mut ids = BTreeSet::new();
-    for segment in segments {
+    for (at, segment) in segments.iter().enumerate() {
         for at in 0..segment.len() {
             ids.insert(segment.record(at).unwrap().oid);
         }
+        let older = SegmentSet::new(segments[..at].to_vec());
+        let lost = alt_pack_segment::unread(segment, &older).unwrap();
+        assert!(lost.is_empty(), "{what}: segment {at}: {lost:?}");
     }
     for oid in &ids {
         match set.read(oid) {
