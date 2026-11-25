@@ -138,7 +138,8 @@ impl IndexedPack {
         self.read_at_counting(offset, &mut ReadWork::default())
     }
 
-    /// [`Self::read`], adding to `work` what it took.
+    /// [`Self::read`], adding to `work` what it took, for a test to count
+    #[doc(hidden)]
     pub fn read_counting(
         &self,
         oid: &ObjectId,
@@ -153,7 +154,8 @@ impl IndexedPack {
         self.read_from(&begin, Some(all.clone()), work).map(Some)
     }
 
-    /// [`Self::read_at`], adding to `work` what it took.
+    /// [`Self::read_at`], adding to `work` what it took, for a test to count
+    #[doc(hidden)]
     pub fn read_at_counting(
         &self,
         offset: u64,
