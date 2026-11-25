@@ -161,3 +161,37 @@ fn a_users_file_that_is_gone_while_the_server_runs_opens_nothing() {
     assert_eq!(told(&server.addr, alice), "200");
     assert_eq!(told(&server.addr, None), "401");
 }
+
+/// A users file that is a link to nothing, or a directory, is a users file
+/// that does not read: the server is not started, where it was started for
+/// anybody to read and write.
+#[test]
+fn a_users_file_that_is_a_link_to_nothing_ends_the_start() {
+    for made in ["link", "directory"] {
+        let tmp = alt_os::temp::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        repository(&root.join("docs"));
+        let users = root.join("users");
+        match made {
+            "link" => std::os::unix::fs::symlink(tmp.path().join("gone"), &users).unwrap(),
+            _ => fs::create_dir(&users).unwrap(),
+        }
+        let mut start = Command::new(env!("CARGO_BIN_EXE_altd-server"))
+            .args(["--bind", "127.0.0.1:0"])
+            .env("ALT_SERVER_ROOT", &root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while start.try_wait().unwrap().is_none() && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let _ = start.kill();
+        let out = start.wait_with_output().unwrap();
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{made}: {said}");
+        assert!(said.contains("users"), "{made}: {said}");
+        assert!(!said.contains("listening on"), "{made}: {said}");
+    }
+}
