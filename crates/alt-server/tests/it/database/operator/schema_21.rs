@@ -184,8 +184,9 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     let most = ["--maximum-bytes", "100000000"];
     let restored = away(&target, &[&from[..], &trusted, &most].concat());
     assert_eq!(restored["restored"], true);
+    // the repositories in the order of their ids: `empty`, then the one pushed to
     assert_eq!(
-        restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
+        restored["catalog"]["repositories"][1]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
     assert_eq!(copies(&target.dsn), (23, 0, 0));
