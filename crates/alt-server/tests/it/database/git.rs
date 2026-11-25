@@ -6,6 +6,7 @@ mod led_raced;
 mod led_stored;
 mod led_unread;
 mod many_refs;
+mod merge_gone;
 mod moved;
 mod raw_push;
 mod reverted;

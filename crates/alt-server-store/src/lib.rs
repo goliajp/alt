@@ -15,7 +15,7 @@ mod pack_compaction;
 mod pack_native;
 mod pack_scrub;
 mod pack_sweep;
-pub use pack_compaction::PACK_RETIRED_GRACE_MS;
+pub use pack_compaction::{MERGE_WRITTEN, MergeWritten, PACK_RETIRED_GRACE_MS};
 pub use pack_scrub::{NO_REPOSITORY, Reading, Scrubbed, Unread};
 pub use pack_sweep::{Writing, writing};
 mod pack_view;
