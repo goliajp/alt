@@ -405,6 +405,7 @@ name = "alt-pack-segment"
 version = "0.1.0"
 dependencies = [
  "alt-deflate",
+ "alt-git-codec",
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",

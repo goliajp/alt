@@ -201,7 +201,18 @@ fn malformed_parent_duplicate_tree_and_tag_type_are_rejected() {
 fn unsafe_names_modes_duplicates_and_zero_oids_are_rejected_and_order_is_not_asked() {
     let mut objects = Objects::default();
     let blob = objects.put(ObjectKind::Blob, b"");
-    for name in [b"".as_slice(), b"..", b"a/b", b".git", b".ALT"] {
+    // as a push refuses them: `.git` and `.alt` also as NTFS and HFS+ read them
+    let names = [
+        "",
+        "..",
+        "a/b",
+        ".git",
+        ".ALT",
+        "git~1",
+        "Alt~1 .",
+        ".a\u{200d}lt",
+    ];
+    for name in names.map(str::as_bytes) {
         let tree = objects.tree(&[("100644", name, blob)]);
         assert!(objects.graph(&[tree]).is_err());
     }

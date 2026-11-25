@@ -515,14 +515,8 @@ pub fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node>
             let mut entries = Vec::new();
             for entry in tree.entries {
                 let name = entry.name.to_vec();
-                if name.is_empty()
-                    || name == b"."
-                    || name == b".."
-                    || name.contains(&b'/')
-                    || name.eq_ignore_ascii_case(b".git")
-                    || name.eq_ignore_ascii_case(b".alt")
-                    || !names.insert(name.clone())
-                {
+                // the names a push is refused for
+                if alt_git_codec::unsafe_name(&name).is_some() || !names.insert(name.clone()) {
                     return Err(Error::Integrity("unsafe or duplicate tree name"));
                 }
                 let mode = entry.mode.value();
