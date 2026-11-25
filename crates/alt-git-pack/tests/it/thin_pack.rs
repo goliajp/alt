@@ -93,3 +93,38 @@ fn a_base_the_store_lacks_too_leaves_the_pack_refused_and_what_is_appended_is_co
         }
     }
 }
+
+/// A pack nobody waits for any more is scanned no further, and made whole no
+/// further: where the peer is gone once the first base is read, the second
+/// is not asked for.
+#[test]
+fn a_pack_nobody_waits_for_is_scanned_and_made_whole_no_further() {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    let dir = TempDir::new().unwrap();
+    let gone = AtomicBool::new(true);
+    let limits = IndexLimits {
+        given_up: Some(&gone),
+        ..IndexLimits::default()
+    };
+    let plain = written(&dir, &[plain_entry(&object(0))]);
+    let scanned = index_pack_within(&plain, HashAlgo::Sha1, false, &limits);
+    assert!(matches!(scanned, Err(PackError::GivenUp)), "{scanned:?}");
+
+    // deltas of two objects the pack leaves out
+    let (one, two) = (object(7), object(5));
+    let entries = [
+        ref_entry(&blob(&one), &delta(one.len(), 18, &object(8))),
+        ref_entry(&blob(&two), &delta(two.len(), 18, &object(6))),
+    ];
+    let pack = written(&dir, &entries);
+    gone.store(false, Relaxed);
+    let (held, asked) = ([one, two], Cell::new(0));
+    let found = store(&held, &asked);
+    let bases = |oid: &ObjectId| {
+        gone.store(true, Relaxed);
+        found(oid)
+    };
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&bases));
+    assert!(matches!(made, Err(PackError::GivenUp)), "{made:?}");
+    assert_eq!(asked.get(), 1);
+}

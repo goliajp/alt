@@ -102,6 +102,7 @@ pub(super) fn complete(
     file.seek(SeekFrom::Start(at))?;
     let came = scanned.entries.len();
     for oid in wanted(scanned, oids) {
+        limits.going_on()?;
         let Some((kind, data)) = bases(&oid)? else {
             continue;
         };

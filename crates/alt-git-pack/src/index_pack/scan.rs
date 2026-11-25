@@ -75,6 +75,7 @@ pub(super) fn scan(
     let mut room = None;
     let mut pos = 12usize;
     for _ in 0..count {
+        limits.going_on()?;
         if pos >= body_end {
             return Err(PackError::Format("pack header count exceeds body"));
         }

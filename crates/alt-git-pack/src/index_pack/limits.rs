@@ -111,6 +111,16 @@ impl<'a> IndexLimits<'a> {
         super::ObjectMemory::of(taken, self.each_bytes)
     }
 
+    /// The pack is scanned and made whole no further once nobody waits for it.
+    pub(super) fn going_on(&self) -> Result<(), crate::PackError> {
+        match self.given_up {
+            Some(gone) if gone.load(std::sync::atomic::Ordering::Relaxed) => {
+                Err(crate::PackError::GivenUp)
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// how long the pack waits for what others have
     pub(super) fn wait(&self) -> super::Wait<'a> {
         super::Wait {
