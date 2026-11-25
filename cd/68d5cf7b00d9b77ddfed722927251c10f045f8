@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a push is told a ref changed only where it leans on what the ref led to
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/wanted.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git/read_moved.rs
