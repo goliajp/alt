@@ -165,6 +165,8 @@ mod tests {
     #[test]
     fn the_responses_to_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
         let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
+        let paced = Room::of(1000, 1, 256 << 10).0.pace();
+        assert_eq!(paced, (256 << 10, alt_shares::LARGE_WINDOW));
         let slow: Vec<Written> = (0..5)
             .map(|_| written_from(&room, Some(1), 50).unwrap())
             .collect();

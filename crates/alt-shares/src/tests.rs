@@ -199,7 +199,9 @@ fn a_taker_waits_while_it_is_waited_for_and_one_let_in_in_vain_gives_its_turn_on
 
 #[test]
 fn a_large_taker_another_waits_for_is_slow_below_its_pace_and_one_alone_is_not() {
+    assert_eq!(Shares::of(1000, 1).pace(), (LARGE_RATE, LARGE_WINDOW));
     let shares = Shares::of(1000, 1).paced(100, Duration::from_secs(10));
+    assert_eq!(shares.pace(), (100, Duration::from_secs(10)));
     let gone = Arc::new(AtomicBool::new(false));
     let mut large = taker(&shares, 1, 300).unwrap();
     let mut small = taker(&shares, 2, 100).unwrap();

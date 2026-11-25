@@ -14,6 +14,8 @@ use crate::altd_server_untrusted::repository;
 
 /// more than a quarter of the room of sixty megabytes, and less than half
 const BYTES: usize = 16 << 20;
+/// the time over which the pace of a large response is counted
+const LARGE_WINDOW: Duration = Duration::from_secs(30);
 
 /// A server of a repository of [`BYTES`] of noise, with `env`, and its head.
 fn served(origin: &std::path::Path, env: &[(&str, &str)]) -> (Server, String) {
@@ -92,6 +94,20 @@ fn a_large_response_waits_for_its_turn_while_its_fetch_may_take() {
     );
 }
 
+/// The bytes of a response kept from the start, read at a quarter of a
+/// megabyte a second until it ends, and how long that took.
+fn read_slowly(mut kept: TcpStream) -> (usize, Duration) {
+    let (mut read, mut piece) = (12, vec![0u8; 64 << 10]);
+    let began = Instant::now();
+    loop {
+        match kept.read(&mut piece) {
+            Ok(0) | Err(_) => return (read, began.elapsed()),
+            Ok(count) => read += count,
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 /// Two workers, so one turn. The response kept in it is read at a quarter of
 /// a megabyte a second while another waits: it is let go of before it is
 /// whole, at the end of the first half minute it is counted over, and the one
@@ -105,28 +121,39 @@ fn a_large_response_taken_slowly_is_let_go_of_once_another_waits_for_its_turn() 
     ];
     let (server, head) = served(&tmp.path().join("origin"), &env);
     let whole = answer(asked_for(&server.addr, &head, Some("203.0.113.9"))).len();
-    let mut slow = kept(&server, &head, "203.0.113.9");
+    let slow = kept(&server, &head, "203.0.113.9");
     let after = waiting(&server, &head, "203.0.113.10");
-    let (mut read, mut piece) = (12, vec![0u8; 64 << 10]);
-    let began = Instant::now();
-    loop {
-        match slow.read(&mut piece) {
-            Ok(0) | Err(_) => break,
-            Ok(count) => read += count,
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
+    let (read, took) = read_slowly(slow);
     assert!(read < whole, "{read} of {whole}");
-    assert!(
-        began.elapsed() < Duration::from_secs(90),
-        "{:?}",
-        began.elapsed()
-    );
+    assert!(took < Duration::from_secs(90), "{took:?}");
     let after = after.join().unwrap();
     assert!(
         after.starts_with(b"HTTP/1.1 200"),
         "{:.200}",
         String::from_utf8_lossy(&after)
     );
+    assert_eq!(after.len(), whole);
+}
+
+/// As above, with the least a large response another waits for is taken at
+/// told as 64 KiB a second: the one read at a quarter of a megabyte a second
+/// is taken fast enough, and is read whole while the other waits.
+#[test]
+fn a_large_response_taken_at_the_pace_the_server_is_told_is_read_whole_while_another_waits() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let env = [
+        ("ALT_SERVER_WORKERS", "2"),
+        ("ALT_SERVER_MAX_FETCH_MS", "120000"),
+        ("ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", "65536"),
+    ];
+    let (server, head) = served(&tmp.path().join("origin"), &env);
+    let whole = answer(asked_for(&server.addr, &head, Some("203.0.113.9"))).len();
+    let slow = kept(&server, &head, "203.0.113.9");
+    let after = waiting(&server, &head, "203.0.113.10");
+    let (read, took) = read_slowly(slow);
+    assert_eq!(read, whole, "after {took:?}");
+    assert!(took > LARGE_WINDOW, "{took:?}");
+    let after = after.join().unwrap();
+    assert!(after.starts_with(b"HTTP/1.1 200"));
     assert_eq!(after.len(), whole);
 }

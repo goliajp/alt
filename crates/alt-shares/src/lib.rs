@@ -92,6 +92,12 @@ impl Shares {
         self
     }
 
+    /// what a large taker another waits for sends at the least, in bytes a
+    /// second, and the time over which that is counted
+    pub fn pace(&self) -> (u64, Duration) {
+        self.lock().pace
+    }
+
     /// A taker for the address `from`, which has nothing yet.
     pub fn share(self: &Arc<Self>, from: Option<IpAddr>) -> Share {
         Share::new(Arc::clone(self), from)

@@ -75,8 +75,11 @@ mod tests {
         let mut config: Config = alt_json::from_str(text).unwrap();
         assert_eq!(config.http.large_sending_kib, None);
         assert_eq!(config.http.large_pace(), 1 << 20);
+        let window = alt_shares::LARGE_WINDOW;
+        assert_eq!(config.http_options().sending.pace(), (1 << 20, window));
         config.http.large_sending_kib = Some(256);
         assert_eq!(config.http.large_pace(), 256 << 10);
+        assert_eq!(config.http_options().sending.pace(), (256 << 10, window));
         let written = alt_json::to_vec(&config).unwrap();
         let read: Config = alt_json::from_slice(&written).unwrap();
         assert_eq!(read.http.large_sending_kib, Some(256));

@@ -199,8 +199,8 @@ impl Config {
         let bases = directory.join("bases");
         let files = alt_pack_segment::BaseFiles::open(&bases, options.verifying.all());
         options.base_files = Some(Box::leak(Box::new(files.map_err(|_| Error::File)?)));
-        let sending = sending(self.http.sending_megabytes, self.http.workers, &directory)?;
-        options.sending = sending.paced(self.http.large_pace(), alt_shares::LARGE_WINDOW);
+        let h = &self.http;
+        options.sending = sending(h.sending_megabytes, h.workers, &directory, h.large_pace())?;
         Ok(options)
     }
     pub fn http_options(&self) -> HttpOptions {
@@ -255,17 +255,20 @@ impl Config {
 /// The room the responses to fetches have on disk in `directory`, where they are
 /// written: as many megabytes as the configuration tells, or half of what is
 /// free on the disk when the server starts. Half the `workers` may send a
-/// response larger than the part of one address at once.
+/// response larger than the part of one address at once, taken at `pace` bytes
+/// a second at the least while another waits.
 fn sending(
     told: Option<u64>,
     workers: usize,
     directory: &Path,
+    pace: u64,
 ) -> Result<std::sync::Arc<alt_shares::Shares>> {
     let room = match told {
         Some(megabytes) => megabytes.saturating_mul(1 << 20),
         None => alt_shares::half_of_what_is_free(directory).map_err(|_| Error::File)?,
     };
-    Ok(alt_shares::Shares::passed_by_one_alone(room, workers / 2))
+    let shares = alt_shares::Shares::passed_by_one_alone(room, workers / 2);
+    Ok(shares.paced(pace, alt_shares::LARGE_WINDOW))
 }
 
 #[cfg(test)]
@@ -275,16 +278,18 @@ mod tests {
     #[test]
     fn the_room_for_responses_is_what_is_told_or_half_of_what_is_free_on_its_disk() {
         let work = alt_os::temp::tempdir().unwrap();
-        assert_eq!(sending(Some(3), 8, work.path()).unwrap().most(), 3 << 20);
+        let told = sending(Some(3), 8, work.path(), 1234).unwrap();
+        assert_eq!(told.most(), 3 << 20);
+        assert_eq!(told.pace(), (1234, alt_shares::LARGE_WINDOW));
         let free = || alt_shares::half_of_what_is_free(work.path()).unwrap();
-        let (before, room, after) = (free(), sending(None, 8, work.path()).unwrap(), free());
+        let (before, room, after) = (free(), sending(None, 8, work.path(), 1).unwrap(), free());
         // others write to the disk meanwhile: within a tenth of what was free
         // before and after
         let (least, most) = (before.min(after), before.max(after));
         assert!(room.most() >= least - least / 10 && room.most() <= most + most / 10);
         assert!(room.most() > 0 && room.most() < u64::MAX);
         assert!(matches!(
-            sending(None, 8, &work.path().join("none")),
+            sending(None, 8, &work.path().join("none"), 1),
             Err(Error::File)
         ));
     }
