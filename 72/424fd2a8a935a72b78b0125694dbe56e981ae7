@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a pack with no base in files waits for a file of bases as for room, where the packs have all there may be
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack/files.rs
+touched: crates/alt-pack-segment/tests/it/base_files.rs
