@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: an online backup reads the segments published after it read the others, once its snapshot holds the writes
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/unread.rs
