@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: the PostgreSQL of a test run has connections for the threads its command is told, and memory for them
+author-type: human
+author: doracawl
+touched: scripts/test-postgres-threads.sh
+touched: scripts/with-test-postgres-native.sh
+touched: scripts/with-test-postgres.sh
