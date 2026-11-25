@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: what is written beside a stored closure is removed where the write fails, and by the next server where a process ended first
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/stored.rs
+touched: crates/alt-server/src/operator/validate.rs
