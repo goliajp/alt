@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: plant a second link on every random checkout, clear what a refusal left, and compare the index
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/checkout_order/random/extras.rs
