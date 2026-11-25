@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: manage.py start makes anew a network an older compose left on another subnet
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
+touched: self-hosted/manage.py
+touched: self-hosted/tests/install_smoke.py
