@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: a closure beyond the bound of those kept lets go of none of them, and is shared while requests hold it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/kept.rs
