@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: the files of a backup are read into its archive by a module of their own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/archive.rs
