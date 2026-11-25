@@ -54,6 +54,9 @@ impl Unread {
     }
 }
 
+/// Segments whose objects were read, each by its repository and its id.
+pub type Read = std::collections::BTreeSet<(String, String)>;
+
 /// How far a reading of every object has come, told as each object was read:
 /// the repository, how many of its objects were read, and how many it has.
 pub type Reading<'a> = &'a mut dyn FnMut(&str, u64, u64);
@@ -172,6 +175,18 @@ impl Store {
     /// backed up and what was restored is read through before it is taken for
     /// a copy of the instance.
     pub fn unread_packs(&mut self, told: Reading<'_>) -> Result<Vec<(String, Unread)>> {
+        Ok(self.unread_packs_besides(&Read::new(), told)?.0)
+    }
+
+    /// [`Self::unread_packs`] of the live segments that are not among those
+    /// `done` already, each still read behind for those that follow it; and
+    /// all that are live, by repository, as read by now.
+    pub fn unread_packs_besides(
+        &mut self,
+        done: &Read,
+        told: Reading<'_>,
+    ) -> Result<(Vec<(String, Unread)>, Read)> {
+        let mut now_read = Read::new();
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
         let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
@@ -187,16 +202,20 @@ impl Store {
                 told(&repository, read, all)
             };
             for (part, segment) in ids.iter().zip(set.segments()) {
-                let before = SegmentSet::new(older.clone());
-                let lost = alt_pack_segment::unread_telling(segment, &before, &mut each);
-                let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
-                if !lost.is_empty() {
-                    unread.push((repository.clone(), Unread::of(&part.0, &lost)));
+                let known = (repository.clone(), part.0.clone());
+                if !done.contains(&known) {
+                    let before = SegmentSet::new(older.clone());
+                    let lost = alt_pack_segment::unread_telling(segment, &before, &mut each);
+                    let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
+                    if !lost.is_empty() {
+                        unread.push((repository.clone(), Unread::of(&part.0, &lost)));
+                    }
                 }
+                now_read.insert(known);
                 older.push(Arc::clone(segment));
             }
         }
-        Ok(unread)
+        Ok((unread, now_read))
     }
 
     /// A store of an instance at a schema this release upgrades from, or at
