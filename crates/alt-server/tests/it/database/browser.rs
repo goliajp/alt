@@ -241,7 +241,7 @@ fn cookie_sessions_csrf_revocation_and_origin_binding_are_enforced_over_http() {
         .disable_local_user(&f.credential, "browser", true)
         .unwrap();
     assert_eq!(get(&server, "/web/session", &cookie).0, 401);
-    // Runtime refuses missing config after persistent browser enablement.
+    // runtime refuses missing config after persistent browser enablement
     assert!(f.store.check_browser_binding(None).is_err());
     // and says why, instead of leaving the operator with an unknown outcome
     assert_eq!(
@@ -505,7 +505,7 @@ fn change_links_use_current_browser_scope_and_csrf() {
         .status(),
         403
     );
-    // Valid browser authentication reaches the same strict business decoder.
+    // valid browser authentication reaches the same strict business decoder
     assert_eq!(
         send(
             &server,

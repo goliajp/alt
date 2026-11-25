@@ -114,7 +114,7 @@ impl Runtime {
         Ok(value.public_view())
     }
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
-        // Check that a local credential exists before admitting control traffic.
+        // check that a local credential exists before admitting control traffic
         store.cloud_refresh(token)?;
         // one that waited for another's asking goes by what that one was told
         let mut waited = false;
@@ -147,7 +147,7 @@ impl Runtime {
             }
             break;
         }
-        // Service refresh may have advanced the shared revocation generation.
+        // service refresh may have advanced the shared revocation generation
         let mut waited = false;
         loop {
             let descriptor = store.cloud_refresh(token)?;

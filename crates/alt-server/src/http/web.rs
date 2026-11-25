@@ -134,7 +134,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     if request.headers().contains_key(header::AUTHORIZATION) {
         return unauthenticated();
     }
-    // Neither bearer credentials nor proxy headers can become browser identity.
+    // neither bearer credentials nor proxy headers can become browser identity
     let token = match headers(request.headers(), "cookie").and_then(|values| {
         browser
             .origin

@@ -103,7 +103,7 @@ impl<'a> Transaction<'a> {
         self.reading
     }
     pub fn raw_mut(&mut self) -> &mut alt_pg::Transaction<'a> {
-        // Raw schema operations may change statement result types or settings.
+        // raw schema operations may change statement result types or settings
         if self.cached {
             self.inner.clear_statements();
         }
@@ -196,7 +196,7 @@ mod tests {
             tx.execute("UPDATE cache_test SET value=$1", &[&99i64])
                 .unwrap();
             assert!(tx.query_one("SELECT 1 / $1::integer", &[&0i32]).is_err());
-            // Drop rolls back. No failed write is retried by the cache.
+            // drop rolls back; no failed write is retried by the cache
         }
         let mut tx = connection.transaction().unwrap();
         assert_eq!(tx.query_one(sql, &[]).unwrap().get::<_, i64>(0), 2);

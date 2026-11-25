@@ -398,7 +398,7 @@ fn dispatch(
             writer.remember();
             return answered;
         }
-        // Path matched but method didn't — 405 Method Not Allowed.
+        // path matched but method didn't — 405 Method Not Allowed
         let mut r = Response::from_string(format!("method not allowed; allow={allow}"))
             .with_status_code(StatusCode(405));
         r.add_header(header("Allow", allow));

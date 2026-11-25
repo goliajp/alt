@@ -48,7 +48,7 @@ impl<R: AsyncRead + Unpin> Body for FileBody<R> {
         }
         let result = match ready!(Pin::new(&mut this.stream).poll_next(cx)) {
             Some(Ok(bytes)) => {
-                // Take limits reads to the declared response extent.
+                // `Take` limits reads to the declared response extent
                 this.remaining -= bytes.len() as u64;
                 // a large response another waits for its turn behind goes on
                 // only as fast as such a one has to
@@ -124,7 +124,7 @@ mod tests {
                     break;
                 }
             }
-            // No extra EOF poll: this is how HTTP/1 handles Content-Length.
+            // no extra EOF poll: this is how HTTP/1 handles Content-Length
             drop(body);
             let outcome = match case {
                 "short" => "failed",

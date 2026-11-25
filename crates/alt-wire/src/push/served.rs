@@ -31,7 +31,7 @@ pub fn encode_v1_ref_advertisement<W: Write>(
     pkt::write_flush(w)?;
     let caps_blob = capabilities.join(" ");
     if refs.is_empty() {
-        // Empty repo: pseudo-ref `capabilities^{}` carries the cap list.
+        // empty repo: pseudo-ref `capabilities^{}` carries the cap list
         let zero = zero_oid(algo);
         let mut line = format!("{zero} capabilities^{{}}").into_bytes();
         line.push(0);

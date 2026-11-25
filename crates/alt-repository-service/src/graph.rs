@@ -388,7 +388,7 @@ fn verify(
         }
         nodes.insert(oid, node);
     }
-    // An object reused at a different edge must still have the required type.
+    // an object reused at a different edge must still have the required type
     for node in nodes.values() {
         for (oid, kind) in node.edges() {
             let found = nodes
