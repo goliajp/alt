@@ -63,12 +63,10 @@ impl NativeRepo<'_> {
             Some(&COMPLETE) => self.undo_index(&last, &workspace, &mut fields)?,
             Some(&in_progress::STEP) => self.undo_step(&last)?,
             Some(&checkout_recovery::PREPARE_CHECKOUT) => {
-                let intent: checkout_recovery::CheckoutIntent = decode(
-                    &last.payload, checkout_recovery::PREPARE_CHECKOUT,
-                )?;
+                let intent = self.checkout_recorded(&last.payload)?;
                 let inverse = self.inverse_checkout(&intent)?;
-                let prepared = self.store.refs.record_op(&self.id.actor("undo"), now_ms(),
-                    &encode(checkout_recovery::PREPARE_CHECKOUT, &inverse)?)?;
+                let record = self.checkout_record(&inverse)?;
+                let prepared = self.store.refs.record_op(&self.id.actor("undo"), now_ms(), &record)?;
                 self.apply_prepared_checkout(prepared, &inverse)?;
             }
             Some(&alt_refs::PAYLOAD_REF_TX) => {

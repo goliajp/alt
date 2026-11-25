@@ -265,7 +265,7 @@ impl NativeRepo<'_> {
         match op.payload.first() {
             Some(&PREPARE) => self.recover_index(op.id, decode(&op.payload, PREPARE)?),
             Some(&PREPARE_CHECKOUT) => {
-                let intent = decode(&op.payload, PREPARE_CHECKOUT)?;
+                let intent = self.checkout_recorded(&op.payload)?;
                 self.finish_interrupted_checkout(op.id, intent, of_step)
             }
             Some(&alt_refs::PAYLOAD_REF_TX) => {

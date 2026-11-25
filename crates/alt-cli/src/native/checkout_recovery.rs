@@ -5,6 +5,7 @@ use super::*;
 use recovery::{WorkspaceIdentity, canonical_index, decode, durable_write, encode, hash};
 
 mod finish;
+mod hollow;
 mod inverse;
 mod prestate;
 
@@ -154,7 +155,7 @@ impl NativeRepo<'_> {
     pub(super) fn record_checkout(&mut self, verb: &str, intent: &CheckoutIntent) -> Res<OpId> {
         self.ensure_directories_replaceable(intent)?;
         self.step_effect()?;
-        let payload = encode(PREPARE_CHECKOUT, intent)?;
+        let payload = self.checkout_record(intent)?;
         crash_point!("checkout-intent:before");
         let actor = self.id.actor(verb);
         let prepared = self.store.refs.record_op(&actor, now_ms(), &payload)?;
@@ -201,6 +202,7 @@ impl NativeRepo<'_> {
         self.snapshot_checked_out(&index)?;
         crash_point!("checkout-done:before");
         self.record_checkout_done("checkout", prepared)?;
+        self.forget_moved_before(intent)?;
         self.step_unfinished(false);
         Ok(())
     }
