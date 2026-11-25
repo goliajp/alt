@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the base of the deltas being read is kept while they are, beside the one that is read
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ordered.rs
+touched: crates/alt-pack-segment/tests/it/mend.rs
