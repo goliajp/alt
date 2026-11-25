@@ -162,9 +162,36 @@ def operator(directory, arguments, mounts=()):
     compose(directory, *options, 'app', '--credential', '/operator/admin.token', *arguments)
 
 
+def network_of(directory):
+    """The default network as the files of the installation have it, and as Docker has it (None where there is none)."""
+    values = dict(line.split('=', 1) for line in regular(directory / '.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
+    project = values.get('COMPOSE_PROJECT_NAME') or directory.name
+    written = f"{values.get('ALT_SUBNET') or '172.30.91.0/24'} {values.get('ALT_GATEWAY') or '172.30.91.1'}"
+    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{end}}'], capture_output=True, text=True)
+    if found.returncode and 'not found' not in found.stderr and 'No such network' not in found.stderr:
+        raise ValueError(f'docker network inspect: {found.stderr.strip()}')
+    return written, (found.stdout.strip() if found.returncode == 0 else None)
+
+
+def start(directory, *services):
+    # Compose makes a network anew where its configuration changed only when
+    # the network carries the digest of the configuration it was made from:
+    # one an older Compose made is kept as it is, on a subnet Docker chose,
+    # and the gateway the edge and the application are told of is not where
+    # a proxy on the host connects from. Such a network is taken down first.
+    written, found = network_of(directory)
+    if found is not None and found != written:
+        print(json.dumps({'network': found, 'written': written, 'taken_down': True}), file=sys.stderr)
+        compose(directory, 'down')
+    compose(directory, 'up', '-d', '--wait', *services)
+    written, found = network_of(directory)
+    if found != written:
+        raise ValueError(f'the network of the edge is {found}, where {written} is written down')
+
+
 def initialize(args):
     directory = args.directory.resolve(strict=True)
-    compose(directory, 'up', '-d', '--wait', 'database', 'edge')
+    start(directory, 'database', 'edge')
     # Each operation uses the same server implementation as a standalone
     # operator. Failure preserves state for inspection; no destructive cleanup
     # or implicit retry is attempted.
@@ -194,6 +221,8 @@ def main():
     prep.add_argument('--subnet', default='172.30.91.0/24', help='private IPv4 network of the edge container; a second installation on one host needs another (default: %(default)s)')
     prep.add_argument('--uid', type=int)
     prep.add_argument('--gid', type=int)
+    up = sub.add_parser('start', help='start every service, the network of the edge made anew first where it is not the one written down (after an upgrade)')
+    up.add_argument('--directory', type=Path, required=True)
     init = sub.add_parser('initialize', help='initialize explicitly; never resume or migrate on restart')
     init.add_argument('--directory', type=Path, required=True)
     op = sub.add_parser('operator', help='run explicit server operator commands')
@@ -215,6 +244,9 @@ def main():
         prepare(args)
     elif args.command == 'initialize':
         initialize(args)
+    elif args.command == 'start':
+        start(args.directory.resolve(strict=True))
+        print(json.dumps({'started': True, 'network': network_of(args.directory.resolve(strict=True))[1]}))
     else:
         arguments = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
         if not arguments:
