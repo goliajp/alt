@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: chore
+summary: the hook of the walks has a type of its own, and stored ids are read as chunks, as clippy asks
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/pack_view/stored.rs
