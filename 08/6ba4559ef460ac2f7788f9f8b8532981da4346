@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the fetch that waits while a response is read at its pace waits as long as that takes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
