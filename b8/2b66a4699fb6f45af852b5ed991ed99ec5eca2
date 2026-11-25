@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the pages of a repository hold a commit to the refs by what is kept of where they lead, and stop for a request waited for no longer
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/browse.rs
+touched: crates/alt-server/src/browse/history.rs
+touched: crates/alt-server/src/browse/reached.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/tests/it/database/browser/unwaited.rs
