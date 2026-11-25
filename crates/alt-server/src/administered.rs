@@ -152,6 +152,9 @@ pub(super) fn execute(
         Action::Collect { repository, limit } => {
             json!({"repository":repository,"removed":store.collect_orphans(admin,repository,*limit)?})
         }
+        Action::RefusedTrees { repository } => {
+            operator::scrub::refused_trees(store, admin, repository.as_deref())?
+        }
         Action::Scrub { repository, mend } => {
             let mend = mend.then(|| operator::scrub::memory(config.indexing_bytes()));
             operator::scrub::read(store, admin, repository.as_deref(), mend)?

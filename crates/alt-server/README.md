@@ -487,6 +487,18 @@ of as a repository without unread objects. A pack is indexed anew within
 once, whatever the length of its chains; the objects kept for the deltas made of
 them take 256 MiB at the most.
 
+`refused-trees [repository]` reads the trees of the live pack segments, of one
+repository or of all, and lists those a push is now refused for: a name that is
+`.git` or `.alt` (in any case, and as NTFS and HFS+ read a name), `.`, `..`,
+empty or holding `/`, a name twice in one tree, or a mode of more than sixteen
+digits. Each is told with its repository, segment, tree id and the reason in
+the words of `git fsck`. It changes nothing. Where there are any, or a
+repository could not be read, the command ends with status 1. Versions before
+this one took such trees in; run it before upgrading, with the new version
+against the instance as it is. A tree it lists is still served; a portable export of its
+repository fails on it, and `scrub --mend` cannot index anew a segment that
+holds it.
+
 `backup` reads the instance through in the same way before it copies anything.
 Where a segment does not give all of its objects back it makes no backup, ends
 with status 1 and tells under `unread` which repository, which segment, how

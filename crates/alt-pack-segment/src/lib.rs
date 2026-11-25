@@ -43,7 +43,7 @@ pub use format::{CommitInfo, Delta, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_led, ingest_while_waited_for};
 pub use led::Led;
 pub use limits::Limits;
-pub use mend::{indexed_anew, unread, unread_holding, unread_telling};
+pub use mend::{indexed_anew, refused_trees, unread, unread_holding, unread_telling};
 pub use merge::{merge, stands_on};
 pub use readback::UNREADABLE;
 pub use room::least_memory;

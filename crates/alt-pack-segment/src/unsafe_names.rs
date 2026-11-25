@@ -23,6 +23,20 @@ pub(crate) fn found(data: &[u8]) -> Option<&'static str> {
     twice.then_some("duplicateEntries: contains duplicate file entries")
 }
 
+/// What a push is refused for in tree `data`: [`found`], or a mode of more
+/// digits than a reader of trees reads.
+pub(crate) fn refused(data: &[u8]) -> Option<&'static str> {
+    let mut rest = data;
+    while let Some(space) = rest.iter().position(|byte| *byte == b' ') {
+        if space > 16 {
+            return Some("badMode: contains bad file modes");
+        }
+        let nul = rest.iter().position(|byte| *byte == 0)?;
+        rest = rest.get(nul + 21..)?;
+    }
+    found(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,5 +66,18 @@ mod tests {
         let mut padded = b"040000 d\0".to_vec();
         padded.extend_from_slice(&[7; 20]);
         assert_eq!(found(&padded), None);
+        // what a push is refused for also holds a mode too long to be read
+        assert_eq!(refused(&padded), None);
+        assert_eq!(
+            refused(&tree(&[b"a", b".git"])),
+            Some("hasDotgit: contains '.git'")
+        );
+        let mut long = b"00000000000100644 f\0".to_vec();
+        long.extend_from_slice(&[7; 20]);
+        assert_eq!(
+            refused(&[&padded[..], &long].concat()),
+            Some("badMode: contains bad file modes")
+        );
+        assert_eq!(refused(&long[1..]), None);
     }
 }

@@ -195,6 +195,40 @@ impl Store {
         Ok(unread)
     }
 
+    /// The trees of the live segments of `repository` that a push is now
+    /// refused for: each with its segment, its id and why, in the words of
+    /// `git fsck`. Nothing is changed.
+    pub fn refused_trees(
+        &mut self,
+        admin: &Credential,
+        repository: &str,
+        told: Reading<'_>,
+    ) -> Result<Vec<(String, String, &'static str)>> {
+        let mut tx = self.client.transaction()?;
+        instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
+        require_admin(&mut tx, &self.spec, admin)?;
+        let known = tx.query_opt("SELECT 1 FROM alt_repositories WHERE id=$1", &[&repository])?;
+        if known.is_none() {
+            return Err(Error::Precondition(NO_REPOSITORY));
+        }
+        let ids = Self::live_segment_ids(&mut tx, repository)?;
+        tx.commit()?;
+        let set = self.open_segments(repository, &ids)?;
+        let (mut read, all, mut refused) = (0, set.objects(), Vec::new());
+        let mut each = || {
+            read += 1;
+            told(repository, read, all)
+        };
+        for (at, (part, segment)) in ids.iter().zip(set.segments()).enumerate() {
+            let before = SegmentSet::new(set.segments()[..at].to_vec());
+            let found = alt_pack_segment::refused_trees(segment, &before, &mut each);
+            for (tree, why) in found.map_err(|_| Error::Integrity("pack segment index"))? {
+                refused.push((part.0.clone(), alt_pack_segment::hex(&tree), why));
+            }
+        }
+        Ok(refused)
+    }
+
     /// Puts the pack of `segment`, indexed anew behind `before`, in the place of
     /// the live segment `part`. The id of the new segment, and the segment.
     fn index_anew(

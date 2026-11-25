@@ -147,19 +147,21 @@ def prepare(args):
     print(json.dumps({'prepared': str(target), 'initialized': False, 'installation_id': config['instance']['installation_id'], 'login': 'owner', 'password_file': str(target / 'operator/initial-password')}))
 
 
-def compose(directory, *args):
+def compose(directory, *args, image=None):
     directory = directory.resolve(strict=True)
     regular(directory / '.env')
     regular(directory / 'compose.yaml')
-    subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), *args], check=True)
+    # what the environment of Compose has is taken before the file of the installation
+    environment = {**os.environ, 'ALT_IMAGE': image} if image else None
+    subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), *args], check=True, env=environment)
 
 
-def operator(directory, arguments, mounts=()):
+def operator(directory, arguments, mounts=(), image=None):
     # This directory is mounted only for explicit operator jobs, never serve.
     options = ['run', '--rm', '--no-deps', '-v', f'{directory.resolve() / "operator"}:/operator:ro']
     for mount in mounts:
         options += ['-v', mount]
-    compose(directory, *options, 'app', '--credential', '/operator/admin.token', *arguments)
+    compose(directory, *options, 'app', '--credential', '/operator/admin.token', *arguments, image=image)
 
 
 def network_of(directory):
@@ -228,6 +230,7 @@ def main():
     op = sub.add_parser('operator', help='run explicit server operator commands')
     op.add_argument('--directory', type=Path, required=True)
     op.add_argument('--mount', action='append', default=[], help='explicit Docker bind mount for input/output artifacts')
+    op.add_argument('--image', help='the application image to run the command with, in place of ALT_IMAGE of the installation (a loaded image of a newer bundle, before upgrading to it)')
     op.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command == 'load':
@@ -251,7 +254,7 @@ def main():
         arguments = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
         if not arguments:
             raise ValueError('operator command is required')
-        operator(args.directory, arguments, args.mount)
+        operator(args.directory, arguments, args.mount, args.image)
 
 
 if __name__ == '__main__':
