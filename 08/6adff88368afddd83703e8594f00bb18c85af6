@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a full table of used nonces says why it refuses a push
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
