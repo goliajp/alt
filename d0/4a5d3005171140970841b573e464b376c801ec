@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the room of the old server's responses is made with its pace where it is made, the one way it is
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
