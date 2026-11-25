@@ -71,6 +71,14 @@ fn what_the_refs_lead_to_is_kept_where_a_record_they_do_not_lead_to_is_not_read(
             let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
             file.seek(std::io::SeekFrom::Start(0)).unwrap();
             file.write_all(&bytes).unwrap();
+            // A segment small enough for its row is written out of the row
+            // again where the process opens it anew, as it does once the
+            // mapping is let go of among those of every test: the row is
+            // changed the same.
+            let id = path.file_stem().unwrap().to_str().unwrap().to_owned();
+            let row =
+                "UPDATE alt_pack_segments SET inline=$2 WHERE segment_id=$1 AND inline IS NOT NULL";
+            f.client().execute(row, &[&id, &bytes]).unwrap();
             break;
         }
     }
