@@ -149,7 +149,14 @@ fn a_large_response_taken_at_the_pace_the_server_is_told_is_read_whole_while_ano
     let (server, head) = served(&tmp.path().join("origin"), &env);
     let whole = answer(asked_for(&server.addr, &head, Some("203.0.113.9"))).len();
     let slow = kept(&server, &head, "203.0.113.9");
-    let after = waiting(&server, &head, "203.0.113.10");
+    // it waits for as long as the other is read, which is longer than a fetch waits here
+    let (address, head) = (server.addr.clone(), head.clone());
+    let after = std::thread::spawn(move || {
+        let socket = asked_for(&address, &head, Some("203.0.113.10"));
+        let longer = Some(Duration::from_secs(300));
+        socket.set_read_timeout(longer).unwrap();
+        answer(socket)
+    });
     let (read, took) = read_slowly(slow);
     assert_eq!(read, whole, "after {took:?}");
     assert!(took > LARGE_WINDOW, "{took:?}");
