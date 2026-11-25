@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: feat
+summary: what a large response another waits for is taken at, at the least, is configured on both servers
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-server/tests/it/database/operator.rs
