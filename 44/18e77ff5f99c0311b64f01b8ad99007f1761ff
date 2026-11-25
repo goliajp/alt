@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: an old server worker whose response waits for its turn gives its place to another meanwhile
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/src/bin/altd_server/workers.rs
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
