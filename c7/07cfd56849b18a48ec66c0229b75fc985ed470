@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a name of a tree is read as NTFS reads what follows each backslash in it
+author-type: human
+author: doracawl
+touched: crates/alt-git-codec/src/names.rs
+touched: crates/alt-server/tests/it/database/git/fsck.rs
