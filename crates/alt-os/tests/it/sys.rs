@@ -287,6 +287,48 @@ fn poll_reports_readable_data() {
     assert_eq!(fds[0].revents & sys::POLLIN, sys::POLLIN);
 }
 
+fn a_peer_that_closed_is_known_once_what_it_sent_is_read() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut peer = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut socket, _) = listener.accept().unwrap();
+    assert!(!alt_os::socket::peer_closed(&socket));
+    peer.write_all(b"x").unwrap();
+    drop(peer);
+    // the byte it sent is there to be read: the close behind it is not seen yet
+    let mut byte = [0u8];
+    let began = std::time::Instant::now();
+    while socket.peek(&mut byte).unwrap() == 0 {
+        assert!(began.elapsed() < std::time::Duration::from_secs(30));
+    }
+    assert!(!alt_os::socket::peer_closed(&socket));
+    // looking took nothing of it
+    socket.read_exact(&mut byte).unwrap();
+    assert_eq!(&byte, b"x");
+    assert!(alt_os::socket::peer_closed(&socket));
+}
+
+/// A peer that has closed its sending side and still reads is taken for one that
+/// is gone: what arrives of either is the same end of what it sends, and which
+/// it is shows only to whoever writes to it.
+fn a_peer_that_sends_no_more_is_taken_for_one_that_is_gone() {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut peer = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut socket, _) = listener.accept().unwrap();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    let began = std::time::Instant::now();
+    while !alt_os::socket::peer_closed(&socket) {
+        assert!(began.elapsed() < std::time::Duration::from_secs(30));
+    }
+    // it reads what it is sent all the same
+    socket.write_all(b"answer").unwrap();
+    drop(socket);
+    let mut answer = String::new();
+    peer.read_to_string(&mut answer).unwrap();
+    assert_eq!(answer, "answer");
+}
+
 fn setsockopt_accepts_a_receive_buffer_size() {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
     let size: sys::c_int = 4096;
@@ -352,6 +394,8 @@ tests![
     close_on_exec_keeps_the_descriptor_out_of_a_child,
     filesystem_statistics_are_filled,
     poll_reports_readable_data,
+    a_peer_that_closed_is_known_once_what_it_sent_is_read,
+    a_peer_that_sends_no_more_is_taken_for_one_that_is_gone,
     setsockopt_accepts_a_receive_buffer_size,
     setrlimit_caps_open_files,
 ];

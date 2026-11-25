@@ -48,14 +48,34 @@ impl hyper::body::Body for ResponseBody {
 pub(super) fn full(bytes: impl Into<Bytes>) -> ResponseBody {
     ResponseBody::Full(Full::new(bytes.into()))
 }
-/// a file of known length, declared in the headers
-fn file(content_type: &str, file: std::fs::File, bytes: u64) -> Response<ResponseBody> {
-    let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes);
+/// A file of known length, declared in the headers, with what it has of the room
+/// of responses kept until it is sent.
+fn file(
+    content_type: &str,
+    (file, bytes): (std::fs::File, u64),
+    held: Option<alt_shares::Share>,
+) -> Response<ResponseBody> {
+    let body = file_body::FileBody::new(tokio::fs::File::from_std(file), bytes).holding(held);
     let mut output = response(200, content_type, ResponseBody::File(body));
     output
         .headers_mut()
         .insert(header::CONTENT_LENGTH, bytes.into());
     output.extensions_mut().insert(connection::DeclaredLength);
+    output
+}
+/// the answer to a request of an address that has as many under way as one may
+pub(super) fn crowded() -> Response<ResponseBody> {
+    let mut output = failure(
+        429,
+        ErrorCode::TemporarilyUnavailable,
+        "Too many requests of this address are under way",
+        None,
+        Retry::SameRequest,
+    );
+    // a place is there again when any request of the address ends, and most
+    // end within the second
+    let soon = header::HeaderValue::from_static("1");
+    output.headers_mut().insert(header::RETRY_AFTER, soon);
     output
 }
 pub(super) fn unknown() -> Response<ResponseBody> {
@@ -103,14 +123,37 @@ pub(super) fn failure(
     }
     output
 }
+/// What a request the store refused is answered with, and after how many
+/// seconds it may be sent again where that is known.
 pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
-    // PostgreSQL/I/O details may contain internal paths, SQL, connection
-    // settings or credentials. Client messages are stable and redacted.
+    let again = match &error {
+        Error::Attempts(left) => Some(left.div_ceil(1000)),
+        // what it waited for is other pushes being verified: gone in less
+        Error::Busy(_) => Some(60),
+        _ => None,
+    };
+    let mut output = refused(error, key);
+    if let Some(seconds) = again {
+        let seconds = header::HeaderValue::from(seconds);
+        output.headers_mut().insert(header::RETRY_AFTER, seconds);
+    }
+    output
+}
+/// PostgreSQL/I/O details may contain internal paths, SQL, connection
+/// settings or credentials. Client messages are stable and redacted.
+fn refused(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
     match error {
         Error::AuthorityUnavailable => failure(
             503,
             ErrorCode::TemporarilyUnavailable,
             "Current account authority could not be verified; retry when the platform is available",
+            key,
+            Retry::SameRequest,
+        ),
+        Error::Busy(_) => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "The instance is busy with other requests; retry the same request",
             key,
             Retry::SameRequest,
         ),
@@ -139,6 +182,7 @@ pub(super) fn store_failure(error: Error, key: Option<RequestKey>) -> Response<R
             Retry::NewIntent,
         ),
         Error::Precondition(_)
+        | Error::Attempts(_)
         | Error::Repository(alt_repository_service::Error::Precondition(_)) => failure(
             409,
             ErrorCode::PreconditionFailed,
@@ -218,7 +262,12 @@ pub(super) fn render_output(
             content_type,
             bytes,
             file,
-        }) => self::file(content_type, file.into_file(), bytes),
+        }) => self::file(content_type, (file.into_file(), bytes), None),
+        Ok(Output::Sending {
+            content_type,
+            file,
+            held,
+        }) => self::file(content_type, (file.into_file(), held.bytes()), Some(held)),
         Ok(Output::Json(value)) => match alt_json::to_vec(&value) {
             Ok(bytes) => response(200, "application/json", full(bytes)),
             Err(_) => failure(
@@ -233,12 +282,13 @@ pub(super) fn render_output(
             bytes,
             digest,
             file,
+            held,
         }) => {
             let file = match file.into_file() {
                 Ok(file) => file,
                 Err(error) => return store_failure(error.into(), request_key),
             };
-            let mut output = self::file("application/octet-stream", file, bytes);
+            let mut output = self::file("application/octet-stream", (file, bytes), held);
             output.headers_mut().insert(
                 "Alt-Content-Blake3",
                 digest.parse().expect("validated digest"),

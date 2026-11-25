@@ -7,9 +7,28 @@ use std::path::{Path, PathBuf};
 use super::Odb;
 use crate::head;
 use crate::lock::lock_shared;
-use crate::synced::{self, Deferred, Lens, Log, Marker};
+use std::sync::{Arc, Mutex};
+
+use crate::synced::{self, Lens, Log, Marker};
 use crate::tier1::Tier1Map;
 use crate::{NativeOdb, OdbError};
+
+/// What a handle whose fsyncs are left to a sink (the daemon) leaves for
+/// that sink.
+#[derive(Debug, Default)]
+pub(crate) struct Left {
+    /// what the handle last finished writing, for the sink to record once
+    /// it has synced: the boundaries and the marker's generation when they
+    /// were written
+    pub whole: Option<(Lens, u64)>,
+    /// a batch of the handle did not end whole. It may have failed in a
+    /// sync of its own, and the kernel answers the next sync of the same
+    /// files with success whether or not they are on disk: the sink makes
+    /// none from then on
+    pub failed: bool,
+}
+
+pub(crate) type Deferred = Arc<Mutex<Left>>;
 
 /// Off-write-path fsync handle for a [`crate::NativeOdb`]: the blob store (chunks then
 /// blobmap) then `map.alt`, the durability order so a crash never leaves a
@@ -46,8 +65,18 @@ impl OdbSink {
     /// A file that an fsync since the last rewind already found as long as
     /// that handle wrote it holds nothing of the handle's that is not
     /// synced, and is left alone.
+    ///
+    /// Fails without an fsync once a batch of that handle did not end
+    /// whole ([`Left::failed`]).
     pub fn fsync(&self) -> Result<(), OdbError> {
-        let Some((lens, generation)) = *self.deferred.lock().unwrap() else {
+        let left = self.deferred.lock().unwrap();
+        if left.failed {
+            let failed = "a batch of objects did not end whole: its files are not synced again";
+            return Err(std::io::Error::other(failed).into());
+        }
+        let whole = left.whole;
+        drop(left);
+        let Some((lens, generation)) = whole else {
             self.blobs.fsync()?;
             self.tier1.sync_all()?;
             return Ok(self.map.sync_all()?);

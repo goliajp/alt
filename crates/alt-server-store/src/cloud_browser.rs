@@ -77,7 +77,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1",
             &[&id],
         )?;
         crate::browser::audit(&mut tx, &actor, "cloud.session.revoke", id)?;

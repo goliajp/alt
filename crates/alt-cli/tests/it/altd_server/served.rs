@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub(crate) struct Server {
-    pub(super) child: Child,
+    pub(crate) child: Child,
     pub(crate) addr: String,
     pub(crate) stderr: Option<BufReader<std::process::ChildStderr>>,
     // what the server keeps while it takes a push, which a server killed
@@ -21,7 +21,6 @@ impl Server {
     /// the bind line. Reading must happen *after* kill since the child's
     /// stderr fd stays open until the process exits, and a blocking
     /// `read_to_string` would otherwise deadlock waiting for EOF.
-    #[allow(dead_code)]
     pub(crate) fn drain_stderr(&mut self) -> String {
         // tiny_http writes the response back from a worker thread; the
         // access-log JSON line is emitted right after, but the OS may
@@ -61,31 +60,36 @@ pub(crate) fn spawn_server(repo_dir: &Path) -> Server {
 }
 
 pub(crate) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
-    let bin = env!("CARGO_BIN_EXE_altd-server");
-    let temporary = alt_os::temp::tempdir().unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.args(["--bind", "127.0.0.1:0"])
-        .env("TMPDIR", temporary.path())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_altd-server"));
+    cmd.args(["--bind", "127.0.0.1:0"]);
     for (k, v) in env {
         cmd.env(k, v);
     }
+    listening(cmd)
+}
+
+/// The server `cmd` starts, once it listens: `cmd` runs `altd-server`
+/// with `--bind 127.0.0.1:0`, directly or through a program that execs it.
+pub(crate) fn listening(mut cmd: Command) -> Server {
+    let temporary = alt_os::temp::tempdir().unwrap();
+    cmd.env("TMPDIR", temporary.path())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("spawn altd-server");
-    let stderr = child.stderr.take().expect("server stderr");
-    let mut reader = BufReader::new(stderr);
-    let mut line = String::new();
+    let mut reader = BufReader::new(child.stderr.take().expect("server stderr"));
+    let mut said = String::new();
     let deadline = Instant::now() + Duration::from_secs(5);
     let addr = loop {
-        line.clear();
-        reader.read_line(&mut line).unwrap();
-        if let Some(rest) = line.find("listening on ") {
-            let after = &line[rest + "listening on ".len()..];
-            let addr = after.split_whitespace().next().unwrap().to_owned();
-            break addr;
+        let before = said.len();
+        if reader.read_line(&mut said).unwrap() == 0 {
+            let ended = child.wait();
+            panic!("altd-server ended before it listened ({ended:?}), having said: {said}");
+        }
+        if let Some((_, after)) = said[before..].split_once("listening on ") {
+            break after.split_whitespace().next().unwrap().to_owned();
         }
         if Instant::now() > deadline {
-            panic!("altd-server never logged its listening address");
+            panic!("altd-server never logged its listening address, having said: {said}");
         }
     };
     Server {

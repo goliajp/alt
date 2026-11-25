@@ -117,6 +117,32 @@ impl GitTransport {
         self
     }
 
+    /// The repository as a push names it to its server: the scheme, the host and
+    /// the port as the `Host` header of the request carries them, and the path
+    /// of the request before the service. They are read off the address once
+    /// it is parsed for sending, not off the text of the URL: a port that is
+    /// the one of the scheme, dots in a path, a host written in another form
+    /// are named here as they are sent.
+    pub fn pushed_to(&self) -> Result<String, TransportError> {
+        let service = Service::ReceivePack.name();
+        let url = format!("{}/{service}", self.base_url);
+        let sent = self.agent.post(&url).request_url();
+        let sent = sent.map_err(|e| TransportError::Other(e.to_string()))?;
+        let of_scheme = match sent.scheme() {
+            "http" => 80,
+            "https" => 443,
+            _ => 0,
+        };
+        let host = match sent.port() {
+            Some(port) if port != of_scheme => format!("{}:{port}", sent.host()),
+            _ => sent.host().to_owned(),
+        };
+        let path = sent.path();
+        let path = path.strip_suffix(service).unwrap_or(path);
+        let path = path.trim_end_matches('/');
+        Ok(format!("{}://{host}{path}", sent.scheme()))
+    }
+
     /// `GET <base>/info/refs?service=<svc>` with `Git-Protocol: version=2`.
     /// Returns the body as a `Vec<u8>` — small enough to buffer (capability
     /// advertisements are kB at most, even on large servers).
@@ -242,6 +268,76 @@ mod tests {
         assert_eq!(Service::ReceivePack.name(), "git-receive-pack");
         assert!(Service::UploadPack.content_type().ends_with("-request"));
         assert!(Service::ReceivePack.accept().ends_with("-result"));
+    }
+
+    /// What a push is sent with for each way of writing an address, read off
+    /// the request as it arrives, is what [`GitTransport::pushed_to`] names.
+    #[test]
+    fn the_repository_a_push_names_is_the_host_and_the_path_its_request_carries() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let at = listener.local_addr().unwrap();
+        let port = at.port();
+        let heads = std::thread::spawn(move || {
+            let mut heads = Vec::new();
+            for _ in 0..7 {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut lines = Vec::new();
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                    lines.push(line.trim().to_owned());
+                }
+                let path = lines[0].split(' ').nth(1).unwrap().to_owned();
+                let host = lines.iter().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("host")
+                        .then(|| value.trim().to_owned())
+                });
+                heads.push((host.unwrap(), path));
+                let answer = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                reader.get_mut().write_all(answer).unwrap();
+            }
+            heads
+        });
+        let written = [
+            format!("http://127.0.0.1:{port}/team/repo"),
+            format!("http://127.1:{port}/team/./repo/../repo/"),
+            format!("http://LOCALHOST:{port}/a b/r\u{e9}po"),
+            format!("http://[0:0:0:0:0:0:0:1]:{port}/r"),
+            format!("http://b\u{fc}cher.example:{port}/r.git"),
+            "http://host.example:80/r".to_owned(),
+            "http://alice:secret@host.example/team/repo/".to_owned(),
+        ];
+        let mut named = Vec::new();
+        for url in &written {
+            let mut transport = GitTransport::new(url.as_str());
+            // every name is this listener
+            transport.agent = ureq::AgentBuilder::new()
+                .resolver(move |_: &str| Ok(vec![at]))
+                .build();
+            named.push(transport.pushed_to().unwrap());
+            transport.command(Service::ReceivePack, b"").unwrap();
+        }
+        let heads = heads.join().unwrap();
+        for ((host, path), named) in heads.iter().zip(&named) {
+            let repository = path.strip_suffix("/git-receive-pack").unwrap();
+            assert_eq!(&format!("http://{host}{repository}"), named);
+        }
+        assert_eq!(named[0], format!("http://127.0.0.1:{port}/team/repo"));
+        assert_eq!(named[1], format!("http://127.0.0.1:{port}/team/repo"));
+        assert_eq!(named[2], format!("http://localhost:{port}/a%20b/r%C3%A9po"));
+        assert_eq!(named[3], format!("http://[::1]:{port}/r"));
+        assert_eq!(
+            named[4],
+            format!("http://xn--bcher-kva.example:{port}/r.git")
+        );
+        assert_eq!(named[5], "http://host.example/r");
+        assert_eq!(named[6], "http://host.example/team/repo");
     }
 
     #[test]

@@ -1,8 +1,12 @@
-use alt_args::{Parser, Subcommand, ValueEnum};
+use alt_args::Parser;
 use alt_json::{Value, json};
 use alt_remote_protocol::{ActorKind, Attribution};
 use alt_server::operator::{self, Config, Error, Result};
+mod action;
+mod administered;
 mod grants;
+mod unconfigured;
+use action::{Action, SecretKind};
 use grants::Grants;
 use std::{
     io::Write,
@@ -24,221 +28,6 @@ struct Args {
     credential: Option<PathBuf>,
     #[command(subcommand)]
     command: Action,
-}
-#[derive(Subcommand)]
-enum Action {
-    /// Restore or reconcile one frozen Cloud recovery into a new incarnation
-    CloudRestore {
-        #[arg(long)]
-        spec: PathBuf,
-        #[arg(long)]
-        directory: PathBuf,
-        #[arg(long)]
-        assets: PathBuf,
-        #[arg(long, default_value = "127.0.0.1:8081")]
-        listen: std::net::SocketAddr,
-        #[arg(long, default_value = "ALT_SERVER_DATABASE")]
-        database_environment: String,
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        identity: PathBuf,
-        #[arg(long)]
-        source_fenced: bool,
-    },
-    /// Initialize or resume exactly one frozen Cloud provision specification
-    CloudInitialize {
-        #[arg(long)]
-        spec: PathBuf,
-        #[arg(long)]
-        directory: PathBuf,
-        #[arg(long)]
-        assets: PathBuf,
-        #[arg(long, default_value = "127.0.0.1:8081")]
-        listen: std::net::SocketAddr,
-        #[arg(long, default_value = "ALT_SERVER_DATABASE")]
-        database_environment: String,
-    },
-    /// Generate and fsync a secret before registering it with the database
-    Secret {
-        kind: SecretKind,
-        #[arg(long)]
-        output: PathBuf,
-    },
-    /// Initialize a dedicated database and empty byte volume explicitly
-    Initialize {
-        #[arg(long)]
-        resume: bool,
-    },
-    /// Install the first self-hosted administrator using a saved secret
-    Bootstrap {
-        actor: String,
-        #[arg(long)]
-        secret: PathBuf,
-        #[arg(long)]
-        expires_unix_ms: u64,
-    },
-    /// Explicitly install one operator-configured cross-product pairing
-    LinkInstall {
-        repository: String,
-        epoch: u64,
-        channel: String,
-    },
-    /// Disable a pairing without removing its historical signed facts
-    LinkDisable {
-        repository: String,
-        epoch: u64,
-        channel: String,
-    },
-    /// Open an existing instance without migration/bootstrap fallback
-    Serve,
-    /// Verify current schema, persisted mode, receipt key and volume identity
-    Health,
-    BuildInfo,
-    /// Read-only administrator counters; does not perform a storage scrub
-    Status,
-    /// Read administrator operation history without secrets or action details
-    Audit {
-        #[arg(long)]
-        before: Option<u64>,
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-    },
-    /// Explicit checksummed schema upgrade; save the next config before commit
-    Migrate {
-        #[arg(long)]
-        from_schema: u32,
-        #[arg(long)]
-        output_config: PathBuf,
-    },
-    /// Encrypted physical backup, including credentials and the receipt key
-    Backup {
-        #[arg(long, default_value_t = alt_server_store::SCHEMA_VERSION)]
-        schema: u32,
-        #[arg(long)]
-        recipient: String,
-        #[arg(long)]
-        output: PathBuf,
-    },
-    /// Authenticate and decrypt every backup entry without restoring a database
-    BackupVerify {
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        identity: PathBuf,
-        #[arg(long)]
-        trusted_receipt_key: String,
-        #[arg(long)]
-        maximum_bytes: u64,
-    },
-    /// Restore to a dedicated empty database and absent volume/key paths
-    Restore {
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long)]
-        identity: PathBuf,
-        #[arg(long)]
-        trusted_receipt_key: String,
-        #[arg(long)]
-        maximum_bytes: u64,
-        /// Attest that the old instance is externally stopped and fenced
-        #[arg(long)]
-        source_fenced: bool,
-    },
-    RepositoryCreate {
-        id: String,
-        #[arg(long)]
-        quota_bytes: u64,
-    },
-    /// Replace the named actor's explicit repository grants from a JSON file
-    Grants {
-        repository: String,
-        actor: String,
-        #[arg(long)]
-        file: PathBuf,
-    },
-    ReviewGrant {
-        repository: String,
-        actor: String,
-        #[arg(long, action = set)]
-        allow: bool,
-    },
-    CollectorPolicy {
-        repository: String,
-        #[arg(long)]
-        file: PathBuf,
-    },
-    BranchPolicy {
-        repository: String,
-        #[arg(long)]
-        file: PathBuf,
-    },
-    DefaultBranch {
-        repository: String,
-        branch: String,
-    },
-    TokenIssue {
-        actor: String,
-        #[arg(long)]
-        secret: PathBuf,
-        #[arg(long)]
-        expires_unix_ms: u64,
-        #[arg(long)]
-        administrator: bool,
-        #[arg(long)]
-        attribution: Option<PathBuf>,
-    },
-    /// Persist the configured origin before enabling browser traffic
-    BrowserEnable,
-    /// Create a local browser user from a private password file
-    UserCreate {
-        actor: String,
-        #[arg(long)]
-        login: String,
-        #[arg(long)]
-        display_name: String,
-        #[arg(long)]
-        password_file: PathBuf,
-        #[arg(long)]
-        administrator: bool,
-    },
-    UserResetPassword {
-        actor: String,
-        #[arg(long)]
-        password_file: PathBuf,
-    },
-    /// Recover an existing local administrator with physical instance access
-    RecoverLocalAdministrator {
-        actor: String,
-        #[arg(long)]
-        password_file: PathBuf,
-        #[arg(long)]
-        reason: String,
-    },
-    /// Recover an existing local human administrator with a short-lived token
-    RecoverLocalToken {
-        actor: String,
-        #[arg(long)]
-        secret: PathBuf,
-        #[arg(long)]
-        expires_unix_ms: u64,
-        #[arg(long)]
-        reason: String,
-    },
-    TokenRevoke {
-        #[arg(long)]
-        secret: PathBuf,
-    },
-    Collect {
-        repository: String,
-        #[arg(long, default_value = "100")]
-        limit: u32,
-    },
-}
-#[derive(Clone, ValueEnum)]
-enum SecretKind {
-    ReceiptKey,
-    Token,
 }
 fn json_file<T: alt_json::FromJson>(path: &Path) -> Result<T> {
     alt_json::from_slice(&operator::read_regular(path, 4 * 1024 * 1024, false)?)
@@ -273,117 +62,8 @@ fn build_info() -> Value {
     json!({"product":"alt-server","version":env!("CARGO_PKG_VERSION"),"build_id":option_env!("ALT_BUILD_ID").unwrap_or("development"),"protocol":1,"schema":alt_server_store::SCHEMA_VERSION})
 }
 fn execute(args: &Args) -> Result<Value> {
-    if let Action::CloudRestore {
-        spec,
-        directory,
-        assets,
-        listen,
-        database_environment,
-        input,
-        identity,
-        source_fenced,
-    } = &args.command
-    {
-        if !source_fenced {
-            return Err(Error::Config(
-                "--source-fenced is required for disaster recovery",
-            ));
-        }
-        let alt_json_serde::Serde::<golia_platform_contract::lifecycle::RecoverySpec>(spec) =
-            alt_json::from_slice(&operator::read_regular(spec, 65536, true)?)
-                .map_err(|_| Error::Config("recovery specification"))?;
-        spec.validate()
-            .map_err(|_| Error::Config("recovery specification"))?;
-        let verified = operator::backup::verify(
-            input,
-            identity,
-            public_key(&spec.backup.receipt_public_key)?,
-            spec.backup.maximum_bytes.0,
-        )?;
-        let instance = &verified.manifest.catalog.instance;
-        if verified.manifest_digest != spec.backup.manifest_digest
-            || instance.installation_id != spec.target.audience.installation_id.as_str()
-            || instance.workspace_id != spec.target.audience.workspace_id.as_str()
-            || instance.runtime_generation != spec.backup.generation.0
-            || instance.deployment_mode != alt_remote_protocol::DeploymentMode::Cloud
-        {
-            return Err(Error::Config("recovery backup differs from frozen intent"));
-        }
-        let config = operator::provision::prepare_recovery(
-            &spec,
-            directory,
-            assets,
-            *listen,
-            database_environment,
-        )?;
-        if config
-            .receipt_key_file
-            .try_exists()
-            .map_err(|_| Error::File)?
-        {
-            let mut store = config
-                .open()
-                .map_err(|_| Error::RestoreStage("existing recovery verification"))?;
-            store
-                .check_restored_backup(&spec.backup.manifest_digest)
-                .map_err(|_| Error::RestoreStage("existing recovery receipt"))?;
-        } else {
-            operator::backup::restore(&config, verified, *source_fenced)?;
-        }
-        return Ok(
-            json!({"restored":true,"instance":config.instance,"manifest_digest":spec.backup.manifest_digest,"old_credentials_revoked":true}),
-        );
-    }
-    if let Action::CloudInitialize {
-        spec,
-        directory,
-        assets,
-        listen,
-        database_environment,
-    } = &args.command
-    {
-        let config = operator::provision::initialize(
-            spec,
-            directory,
-            assets,
-            *listen,
-            database_environment,
-        )?;
-        return Ok(json!({"initialized":true,"instance":config.instance,
-            "configuration":directory.join("config.json"),
-            "spec_digest":config.cloud.as_ref().and_then(|c| c.provision_digest.as_ref())}));
-    }
-    if let Action::BuildInfo = &args.command {
-        return Ok(build_info());
-    }
-    if let Action::BackupVerify {
-        input,
-        identity,
-        trusted_receipt_key,
-        maximum_bytes,
-    } = &args.command
-    {
-        let verified = operator::backup::verify(
-            input,
-            identity,
-            public_key(trusted_receipt_key)?,
-            *maximum_bytes,
-        )?;
-        return Ok(
-            json!({"verified":true,"restored":false,"manifest_digest":verified.manifest_digest,"catalog":verified.manifest.catalog}),
-        );
-    }
-    if let Action::Secret { kind, output } = &args.command {
-        let mut seed = [0u8; 32];
-        alt_os::random::fill(&mut seed);
-        let bytes = match kind {
-            SecretKind::ReceiptKey => seed.to_vec(),
-            SecretKind::Token => format!("alt1_{}\n", hex(&seed)).into_bytes(),
-        };
-        operator::create_private(output, &bytes)?;
-        return Ok(
-            json!({"created":output,"kind":match kind {SecretKind::ReceiptKey=>"receipt_key",SecretKind::Token=>"token"}}),
-        );
+    if let Some(done) = unconfigured::execute(args)? {
+        return Ok(done);
     }
     let config = Config::read(
         args.config
@@ -404,10 +84,12 @@ fn execute(args: &Args) -> Result<Value> {
             schema,
             recipient,
             output,
+            with_unread,
         } => {
-            let manifest = operator::backup::create(&config, *schema, recipient, output)?;
+            let manifest =
+                operator::backup::create(&config, *schema, recipient, output, *with_unread)?;
             return Ok(
-                json!({"backup_created":true,"restored":false,"operation_id":manifest.operation_id,"output":output,"catalog":manifest.catalog,"payload":manifest.payload}),
+                json!({"backup_created":true,"restored":false,"operation_id":manifest.operation_id,"output":output,"catalog":manifest.catalog,"payload":manifest.payload,"unread":manifest.unread}),
             );
         }
         Action::Restore {
@@ -416,6 +98,7 @@ fn execute(args: &Args) -> Result<Value> {
             trusted_receipt_key,
             maximum_bytes,
             source_fenced,
+            with_unread,
         } => {
             if !source_fenced {
                 return Err(Error::Config(
@@ -429,9 +112,10 @@ fn execute(args: &Args) -> Result<Value> {
                 *maximum_bytes,
             )?;
             let digest = verified.manifest_digest.clone();
-            let catalog = operator::backup::restore(&config, verified, *source_fenced)?;
+            let (catalog, unread) =
+                operator::backup::restore(&config, verified, *source_fenced, *with_unread)?;
             return Ok(
-                json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true}),
+                json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true,"unread":unread}),
             );
         }
         _ => (),
@@ -449,7 +133,7 @@ fn execute(args: &Args) -> Result<Value> {
         Action::Serve => {
             drop(store);
             let factory = config.factory()?;
-            let options = config.http_options();
+            let options = config.serving_options()?;
             let browser = config.browser_options()?;
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(config.http.workers.min(16))
@@ -468,7 +152,7 @@ fn execute(args: &Args) -> Result<Value> {
         }
         Action::Health => {
             return Ok(
-                json!({"ready":true,"instance":store.spec(),"build":build_info(),"receipt_public_key":hex(config.signing_key()?.verifying_key().as_bytes())}),
+                json!({"ready":true,"instance":store.spec(),"build":build_info(),"receipt_public_key":hex(config.signing_key()?.verifying_key().as_bytes()),"requests_awaiting_settled_at":store.requests_without_moment()?}),
             );
         }
         Action::Bootstrap {
@@ -515,158 +199,7 @@ fn execute(args: &Args) -> Result<Value> {
         "--credential is required for this operator action",
     ))?)?;
     let admin = config.factory()?.authenticate(&mut store, &token)?;
-    let result = match &args.command {
-        Action::LinkInstall {
-            repository,
-            epoch,
-            channel,
-        } => {
-            let scope = alt_remote_protocol::Scope {
-                installation_id: config.instance.installation_id.clone(),
-                repository_instance_id: repository.clone(),
-                recovery_epoch: *epoch,
-            };
-            let factory = config.factory()?;
-            let runtime = factory
-                .change_links
-                .iter()
-                .find(|c| c.matches(&scope, channel))
-                .ok_or(Error::Config("change-link is not configured"))?;
-            runtime.install(&factory, &token)?;
-            json!({"repository":repository,"channel":channel,"installed":true})
-        }
-        Action::LinkDisable {
-            repository,
-            epoch,
-            channel,
-        } => {
-            let scope = alt_remote_protocol::Scope {
-                installation_id: config.instance.installation_id.clone(),
-                repository_instance_id: repository.clone(),
-                recovery_epoch: *epoch,
-            };
-            store.disable_change_channel(&admin, &scope, channel)?;
-            json!({"repository":repository,"channel":channel,"disabled":true})
-        }
-        Action::Status => {
-            alt_json::to_value(store.instance_status(&admin)?).map_err(|_| Error::Store)?
-        }
-        Action::Audit { before, limit } => {
-            alt_json::to_value(store.instance_audit(&admin, *before, *limit)?)
-                .map_err(|_| Error::Store)?
-        }
-        Action::RepositoryCreate { id, quota_bytes } => {
-            json!({"repository":store.create_repository(&admin,id,*quota_bytes)?})
-        }
-        Action::Grants {
-            repository,
-            actor,
-            file,
-        } => {
-            let grant: Grants = json_file(file)?;
-            store.set_grants(
-                &admin,
-                repository,
-                actor,
-                grant.read,
-                grant.publish_records,
-                &grant.grants,
-            )?;
-            json!({"repository":repository,"actor":actor,"grants_updated":true})
-        }
-        Action::ReviewGrant {
-            repository,
-            actor,
-            allow,
-        } => {
-            store.set_review_grant(&admin, repository, actor, *allow)?;
-            json!({"repository":repository,"actor":actor,"can_review":allow})
-        }
-        Action::CollectorPolicy { repository, file } => {
-            store.set_collector_policy(&admin, repository, &json_file(file)?)?;
-            json!({"repository":repository,"collector_policy_updated":true})
-        }
-        Action::BranchPolicy { repository, file } => {
-            store.set_policies(
-                &admin,
-                repository,
-                &json_file::<Vec<alt_repository_service::RefPolicy>>(file)?,
-            )?;
-            json!({"repository":repository,"branch_policy_updated":true})
-        }
-        Action::DefaultBranch { repository, branch } => {
-            store.set_default_branch(&admin, repository, branch)?;
-            json!({"repository":repository,"default_branch":branch})
-        }
-        Action::TokenIssue {
-            actor,
-            secret,
-            expires_unix_ms,
-            administrator,
-            attribution,
-        } => {
-            let attribution = match attribution {
-                Some(path) => json_file(path)?,
-                None => Attribution {
-                    kind: ActorKind::Human,
-                    on_behalf_of: None,
-                    delegation_id: None,
-                    agent_session: None,
-                },
-            };
-            store.issue_local_token_with_secret(
-                &admin,
-                &operator::read_token(secret)?,
-                actor,
-                &attribution,
-                *expires_unix_ms,
-                *administrator,
-            )?;
-            json!({"actor":actor,"credential_registered":true,"expires_unix_ms":expires_unix_ms.to_string()})
-        }
-        Action::BrowserEnable => {
-            let browser = config
-                .browser
-                .as_ref()
-                .ok_or(Error::Config("browser configuration required"))?;
-            let origin = alt_browser_auth::PublicOrigin::parse(&browser.public_origin)
-                .map_err(|_| Error::Config("browser origin"))?;
-            store.enable_browser(&admin, &origin)?;
-            json!({"browser_enabled":true,"public_origin":origin.as_str()})
-        }
-        Action::UserCreate {
-            actor,
-            login,
-            display_name,
-            password_file,
-            administrator,
-        } => {
-            let raw = operator::read_regular(password_file, 1025, true)?;
-            let password = std::str::from_utf8(&raw)
-                .map_err(|_| Error::Config("password encoding"))?
-                .strip_suffix('\n')
-                .unwrap_or(
-                    std::str::from_utf8(&raw).map_err(|_| Error::Config("password encoding"))?,
-                );
-            json!({"user":store.create_local_user(&admin, actor, login, display_name, password, *administrator)?})
-        }
-        Action::UserResetPassword {
-            actor,
-            password_file: path,
-        } => {
-            store.reset_local_password(&admin, actor, &password_file(path)?)?;
-            json!({"actor":actor,"password_reset":true,"old_credentials_revoked":true})
-        }
-        Action::TokenRevoke { secret } => {
-            store.revoke(&admin, &operator::read_token(secret)?)?;
-            json!({"revoked":true})
-        }
-        Action::Collect { repository, limit } => {
-            json!({"repository":repository,"removed":store.collect_orphans(&admin,repository,*limit)?})
-        }
-        _ => return Err(Error::Config("unsupported operator action")),
-    };
-    Ok(result)
+    administered::execute(args, &config, &mut store, (&admin, &token))
 }
 fn main() -> ExitCode {
     let args = Args::parse();
@@ -688,6 +221,10 @@ fn main() -> ExitCode {
         Ok(value) => {
             println!("{value}");
             ExitCode::SUCCESS
+        }
+        Err(Error::Partly(told, unknown)) => {
+            println!("{told}");
+            ExitCode::from(if unknown { 75 } else { 1 })
         }
         Err(error) => {
             let writing = !matches!(

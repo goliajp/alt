@@ -8,6 +8,8 @@ use alt_task_service::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod named;
+
 pub(super) fn task_limits() -> TaskLimits {
     TaskLimits {
         objects: 1000,
@@ -344,52 +346,6 @@ fn task_publication_accepts_git_objects_held_only_by_a_segment() {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
-fn task_publication_preserves_baseline_after_ref_deletion() {
-    let mut f = Fixture::new();
-    let old = Payload::new("historical-task-baseline", None);
-    old.upload(&mut f.store, &f.credential);
-    old.publish(&mut f.store, &f.credential);
-    let mut payload = task_payload("historical-task-baseline");
-    payload.publication.key.request_id = "publish-task-baseline".into();
-    assert_eq!(payload.commit, old.commit);
-    payload.upload(&mut f.store, &f.credential);
-    let work = f
-        .store
-        .acquire_publication(&f.credential, &payload.publication.key, 60_000, 1000)
-        .unwrap();
-    let (graph, tasks) = verified(&work, payload.commit);
-    f.store
-        .mark_ready_with_tasks(&f.credential, &work, &graph, &tasks)
-        .unwrap();
-    f.store
-        .publish_with_tasks(&f.credential, &work, &graph, &tasks)
-        .unwrap();
-    let mut deletion = Payload::new("remove-current-ref", Some(old.commit));
-    deletion.publication.refs[0].new = None;
-    deletion.manifest.entries.clear();
-    deletion.contents.clear();
-    deletion.publication.content_manifest = deletion.manifest.id(limits()).unwrap();
-    deletion.upload(&mut f.store, &f.credential);
-    deletion.publish(&mut f.store, &f.credential);
-    assert_eq!(f.counts().0, 0);
-    f.store
-        .collect_orphans(&f.credential, "repository", 100)
-        .unwrap();
-    let (_, mut file) = f
-        .store
-        .open_published_content(
-            &f.credential,
-            &payload.publication.key.scope,
-            &old.manifest.entries[1].blake3,
-        )
-        .expect("task baseline must survive current ref deletion");
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).unwrap();
-    assert_eq!(bytes, old.contents[1]);
-}
-
-#[test]
-#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
 fn task_publication_refuses_revoked_publish_scope_and_wrong_verified_bundle() {
     let mut f = Fixture::new();
     let payload = task_payload("selected-task");
@@ -511,12 +467,16 @@ fn completed_source(
         ref_operation: operation.map(|(_, raw)| add(payload, ContentKind::Attachment, raw)),
     }
 }
-struct IntegrationPayload {
-    payload: Payload,
+pub(super) struct IntegrationPayload {
+    pub(super) payload: Payload,
     policy: CollectorPolicy,
-    integration: String,
+    pub(super) integration: String,
 }
-fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> IntegrationPayload {
+pub(super) fn integration_payload(
+    base: &Payload,
+    omit_output: bool,
+    recover: bool,
+) -> IntegrationPayload {
     let mut payload = Payload::new("reviewed-integration", Some(base.commit));
     // Original notes history is independent of the target branch.
     let notes = Payload::new("original notes", None);
@@ -833,7 +793,7 @@ fn integration_payload(base: &Payload, omit_output: bool, recover: bool) -> Inte
         integration: integration.id().unwrap(),
     }
 }
-fn ready_integration(
+pub(super) fn ready_integration(
     f: &mut Fixture,
     data: &IntegrationPayload,
 ) -> (
@@ -868,7 +828,7 @@ fn ready_integration(
         .unwrap();
     (work, graph, tasks)
 }
-fn current_reviewer(f: &mut Fixture, data: &IntegrationPayload) -> (String, Credential) {
+pub(super) fn current_reviewer(f: &mut Fixture, data: &IntegrationPayload) -> (String, Credential) {
     f.store
         .set_collector_policy(&f.credential, "repository", &data.policy)
         .unwrap();

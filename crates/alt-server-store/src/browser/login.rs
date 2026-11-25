@@ -20,7 +20,63 @@ fn session_ttl(ttl_ms: u64) -> Result<()> {
     Ok(())
 }
 
+/// A sign-in attempt that was let in: counted, and with the account it names
+/// where there is one. Checking its password is the part that costs.
+pub struct PasswordAttempt {
+    saved: Option<PasswordProof>,
+}
+
+impl PasswordAttempt {
+    /// One Argon2 computation, whether or not the attempt names an account, and
+    /// the same answer for an unknown account as for a wrong password.
+    pub fn check(self, password: &str) -> Result<Option<PasswordProof>> {
+        let Some(saved) = self.saved else {
+            // A fresh, valid input incurs one Argon2 computation without creating a user.
+            let padding = format!("unknown-login:{password}");
+            let _ = password_hash(&padding.chars().take(256).collect::<String>())
+                .map_err(|_| Error::Integrity("password operation"))?;
+            return Ok(None);
+        };
+        let matched = password_verify(password, &saved.hash);
+        if !matched.map_err(|_| Error::Integrity("password encoding"))? {
+            return Ok(None);
+        }
+        Ok(Some(saved))
+    }
+}
+
 impl Store {
+    /// Lets a sign-in attempt in or refuses it for the number there have been,
+    /// before anything of it costs: the attempt is counted and committed here,
+    /// and the password is checked afterwards, by whoever has a place to do so.
+    pub fn admit_browser_password(
+        &mut self,
+        origin: &PublicOrigin,
+        login: &str,
+        password: &str,
+        network: std::net::IpAddr,
+    ) -> Result<PasswordAttempt> {
+        if password.len() > 1024 {
+            return Err(Error::Unauthorized);
+        }
+        let login = login_name(login).map_err(|_| Error::Unauthorized)?;
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        if self.spec.deployment_mode != DeploymentMode::SelfHosted {
+            return Err(Error::Unauthorized);
+        }
+        binding(&mut tx, origin)?;
+        login_budget(&mut tx, &login, network)?;
+        let saved=tx.query_opt("SELECT actor_id,password_hash,generation FROM alt_web_accounts WHERE login_name=$1 AND NOT disabled", &[&login])?;
+        tx.commit()?;
+        Ok(PasswordAttempt {
+            saved: saved.map(|saved| PasswordProof {
+                actor: saved.get("actor_id"),
+                generation: saved.get("generation"),
+                hash: saved.get("password_hash"),
+            }),
+        })
+    }
     /// Login rate admission is committed before the expensive password check.
     /// Unknown accounts receive the same bounded work and generic result.
     pub fn verify_browser_password(
@@ -33,35 +89,8 @@ impl Store {
         if password.len() > 1024 {
             return Ok(None);
         }
-        let login = login_name(login).map_err(|_| Error::Unauthorized)?;
-        let saved = {
-            let mut tx = self.client.transaction()?;
-            instance(&mut tx, &self.spec, &self.signing_key)?;
-            if self.spec.deployment_mode != DeploymentMode::SelfHosted {
-                return Err(Error::Unauthorized);
-            }
-            binding(&mut tx, origin)?;
-            login_budget(&mut tx, &login, network)?;
-            let saved=tx.query_opt("SELECT actor_id,password_hash,generation FROM alt_web_accounts WHERE login_name=$1 AND NOT disabled", &[&login])?;
-            tx.commit()?;
-            saved
-        };
-        let Some(saved) = saved else {
-            // A fresh, valid input incurs one Argon2 computation without creating a user.
-            let padding = format!("unknown-login:{password}");
-            let _ = password_hash(&padding.chars().take(256).collect::<String>())
-                .map_err(|_| Error::Integrity("password operation"))?;
-            return Ok(None);
-        };
-        let hash: String = saved.get("password_hash");
-        if !password_verify(password, &hash).map_err(|_| Error::Integrity("password encoding"))? {
-            return Ok(None);
-        }
-        Ok(Some(PasswordProof {
-            actor: saved.get("actor_id"),
-            generation: saved.get("generation"),
-            hash,
-        }))
+        self.admit_browser_password(origin, login, password, network)?
+            .check(password)
     }
     /// No session is opened for an account that changed after its password matched.
     pub fn open_browser_session(

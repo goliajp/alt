@@ -137,6 +137,36 @@ impl PackIndex {
     }
 }
 
+impl PackIndex {
+    /// Every entry of `oid`: an index lists an object as often as its pack
+    /// holds it. Both ends are searched for, however many there are.
+    pub fn all_of(&self, oid: &ObjectId) -> std::ops::Range<u32> {
+        let want = oid.as_bytes();
+        let bucket = want[0] as usize;
+        let lo = match bucket {
+            0 => 0,
+            _ => read_u32(&self.map, 8 + (bucket - 1) * 4),
+        };
+        let hi = read_u32(&self.map, 8 + bucket * 4);
+        let raw = self.algo.raw_len();
+        // the first entry of the bucket that is not before `oid`, or not at it
+        let first = |mut lo: u32, mut hi: u32, behind: bool| {
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                let at = self.oids_at + mid as usize * raw;
+                let held = self.map[at..at + raw].cmp(want);
+                match held.is_lt() || (behind && held.is_eq()) {
+                    true => lo = mid + 1,
+                    false => hi = mid,
+                }
+            }
+            lo
+        };
+        let begin = first(lo, hi, false);
+        begin..first(begin, hi, true)
+    }
+}
+
 pub(crate) fn read_u32(data: &[u8], at: usize) -> u32 {
     u32::from_be_bytes(data[at..at + 4].try_into().unwrap())
 }

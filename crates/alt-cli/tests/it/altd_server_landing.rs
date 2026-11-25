@@ -28,7 +28,7 @@ pub(crate) fn pusher(id: &str) -> Principal {
 }
 
 /// The store of the served repository, as the server holds it.
-fn served(origin: &Path) -> RefCell<Store> {
+pub(crate) fn served(origin: &Path) -> RefCell<Store> {
     let mut store = Store::open(origin.join(".alt")).unwrap();
     store.set_defer_durability(true);
     RefCell::new(store)
@@ -38,13 +38,15 @@ pub(crate) fn prepared(pack: &[u8]) -> (alt_os::temp::TempDir, PreparedPack) {
     let dir = alt_os::temp::tempdir().unwrap();
     let path = dir.path().join("incoming.pack");
     std::fs::write(&path, pack).unwrap();
-    let prepared = receive::prepare_pack(&path).unwrap();
+    let prepared = receive::prepare_pack(&path, &Default::default(), &|_| Ok(None))
+        .unwrap()
+        .0;
     (dir, prepared)
 }
 
 /// Takes in the push of `updates` by `anonymous`, `written` being called
 /// between its objects and its ref transaction.
-fn land(
+pub(crate) fn land(
     store: &RefCell<Store>,
     updates: &[alt_wire::RefUpdate],
     pack: Option<&[u8]>,
@@ -60,6 +62,18 @@ pub(crate) fn land_as(
     pack: Option<&[u8]>,
     written: &dyn Fn(),
 ) -> Landed {
+    land_held_to(store, (principal, None), updates, pack, written)
+}
+
+/// [`land_as`], the push signed by `principal` and come in by the account
+/// `signed_in` where one is given.
+pub(crate) fn land_held_to(
+    store: &RefCell<Store>,
+    (principal, signed_in): (&Principal, Option<&Principal>),
+    updates: &[alt_wire::RefUpdate],
+    pack: Option<&[u8]>,
+    written: &dyn Fn(),
+) -> Landed {
     let mut store = store.borrow_mut();
     store.refresh().unwrap();
     let prepared = pack.map(prepared);
@@ -71,6 +85,7 @@ pub(crate) fn land_as(
         checked: checked.as_ref(),
         updates,
         principal,
+        signed_in,
         sig_label: "none",
     };
     let written = |step| {
@@ -261,59 +276,33 @@ fn a_push_whose_ref_transaction_fails_has_its_objects_taken_out_again() {
     ok(alt(origin.path(), &["fsck"]));
 }
 
-/// Not a check of anything but that the pushes are let in: prints how
-/// long a push takes to land in a repository of ten thousand refs, on
-/// top of one of them and beside them (run with `--nocapture`).
+/// A push that a key signs comes in by an account, and each has what it may
+/// do: a branch the account may not write is not written because the key
+/// may, nor one the key may not because the account may. The policy of the
+/// one alone is what the other had taken off before.
 #[test]
-#[ignore = "a measurement of a push among ten thousand refs, for --nocapture"]
-fn the_time_of_a_push_among_ten_thousand_refs() {
-    use alt_git_codec::ObjectKind;
+fn a_signed_push_is_held_to_what_its_signer_and_the_account_it_came_in_by_may_do() {
     let (origin, seed) = seeded();
-    let alt_dir = origin.path().join(".alt");
-    let mut odb = NativeOdb::open(&alt_dir).unwrap();
-    let tree = ObjectId::hash_object(alt_git_codec::HashAlgo::Sha1, ObjectKind::Tree, b"");
-    odb.put(tree, ObjectKind::Tree, b"").unwrap();
-    let mut changes = Vec::new();
-    for n in 0..10_000 {
-        let (oid, commit) = commit_object(&seed, 1_700_000_000, "", &format!("branch {n}"));
-        odb.put(oid, ObjectKind::Commit, &commit).unwrap();
-        changes.push(RefChange {
-            name: format!("refs/heads/branch-{n}"),
-            old: None,
-            new: Some(RefTarget::Oid(oid)),
-        });
-    }
-    odb.flush().unwrap();
-    drop(odb);
-    let top = changes[5000].new.clone();
-    let Some(RefTarget::Oid(top)) = top else {
-        unreachable!()
-    };
-    // `main` moves on: the seed is under the refs and none points at it
-    changes.push(RefChange {
-        name: "refs/heads/main".into(),
-        old: Some(RefTarget::Oid(seed.parse().unwrap())),
-        new: Some(RefTarget::Oid(top)),
-    });
-    let mut refs = RefStore::open(&alt_dir).unwrap();
-    refs.commit("by hand", 0, &changes).unwrap();
-    drop(refs);
+    let policy = "human:bob -> branch_deny=refs/heads/kept\nhuman:carol -> branch=refs/heads/c-*\n";
+    std::fs::write(origin.path().join(".alt/policy"), policy).unwrap();
     let store = served(origin.path());
-    store.borrow_mut().refresh().unwrap();
-
-    for (what, parent) in [
-        ("on top of a ref", top.to_string()),
-        ("beside the refs", seed),
-    ] {
-        for round in 0..3 {
-            let new = commit_object(&parent, 1_700_000_001, "", &format!("{what} {round}"));
-            let name = format!("refs/heads/{}-{round}", what.replace(' ', "-"));
-            let updates = [creation(&name, &new.0.to_string())];
-            let pack = pack_of(&[new]);
-            let started = std::time::Instant::now();
-            let landed = land(&store, &updates, Some(&pack), &|| ());
-            eprintln!("a push {what}: {:?}", started.elapsed());
-            assert_eq!(landed, Landed::Moved);
-        }
-    }
+    let (bob, carol, dave) = (pusher("bob"), pusher("carol"), pusher("dave"));
+    let to = |branch: &str| [creation(&format!("refs/heads/{branch}"), &seed)];
+    let landed = |held_to: (&Principal, Option<&Principal>), branch: &str| {
+        land_held_to(&store, held_to, &to(branch), None, &|| ())
+    };
+    let refused = |landed: Landed| matches!(landed, Landed::Refused(_));
+    // each alone, as the policy tells
+    assert!(refused(landed((&bob, None), "kept")));
+    assert!(refused(landed((&carol, None), "other")));
+    assert_eq!(landed((&dave, None), "d-1"), Landed::Moved);
+    // signed by one who may, come in by the account that may not: and the other way
+    assert!(refused(landed((&dave, Some(&bob)), "kept")));
+    assert!(refused(landed((&carol, Some(&bob)), "kept")));
+    assert!(refused(landed((&bob, Some(&carol)), "other")));
+    assert!(refused(landed((&carol, Some(&dave)), "other")));
+    // what both may
+    assert_eq!(landed((&carol, Some(&bob)), "c-1"), Landed::Moved);
+    assert_eq!(landed((&dave, Some(&bob)), "d-2"), Landed::Moved);
+    assert_eq!(landed((&bob, Some(&carol)), "c-2"), Landed::Moved);
 }

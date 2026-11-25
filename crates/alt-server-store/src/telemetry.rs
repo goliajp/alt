@@ -12,7 +12,7 @@ pub fn outcome(error: &Error) -> Outcome {
         Error::OutcomeUnknown => Outcome::Unknown,
         Error::AuthorityUnavailable | Error::Database(_) | Error::Io(_) => Outcome::Unavailable,
         Error::Repository(alt_repository_service::Error::Precondition(_)) => Outcome::Conflict,
-        Error::Precondition(_) => Outcome::Precondition,
+        Error::Precondition(_) | Error::Attempts(_) => Outcome::Precondition,
         Error::Limit(_)
         | Error::Repository(alt_repository_service::Error::Limit(_))
         | Error::Task(alt_task_service::Error::Limit(_))

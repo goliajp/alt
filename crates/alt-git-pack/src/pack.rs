@@ -77,6 +77,9 @@ impl Pack {
                 .get(pos)
                 .ok_or(PackError::Format("truncated entry size"))?;
             pos += 1;
+            if shift > 57 {
+                return Err(PackError::Format("entry size too long"));
+            }
             size |= u64::from(byte & 0x7f) << shift;
             shift += 7;
         }
@@ -98,7 +101,10 @@ impl Pack {
                         .get(pos)
                         .ok_or(PackError::Format("truncated ofs-delta"))?;
                     pos += 1;
-                    dist = ((dist + 1) << 7) | u64::from(byte & 0x7f);
+                    dist = (dist.checked_add(1))
+                        .and_then(|dist| dist.checked_mul(128))
+                        .ok_or(PackError::Format("ofs-delta distance too long"))?
+                        | u64::from(byte & 0x7f);
                 }
                 let base_at = offset
                     .checked_sub(dist)
@@ -127,8 +133,37 @@ impl Pack {
 
     /// Inflates the zlib stream starting at `data_at` into exactly `size` bytes.
     pub fn inflate(&self, data_at: u64, size: u64) -> Result<Vec<u8>, PackError> {
-        let mut out = vec![0; size as usize];
-        crate::inflate_entry(&self.map[data_at as usize..], &mut out)?;
+        let mut out = Vec::new();
+        self.inflate_into(data_at, size, self.map.len(), &mut out)?;
         Ok(out)
     }
+
+    /// [`Self::inflate`] into `out`, of a stream that ends before byte
+    /// `end` of the pack; where the stream ends. A size that no stream
+    /// of the bytes there are could inflate to is refused before room is
+    /// made for it.
+    pub(crate) fn inflate_into(
+        &self,
+        data_at: u64,
+        size: u64,
+        end: usize,
+        out: &mut Vec<u8>,
+    ) -> Result<usize, PackError> {
+        let from = usize::try_from(data_at).ok().filter(|from| *from <= end);
+        let from = from.ok_or(PackError::Format("entry offset out of range"))?;
+        if size / DEFLATE_MOST > (end - from) as u64 {
+            return Err(PackError::Format("entry size beyond what its stream holds"));
+        }
+        out.clear();
+        out.resize(size as usize, 0);
+        Ok(from + crate::inflate_entry(&self.map[from..end], out)?)
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.map
+    }
 }
+
+/// The most bytes one byte of a deflate stream inflates to: a match of
+/// 258 bytes takes two bits at the least.
+const DEFLATE_MOST: u64 = 1032;

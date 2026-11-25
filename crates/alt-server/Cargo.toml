@@ -9,6 +9,7 @@ publish = false
 alt-byte-segment.workspace = true
 alt-hash.workspace = true
 alt-os.workspace = true
+alt-shares.workspace = true
 alt-pack-segment.workspace = true
 alt-server-telemetry.workspace = true
 golia-change-link.workspace = true

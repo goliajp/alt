@@ -7,6 +7,7 @@
 //! - [`locale`]: the locales the C library has installed
 //! - [`random`]: bytes from the operating system's generator
 //! - [`heap`]: keeping freed memory with the process
+//! - [`holes`]: where a file holds data and where it has holes
 //! - [`map`]: read-only file mappings
 //! - [`stack`]: reporting a stack overflow of the main thread
 //! - [`stdio`]: `/dev/null` on standard descriptors that start out closed
@@ -30,9 +31,11 @@ pub mod boot;
 pub mod durability;
 pub mod env;
 pub mod heap;
+pub mod holes;
 pub mod locale;
 pub mod map;
 pub mod random;
+pub mod socket;
 pub mod stack;
 pub mod stdio;
 pub mod sys;

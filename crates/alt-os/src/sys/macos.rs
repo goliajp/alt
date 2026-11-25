@@ -17,6 +17,12 @@ pub const AT_SYMLINK_NOFOLLOW: c_int = 0x0020;
 
 pub const SIGCONT: c_int = 19;
 
+/// The `lseek` origins that find the next data and the next hole of a file.
+pub const SEEK_HOLE: c_int = 3;
+pub const SEEK_DATA: c_int = 4;
+/// "operation not supported".
+pub const ENOTSUP: c_int = 45;
+
 /// The character-type category in the mask `newlocale` takes.
 pub const LC_CTYPE_MASK: c_int = 1 << 1;
 /// The `nl_langinfo` item that names the character set.
@@ -25,7 +31,11 @@ pub const CODESET: c_int = 0;
 pub const RLIMIT_NOFILE: rlimit_resource_t = 8;
 
 pub const SOL_SOCKET: c_int = 0xffff;
+/// `recv` waits for nothing
+pub const MSG_DONTWAIT: c_int = 0x80;
 pub const SO_RCVBUF: c_int = 0x1002;
+/// the option of a socket that tells the bytes in its send buffer
+pub const SO_NWRITE: c_int = 0x1024;
 
 pub const RENAME_EXCL: c_uint = 0x0000_0004;
 
@@ -133,5 +143,12 @@ unsafe extern "C" {
     #[link_name = "__error"]
     pub fn errno_location() -> *mut c_int;
 
+    pub fn getsockopt(
+        socket: c_int,
+        level: c_int,
+        name: c_int,
+        value: *mut core::ffi::c_void,
+        option_len: *mut super::socklen_t,
+    ) -> c_int;
     pub fn renamex_np(from: *const c_char, to: *const c_char, flags: c_uint) -> c_int;
 }

@@ -16,6 +16,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod waiting;
+use waiting::awaited;
+
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 #[derive(alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
@@ -353,71 +356,10 @@ fn login(
     }
     client.validate_authorization(&pending.authorization)?;
     let issued_path = directory.join("issued.json");
-    if !issued_path.try_exists()? {
-        let time = now()?;
-        let end = pending
-            .started_at_unix_ms
-            .saturating_add(pending.authorization.expires_in.saturating_mul(1000));
-        if time < pending.started_at_unix_ms || time >= end {
-            return Err(refused(
-                "device request expired; no new request was started. Inspect terminal credentials in Settings before starting another login",
-            ));
-        }
-        writeln!(
-            progress,
-            "Open {}\nConfirm terminal code: {}",
-            pending.authorization.verification_uri_complete, pending.authorization.user_code
-        )?;
-        progress.flush()?;
-        if no_wait {
-            return Ok(
-                json!({"schema_version":1,"status":"authorization_pending","verification_uri":pending.authorization.verification_uri,"verification_uri_complete":pending.authorization.verification_uri_complete,"user_code":pending.authorization.user_code,"credential_file":path,"resume":true}),
-            );
-        }
-        let deadline = Instant::now() + Duration::from_millis(end - time);
-        let mut interval = Duration::from_secs(pending.authorization.interval);
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining <= interval {
-                return Err(refused(
-                    "device request expired; pending state was retained",
-                ));
-            }
-            std::thread::sleep(interval);
-            let started = now()?;
-            match client.poll(&pending.authorization.device_code) {
-                Ok(value) => {
-                    save(
-                        &issued_path,
-                        &Issued {
-                            version: 1,
-                            device_digest: alt_hash::blake3::hash(
-                                pending.authorization.device_code.as_bytes(),
-                            )
-                            .to_hex()
-                            .to_string(),
-                            access_token: value.access_token,
-                            expires_at_unix_ms: started.saturating_add(value.expires_in * 1000),
-                        },
-                    )
-                    .map_err(|_| {
-                        unconfirmed(
-                            "issued credential save is unconfirmed; resume the same login journal",
-                        )
-                    })?;
-                    break;
-                }
-                Err(DeviceTransportError::Rejected(DeviceError::AuthorizationPending)) => (),
-                Err(DeviceTransportError::Rejected(DeviceError::SlowDown)) => {
-                    interval = interval.saturating_add(Duration::from_secs(5))
-                }
-                Err(
-                    DeviceTransportError::Unavailable
-                    | DeviceTransportError::Rejected(DeviceError::TemporarilyUnavailable),
-                ) => interval = interval.saturating_mul(2).min(Duration::from_secs(60)),
-                Err(error) => return Err(error.into()),
-            }
-        }
+    if !issued_path.try_exists()?
+        && let Some(told) = awaited(&client, &pending, (&issued_path, path), no_wait, progress)?
+    {
+        return Ok(told);
     }
     let issued: Issued = read(&mut private_file(&issued_path, false)?)?;
     if issued.version != 1

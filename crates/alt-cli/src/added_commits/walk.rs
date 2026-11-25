@@ -1,11 +1,14 @@
 //! The walk over the commits a push reaches (see the module above).
 
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BinaryHeap};
+use std::sync::Arc;
 
-use alt_git_codec::{Commit, ObjectId, ObjectKind};
+use alt_git_codec::ObjectId;
+use alt_hash::{KeyedIdMap, KeyedIdSet};
 
 use super::trees::Trees;
-use super::{MISSING, Res, Source, tagged};
+use super::{Lineage, MISSING, Res, Source, tagged};
 
 pub(super) const ADDED: u8 = 1;
 const SERVED: u8 = 2;
@@ -14,24 +17,20 @@ struct Node {
     marks: u8,
     /// the marks its parents have from it
     passed: u8,
-    parents: Vec<ObjectId>,
-    tree: Option<ObjectId>,
-    date: i64,
-    /// set for a commit that does not read as one
-    unreadable: Option<String>,
+    commit: Arc<Lineage>,
 }
 
 pub(super) struct Walk<'a> {
     source: &'a Source<'a>,
     /// `None` for what is no commit the source holds
-    nodes: HashMap<ObjectId, Option<Node>>,
+    nodes: KeyedIdMap<ObjectId, Option<Node>>,
     queue: BinaryHeap<(i64, ObjectId)>,
     /// how many commits wait to be visited with the mark of the push alone
     open: usize,
     /// visited commits that fail and the refs are not known to reach
     suspects: BTreeMap<ObjectId, String>,
     /// what the refs point at
-    tips: HashSet<ObjectId>,
+    tips: KeyedIdSet<ObjectId>,
     /// whether all of `tips` have their mark
     spread: bool,
     /// the commits visited with the mark of the push alone, and how many
@@ -40,14 +39,14 @@ pub(super) struct Walk<'a> {
     looked: usize,
     pub(super) trees: Trees,
     /// see [`Self::bases`]
-    bases: HashMap<ObjectId, Vec<ObjectId>>,
+    bases: KeyedIdMap<ObjectId, Vec<ObjectId>>,
 }
 
 impl<'a> Walk<'a> {
     pub(super) fn new(source: &'a Source<'a>, served: &[ObjectId]) -> Self {
         Walk {
             source,
-            nodes: HashMap::new(),
+            nodes: KeyedIdMap::default(),
             queue: BinaryHeap::new(),
             open: 0,
             suspects: BTreeMap::new(),
@@ -55,8 +54,8 @@ impl<'a> Walk<'a> {
             spread: false,
             visited: Vec::new(),
             looked: 0,
-            bases: HashMap::new(),
-            trees: Trees::default(),
+            bases: KeyedIdMap::default(),
+            trees: Trees::holding(super::trees::BASES),
         }
     }
 
@@ -77,49 +76,25 @@ impl<'a> Walk<'a> {
         commits.chain(self.trees.added)
     }
 
-    fn load(&self, oid: &ObjectId) -> Res<Option<Node>> {
-        let Some(raw) = (self.source.get)(oid)? else {
-            return Ok(None);
-        };
-        if raw.kind != ObjectKind::Commit {
-            return Ok(None);
-        }
-        let parsed = Commit::parse(&raw.data).map_err(|e| e.to_string());
-        let parsed = parsed.and_then(|commit| {
-            let tree = commit.tree().ok_or("no tree")?;
-            let parents = commit.parents().collect();
-            Ok((parents, Some(tree), commit.committer_date().unwrap_or(0)))
-        });
-        let (parents, tree, date, unreadable) = match parsed {
-            Ok((parents, tree, date)) => (parents, tree, date, None),
-            Err(e) => (
-                Vec::new(),
-                None,
-                0,
-                Some(format!("commit {oid} unreadable: {e}")),
-            ),
-        };
-        Ok(Some(Node {
-            marks: 0,
-            passed: 0,
-            parents,
-            tree,
-            date,
-            unreadable,
-        }))
-    }
-
     /// Gives the commit `oid` the mark. Whether `oid` is a commit.
     pub(super) fn mark(&mut self, oid: ObjectId, mark: u8) -> Res<bool> {
         let mut mark = mark;
-        if !self.nodes.contains_key(&oid) {
-            let node = self.load(&oid)?;
-            self.nodes.insert(oid, node);
-            if self.tips.contains(&oid) {
-                mark |= SERVED;
+        let node = match self.nodes.entry(oid) {
+            Entry::Occupied(known) => known.into_mut(),
+            Entry::Vacant(new) => {
+                let commit = (self.source.commit)(&oid)?;
+                if commit.is_some() && mark & SERVED == 0 && self.tips.contains(&oid) {
+                    mark |= SERVED;
+                }
+                let (marks, passed) = (0, 0);
+                new.insert(commit.map(|commit| Node {
+                    marks,
+                    passed,
+                    commit,
+                }))
             }
-        }
-        let Some(node) = self.nodes.get_mut(&oid).and_then(Option::as_mut) else {
+        };
+        let Some(node) = node else {
             return Ok(false);
         };
         for one in [ADDED, SERVED] {
@@ -128,7 +103,7 @@ impl<'a> Walk<'a> {
             }
             let waited = node.marks == ADDED && node.passed == 0;
             node.marks |= one;
-            self.queue.push((node.date, oid));
+            self.queue.push((node.commit.date, oid));
             if node.marks == ADDED {
                 self.open += 1;
             } else if waited {
@@ -144,10 +119,11 @@ impl<'a> Walk<'a> {
     /// refs.
     fn spread(&mut self) -> Res<()> {
         self.spread = true;
-        let mut named = HashSet::new();
-        for tip in self.tips.clone() {
+        let tips: Vec<ObjectId> = self.tips.iter().copied().collect();
+        self.nodes.reserve(tips.len());
+        for tip in tips {
             let mut oid = tip;
-            while named.insert(oid) && !self.mark(oid, SERVED)? {
+            while !self.mark(oid, SERVED)? {
                 match tagged(self.source, &oid)? {
                     Some(Ok(target)) => oid = target,
                     _ => break,
@@ -178,23 +154,19 @@ impl<'a> Walk<'a> {
                 self.spread()?;
                 continue;
             }
-            let (parents, unreadable) = (node.parents.clone(), node.unreadable.clone());
+            let commit = Arc::clone(&node.commit);
             if let Some(node) = self.nodes.get_mut(&oid).and_then(Option::as_mut) {
                 node.passed = node.marks;
             }
             let mut lacks = false;
-            for parent in parents {
-                for mark in [ADDED, SERVED] {
-                    if new & mark != 0 {
-                        lacks |= !self.mark(parent, mark)?;
-                    }
-                }
+            for &parent in &commit.parents {
+                lacks |= !self.mark(parent, new)?;
             }
             if only_added {
                 self.open -= 1;
                 self.visited.push(oid);
-                let reason = match unreadable {
-                    Some(reason) => Some(reason),
+                let reason = match &commit.unreadable {
+                    Some(reason) => Some(reason.clone()),
                     None if lacks => Some(MISSING.to_owned()),
                     None => (self.source.fails)(&oid)?,
                 };
@@ -218,8 +190,8 @@ impl<'a> Walk<'a> {
     fn bases(&mut self, oid: ObjectId) -> Vec<ObjectId> {
         let mut stack = vec![oid];
         while let Some(&top) = stack.last() {
-            let parents = match self.added(&top) {
-                Some(commit) if !self.bases.contains_key(&top) => commit.parents.clone(),
+            let commit = match self.added(&top) {
+                Some(node) if !self.bases.contains_key(&top) => Arc::clone(&node.commit),
                 _ => {
                     stack.pop();
                     continue;
@@ -228,16 +200,18 @@ impl<'a> Walk<'a> {
             let waits = |parent: &&ObjectId| {
                 self.added(parent).is_some() && !self.bases.contains_key(*parent)
             };
-            let waiting: Vec<ObjectId> = parents.iter().filter(waits).copied().collect();
+            let waiting: Vec<ObjectId> = commit.parents.iter().filter(waits).copied().collect();
             if !waiting.is_empty() {
                 stack.extend(waiting);
                 continue;
             }
             let mut bases = Vec::new();
-            for parent in &parents {
+            for parent in &commit.parents {
                 match self.bases.get(parent) {
                     Some(theirs) => bases.extend(theirs),
-                    None => bases.extend(self.nodes.get(parent).and_then(|n| n.as_ref()?.tree)),
+                    None => {
+                        bases.extend(self.nodes.get(parent).and_then(|n| n.as_ref()?.commit.tree))
+                    }
                 }
             }
             bases.sort_unstable();
@@ -258,12 +232,12 @@ impl<'a> Walk<'a> {
             while self.looked < self.visited.len() {
                 let oid = self.visited[self.looked];
                 self.looked += 1;
-                let Some(tree) = self.added(&oid).and_then(|commit| commit.tree) else {
+                let Some(tree) = self.added(&oid).and_then(|node| node.commit.tree) else {
                     continue;
                 };
                 let bases = self.bases(oid);
                 if !self.trees.whole(self.source, tree, &bases)? {
-                    self.suspects.insert(oid, MISSING.to_owned());
+                    self.suspects.insert(oid, self.trees.lack().to_owned());
                 }
             }
             if self.suspects.is_empty() {

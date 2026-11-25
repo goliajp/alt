@@ -215,7 +215,7 @@ fn a_schema_19_instance_reads_every_request_as_before_the_upgrade() {
         assert!(f.store.check_connection().is_err());
 
         migrate(&mut f, from).unwrap();
-        assert_eq!(shape(&f), (21, 2, 0, 0));
+        assert_eq!(shape(&f), (22, 2, 0, 0));
         assert!(compression(&f).iter().all(|(_, method)| method == "l"));
         let after: Vec<Vec<u8>> = keys.iter().map(|key| observed(&mut f, key)).collect();
         assert_eq!(after, before, "from schema {from}");
@@ -239,7 +239,7 @@ fn a_schema_19_instance_reads_every_request_as_before_the_upgrade() {
         // the upgraded instance goes on publishing
         let third = Payload::new("third", Some(second.commit));
         third.publish_new(&mut f.store, &f.credential);
-        assert_eq!(shape(&f), (21, 2, 0, 0));
+        assert_eq!(shape(&f), (22, 2, 0, 0));
     }
 }
 
@@ -287,7 +287,7 @@ fn a_row_that_would_not_read_back_fails_the_upgrade_and_leaves_schema_19() {
         )
         .unwrap();
     migrate(&mut f, 19).unwrap();
-    assert_eq!(shape(&f), (21, 2, 0, 0));
+    assert_eq!(shape(&f), (22, 2, 0, 0));
     assert_eq!(observed(&mut f, &first.publication.key), before);
     assert_eq!(outbox_events(&mut f), values(&text(&f, AUDIT)));
 }
@@ -397,7 +397,7 @@ fn rows_recorded_at_schema_19_are_read_unchanged_after_the_upgrade() {
     assert_eq!(shape(&f).2, (committed + publications) as i64);
 
     migrate(&mut f, 19).unwrap();
-    assert_eq!(shape(&f), (21, 2, 0, 0));
+    assert_eq!(shape(&f), (22, 2, 0, 0));
 
     let mut queried = 0;
     for (line, (stored, written)) in results.iter().enumerate() {
@@ -435,7 +435,7 @@ fn rows_recorded_at_schema_19_are_read_unchanged_after_the_upgrade() {
             client
                 .batch_execute("DELETE FROM alt_requests WHERE repository='repository'")
                 .unwrap();
-            client.execute("INSERT INTO alt_requests SELECT 'repository',epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes FROM alt_requests WHERE repository=$1", &[&name]).unwrap();
+            client.execute("INSERT INTO alt_requests SELECT (jsonb_populate_record(q, '{\"repository\":\"repository\"}')).* FROM alt_requests q WHERE repository=$1", &[&name]).unwrap();
             if let Ok(RequestObservation::Recorded { result, .. }) =
                 f.store.query(&f.credential, key)
             {

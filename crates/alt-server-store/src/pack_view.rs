@@ -4,61 +4,15 @@
 use crate::Jsonb;
 use crate::{
     Credential, Error, Refs, Result, Store,
-    store::{authorize, instance, integer, snapshot, unsigned},
+    store::{instance, integer, unsigned},
 };
 use alt_pack_segment::SegmentSet;
 use alt_remote_protocol::Scope;
 
-/// One statement per way of reading the references, so the plain reads carry no
-/// filter. `$refs` is the aggregated reference text and `$others` whether a reference
-/// points outside the object ids of the filter.
-macro_rules! view {
-    ($refs:literal, $others:literal) => {
-        concat!(
-            "SELECT
- (SELECT row_to_json(i) FROM (SELECT installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id FROM alt_instance WHERE singleton) i),
- (SELECT row_to_json(c) FROM (SELECT actor_id,attribution,identity_source,expires_at,revoked FROM alt_credentials WHERE token_digest=$1) c),
- EXISTS(SELECT 1 FROM alt_delegations WHERE token_digest=$1),
- (SELECT row_to_json(a) FROM (SELECT disabled FROM alt_web_accounts WHERE actor_id=(SELECT actor_id FROM alt_credentials WHERE token_digest=$1)) a),
- (SELECT row_to_json(s) FROM (SELECT s.account_generation,a.generation,s.expires_at FROM alt_web_sessions s JOIN alt_web_accounts a ON a.actor_id=s.actor_id WHERE s.token_digest=$1) s),
- (SELECT row_to_json(g) FROM (SELECT can_read,publish_records,grants FROM alt_grants WHERE repository=$2 AND actor_id=(SELECT actor_id FROM alt_credentials WHERE token_digest=$1)) g),
- (SELECT row_to_json(r) FROM (SELECT recovery_epoch,object_format,default_branch,pack_unreachable,writes_enabled AND portable_freeze IS NULL AND portable_import IS NULL AS writable FROM alt_repositories WHERE id=$2) r),
- ",
-            $refs,
-            ",
- (SELECT coalesce(json_agg(json_build_array(segment_id,inline IS NOT NULL) ORDER BY sequence),'[]'::json) FROM alt_pack_segments WHERE repository=$2 AND state='live'),
- floor(extract(epoch FROM clock_timestamp())*1000)::bigint,
- ",
-            $others
-        )
-    };
-}
-const VIEW_ALL: &str = view!(
-    "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2)",
-    "false"
-);
-const VIEW_NOTHING: &str = view!("NULL::text", "false");
-// one more row than `DEFERRED_REFS`, written out: a limit passed as a parameter makes
-// the server plan the statement again on every execution
-const VIEW_BOUNDED: &str = view!(
-    "(SELECT string_agg(oid||' '||name,E'\\n') FROM (SELECT oid,name FROM alt_refs WHERE repository=$2 LIMIT 4097) r)",
-    "false"
-);
-const VIEW_PREFIXES: &str = view!(
-    "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (name=(SELECT default_branch FROM alt_repositories WHERE id=$2) OR EXISTS(SELECT 1 FROM unnest($3::text[]) prefix WHERE starts_with(name,prefix))))",
-    "false"
-);
-// Both are planned for the object ids they are given: a plan made for any array
-// tests a row against it one element at a time. Planning for an array hashes it,
-// which is faster to run than the subquery and slower to plan as the array grows.
-const VIEW_TIPS: &str = view!(
-    "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (oid=ANY($3::text[]) OR ($4::bool AND starts_with(name,'refs/tags/'))))",
-    "EXISTS(SELECT 1 FROM alt_refs WHERE repository=$2 AND NOT oid=ANY($3::text[]))"
-);
-const VIEW_MANY_TIPS: &str = view!(
-    "(SELECT string_agg(oid||' '||name,E'\\n') FROM alt_refs WHERE repository=$2 AND (oid IN (SELECT unnest($3::text[])) OR ($4::bool AND starts_with(name,'refs/tags/'))))",
-    "EXISTS(SELECT 1 FROM alt_refs WHERE repository=$2 AND oid NOT IN (SELECT unnest($3::text[])))"
-);
+mod led;
+pub(crate) use led::led;
+mod statements;
+use statements::{VIEW_ALL, VIEW_BOUNDED, VIEW_MANY_TIPS, VIEW_NOTHING, VIEW_PREFIXES, VIEW_TIPS};
 
 /// more wanted object ids than this are given to the view as a subquery
 pub const ARRAY_TIPS: usize = 2000;
@@ -103,8 +57,13 @@ pub struct PackView {
     pub ref_scope: RefScope,
     pub default_branch: String,
     pub segments: SegmentSet,
+    /// the ids of those segments, in their order: what a push that was verified
+    /// against them is published against, or verified anew
+    pub segment_ids: Vec<String>,
     /// some stored objects may be unreachable from the refs
     pub unreachable: bool,
+    /// what is kept of the objects the refs lead to is kept under this
+    pub(crate) led_under: String,
     pub actor_id: String,
     pub attribution: alt_remote_protocol::Attribution,
     /// writes are enabled and the caller holds some ref-changing grant
@@ -164,7 +123,7 @@ impl Store {
             return Ok(view);
         }
         // every reference: a complete view answers any filter
-        self.pack_view_locked(credential, repository)
+        crate::reading::twice(|| self.pack_view_locked(credential, repository))
     }
 
     /// The same decision as `pack_view_locked` from one statement and therefore one
@@ -280,6 +239,7 @@ impl Store {
             default_branch: text(&repository_row, "default_branch")
                 .ok_or(Error::Integrity("default branch"))?,
             unreachable: flag(&repository_row, "pack_unreachable") == Some(true),
+            led_under: self.led_under(repository),
             writable: flag(&repository_row, "writable") == Some(true)
                 && grants
                     .iter()
@@ -288,16 +248,19 @@ impl Store {
                 .ok_or(Error::Integrity("credential actor"))?,
             attribution: alt_json::from_value(attribution)?,
             segments: self.open_segments(repository, &ids)?,
+            segment_ids: ids.into_iter().map(|(id, _)| id).collect(),
         }))
     }
 
     fn pack_view_locked(&mut self, credential: &Credential, repository: &str) -> Result<PackView> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         // nothing durable is written here; row locks alone need no synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
-        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
+        // the references are read for a caller who may read them, and for no other
+        let mut current = crate::reading::unread(&mut tx, &self.spec, repository)?;
+        let auth = crate::store::authorize(&mut tx, &self.spec, credential, &current)?;
+        current.refs = crate::reading::refs(&mut tx, repository)?;
         let row = tx.query_one(
             "SELECT default_branch,pack_unreachable FROM alt_repositories WHERE id=$1",
             &[&repository],
@@ -310,6 +273,7 @@ impl Store {
             ref_scope: RefScope::Complete,
             default_branch: row.get(0),
             unreachable: row.get(1),
+            led_under: self.led_under(repository),
             writable: current.writes_enabled
                 && auth
                     .grants
@@ -318,6 +282,7 @@ impl Store {
             actor_id: auth.actor_id,
             attribution: auth.attribution,
             segments: self.open_segments(repository, &ids)?,
+            segment_ids: ids.into_iter().map(|(id, _)| id).collect(),
         })
     }
 }

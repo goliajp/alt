@@ -11,51 +11,75 @@
 //!
 //! ## Scope
 //!
-//! Non-thin packs only: every delta's base must be present in this same
-//! pack. That matches our fetch policy (we don't claim `thin-pack`
-//! capability, so the server sends self-contained packs). Thin-pack
-//! ingestion belongs to a later step when push-side `--fix-thin` is
-//! needed.
+//! A pack that was fetched holds the base of every delta it has: we don't
+//! claim the `thin-pack` capability. A pack that was pushed is thin, and
+//! is made whole from the store it was pushed to ([`index_pack_thin`]).
 //!
 //! ## Algorithm
 //!
-//! 1. Map the pack, read the header (`PACK` + version + count).
-//! 2. Stream the entries sequentially. For each:
-//!    - Parse the entry header (kind + inflated size + delta-base info).
-//!    - Drive a `ZlibDecoder` to read the compressed payload; record the
-//!      consumed compressed-byte count so we know where the next entry
-//!      starts and so we can crc32 the raw bytes for the idx.
-//!    - Record (offset, kind/base, compressed-length, payload).
-//! 3. Resolve every entry to a canonical `(ObjectKind, Vec<u8>)`:
-//!    - Plain entries resolve directly.
-//!    - OFS_DELTA: base is at a known earlier offset → resolve recursively
-//!      (memoised, so a delta chain of N entries costs N inflations).
-//!    - REF_DELTA: scan the resolved table for the base oid (we don't know
-//!      a delta's base oid until its base is resolved, so we iterate until
-//!      stable). For self-contained packs this terminates in ≤ depth
-//!      iterations.
-//! 4. Hash each entry's canonical payload to its oid; emit the v2 idx
-//!    (fanout, sorted oids, per-entry crc32s, offsets, pack trailer, idx
-//!    checksum).
+//! As `git index-pack` has it, in two passes over the mapped pack.
+//!
+//! 1. The entries are walked in file order ([`scan`]). Each is inflated to
+//!    find where it ends and to checksum its bytes; a plain entry is
+//!    hashed to its id there, and nothing of any entry is kept but its
+//!    place, its form and what it names as its base.
+//! 2. The deltas are sorted by their bases, by entry for an `OFS_DELTA`
+//!    and by id for a `REF_DELTA`, and resolved depth first from every
+//!    plain entry ([`resolve`]): once an object is known, the deltas made
+//!    of it are found by a search of the sorted lists. Every delta is
+//!    inflated again, applied and hashed once, in whichever order the
+//!    pack has its entries.
 //!
 //! ## Memory
 //!
-//! Resolved object payloads are cached in a `Vec` keyed by entry index for
-//! the duration of indexing. For a 100 MB packed-out repo this peaks at a
-//! few hundred MB of decompressed memory; tighter cost control (LRU on
-//! base cache) is a follow-up.
+//! What is held is a few words for each entry, the bases on the path
+//! from a plain entry to the delta being resolved, and the one result.
+//! The bases are held within [`IndexLimits::base_bytes`], git's
+//! `core.deltaBaseCacheLimit`: beyond it those nearest the plain entry
+//! are let go of and made again from the pack when another delta of
+//! theirs comes up. What is made again counts against
+//! [`IndexLimits::inflated_bytes`], and a chain is refused past
+//! [`MAX_DELTA_DEPTH`].
 
-use std::collections::HashMap;
+mod budget;
+mod deltas;
+mod files;
+mod held;
+mod idx;
+mod kept;
+mod limits;
+mod memory;
+mod objects;
+mod resolve;
+mod scan;
+mod thin;
+mod walk;
+
+pub use budget::{Budget, IndexWork, Objects as ObjectMemory, SPILL_FILES};
+pub use deltas::{Deltas, Of};
+pub use files::{BaseFiles, FILES as BASE_FILES};
+pub use limits::IndexLimits;
+pub use memory::{Memory, Taken, Wait};
+pub use objects::Objects;
+pub use thin::Bases;
+pub use walk::Walk;
+
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use alt_os::map::Mmap;
+use alt_git_codec::{HashAlgo, ObjectId};
 
-use crate::PackError;
-use crate::delta;
+use crate::{Pack, PackError};
+
+/// The deepest chain of deltas a pack may hold, the deepest
+/// `git pack-objects` makes.
+pub const MAX_DELTA_DEPTH: u32 = 4095;
+
+/// What a pack has for the objects it inflates and makes one at a time
+/// without asking for it: the objects of a history are far smaller, and
+/// only one that is larger has memory taken for it alone.
+pub const EACH: u64 = 4 << 20;
 
 /// Result of indexing a `.pack` file.
 #[derive(Debug)]
@@ -70,6 +94,9 @@ pub struct IndexedPackOnDisk {
     pub trailer: Vec<u8>,
     /// Object count.
     pub objects: u32,
+    pub work: IndexWork,
+    /// the memory the pack took, held for as long as its objects are read
+    pub memory: Option<Taken<'static>>,
 }
 
 /// Build a `.idx` for an existing `.pack` file. The idx is written next
@@ -83,59 +110,99 @@ pub fn index_pack(
     algo: HashAlgo,
     rename: bool,
 ) -> Result<IndexedPackOnDisk, PackError> {
-    let file = File::open(pack_path)?;
-    // Safety: the file is not modified for the lifetime of this map (we
-    // hold the only handle), and we never expose `&[u8]` past this fn.
-    let map = unsafe { Mmap::map(&file)? };
-    let trailer_len = algo.raw_len();
-    if map.len() < 12 + trailer_len || &map[..4] != b"PACK" {
-        return Err(PackError::Format("not a pack file (bad magic)"));
-    }
-    let version = read_be_u32(&map, 4);
-    if !matches!(version, 2 | 3) {
-        return Err(PackError::Format("unsupported pack version"));
-    }
-    let count = read_be_u32(&map, 8);
+    index_pack_within(pack_path, algo, rename, &IndexLimits::default())
+}
 
-    let trailer = map[map.len() - trailer_len..].to_vec();
+/// [`index_pack`] of a pack that whoever sent it chose the content of.
+pub fn index_pack_within(
+    pack_path: &Path,
+    algo: HashAlgo,
+    rename: bool,
+    limits: &IndexLimits<'_>,
+) -> Result<IndexedPackOnDisk, PackError> {
+    index_pack_thin(pack_path, algo, rename, limits, None)
+}
+
+/// [`index_pack_within`] of a pack that may be thin: the bases it leaves
+/// out are read from `bases` and appended to it. Its trailer and its
+/// count of objects are those of the pack made whole then.
+pub fn index_pack_thin(
+    pack_path: &Path,
+    algo: HashAlgo,
+    rename: bool,
+    limits: &IndexLimits<'_>,
+    bases: Option<Bases<'_>>,
+) -> Result<IndexedPackOnDisk, PackError> {
+    // the file is not modified for the lifetime of a map: we hold the
+    // only handle
+    let pack = Pack::open(pack_path, algo)?;
+    let map = pack.bytes();
+    let trailer_len = algo.raw_len();
+    let count = pack.object_count();
+    let mut trailer = map[map.len() - trailer_len..].to_vec();
     // verify the pack trailer matches a fresh hash of the body — protects
     // against truncated / corrupt downloads
-    verify_trailer(&map, algo, &trailer)?;
+    verify_trailer(map, algo, &trailer)?;
 
-    // -- pass 1: walk entries sequentially, recording raw form --
-    let mut entries: Vec<RawEntry> = Vec::with_capacity(count as usize);
-    let mut pos: u64 = 12;
-    let body_end: u64 = (map.len() - trailer_len) as u64;
-    for _ in 0..count {
-        if pos >= body_end {
-            return Err(PackError::Format("pack header count exceeds body"));
+    let mut work = IndexWork::default();
+    // an entry is inflated whole to be scanned: no larger than an object
+    // may be, nor than what its stream can inflate to
+    let body = (map.len() as u64).saturating_mul(1032);
+    let scanning = limits.let_in(0, body.min(limits.object_bytes))?;
+    let room = limits.objects(&scanning);
+    let mut scanned = scan::scan(&pack, count, limits, room, &mut work)?;
+    drop(scanning);
+    let before = limits.resolving(scanned.inflated, scanned.largest);
+    let mut memory = limits.let_in(before.0, before.1)?;
+    let mut oids = scanned.oids.clone();
+    let room = limits.objects(&memory);
+    resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, room, &mut work)?;
+    drop(pack);
+    let came = oids.len();
+    if let Some(bases) = bases
+        && oids.contains(&None)
+        && let Some(whole) =
+            thin::complete(pack_path, algo, &mut scanned, &mut oids, bases, limits)?
+    {
+        trailer = whole;
+        // a base that was appended may be larger than all the pack came with
+        let after = limits.resolving(scanned.inflated, scanned.largest);
+        if after != before {
+            drop(memory.take());
+            memory = limits.let_in(after.0, after.1)?;
         }
-        let entry = read_entry(&map, pos, algo, body_end)?;
-        pos = entry.next_offset;
-        entries.push(entry);
+        let pack = Pack::open(pack_path, algo)?;
+        let room = limits.objects(&memory);
+        resolve::resolve(
+            &pack,
+            &mut scanned,
+            &mut oids,
+            came,
+            limits,
+            room,
+            &mut work,
+        )?;
     }
-    if pos != body_end {
-        return Err(PackError::Format("pack body has trailing bytes"));
-    }
+    let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
+    let oids: Vec<ObjectId> = oids.into_iter().collect::<Option<_>>().ok_or(stuck)?;
+    let count = oids.len() as u32;
+    let mut oid_entries: Vec<(ObjectId, u64, u32)> = scanned
+        .entries
+        .iter()
+        .zip(oids)
+        .map(|(entry, oid)| (oid, entry.offset, entry.crc32))
+        .collect();
+    drop(scanned);
 
-    // -- pass 2: resolve each entry's canonical (kind, data) --
-    let resolved = resolve_all(&entries)?;
-
-    // -- pass 3: compute oids, build idx --
-    let mut oid_entries: Vec<(ObjectId, u64, u32)> = Vec::with_capacity(entries.len());
-    for (i, entry) in entries.iter().enumerate() {
-        let r = &resolved[i];
-        let oid = ObjectId::hash_object(algo, r.kind, &r.data);
-        oid_entries.push((oid, entry.offset, entry.crc32));
-    }
-
-    let idx_bytes = build_idx(algo, &mut oid_entries, &trailer);
+    let idx_bytes = idx::build_idx(algo, &mut oid_entries, &trailer);
     let idx_path = pack_path.with_extension("idx");
     let tmp_idx = pack_path.with_extension("idx.tmp");
     {
         let mut f = File::create(&tmp_idx)?;
         f.write_all(&idx_bytes)?;
-        f.sync_all()?;
+        if limits.kept {
+            f.sync_all()?;
+        }
     }
     std::fs::rename(&tmp_idx, &idx_path)?;
 
@@ -160,186 +227,9 @@ pub fn index_pack(
         idx_path: final_idx,
         trailer,
         objects: count,
+        work,
+        memory,
     })
-}
-
-/// A pack entry as found on disk, with enough info to resolve it later.
-struct RawEntry {
-    offset: u64,
-    /// Byte after the compressed payload — where the next entry begins.
-    next_offset: u64,
-    kind: RawEntryKind,
-    /// Inflated payload (canonical for `Plain`, delta script for delta
-    /// entries).
-    payload: Vec<u8>,
-    /// CRC32 of the raw on-disk bytes (header + compressed payload).
-    crc32: u32,
-}
-
-enum RawEntryKind {
-    Plain(ObjectKind),
-    Ofs { base_at: u64 },
-    Ref { base: ObjectId },
-}
-
-fn read_entry(
-    map: &[u8],
-    offset: u64,
-    algo: HashAlgo,
-    body_end: u64,
-) -> Result<RawEntry, PackError> {
-    let mut pos = offset as usize;
-    let header_start = pos;
-    let mut byte = *map
-        .get(pos)
-        .ok_or(PackError::Format("entry offset out of range"))?;
-    pos += 1;
-    let type_id = (byte >> 4) & 0b111;
-    let mut size = u64::from(byte & 0b1111);
-    let mut shift = 4;
-    while byte & 0x80 != 0 {
-        byte = *map
-            .get(pos)
-            .ok_or(PackError::Format("truncated entry size"))?;
-        pos += 1;
-        size |= u64::from(byte & 0x7f) << shift;
-        shift += 7;
-    }
-    let kind = match type_id {
-        1 => RawEntryKind::Plain(ObjectKind::Commit),
-        2 => RawEntryKind::Plain(ObjectKind::Tree),
-        3 => RawEntryKind::Plain(ObjectKind::Blob),
-        4 => RawEntryKind::Plain(ObjectKind::Tag),
-        6 => {
-            byte = *map
-                .get(pos)
-                .ok_or(PackError::Format("truncated ofs-delta"))?;
-            pos += 1;
-            let mut dist = u64::from(byte & 0x7f);
-            while byte & 0x80 != 0 {
-                byte = *map
-                    .get(pos)
-                    .ok_or(PackError::Format("truncated ofs-delta"))?;
-                pos += 1;
-                dist = ((dist + 1) << 7) | u64::from(byte & 0x7f);
-            }
-            let base_at = offset
-                .checked_sub(dist)
-                .ok_or(PackError::Format("ofs-delta points before pack start"))?;
-            RawEntryKind::Ofs { base_at }
-        }
-        7 => {
-            let raw = algo.raw_len();
-            let bytes = map
-                .get(pos..pos + raw)
-                .ok_or(PackError::Format("truncated ref-delta base id"))?;
-            pos += raw;
-            RawEntryKind::Ref {
-                base: ObjectId::from_bytes(algo, bytes).unwrap(),
-            }
-        }
-        _ => return Err(PackError::Format("invalid pack entry type")),
-    };
-
-    let mut payload = vec![0; size as usize];
-    let compressed_len = crate::inflate_entry(&map[pos..body_end as usize], &mut payload)?;
-    let next_offset = (pos + compressed_len) as u64;
-    if next_offset > body_end {
-        return Err(PackError::Format("entry runs past pack body"));
-    }
-
-    let crc32 = alt_hash::crc32(&map[header_start..next_offset as usize]);
-
-    Ok(RawEntry {
-        offset,
-        next_offset,
-        kind,
-        payload,
-        crc32,
-    })
-}
-
-/// Resolved (canonical kind + data) for one entry.
-struct Resolved {
-    kind: ObjectKind,
-    data: Arc<Vec<u8>>,
-}
-
-fn resolve_all(entries: &[RawEntry]) -> Result<Vec<Resolved>, PackError> {
-    let n = entries.len();
-    let mut resolved: Vec<Option<Resolved>> = (0..n).map(|_| None).collect();
-    let by_offset: HashMap<u64, usize> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| (e.offset, i))
-        .collect();
-
-    // first pass: plain entries resolve directly
-    for (i, e) in entries.iter().enumerate() {
-        if let RawEntryKind::Plain(kind) = e.kind {
-            resolved[i] = Some(Resolved {
-                kind,
-                data: Arc::new(e.payload.clone()),
-            });
-        }
-    }
-
-    // iterate until either everything is resolved or no progress (stuck
-    // cycle / external base — both fatal for index-pack on a non-thin
-    // pack)
-    loop {
-        let mut progressed = false;
-        let mut still_unresolved = false;
-        for (i, e) in entries.iter().enumerate() {
-            if resolved[i].is_some() {
-                continue;
-            }
-            let base_idx = match &e.kind {
-                RawEntryKind::Plain(_) => unreachable!("plain entries resolved above"),
-                RawEntryKind::Ofs { base_at } => *by_offset
-                    .get(base_at)
-                    .ok_or(PackError::Format("ofs-delta base offset not found"))?,
-                RawEntryKind::Ref { base } => {
-                    // find resolved entry with this oid
-                    match resolved.iter().enumerate().find_map(|(j, r)| {
-                        r.as_ref().and_then(|res| {
-                            let oid = ObjectId::hash_object(base.algo(), res.kind, &res.data);
-                            (oid == *base).then_some(j)
-                        })
-                    }) {
-                        Some(j) => j,
-                        None => {
-                            still_unresolved = true;
-                            continue;
-                        }
-                    }
-                }
-            };
-            let Some(base_res) = &resolved[base_idx] else {
-                still_unresolved = true;
-                continue;
-            };
-            let applied = delta::apply(&base_res.data, &e.payload)?;
-            resolved[i] = Some(Resolved {
-                kind: base_res.kind,
-                data: Arc::new(applied),
-            });
-            progressed = true;
-        }
-        if !still_unresolved {
-            break;
-        }
-        if !progressed {
-            return Err(PackError::Format(
-                "delta resolution stuck (ref-delta base missing or cycle)",
-            ));
-        }
-    }
-
-    Ok(resolved
-        .into_iter()
-        .map(|r| r.expect("all entries resolved"))
-        .collect())
 }
 
 fn verify_trailer(map: &[u8], algo: HashAlgo, trailer: &[u8]) -> Result<(), PackError> {
@@ -363,70 +253,11 @@ fn verify_trailer(map: &[u8], algo: HashAlgo, trailer: &[u8]) -> Result<(), Pack
     Ok(())
 }
 
-fn read_be_u32(buf: &[u8], at: usize) -> u32 {
-    u32::from_be_bytes(buf[at..at + 4].try_into().unwrap())
-}
-
-/// V2 idx layout — same shape as [`crate::write::build_idx`], duplicated
-/// here so we don't have to expose the writer's internals across modules
-/// (and so this stays a self-contained read-and-index path).
-fn build_idx(algo: HashAlgo, entries: &mut [(ObjectId, u64, u32)], trailer: &[u8]) -> Vec<u8> {
-    use alt_hash::{Sha1, Sha256};
-    entries.sort_unstable_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-
-    let mut out = Vec::with_capacity(8 + 256 * 4 + entries.len() * (algo.raw_len() + 8) + 64);
-    out.extend_from_slice(&[0xff, b't', b'O', b'c']);
-    out.extend_from_slice(&2u32.to_be_bytes());
-
-    let mut fanout = [0u32; 256];
-    for (oid, _, _) in entries.iter() {
-        fanout[oid.as_bytes()[0] as usize] += 1;
-    }
-    let mut cumulative = 0u32;
-    for count in fanout {
-        cumulative += count;
-        out.extend_from_slice(&cumulative.to_be_bytes());
-    }
-    for (oid, _, _) in entries.iter() {
-        out.extend_from_slice(oid.as_bytes());
-    }
-    for (_, _, crc) in entries.iter() {
-        out.extend_from_slice(&crc.to_be_bytes());
-    }
-    let mut large: Vec<u64> = Vec::new();
-    for (_, offset, _) in entries.iter() {
-        if *offset < (1 << 31) {
-            out.extend_from_slice(&(*offset as u32).to_be_bytes());
-        } else {
-            out.extend_from_slice(&((1u32 << 31) | large.len() as u32).to_be_bytes());
-            large.push(*offset);
-        }
-    }
-    for offset in large {
-        out.extend_from_slice(&offset.to_be_bytes());
-    }
-    out.extend_from_slice(trailer);
-
-    let checksum: Vec<u8> = match algo {
-        HashAlgo::Sha1 => {
-            let mut h = Sha1::new();
-            h.update(&out);
-            h.finalize().to_vec()
-        }
-        HashAlgo::Sha256 => {
-            let mut h = Sha256::new();
-            h.update(&out);
-            h.finalize().to_vec()
-        }
-    };
-    out.extend_from_slice(&checksum);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{IndexedPack, PackWriter};
+    use alt_git_codec::ObjectKind;
     use alt_os::temp::TempDir;
 
     fn put(writer: &mut PackWriter, kind: ObjectKind, data: &[u8]) -> ObjectId {

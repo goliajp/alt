@@ -1,6 +1,13 @@
 use super::*;
+mod given_up;
+mod led;
 mod many_refs;
+mod moved;
 mod raw_push;
+mod reverted;
+mod said;
+mod settled_cost;
+mod verifying;
 use std::{
     path::Path,
     process::{Command, Output},

@@ -25,7 +25,13 @@ pub enum RefError {
     /// against the current ref state.
     Rejected(String),
     /// The transaction is in the log as `op`; `cause` is what failed after
-    /// it was appended. Every other error left the log as it was.
+    /// it was appended. Any other error of a ref transaction says that the
+    /// transaction is not in the log, and no more than that: before it is
+    /// refused an append takes in what other writers left, which can cut
+    /// the log or give it its boundary, and a write that failed halfway
+    /// leaves bytes at the end that are no record, for the next append
+    /// to write over. An op that is no ref transaction
+    /// ([`crate::RefStore::record_op`]) is not told apart this way.
     Recorded {
         op: OpId,
         cause: Box<RefError>,

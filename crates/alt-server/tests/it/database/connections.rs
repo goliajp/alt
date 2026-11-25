@@ -1,4 +1,13 @@
 use super::*;
+mod bodies;
+mod caller_bytes;
+mod held_places;
+mod listed_refs;
+mod sending;
+mod slow_bodies;
+mod slow_readers;
+mod sources;
+mod unknown_callers;
 mod unread_body;
 use std::collections::BTreeSet;
 
@@ -14,6 +23,14 @@ fn backends(client: &mut Client, database: &str) -> BTreeSet<i32> {
         .collect()
 }
 
+/// The backends of `database` that hold the lock of the process that serves it:
+/// the session a server keeps for as long as it serves.
+fn serving(client: &mut Client, database: &str) -> BTreeSet<i32> {
+    let holding = "SELECT l.pid FROM pg_locks l JOIN pg_database d ON d.oid=l.database WHERE d.datname=$1 AND l.locktype='advisory' AND l.granted AND (l.classid::bigint<<32|l.objid::bigint)=715071909112";
+    let rows = client.query(holding, &[&database]).unwrap();
+    rows.into_iter().map(|row| row.get(0)).collect()
+}
+
 #[test]
 #[ignore = "requires isolated PostgreSQL and HTTP; cancellation must close retained synchronous clients outside async tasks"]
 fn cancelled_http_server_releases_retained_database_connections() {
@@ -23,12 +40,12 @@ fn cancelled_http_server_releases_retained_database_connections() {
     let server = Running::start_with_shutdown(&f, None, None, vec![], true);
     assert_eq!(server.send("GET", "/healthz", None, b"").status(), 200);
     assert_eq!(server.send("GET", "/healthz", None, b"").status(), 200);
-    assert_eq!(
-        backends(&mut client, &f.database)
-            .difference(&existing)
-            .count(),
-        1
-    );
+    // the session that holds the lock of the server, and one for its requests
+    let kept = backends(&mut client, &f.database);
+    let held = serving(&mut client, &f.database);
+    assert_eq!(held.len(), 1);
+    let requests = kept.difference(&existing).filter(|pid| !held.contains(pid));
+    assert_eq!(requests.count(), 1);
     drop(server);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while backends(&mut client, &f.database) != existing {
@@ -53,7 +70,10 @@ fn reused_http_connections_recheck_current_state_and_discard_closed_backends() {
         .difference(&existing)
         .copied()
         .collect();
-    assert_eq!(retained.len(), 1);
+    // one for its requests, beside the session that holds the lock of the server
+    let held = serving(&mut client, &f.database);
+    assert_eq!((retained.len(), held.len()), (2, 1));
+    assert!(retained.is_superset(&held));
     for _ in 0..8 {
         assert_eq!(health(), 200);
         assert_eq!(
@@ -93,16 +113,20 @@ fn reused_http_connections_recheck_current_state_and_discard_closed_backends() {
     let path = "/v1/repositories/repository";
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 200);
     client
-        .execute("UPDATE alt_credentials SET revoked=true", &[])
+        .execute("UPDATE alt_credentials SET revoked=true,revoked_at=0", &[])
         .unwrap();
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 403);
     client
-        .execute("UPDATE alt_credentials SET revoked=false", &[])
+        .execute(
+            "UPDATE alt_credentials SET revoked=false,revoked_at=NULL",
+            &[],
+        )
         .unwrap();
     assert_eq!(server.send("GET", path, Some(&f.token), b"").status(), 200);
 
     let live = backends(&mut client, &f.database);
-    let owned: Vec<_> = live.difference(&existing).copied().collect();
+    let owned = live.difference(&existing).filter(|pid| !held.contains(pid));
+    let owned: Vec<_> = owned.copied().collect();
     assert_eq!(owned.len(), 1);
     // Kill only the backend identified in this isolated database. The failed
     // checkout must surface once; the next request may open a new connection.
@@ -134,9 +158,9 @@ fn reused_http_connections_recheck_current_state_and_discard_closed_backends() {
         thread.join().unwrap();
     }
     assert_eq!(health(), 200);
-    let count = backends(&mut client, &f.database)
-        .difference(&existing)
-        .count();
+    let live = backends(&mut client, &f.database);
+    let idle = live.difference(&existing).filter(|pid| !held.contains(pid));
+    let count = idle.count();
     assert!((1..=4).contains(&count), "idle connection count {count}");
     drop(server);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);

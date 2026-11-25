@@ -197,7 +197,7 @@ impl Store {
 impl Store {
     /// Query never captures a new snapshot. An obsolete scope cannot resume an
     /// export from before a restore, even if the original ID remains on disk.
-    pub fn query_portable_export(
+    pub(crate) fn query_portable_export_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -205,9 +205,9 @@ impl Store {
         limits: alt_portable::PackageLimits,
     ) -> Result<PortableExportState> {
         use PortableExportState as ExportState;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         require_admin(&mut tx, &self.spec, credential)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if scope.installation_id != self.spec.installation_id {
@@ -249,14 +249,14 @@ impl Store {
 impl Store {
     /// Read-only archive inspection consumes bounded server resources under
     /// current administrator and repository-read authority, without a grant.
-    pub fn check_portable_inspection(
+    pub(crate) fn check_portable_inspection_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
     ) -> Result<()> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = crate::reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         require_admin(&mut tx, &self.spec, credential)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if current.scope != *scope || auth.attribution.kind != alt_remote_protocol::ActorKind::Human

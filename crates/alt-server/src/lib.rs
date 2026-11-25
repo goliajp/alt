@@ -12,6 +12,8 @@ mod git;
 mod git_packs;
 mod git_read;
 mod git_response;
+pub use alt_pack_segment::Memory as PackMemory;
+pub use alt_shares as shares;
 pub use git::execute_git;
 pub mod operator;
 

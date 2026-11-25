@@ -11,7 +11,7 @@ mod lost;
 mod open;
 mod runs;
 mod settle;
-mod sink;
+pub(crate) mod sink;
 
 pub use cut::Discarded;
 pub(crate) use cut::generation_kept;

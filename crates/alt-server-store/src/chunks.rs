@@ -1,6 +1,6 @@
 use crate::Jsonb;
-use crate::requests::{active, check_key, upload_pin, upload_request_row, upload_selection};
-use crate::store::{authorize, instance, integer, now, snapshot};
+use crate::requests::{active, check_key, upload_pin, upload_selection};
+use crate::store::{authorize, instance, integer, now};
 use crate::{ByteStore, Credential, Error, Result, Store};
 use alt_remote_protocol::{Chunk, ContentEntry, ContentKind, Publication, RequestKey, Scope};
 use std::collections::BTreeMap;
@@ -8,17 +8,18 @@ use std::io::Read;
 
 pub use alt_remote_protocol::UploadStatus;
 impl Store {
-    fn upload_chunks(
+    pub(crate) fn upload_chunks_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
     ) -> Result<(BTreeMap<String, u64>, Vec<String>)> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current =
+            crate::reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = crate::reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
@@ -43,19 +44,20 @@ impl Store {
         let (_, verified_chunks) = self.upload_chunks(credential, key)?;
         Ok(UploadStatus { verified_chunks })
     }
-    pub fn selected_chunk(
+    pub(crate) fn selected_chunk_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
         digest: &str,
     ) -> Result<u64> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current =
+            crate::reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = crate::reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         let time = now(&mut tx)?;
         active(&row, time)?;
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
@@ -102,10 +104,10 @@ impl Store {
         if verified {
             // Git objects the segments hold were granted when the request began:
             // there are no chunks to assemble them from
-            let segments = self.published_segments(&key.scope.repository_instance_id)?;
+            let published = self.published(&key.scope.repository_instance_id)?;
             let mut held = true;
             for entry in &entries {
-                held &= crate::pack_native::holds_entry(&segments, entry)?;
+                held &= published.holds_entry(entry)?;
             }
             if held {
                 return Ok(());

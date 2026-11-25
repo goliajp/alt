@@ -62,6 +62,7 @@ pub(crate) fn parse_body(body: &[u8], id: OpId) -> Result<Op, OpLogError> {
         timestamp_ms,
         actor,
         payload: payload.to_vec(),
+        frame: None,
     })
 }
 

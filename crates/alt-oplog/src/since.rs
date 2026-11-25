@@ -5,7 +5,8 @@ use std::borrow::Cow;
 
 use crate::read::read_at;
 use crate::scan::{CHECKSUM_LEN, HEADER_LEN, check_header, replay_records};
-use crate::{Anchor, Op, OpLog, OpLogError, ROOT};
+use crate::v1::OpLog;
+use crate::{Anchor, Op, OpLogError, ROOT};
 
 impl OpLog {
     /// All ops in chain order — the replay basis. On a log opened at an
@@ -113,7 +114,7 @@ mod tests {
     use super::*;
 
     fn log_of(dir: &std::path::Path, actor: &str, ops: usize) -> Vec<Anchor> {
-        let mut log = OpLog::open(dir).unwrap();
+        let mut log = OpLog::open_at(dir, None).unwrap();
         let mut anchors = Vec::new();
         for n in 0..ops {
             log.append(actor, n as u64, format!("op {n}").as_bytes())
@@ -132,7 +133,7 @@ mod tests {
     fn the_ops_after_an_anchor_are_the_same_wherever_the_handle_began() {
         let dir = alt_os::temp::tempdir().unwrap();
         let anchors = log_of(dir.path(), "a", 6);
-        let whole = OpLog::open(dir.path()).unwrap();
+        let whole = OpLog::open_at(dir.path(), None).unwrap();
         for began in [None, Some(anchors[1]), Some(anchors[3]), Some(anchors[5])] {
             let log = OpLog::open_at(dir.path(), began).unwrap();
             assert_eq!(log.anchored(), began.is_some());

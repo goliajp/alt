@@ -25,6 +25,7 @@ path = "src/bin/altd_server.rs"
 [dependencies]
 alt-hash.workspace = true
 alt-os.workspace = true
+alt-shares.workspace = true
 golia-change-link.workspace = true
 alt-provenance.workspace = true
 alt-portable.workspace = true
@@ -59,7 +60,6 @@ alt-wire.workspace = true
 alt-wire-http.workspace = true
 alt-crypto.workspace = true
 ed25519-dalek.workspace = true
-tiny_http.workspace = true
 alt-worktree.workspace = true
 alt-base64.workspace = true
 alt-bytes.workspace = true
@@ -70,6 +70,7 @@ alt-json-serde.workspace = true
 
 [dev-dependencies]
 alt-precompose.workspace = true
+tiny_http.workspace = true
 alt-json-testkit.workspace = true
 alt-browser-auth.workspace = true
 alt-deflate.workspace = true

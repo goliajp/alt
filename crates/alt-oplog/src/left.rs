@@ -25,7 +25,8 @@ use std::os::unix::fs::FileExt;
 use std::path::Path;
 
 use crate::synced::Marker;
-use crate::{Op, OpLog, OpLogError, Unconfirmed};
+use crate::v1::OpLog;
+use crate::{Op, OpLogError, Unconfirmed};
 
 const AT: u64 = 8;
 

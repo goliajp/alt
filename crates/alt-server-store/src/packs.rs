@@ -12,6 +12,9 @@ use alt_remote_protocol::{Publication, Receipt, ReceiptBody};
 use alt_repository_service::{Graph, validate_publication};
 use std::{path::PathBuf, sync::Arc};
 
+mod published;
+pub use published::{HeldPublication, HeldSegment};
+
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;
 
@@ -201,7 +204,7 @@ impl Store {
         repository: &str,
     ) -> Result<Vec<(String, bool)>> {
         Ok(tx
-            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence", &[&repository])?
+            .query("SELECT segment_id,inline IS NOT NULL FROM alt_pack_segments WHERE repository=$1 AND state='live' ORDER BY sequence,segment_id", &[&repository])?
             .iter()
             .map(|row| (row.get(0), row.get(1)))
             .collect())
@@ -228,120 +231,52 @@ impl Store {
         repository: &str,
         ids: &[(String, bool)],
     ) -> Result<SegmentSet> {
-        let mut segments = Vec::with_capacity(ids.len());
-        for (id, inline) in ids {
-            let path = self.pack_path(repository, id)?;
-            let cached = crate::open_segments::get(&path);
-            let segment = match cached {
-                Some(segment) => segment,
-                None => {
-                    if *inline {
-                        // the file of an unsettled segment was never flushed; the row is the truth
-                        let bytes: Vec<u8> = self
-                            .client
-                            .query_one("SELECT inline FROM alt_pack_segments WHERE repository=$1 AND segment_id=$2", &[&repository, id])?
-                            .get::<_, Option<Vec<u8>>>(0)
-                            .ok_or(Error::Integrity("pack segment bytes"))?;
-                        let staging = path.with_extension("restore");
-                        std::fs::write(&staging, &bytes)?;
-                        std::fs::rename(&staging, &path)?;
-                    }
-                    let segment = Arc::new(
-                        Segment::open(&path)
-                            .map_err(|_| Error::Integrity("pack segment unavailable"))?,
-                    );
-                    crate::open_segments::insert(path, segment.clone());
-                    segment
-                }
-            };
-            segments.push(segment);
-        }
-        Ok(SegmentSet::new(segments))
+        self.pack_directory(repository)?;
+        let client = &mut self.client;
+        opened(self.bytes.root(), repository, ids, &mut |id| {
+            Ok(client.query_one(INLINE, &[&repository, &id])?.get(0))
+        })
     }
+}
 
-    /// Publishes ref updates, and the segment that carries their new objects, in one
-    /// transaction. The segment file must already be durable under its final name.
-    pub fn pack_publish(
-        &mut self,
-        credential: &Credential,
-        publication: &Publication,
-        graph: &impl Graph,
-        segment: Option<NewSegment<'_>>,
-    ) -> Result<Receipt> {
-        let repository = &publication.key.scope.repository_instance_id;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
-        let auth = authorize(&mut tx, &self.spec, credential, &current)?;
-        let time = now(&mut tx)?;
-        let validated =
-            validate_publication(publication, &current, &auth, graph, self.limits, time)?;
-        crate::publication::replace_refs(&mut tx, repository, &validated.updates)?;
-        let unreachable = publication
-            .refs
-            .iter()
-            .any(|update| update.force || update.new.is_none());
-        let sequence = unsigned(
-            tx.query_one(
-                "UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1,pack_unreachable=pack_unreachable OR $2 WHERE id=$1 RETURNING transaction_sequence",
-                &[repository, &unreachable],
-            )?
-            .get(0),
-        )?;
-        if let Some(segment) = &segment {
-            if tx.execute(
-                "UPDATE alt_repositories SET stored_bytes=stored_bytes+$2 WHERE id=$1 AND $2<=quota_bytes-stored_bytes-reserved_bytes-link_bytes",
-                &[repository, &integer(segment.bytes)?],
-            )? != 1
-            {
-                return Err(Error::Limit("repository quota"));
+const INLINE: &str = "SELECT inline FROM alt_pack_segments WHERE repository=$1 AND segment_id=$2";
+
+/// The segments `ids` of a repository, opened. `inline` gives what the row of
+/// a segment holds of it.
+pub(crate) fn opened(
+    root: &std::path::Path,
+    repository: &str,
+    ids: &[(String, bool)],
+    inline: &mut dyn FnMut(&str) -> Result<Option<Vec<u8>>>,
+) -> Result<SegmentSet> {
+    let mut segments = Vec::with_capacity(ids.len());
+    for (id, held) in ids {
+        let path = segment_file(root, repository, id)?;
+        let cached = crate::open_segments::get(&path);
+        let segment = match cached {
+            Some(segment) => segment,
+            None => {
+                if *held {
+                    // the file of an unsettled segment was never flushed; the row is the truth
+                    let bytes = inline(id)?.ok_or(Error::Integrity("pack segment bytes"))?;
+                    // under a name of its own: another request, or a command of the
+                    // operator, may be writing the same segment out
+                    let mut nonce = [0u8; 8];
+                    alt_os::random::fill(&mut nonce);
+                    let staging =
+                        path.with_extension(format!("{}.restore", u64::from_le_bytes(nonce)));
+                    std::fs::write(&staging, &bytes)?;
+                    std::fs::rename(&staging, &path)?;
+                }
+                let segment = Arc::new(
+                    Segment::open(&path)
+                        .map_err(|_| Error::Integrity("pack segment unavailable"))?,
+                );
+                crate::open_segments::insert(path, segment.clone());
+                segment
             }
-            insert_segment(&mut tx, repository, sequence, segment)?;
-        }
-        let body = ReceiptBody {
-            publication: publication.clone(),
-            request_digest: validated.digest.clone(),
-            transaction_sequence: sequence,
-            policy_version: validated.policy_version,
-            committed_at_unix_ms: now(&mut tx)?,
         };
-        let signature = self.signing_key.sign(&body.signing_bytes_of_validated()?);
-        let receipt = Receipt {
-            body,
-            signing_key_id: alt_hash::blake3::hash(self.signing_key.verifying_key().as_bytes())
-                .to_hex()
-                .to_string(),
-            signature: signature
-                .to_bytes()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect(),
-        };
-        let documents = crate::committed::committed_documents(&receipt)?;
-        crate::committed::record_committed(
-            &mut tx,
-            repository,
-            sequence,
-            &auth.actor_id,
-            &documents,
-        )?;
-        tx.execute(
-            "INSERT INTO alt_requests(repository,epoch,actor_id,request_id,digest,publication,manifest,state,result,expires_at,reserved_bytes) VALUES($1,$2,$3,$4,$5,$6,$7,'committed',$8,0,0)",
-            &[
-                repository,
-                &integer(publication.key.scope.recovery_epoch)?,
-                &publication.key.actor_id,
-                &publication.key.request_id,
-                &validated.digest,
-                &JsonText(&alt_json::to_vec(publication)?),
-                &JsonText(&alt_json::to_vec(&alt_json::json!({"pack_segment": segment.as_ref().map(|segment| segment.id)}))?),
-                &JsonText(&documents.result),
-            ],
-        )?;
-        // lock waits can outlive a lease checked on entry
-        credential_row(&mut tx, &self.spec, credential)?;
-        crate::cloud_quota::check_publication(&mut tx, &self.spec)?;
-        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
-        Ok(receipt)
+        segments.push(segment);
     }
+    Ok(SegmentSet::new(segments))
 }

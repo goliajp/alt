@@ -1,0 +1,147 @@
+//! How many sign-in attempts a minute are let in: from one address, from the
+//! network around it, for one login, and from everybody.
+
+use crate::database::Transaction;
+use crate::store::{integer, now};
+use crate::{Error, Result};
+
+/// The networks an attempt counts for: its address, and the wider one the address is
+/// of. A host is given a whole /64, so every address of one is the same; an IPv4
+/// address written as an IPv6 one is the IPv4 address it is.
+fn networks(address: std::net::IpAddr) -> [std::net::IpAddr; 2] {
+    use std::net::IpAddr::{V4, V6};
+    let address = match address {
+        V6(v6) => v6.to_ipv4_mapped().map_or(address, V4),
+        v4 => v4,
+    };
+    match address {
+        V4(v4) => [address, V4((u32::from(v4) >> 8 << 8).into())],
+        // an address of the link the server is on stands for a host by
+        // itself: every host of the link has the same first 64 bits
+        V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80 => {
+            [address, V6((u128::from(v6) >> 64 << 64).into())]
+        }
+        V6(v6) => {
+            let bits = u128::from(v6);
+            [V6((bits >> 64 << 64).into()), V6((bits >> 80 << 80).into())]
+        }
+    }
+}
+
+/// what one address and the /24 or /48 it is of may attempt in a minute
+const ADDRESS_ATTEMPTS: i32 = 100;
+const NETWORK_ATTEMPTS: i32 = 400;
+/// What may be attempted for one login in a minute: from one address, and from
+/// everywhere. The first is what holds a guesser back; were it the only number
+/// and counted for the login alone, whoever knows a login could keep its owner
+/// out by guessing at it. The second bounds the guessing of many addresses.
+///
+/// Between the two is what the network around an address may attempt for one
+/// login. Whoever has a network has many addresses in it, a household some
+/// hundreds of /64 and more: without this number ten of them would spend what
+/// everywhere may attempt, and the owner of the login would be refused with them.
+/// With it that takes five networks, each a /24 or a /48. The price is that the
+/// owner is held to this number where the guesser is in the same network.
+const LOGIN_ATTEMPTS: i32 = 10;
+const LOGIN_NETWORK_ATTEMPTS: i32 = 20;
+const LOGIN_EVERYWHERE: i32 = 100;
+/// The attempts of everybody in a minute past which an address is held to
+/// [`BUSY_ATTEMPTS`]. Nobody is refused for this number alone: whoever can reach
+/// it from many addresses would otherwise refuse everyone else with it. It is what
+/// the instance can check of passwords in a minute: one takes three tenths of a
+/// second and two are checked at once, which is four hundred. Past it the attempts
+/// outrun the checking, and each address is held to the few that one person makes.
+const BUSY: i32 = 400;
+const BUSY_ATTEMPTS: i32 = 5;
+
+/// One more attempt of `key` in the minute it is in, which begins anew where
+/// the last one is over: how many that makes, and how long until the minute ends.
+fn counted(tx: &mut Transaction<'_>, key: &str, time: i64) -> Result<(i32, u64)> {
+    let row=tx.query_one("INSERT INTO alt_login_budgets(key,window_start,attempts) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window_start=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN $2 ELSE alt_login_budgets.window_start END,attempts=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN 1 ELSE alt_login_budgets.attempts+1 END RETURNING attempts,window_start", &[&key,&time])?;
+    let left = row.get::<_, i64>(1) + 60_000 - time;
+    Ok((row.get(0), left.clamp(1, 60_000) as u64))
+}
+
+fn key(kind: &str, of: &str) -> String {
+    format!("{kind}:{}", alt_browser_auth::digest(of))
+}
+
+/// Removes the rows whose minute is over. One that another transaction has just
+/// counted in is left to it: waiting for it here, with rows of one's own counted
+/// in that the other waits for in turn, is two transactions that end each other.
+fn stale(tx: &mut Transaction<'_>, time: i64) -> Result<()> {
+    tx.execute(
+        "DELETE FROM alt_login_budgets WHERE key IN (SELECT key FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000 FOR UPDATE SKIP LOCKED)",
+        &[&time],
+    )?;
+    Ok(())
+}
+
+/// Where this refuses, the caller lets go of its transaction: committed, the attempt
+/// would still count against what every network and login share.
+pub(crate) fn login_budget(
+    tx: &mut Transaction<'_>,
+    login: &str,
+    network: std::net::IpAddr,
+) -> Result<()> {
+    let time = integer(now(tx)?)?;
+    let [address, wider] = networks(network);
+    // A single stable global row serializes admission. Stale keys are removed here.
+    let rows = [
+        ("global".to_owned(), i32::MAX),
+        (key("network", &address.to_string()), ADDRESS_ATTEMPTS),
+        (key("wider", &wider.to_string()), NETWORK_ATTEMPTS),
+        (
+            key("login-at", &format!("{login}\n{address}")),
+            LOGIN_ATTEMPTS,
+        ),
+        (
+            key("login-in", &format!("{login}\n{wider}")),
+            LOGIN_NETWORK_ATTEMPTS,
+        ),
+        (key("login", login), LOGIN_EVERYWHERE),
+    ];
+    let mut busy = false;
+    for (index, (key, max)) in rows.into_iter().enumerate() {
+        let (attempts, left) = counted(tx, &key, time)?;
+        busy |= index == 0 && attempts > BUSY;
+        if attempts > max || (index == 1 && busy && attempts > BUSY_ATTEMPTS) {
+            return Err(Error::Attempts(left));
+        }
+    }
+    stale(tx, time)
+}
+
+/// The codes an address and the network around it may ask for in a minute. They
+/// are counted apart from the sign-ins: a code costs no password to be checked,
+/// so those asked for make nobody busy, and take nothing from what an address
+/// may attempt of sign-ins. The caller lets go of its transaction as above.
+pub(crate) fn code_budget(tx: &mut Transaction<'_>, network: std::net::IpAddr) -> Result<()> {
+    apart(tx, "code", network)
+}
+
+/// The sign-ins through the platform an address and the network around it may
+/// begin in a minute. One is begun without a credential and has no password
+/// checked here either: they are counted as the codes are, apart from each other.
+pub(crate) fn start_budget(tx: &mut Transaction<'_>, network: std::net::IpAddr) -> Result<()> {
+    apart(tx, "start", network)
+}
+
+fn apart(tx: &mut Transaction<'_>, kind: &str, network: std::net::IpAddr) -> Result<()> {
+    let time = integer(now(tx)?)?;
+    let [address, wider] = networks(network);
+    let rows = [
+        (key(kind, &address.to_string()), ADDRESS_ATTEMPTS),
+        (
+            key(&format!("{kind}-wider"), &wider.to_string()),
+            NETWORK_ATTEMPTS,
+        ),
+    ];
+    for (key, max) in rows {
+        let (attempts, left) = counted(tx, &key, time)?;
+        if attempts > max {
+            return Err(Error::Attempts(left));
+        }
+    }
+    stale(tx, time)
+}

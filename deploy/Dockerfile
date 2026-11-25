@@ -2,31 +2,53 @@
 # alt.golia.jp. Live path on t01: /apps/alt/Dockerfile (rsynced from
 # deploy/ in this repo).
 #
-# Builder (rust:1.88-bookworm) clones goliajp/alt and builds the three
-# release binaries; the runtime layer (debian:bookworm-slim) carries
-# only those binaries plus a stable system user. Repository data lives
-# under `/var/lib/alt-repos` and is supplied by the compose host via a
-# bind mount — the image stays a pure binary distribution and
-# the host owns the actual content.
+# The builder builds the three release binaries; the runtime layer
+# (debian:bookworm-slim) carries only those binaries plus a stable
+# system user. Repository data lives under `/var/lib/alt-repos` and is
+# supplied by the compose host via a bind mount — the image stays a
+# pure binary distribution and the host owns the actual content.
+#
+# Where the sources come from is a build argument:
+#   ALT_SOURCE=github (default)  clones goliajp/alt at the branch ALT_REF
+#                                (default develop); the build context is
+#                                not read, so this directory is enough
+#   ALT_SOURCE=context           builds the checkout the build context is:
+#                                docker build -f deploy/Dockerfile \
+#                                    --build-arg ALT_SOURCE=context <checkout>
+# Only the stage that is asked for is built, which takes BuildKit.
 #
 # Update flow:
 #   1. on a workstation: `scripts/deploy-repos.sh`
 #      → populate /apps/alt/repos/{alt,demo-binaries}/.alt on t01.
 #   2. on t01:        `docker compose build --pull && docker compose up -d`
 # A cache-bust ADD ahead of `git clone` makes step 2 pick up new
-# develop commits without --no-cache.
+# commits of the branch without --no-cache.
 
-FROM rust:1.88-bookworm AS builder
+ARG ALT_SOURCE=github
+
+# the toolchain the bundled server is built with: the workspace asks for 1.97 or later
+FROM rust:1.99.1-bookworm@sha256:7085845219c18e7c5b1f34ed9ce89b84f822f2e3d54a02774cedc996ac0f304f AS toolchain
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
-# Cache-bust: GitHub's refs API returns the current develop tip's SHA,
-# so its content changes whenever develop moves.
-ADD https://api.github.com/repos/goliajp/alt/git/refs/heads/develop /tmp/develop-ref.json
-RUN git clone https://github.com/goliajp/alt.git .
+FROM toolchain AS source-github
+ARG ALT_REF=develop
+# Cache-bust: GitHub's refs API returns the SHA of the branch tip, so
+# its content changes whenever the branch moves.
+ADD https://api.github.com/repos/goliajp/alt/git/refs/heads/${ALT_REF} /tmp/ref.json
+RUN git clone --branch "${ALT_REF}" https://github.com/goliajp/alt.git .
+
+FROM toolchain AS source-context
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+COPY vendor/ ./vendor/
+# the shell functions `alt` carries are read from here when it is built
+COPY shell/ ./shell/
+
+FROM source-${ALT_SOURCE} AS builder
 
 # Three binaries: `alt` (still useful inside the image for debugging
 # imports), `altd-server` (wire), `alt-web` (browse JSON API).

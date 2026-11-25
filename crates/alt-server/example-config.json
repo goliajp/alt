@@ -53,13 +53,17 @@
     "header_bytes": 16384,
     "headers": 64,
     "header_timeout_ms": 5000,
-    "body_timeout_ms": 60000,
+    "body_timeout_ms": 30000,
     "work_timeout_ms": 30000,
     "connection_timeout_ms": 120000,
     "database_connect_timeout_ms": 5000,
     "database_statement_timeout_ms": 15000,
     "upload_ttl_ms": 3600000,
     "worker_lease_ms": 60000,
-    "approval_ttl_ms": 300000
+    "approval_ttl_ms": 300000,
+    "trusted_proxies": [
+      "127.0.0.1",
+      "::1"
+    ]
   }
 }

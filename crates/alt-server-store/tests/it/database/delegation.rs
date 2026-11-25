@@ -1,7 +1,7 @@
 use super::*;
 use alt_remote_protocol::delegation::{AgentScope, DelegationRequest};
 
-fn request() -> DelegationRequest {
+pub(super) fn request() -> DelegationRequest {
     let mut grant = grants().remove(0);
     grant.refs = RefSelector::Exact("refs/heads/main".into());
     grant.delete = false;
@@ -195,7 +195,7 @@ fn local_agent_cannot_escape_ref_repository_epoch_or_parent_requests() {
     let changed = f
         .client()
         .execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=0 WHERE token_digest=$1",
             &[&alt_server_store::cloud_credential_digest(&f.token).unwrap()],
         )
         .unwrap();
@@ -244,7 +244,7 @@ fn agent_issuance_waits_for_concurrent_parent_revocation_and_cannot_resurrect_au
     let mut revocation = owner.transaction().unwrap();
     let changed = revocation
         .execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=0 WHERE token_digest=$1",
             &[&alt_server_store::cloud_credential_digest(&f.token).unwrap()],
         )
         .unwrap();

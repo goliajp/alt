@@ -12,6 +12,7 @@ workbench/dist
 workbench/*.tsbuildinfo
 !self-hosted/
 !self-hosted/Dockerfile
+!self-hosted/build-server.sh
 !self-hosted/entrypoint.sh
 
 !vendor/

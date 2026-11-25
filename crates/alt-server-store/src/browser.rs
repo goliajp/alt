@@ -6,8 +6,10 @@ use crate::store::{credential_row, instance, integer, now, require_admin, unsign
 use crate::{Credential, Error, Result, Store};
 use alt_browser_auth::{PublicOrigin, password_hash};
 use alt_remote_protocol::DeploymentMode;
+mod budget;
 mod login;
-pub use login::PasswordProof;
+pub(crate) use budget::{code_budget, login_budget, start_budget};
+pub use login::{PasswordAttempt, PasswordProof};
 
 #[derive(Clone, alt_json::ToJson)]
 pub struct LocalUser {
@@ -243,7 +245,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1",
             &[&credential.digest],
         )?;
         let actor: String = row.get("actor_id");
@@ -284,7 +286,7 @@ impl Store {
             return Err(Error::Precondition("unknown user"));
         }
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE actor_id=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE actor_id=$1",
             &[&actor],
         )?;
         audit(
@@ -318,35 +320,5 @@ pub(crate) fn check_credential(
     }
     let time = integer(now(tx)?)?;
     if let Some(row)=tx.query_opt("SELECT s.account_generation,a.generation,s.expires_at FROM alt_web_sessions s JOIN alt_web_accounts a ON a.actor_id=s.actor_id WHERE s.token_digest=$1 FOR SHARE OF s,a", &[&credential.digest])? && (row.get::<_,i64>(0)!=row.get::<_,i64>(1)||row.get::<_,i64>(2)<=time) {return Err(Error::Unauthorized);}
-    Ok(())
-}
-pub(crate) fn login_budget(
-    tx: &mut Transaction<'_>,
-    login: &str,
-    network: std::net::IpAddr,
-) -> Result<()> {
-    let time = integer(now(tx)?)?;
-    // A single stable global row serializes admission and bounds the number of
-    // attacker-chosen keys written in each minute. Stale keys are removed here.
-    let rows = [
-        ("global".to_owned(), 1000),
-        (
-            format!("network:{}", alt_browser_auth::digest(&network.to_string())),
-            100,
-        ),
-        (format!("login:{}", alt_browser_auth::digest(login)), 10),
-    ];
-    for (key, max) in rows {
-        let row=tx.query_one("INSERT INTO alt_login_budgets(key,window_start,attempts) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET window_start=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN $2 ELSE alt_login_budgets.window_start END,attempts=CASE WHEN alt_login_budgets.window_start<=$2-60000 THEN 1 ELSE alt_login_budgets.attempts+1 END RETURNING attempts", &[&key,&time])?;
-        if row.get::<_, i32>(0) > max {
-            return Err(Error::Precondition(
-                "login admission limit; retry after one minute",
-            ));
-        }
-    }
-    tx.execute(
-        "DELETE FROM alt_login_budgets WHERE key<>'global' AND window_start<$1::bigint-60000",
-        &[&time],
-    )?;
     Ok(())
 }

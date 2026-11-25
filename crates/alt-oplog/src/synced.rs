@@ -215,7 +215,7 @@ pub(crate) fn lost(marker: &Marker, holds: u64) -> Result<(), OpLogError> {
     }
 }
 
-impl crate::OpLog {
+impl crate::v1::OpLog {
     /// Whether the log still holds the records its marker says were
     /// synced; [`OpLogError::Lost`] when it does not. Reads the marker and
     /// takes no lock: an append checks the same under the lock.

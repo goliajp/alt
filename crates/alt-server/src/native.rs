@@ -5,6 +5,8 @@ use alt_server_store::{Credential, Error, Result, Store};
 use alt_task_service::TaskLimits;
 use std::io::Read;
 
+mod request;
+
 pub use alt_remote_protocol::{ApprovalRequest, BeginRequest};
 #[derive(Clone)]
 pub struct NativeOptions {
@@ -32,10 +34,19 @@ pub enum Output {
         bytes: u64,
         file: alt_os::temp::NamedTempFile,
     },
+    /// a file that takes of the room responses have on disk until it is sent
+    Sending {
+        content_type: &'static str,
+        file: alt_os::temp::NamedTempFile,
+        held: alt_shares::Share,
+    },
     File {
         bytes: u64,
         digest: String,
         file: alt_server_store::StoredReader,
+        /// what it takes of the room responses have on disk, where it was
+        /// written out for this response
+        held: Option<alt_shares::Share>,
     },
 }
 pub(crate) fn json(value: &impl alt_json::ToJson) -> Result<Output> {
@@ -69,6 +80,24 @@ pub(crate) fn empty(source: &mut dyn Read) -> Result<()> {
         return Err(Error::Precondition("unexpected request body"));
     }
     Ok(())
+}
+/// A published payload by the digest of its content. What it takes to tell
+/// whether the caller is given a Git object is given up once `gone` is set.
+pub(crate) fn content(
+    store: &mut Store,
+    credential: &Credential,
+    (scope, digest): (alt_remote_protocol::Scope, String),
+    source: &mut dyn Read,
+    gone: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Output> {
+    empty(source)?;
+    let (bytes, file) = store.open_published_content_while(credential, &scope, &digest, gone)?;
+    Ok(Output::File {
+        bytes,
+        digest,
+        file,
+        held: None,
+    })
 }
 pub fn execute_native(
     store: &mut Store,
@@ -151,15 +180,7 @@ pub fn execute_native(
                 options.upload_ttl_ms,
             )?)
         }
-        Route::Content(scope, digest) => {
-            empty(source)?;
-            let (bytes, file) = store.open_published_content(credential, &scope, &digest)?;
-            Ok(Output::File {
-                bytes,
-                digest,
-                file,
-            })
-        }
+        Route::Content(scope, digest) => content(store, credential, (scope, digest), source, None),
         Route::Bundles(scope, root, after) => {
             empty(source)?;
             json(&store.bundles_for_record(credential, &scope, &root, after.as_deref(), 20)?)
@@ -168,125 +189,8 @@ pub fn execute_native(
             empty(source)?;
             json(&store.published_records(credential, &scope, kind, after.as_deref(), 100)?)
         }
-        Route::Request(key, action) => match action {
-            RequestAction::UploadStatus => {
-                empty(source)?;
-                json(&store.upload_status(credential, &key)?)
-            }
-            RequestAction::UploadChunk(digest) => {
-                store.upload_chunk(credential, &key, &digest, source)?;
-                json(&alt_json::json!({"blake3":digest,"verified":true}))
-            }
-            RequestAction::Assemble(digest) => {
-                empty(source)?;
-                store.assemble_content(credential, &key, &digest)?;
-                json(&alt_json::json!({"blake3":digest,"verified":true}))
-            }
-            RequestAction::Review => {
-                empty(source)?;
-                json(&store.review_selection(credential, &key)?)
-            }
-            RequestAction::ReviewContent(digest) => {
-                empty(source)?;
-                let (bytes, file) = store.open_review_content(credential, &key, &digest)?;
-                Ok(Output::File {
-                    bytes,
-                    digest,
-                    file,
-                })
-            }
-            RequestAction::Query => {
-                empty(source)?;
-                json(&store.query(credential, &key)?)
-            }
-            RequestAction::Upload(digest) => {
-                let entries = store.selected_upload(credential, &key, &digest)?;
-                let entry = &entries[0];
-                let proof = store.bytes().put(
-                    &key.scope,
-                    &digest,
-                    entry.bytes,
-                    store.limits().object_bytes,
-                    source,
-                )?;
-                for entry in entries {
-                    store.register_content(credential, &key, &entry, &proof)?;
-                }
-                json(&alt_json::json!({"blake3":digest,"verified":true}))
-            }
-            RequestAction::Prepare | RequestAction::Publish => {
-                empty(source)?;
-                let observation = store.query(credential, &key)?;
-                match &observation {
-                    RequestObservation::Recorded { result, .. }
-                        if matches!(
-                            **result,
-                            RequestState::Committed { .. }
-                                | RequestState::Rejected { .. }
-                                | RequestState::Expired { .. }
-                        ) =>
-                    {
-                        return json(&observation);
-                    }
-                    RequestObservation::Unknown { .. } => return json(&observation),
-                    _ => {}
-                }
-                let limits = store.limits();
-                let work = store.acquire_publication(
-                    credential,
-                    &key,
-                    options.worker_lease_ms,
-                    limits.graph_objects,
-                )?;
-                // Validation failures leave the immutable request available for
-                // inspection. The fenced lease expires even after process loss.
-                let validated = ValidatedWork::verify(work, limits, options.task_limits)?;
-                let result = (|| {
-                    validated.mark_ready(store, credential)?;
-                    if action == RequestAction::Publish {
-                        let receipt = validated.publish(store, credential)?;
-                        return json(&RequestObservation::Recorded {
-                            key: key.clone(),
-                            result: Box::new(RequestState::Committed {
-                                receipt: Box::new(receipt),
-                            }),
-                        });
-                    }
-                    json(&store.query(credential, &key)?)
-                })();
-                if action == RequestAction::Prepare || result.is_err() {
-                    let release = store.release_publication(credential, validated.work());
-                    if result.is_ok() {
-                        release?;
-                    }
-                }
-                result
-            }
-            RequestAction::Approve => {
-                let request: ApprovalRequest = body(source, store.limits().request_bytes)?;
-                alt_task::check_id(&request.integration_id)
-                    .map_err(|_| Error::Precondition("integration id"))?;
-                let limits = store.limits();
-                let work = store.acquire_review(
-                    credential,
-                    &key,
-                    options.worker_lease_ms,
-                    limits.graph_objects,
-                )?;
-                let validated = ValidatedWork::verify(work, limits, options.task_limits)?;
-                let result = validated.approve(
-                    store,
-                    credential,
-                    &request.integration_id,
-                    &request.inspected,
-                    options.approval_ttl_ms,
-                );
-                let _ = store.release_publication(credential, validated.work());
-                result?;
-                json(
-                    &alt_json::json!({"request":key,"integration_id":request.integration_id,"approved":true}),
-                )
-            }
-        },
+        Route::Request(key, action) => {
+            request::execute(store, credential, options, key, action, source)
+        }
     }
 }

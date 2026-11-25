@@ -180,10 +180,10 @@ impl Segment {
         let pack_len = u64::from_le_bytes(footer[..8].try_into().unwrap()) as usize;
         let (records, commits, parent_count) = (u32_at(8), u32_at(12), u32_at(16));
         let fanout_at = pack_len;
-        let records_at = fanout_at + 1024;
-        let commits_at = records_at + records * RECORD;
-        let parents_at = commits_at + commits * COMMIT;
-        if pack_len < 32 || parents_at + parent_count * 20 != footer_at {
+        let records_at = fanout_at.saturating_add(1024);
+        let commits_at = records_at.saturating_add(records * RECORD);
+        let parents_at = commits_at.saturating_add(commits * COMMIT);
+        if pack_len < 32 || parents_at.saturating_add(parent_count * 20) != footer_at {
             return Err(bad());
         }
         if alt_hash::blake3::hash(&map[fanout_at..footer_at]).as_bytes() != &footer[24..56] {

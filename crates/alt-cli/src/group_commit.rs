@@ -9,6 +9,14 @@
 //! N concurrent commits coalesce onto ~1 fsync — the lever that lifts
 //! throughput past the one-fsync-per-commit ceiling.
 //!
+//! A sync that fails is the last one. The kernel reports the failure of
+//! an fsync once: the pages it could not write are marked clean, and the
+//! next fsync of the same file answers that all is well with the data not
+//! on disk. So no later sync can vouch for what the failed one covered,
+//! nor for anything appended behind it in the same files: every commit
+//! not yet durable is told of the failure, and so is every commit after
+//! it, until the process is started again ([`GroupCommit::failed`]).
+//!
 //! The fsync runs **without** the store `Mutex` — the caller hands in a
 //! handle ([`crate::native::StoreSink`]) that owns its own fds, so
 //! completed batches can share the flush. The sink's shared odb lock keeps
@@ -34,10 +42,8 @@ struct GroupInner {
     durable: u64,
     /// A leader is currently fsyncing; others wait rather than pile on.
     syncing: bool,
-    /// Error from the most recent fsync (clears on the next success),
-    /// so a committer whose own flush failed reports it instead of
-    /// looping a dead disk.
-    last_error: Option<String>,
+    /// The error of the fsync that failed: none is made after it.
+    failed: Option<String>,
     /// Total fsyncs performed (success + failure both increment).
     /// Exposed so a test can prove coalescing actually happened —
     /// `fsync_count < commit_count` under N-way concurrency means the
@@ -73,7 +79,7 @@ impl GroupCommit {
                 next_ticket: 0,
                 durable: 0,
                 syncing: false,
-                last_error: None,
+                failed: None,
                 fsync_count: 0,
             }),
             cv: Condvar::new(),
@@ -95,10 +101,27 @@ impl GroupCommit {
         g.next_ticket
     }
 
+    /// The error of the sync that failed, once one has: no commit is
+    /// made durable from then on, and a caller refuses a write before it
+    /// appends anything.
+    pub fn failed(&self) -> Option<String> {
+        let g = self.inner.lock().expect("group mutex poisoned");
+        g.failed.clone()
+    }
+
+    /// Has every commit that is not durable yet answered with `error`, as
+    /// a sync that failed has: for a write that failed to sync outside
+    /// the group, in files the group syncs.
+    pub fn fail(&self, error: String) {
+        let mut g = self.inner.lock().expect("group mutex poisoned");
+        g.failed.get_or_insert(error);
+        self.cv.notify_all();
+    }
+
     /// Block until `ticket` is durable. The first caller into the
     /// uncovered region becomes the leader and performs the fsync;
-    /// later callers wait on the condvar. A leader whose own flush
-    /// fails surfaces the error rather than retry a dead disk.
+    /// later callers wait on the condvar. Once a flush has failed,
+    /// every ticket it left uncovered is answered with its error.
     pub fn await_durable(&self, sink: &StoreSink, ticket: u64) -> Result<(), String> {
         let causes = |e: Box<dyn std::error::Error>| crate::machine::causes(e.as_ref());
         self.await_durable_with(ticket, || sink.fsync_all().map_err(causes))
@@ -112,43 +135,46 @@ impl GroupCommit {
         mut flush: impl FnMut() -> Result<(), E>,
     ) -> Result<(), String> {
         let mut g = self.inner.lock().expect("group mutex poisoned");
-        let mut led = false;
         loop {
             if g.durable >= ticket {
                 return Ok(());
+            }
+            if let Some(failed) = &g.failed {
+                return Err(failed.clone());
             }
             if g.syncing {
                 g = self.cv.wait(g).expect("group mutex poisoned");
                 continue;
             }
-            if led {
-                // we already fsynced once and are still uncovered → our
-                // flush failed; surface it rather than spin a dead disk
-                return Err(g
-                    .last_error
-                    .clone()
-                    .unwrap_or_else(|| "durability failed".to_owned()));
-            }
             // become the leader for this batch
             g.syncing = true;
-            led = true;
             let covered = g.next_ticket;
             drop(g);
             let leading = Leading;
-            let outcome = flush().map(|()| covered).map_err(|e| e.to_string());
+            let outcome = flush().map_err(|e| e.to_string());
             drop(leading);
             g = self.inner.lock().expect("group mutex poisoned");
             g.syncing = false;
             g.fsync_count += 1;
             match outcome {
-                Ok(covered) => {
-                    g.durable = g.durable.max(covered);
-                    g.last_error = None;
-                }
-                Err(e) => g.last_error = Some(e),
+                Ok(()) => g.durable = g.durable.max(covered),
+                Err(e) => g.failed = Some(e),
             }
             self.cv.notify_all();
         }
+    }
+}
+
+impl crate::receive::Recorded<u64> for &GroupCommit {
+    // the ticket is handed out with the store still in hand, once the
+    // batch of objects has ended: a sink syncs the odb under the shared
+    // `odb.lock`, and so never between a push's objects and its refs
+    fn moved(self) -> u64 {
+        self.assign()
+    }
+
+    fn unsynced(self, why: &str) {
+        self.fail(why.to_owned());
     }
 }
 
@@ -243,6 +269,72 @@ mod tests {
             Some(crate::held::IN_DOUBT),
             "{child:?}"
         );
+    }
+
+    /// What Linux does with a second fsync of a file whose first one
+    /// failed: it answers that all is well, with the data not on disk.
+    #[test]
+    fn after_a_failed_flush_no_later_one_makes_its_batch_durable() {
+        let group = GroupCommit::new();
+        let (first, second) = (group.assign(), group.assign());
+        let failed = group.await_durable_with(first, || Err(std::io::Error::other("disk gone")));
+        assert!(failed.unwrap_err().contains("disk gone"));
+        let mut again = 0;
+        let flush = || {
+            again += 1;
+            Ok::<(), std::io::Error>(())
+        };
+        // appended before the flush that failed: in the same unsynced bytes
+        let err = group.await_durable_with(second, flush).unwrap_err();
+        assert!(err.contains("disk gone"), "{err}");
+        // appended after it, behind those bytes in the same files
+        let third = group.assign();
+        let flush = || {
+            again += 1;
+            Ok::<(), std::io::Error>(())
+        };
+        let err = group.await_durable_with(third, flush).unwrap_err();
+        assert!(err.contains("disk gone"), "{err}");
+        assert_eq!(again, 0);
+        assert_eq!(group.fsync_count(), 1);
+    }
+
+    /// A commit that waits while the leader's flush fails is told so: it
+    /// does not lead a flush of its own.
+    #[test]
+    fn a_commit_waiting_on_a_flush_that_fails_is_told_it_failed() {
+        let group = Arc::new(GroupCommit::new());
+        let flushes = Arc::new(AtomicU64::new(0));
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let leader_ticket = group.assign();
+        let leader = {
+            let group = Arc::clone(&group);
+            std::thread::spawn(move || {
+                group.await_durable_with(leader_ticket, || {
+                    started_tx.send(()).expect("test channel open");
+                    release_rx.recv().expect("test channel open");
+                    Err(std::io::Error::other("disk gone"))
+                })
+            })
+        };
+        started_rx.recv().expect("leader started its flush");
+        let ticket = group.assign();
+        let follower = {
+            let group = Arc::clone(&group);
+            let flushes = Arc::clone(&flushes);
+            std::thread::spawn(move || {
+                group.await_durable_with(ticket, || {
+                    flushes.fetch_add(1, Ordering::SeqCst);
+                    Ok::<(), std::io::Error>(())
+                })
+            })
+        };
+        release_tx.send(()).expect("leader waiting");
+        assert!(leader.join().expect("leader thread").is_err());
+        let err = follower.join().expect("follower thread").unwrap_err();
+        assert!(err.contains("disk gone"), "{err}");
+        assert_eq!(flushes.load(Ordering::SeqCst), 0);
     }
 
     #[test]

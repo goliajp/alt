@@ -1,24 +1,27 @@
 mod body;
+mod bounded;
+mod caller;
 mod connection;
 mod device;
 mod encoding;
+mod expiry;
 mod file_body;
 mod handle;
+mod hashers;
 mod observation;
+mod paced;
 mod pack_body;
 use alt_server_telemetry::{Outcome, Phase};
-pub(crate) use observation::{scope as trace_scope, spawn_blocking};
-pub(crate) fn spawn_observed<T: Send + 'static>(
-    phase: Phase,
-    work: impl FnOnce() -> alt_server_store::Result<T> + Send + 'static,
-) -> tokio::task::JoinHandle<alt_server_store::Result<T>> {
-    spawn_blocking(move || alt_server_store::telemetry::observe(phase, work))
-}
+pub(crate) use observation::{scope as trace_scope, spawn_blocking, spawn_observed};
 mod pool;
 mod provision;
+mod receiving;
 mod respond;
 mod routes;
+mod serving;
+mod sources;
 mod web;
+mod work;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};
@@ -29,6 +32,7 @@ use axum::{
 };
 use body::{BodyError, spool};
 use bytes::Bytes;
+pub use caller::Network;
 use http_body_util::{BodyExt, Full};
 use respond::{ResponseBody, failure, full, render_output, response, store_failure, unknown};
 use std::{
@@ -121,6 +125,26 @@ pub struct HttpOptions {
     pub body_timeout: Duration,
     pub work_timeout: Duration,
     pub connection_timeout: Duration,
+    /// the reverse proxies whose `X-Forwarded-For` is read for the address a
+    /// request came from; with none the address is the peer's
+    pub trusted_proxies: Vec<Network>,
+    /// the connections one address may have in use at once
+    pub connections_each: usize,
+    /// the bodies one caller may have being received at once
+    pub receiving_each: usize,
+    /// the bytes of bodies that are being received, or wait for a worker
+    pub receiving_bytes: u64,
+    /// the memory the packs of pushes are verified in, all at once
+    pub verifying: &'static alt_pack_segment::Memory,
+    /// where the bases of deltas that memory has no room for are written, and what
+    /// the packs may take there; among the host's temporary files where not told
+    pub base_files: Option<&'static alt_pack_segment::BaseFiles>,
+    /// the room on disk for the responses to fetches that are files until they are sent
+    pub sending: Arc<alt_shares::Shares>,
+    /// how often requests whose time to upload ran out are ended
+    pub expiry_interval: Duration,
+    /// the passwords that are checked at once: each takes the memory of one hash
+    pub password_places: usize,
     pub native: NativeOptions,
 }
 struct App {
@@ -129,8 +153,11 @@ struct App {
     factory: pool::Pool,
     options: HttpOptions,
     workers: Arc<Semaphore>,
+    receiving: Arc<receiving::Receiving>,
+    sources: Arc<sources::Sources>,
     browser: Option<WebOptions>,
-    passwords: Arc<Semaphore>,
+    passwords: hashers::Hashers,
+    reviews: Arc<crate::web_review::Reviews>,
 }
 pub fn authorization(headers: &HeaderMap) -> Option<String> {
     if headers.get_all(header::AUTHORIZATION).iter().count() != 1 {
@@ -196,19 +223,18 @@ pub async fn serve_with_browser(
                 "the browser origin recorded in the database differs from the configured one",
             )
         })?;
-    if options.connections == 0
-        || options.workers == 0
-        || options.header_bytes < 8192
-        || options.headers == 0
-        || [
-            options.header_timeout,
-            options.body_timeout,
-            options.work_timeout,
-            options.connection_timeout,
-        ]
-        .contains(&Duration::ZERO)
-    {
+    if !options.bounded() {
         return Err(std::io::Error::other("invalid HTTP limits"));
+    }
+    let serves = factory.clone();
+    let mut alone = spawn_blocking(move || serving::alone(serves))
+        .await
+        .map_err(|_| std::io::Error::other("serving session unavailable"))??;
+    if options.trusted_proxies.is_empty() {
+        // in the log like everything the instance says: a line of its own
+        // kind would be no line of the log to whoever reads it
+        let log = alt_server_telemetry::BackgroundLog::current();
+        log.failed("configuration", "", &caller::UNNAMED);
     }
     let mut background = tokio::task::JoinSet::new();
     let connections = Arc::new(Semaphore::new(options.connections));
@@ -218,9 +244,12 @@ pub async fn serve_with_browser(
         compaction: crate::compaction::Compaction::start(factory.clone()),
         factory: pool::Pool::new(factory, options.workers),
         workers: Arc::new(Semaphore::new(options.workers)),
+        receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
+        sources: sources::Sources::new(options.connections_each, &options.trusted_proxies),
+        passwords: hashers::Hashers::new(options.password_places),
+        reviews: Arc::new(crate::web_review::Reviews::of(options.workers)),
         options,
         browser,
-        passwords: Arc::new(Semaphore::new(2)),
     });
     if !state.factory.change_links.is_empty() {
         background.spawn(crate::change_links::worker(
@@ -228,18 +257,27 @@ pub async fn serve_with_browser(
             state.metrics.clone(),
         ));
     }
+    background.spawn(expiry::run(state.clone()));
     let router = routes::router(state.clone());
     tokio::pin!(shutdown);
     loop {
         let (socket, peer) = tokio::select! {
             _ = &mut shutdown => {
                 state.factory.shutdown().await?;
-                return Ok(());
+                return alone.ended().await;
+            },
+            _ = &mut alone.lost => {
+                state.factory.shutdown().await?;
+                return Err(std::io::Error::other(alt_server_store::SERVED));
             },
             accepted = listener.accept() => accepted?,
         };
         let Ok(permit) = connections.clone().try_acquire_owned() else {
             drop(socket);
+            continue;
+        };
+        // an address that has as many as it may is not listened to
+        let Ok(place) = state.sources.connected(peer) else {
             continue;
         };
         // File bodies can become ready after the response headers are sent.
@@ -249,8 +287,8 @@ pub async fn serve_with_browser(
         }
         let (state, router) = (state.clone(), router.clone());
         tokio::spawn(async move {
-            let _permit = permit;
-            connection::serve(socket, peer, router, &state.options).await;
+            let _permit = (permit, place);
+            connection::serve(socket, peer, router, &state).await;
         });
     }
 }

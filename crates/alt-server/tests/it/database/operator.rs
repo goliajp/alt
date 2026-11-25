@@ -2,6 +2,10 @@ mod change_links;
 mod maintenance;
 mod observability;
 mod provision;
+mod schema_21;
+mod scrubbed;
+mod serving;
+mod unread;
 mod upgrade;
 use super::*;
 use alt_server::operator::{Config, HttpBounds};
@@ -81,6 +85,12 @@ impl OperatorDb {
                 upload_ttl_ms: 60000,
                 worker_lease_ms: 30000,
                 approval_ttl_ms: 60000,
+                trusted_proxies: vec![],
+                receiving_each: None,
+                connections_each: None,
+                receiving_megabytes: None,
+                indexing_megabytes: None,
+                sending_megabytes: None,
             },
         };
         std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();
@@ -103,13 +113,42 @@ impl OperatorDb {
     fn run(&self, args: &[&str]) -> Output {
         self.command().args(args).output().unwrap()
     }
+    /// What is wrong with the tools of PostgreSQL on the path, where something is:
+    /// a backup is made and read with them, and they refuse a server of a later
+    /// version than their own. Said with the failure of a command that needs them,
+    /// in place of whatever the command made of it.
+    fn tools(&self) -> String {
+        let server = Client::connect(&self.admin)
+            .unwrap()
+            .query_one("SHOW server_version_num", &[])
+            .unwrap();
+        let server = server.get::<_, String>(0).parse::<u32>().unwrap() / 10_000;
+        let Ok(told) = Command::new("pg_dump").arg("--version").output() else {
+            return "pg_dump is not on the path: a backup is made with it".into();
+        };
+        let told = String::from_utf8_lossy(&told.stdout).into_owned();
+        let digits = told.trim_start_matches(|c: char| !c.is_ascii_digit());
+        let major = digits.split(|c: char| !c.is_ascii_digit()).next();
+        match major.and_then(|major| major.parse::<u32>().ok()) {
+            Some(tool) if tool < server => format!(
+                "pg_dump on the path is of PostgreSQL {tool} and the test server of {server}: \
+                 run these tests with tools no older than the server, as with \
+                 ALT_SERVER_TEST_POSTGRES_BIN=<the bin directory of a PostgreSQL {server}> \
+                 scripts/with-test-postgres.sh and that directory first on PATH"
+            ),
+            _ => String::new(),
+        }
+    }
     fn ok(&self, args: &[&str]) -> alt_json::Value {
         let result = self.run(args);
-        assert!(
-            result.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        if !result.status.success() {
+            let said = String::from_utf8_lossy(&result.stderr);
+            let tools = match args.first() {
+                Some(&"backup" | &"restore") => self.tools(),
+                _ => String::new(),
+            };
+            panic!("{args:?}: {said}\n{tools}");
+        }
         super::json::observe(&result.stdout);
         alt_json::from_slice(&result.stdout).unwrap()
     }

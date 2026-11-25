@@ -76,6 +76,12 @@ fn a_sweep_takes_row_locks_only_when_it_has_something_to_delete() {
     // a file a crash left long ago goes under the locks: its row could be uncommitted
     let stale = f.store.pack_path("repository", &"b".repeat(32)).unwrap();
     aged(&stale, Duration::from_secs(7200));
+    // one as old that this process is still writing stays for as long as it is
+    let written = f.store.pack_path("repository", &"d".repeat(32)).unwrap();
+    let writing = alt_server_store::writing(&written);
+    aged(&written, Duration::from_secs(7200));
+    kept.push(written.clone());
+    kept.sort();
     assert!(
         store
             .sweep_packs("repository", PACK_RETIRED_GRACE_MS)
@@ -102,6 +108,9 @@ fn a_sweep_takes_row_locks_only_when_it_has_something_to_delete() {
     let mut kept = live;
     kept.push(fresh);
     kept.sort();
+    assert!(written.exists());
+    drop(writing);
+    assert_eq!(store.sweep_packs("repository", 0).unwrap(), 1);
     assert_eq!(files(&f), kept);
     let rows: i64 = f
         .client()

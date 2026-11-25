@@ -47,6 +47,12 @@ pub const SIGTERM: c_int = 15;
 pub const SIG_IGN: sighandler_t = 1;
 
 pub const POLLIN: c_short = 0x1;
+/// `recv` leaves what it reads to be read again
+pub const MSG_PEEK: c_int = 0x2;
+
+pub const ENXIO: c_int = 6;
+pub const EINVAL: c_int = 22;
+pub const ENOTTY: c_int = 25;
 
 pub const S_IFMT: mode_t = 0o17_0000;
 pub const S_IFDIR: mode_t = 0o4_0000;
@@ -147,6 +153,8 @@ unsafe extern "C" {
         bufsiz: usize,
     ) -> isize;
     pub fn mkfifo(path: *const c_char, mode: mode_t) -> c_int;
+    /// `off_t` is 64 bits wide on every target this crate supports.
+    pub fn lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
 
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86_64"),
@@ -170,6 +178,7 @@ unsafe extern "C" {
     pub fn setrlimit(resource: rlimit_resource_t, rlim: *const rlimit) -> c_int;
     pub fn signal(signum: c_int, handler: sighandler_t) -> sighandler_t;
     pub fn poll(fds: *mut pollfd, nfds: nfds_t, timeout: c_int) -> c_int;
+    pub fn recv(socket: c_int, buffer: *mut c_void, length: usize, flags: c_int) -> isize;
     pub fn setsockopt(
         socket: c_int,
         level: c_int,

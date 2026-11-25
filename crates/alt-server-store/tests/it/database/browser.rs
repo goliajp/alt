@@ -2,6 +2,7 @@ use super::*;
 use alt_browser_auth::PublicOrigin;
 
 const PASSWORD: &str = "a local password for the browser test";
+mod budgets;
 mod device;
 fn origin() -> PublicOrigin {
     PublicOrigin::parse("https://alt.example.test").unwrap()
@@ -165,7 +166,11 @@ fn login_budget_is_committed_before_password_work_and_serializes_concurrent_atte
             .unwrap()
             .is_none()
     );
-    let key = format!("login:{}", alt_browser_auth::digest("missing"));
+    // what this login has attempted from this address
+    let key = format!(
+        "login-at:{}",
+        alt_browser_auth::digest("missing\n127.0.0.1")
+    );
     f.client()
         .execute(
             "UPDATE alt_login_budgets SET attempts=9 WHERE key=$1",

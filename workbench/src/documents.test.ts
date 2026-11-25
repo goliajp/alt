@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test';
-import { closeDocuments, documentKey, documentFromHash, documentHash, moveDocument, openDocument } from './documents';
+import { closeDocuments, documentKey, documentFromHash, documentHash, moveDocument, openDocument, treeAfter, treeBack, treeCursors, treeForward } from './documents';
 test('documents preserve their original repository when the resource selector changes', () => {
-  const first = openDocument([], { kind: 'blob', repository: 'one', oid: 'abc', path: 'readme' });
-  const second = openDocument(first.documents, { kind: 'blob', repository: 'two', oid: 'abc', path: 'readme' });
+  const first = openDocument([], { kind: 'blob', repository: 'one', oid: 'abc', path: 'readme', commit: 'c', at: '' });
+  const second = openDocument(first.documents, { kind: 'blob', repository: 'two', oid: 'abc', path: 'readme', commit: 'c', at: '' });
   expect(second.documents).toHaveLength(2);
-  expect(second.documents[0].document).toEqual({ kind: 'blob', repository: 'one', oid: 'abc', path: 'readme' });
+  expect(second.documents[0].document).toEqual({ kind: 'blob', repository: 'one', oid: 'abc', path: 'readme', commit: 'c', at: '' });
   expect(openDocument(second.documents, first.documents[0].document).documents).toBe(second.documents);
   expect(closeDocuments(second.documents, second.key, [second.key]).active).toBe(first.key);
   expect(moveDocument(second.documents, first.key, 1)[1].key).toBe(first.key);
 });
 test('paths and request identities cannot collide through delimiters or epochs', () => {
-  expect(documentKey({ kind: 'blob', repository: 'a:b', oid: 'c', path: 'd' })).not.toBe(documentKey({ kind: 'blob', repository: 'a', oid: 'b:c', path: 'd' }));
+  expect(documentKey({ kind: 'blob', repository: 'a:b', oid: 'c', path: 'd', commit: 'e', at: '' })).not.toBe(documentKey({ kind: 'blob', repository: 'a', oid: 'b:c', path: 'd', commit: 'e', at: '' }));
   expect(documentKey({ kind: 'review', repository: 'r', actor: 'a', request: 'q', epoch: '1' })).not.toBe(documentKey({ kind: 'review', repository: 'r', actor: 'a', request: 'q', epoch: '2' }));
 });
 
@@ -34,4 +34,17 @@ test('delivery association shares bind the exact repository and delivery',()=>{
   expect(documentFromHash(documentHash(doc))).toEqual(doc);
   expect(documentFromHash(documentHash({...doc,delivery:'a'.repeat(63)}))).toBeUndefined();
   expect(documentFromHash(documentHash({...doc,peer:'https://arbitrary.test'} as typeof doc))).toBeUndefined();
+});
+test('the pages of a directory are turned on and back, and another directory begins at its first page', () => {
+  const first = treeCursors({ directory: 'c/src', cursors: [''] }, 'c/src');
+  expect(treeAfter(first)).toBeUndefined();
+  const second = treeForward(first, '500');
+  const third = treeForward(second, '1000');
+  expect([treeAfter(second), treeAfter(third)]).toEqual(['500', '1000']);
+  expect(treeBack(third)).toEqual(second);
+  expect(treeAfter(treeBack(second))).toBeUndefined();
+  expect(treeBack(first)).toEqual(first);
+  const paging = { directory: 'c/src', cursors: third };
+  expect(treeCursors(paging, 'c/src')).toBe(third);
+  expect(treeCursors(paging, 'c/docs')).toEqual(['']);
 });

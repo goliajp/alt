@@ -9,11 +9,12 @@ use crate::policy::Capabilities;
 pub(super) struct Tx {
     changes: Vec<RefChange>,
     actor: String,
-    caps: Capabilities,
+    /// of each principal the push is held to: what all of them allow
+    caps: Vec<Capabilities>,
 }
 
 impl Tx {
-    pub(super) fn new(caps: Capabilities, push: &Push<'_>) -> Self {
+    pub(super) fn new(caps: Vec<Capabilities>, push: &Push<'_>) -> Self {
         let changes = push
             .updates
             .iter()
@@ -44,17 +45,19 @@ impl Tx {
         state_check: Option<&StateCheck<'_>>,
         run: impl FnOnce(&RefPolicy<'_>) -> T,
     ) -> T {
-        let caps = &self.caps;
         // branch_allow and branch_deny (deny wins), as the local CLI has them
-        let is_branch_allowed = |name: &str| {
+        let allows = |caps: &Capabilities, name: &str| {
             if caps.branch_deny.iter().any(|g| g.matches(name)) {
                 return false;
             }
             caps.branch_allow.is_empty() || caps.branch_allow.iter().any(|g| g.matches(name))
         };
-        let has_constraint = !caps.branch_allow.is_empty() || !caps.branch_deny.is_empty();
+        let is_branch_allowed = |name: &str| self.caps.iter().all(|caps| allows(caps, name));
+        let constrains =
+            |caps: &Capabilities| !caps.branch_allow.is_empty() || !caps.branch_deny.is_empty();
+        let has_constraint = self.caps.iter().any(constrains);
         run(&RefPolicy {
-            read_only: caps.read_only,
+            read_only: self.caps.iter().any(|caps| caps.read_only),
             is_branch_allowed: match has_constraint {
                 true => Some(&is_branch_allowed),
                 false => None,

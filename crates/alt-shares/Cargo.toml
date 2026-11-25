@@ -1,0 +1,10 @@
+[package]
+name = "alt-shares"
+description = "An amount many take of at once, and the part of it one address may have"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+alt-os.workspace = true

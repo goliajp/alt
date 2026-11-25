@@ -236,13 +236,136 @@ for supported task intake into an independent directory; the source stays intact
 repositories, it serves them over git smart-HTTP v2.
 
 ```sh
-altd-server --bind 127.0.0.1:8080 --root /srv/repos
+ALT_SERVER_ROOT=/srv/repos altd-server --bind 127.0.0.1:8080
 ```
 
 Front it with a reverse proxy (nginx, Caddy, …) for TLS — the server is
 plain HTTP and assumes the proxy terminates TLS. Authentication is HTTP
 Basic with per-principal tokens; the `.alt/policy` file in each repo gates
 what each principal may do.
+
+A fetch is given the objects the refs of the repository reach, and no
+others: an object left in the store by a push that was refused, or by a
+branch that was deleted, is not served to whoever asks for it by id. Git's
+own server, over protocol v2, gives any object it holds. Accepting only the
+tips of refs would be narrower still, but a partial clone asks by id for the
+blobs it left out, which no ref points at, and could not fetch them.
+
+Shallow clones and fetches (`--depth`, `--shallow-since`, `--shallow-exclude`,
+`--deepen`, `--unshallow`) are given the history they ask for, as Git's own
+server gives it.
+
+A peer may be as slow as its line. The body of a request and a response have
+no time in all: they go on for as long as they move, 1 KiB a second on
+average over each window, half a minute by default, and a peer that stalls
+is let go of within two windows. What moves of a body sent in chunks is what
+the chunks hold, not the lines around them. A
+slow peer keeps a connection and never one of the request handlers: the
+connections open at once are limited, and so are those of one address that
+is not the host itself. Behind a reverse proxy on the same host every
+connection comes from the host, and the proxy is where the connections of one
+client are limited. What the
+requests hold, the bodies received and the responses to fetches, is counted
+for the address the proxy names in `X-Forwarded-For`: the last name there
+that is not a proxy itself, as Caddy's `reverse_proxy` writes it without
+being told to. Which peers are proxies, trusted to name whose a request is,
+is what `ALT_SERVER_TRUSTED_PROXIES` says, a list of addresses and networks,
+the loopback ones unless it is set: a server in a container sees the proxy on
+its host under the address the container's network gives the host, and has
+to be told that address, or all clients together are held to what one address
+may have. What any other peer writes in that header is not read. The proxies
+are of the host; `ALT_SERVER_LOCAL_PEERS` names what else is, such a list
+too, for peers that are to be held to no part of the connections and of the
+room: naming a network there lets none of its hosts say whose a request is.
+Of what all hold between them one address
+has a quarter; a single body or response may pass the quarter as far as half,
+one such at a time, so that one slow client with one large thing leaves half
+to the others.
+
+Behind a proxy the server counts a body as the proxy hands it on, and Caddy
+hands it on as it comes: a body past what its address may hold is answered
+`503` at once, and its connection to the server is closed. When the client
+reads that answer is the proxy's matter. Caddy sends an HTTP/2 client the
+answer at once. To an HTTP/1.1 client it sends it once it has read the rest
+of the body, up to 256 KiB of it, so a client that sends on is told a moment
+later, and one that has stopped sending is told when it sends again or not at
+all: it then keeps its connection to Caddy, not to the server, and nothing
+of what the server holds for others. `servers { enable_full_duplex }` in
+Caddy's global options has the answer sent to HTTP/1.1 clients at once
+(Caddy warns that some HTTP/1.1 clients do not read while they send), and
+`servers { timeouts { read_body <duration> } }` ends a body that takes longer
+than that in all, slow or stalled alike, which is a limit on how long a push
+may take.
+
+A signed push (`alt push` with a sign policy) is signed over what Git has a
+pusher sign in a push certificate: the principal, the repository as the push
+is sent to it (`pushee`: the scheme, the host and the path of the request,
+as they go out once the URL is parsed), the nonce the server gave for this
+one push, and the ref updates. The server takes the signature only where the
+nonce is one it gave and has not seen used, and the repository is this one.
+Tell the server where its clients reach it, `ALT_SERVER_ORIGINS`, a list like
+`https://alt.example,http://10.0.0.5:8090`: a certificate is then taken for
+one of these addresses and the path of the request, and for no other, and
+the server names the addresses before a push, so that a client pushing to
+another name of it is told before it packs anything. Without it the server
+goes by the `Host` header of the request, which is its sender's word: a push
+that was signed for another server that trusts the same key is then taken
+from whoever sends it on under that server's name, and the server says so
+when it starts. A proxy in front of the server has to pass the path on as
+the client sent it, as Caddy does. A verified signature tells who pushes,
+and where the request also signed in with an account, the push is held to
+what the policy allows both. A client
+from before this, which signs the updates alone or the nonce and the updates,
+is no longer taken as signed: where the policy requires signed pushes it is
+refused, elsewhere its push is recorded as not verified. The response to a fetch is a file until its peer has
+taken it, and those files together take no more than
+`ALT_SERVER_MAX_SENDING_BYTES`, half of what is free for temporary files
+when the server starts unless it is set: a fetch whose response has no room
+is answered `503` with `Retry-After`, and one that is alone is answered
+whatever its size. What the server writes for a time (request bodies, the packs
+of pushes and the bases of their deltas, responses to fetches) is in a directory
+it makes for itself when it starts, its owner's alone, under
+`ALT_SERVER_TEMP_DIR` or among the temporary files of the host where that is
+not set; point it at a disk where those are kept in memory. A server that was
+ended where it stood leaves its directory behind, and the next one to start
+under the same parent removes it. Of that room, and of the room for request bodies being
+received, the peers of one address that is not the host itself have a
+quarter between them; a single response or body of an address may pass the
+quarter as far as the room goes. These numbers, and those for the size of a push and the
+memory and disk requests may take, are set through the environment;
+`altd-server --help` lists them with their defaults. Two more that it lists
+bound what the server holds at once: `ALT_SERVER_MAX_OPEN_REPOS`, the
+repositories of a root kept open, and `ALT_SERVER_MAX_INDEX_BYTES`, the memory
+the packs of pushes are indexed in between them and as much on disk for the
+bases of their deltas. A pack has what it holds throughout out of that memory,
+and room for its largest object is kept free once for all the packs being
+indexed; pushes that find no memory wait in the order they came, for
+`ALT_SERVER_MAX_INDEX_WAIT_MS` at the longest and no longer than their client
+stays, and are then answered `503` with `Retry-After`. The response to a
+fetch is made for `ALT_SERVER_MAX_FETCH_MS` at the longest, ten minutes by
+default, and no longer than its client stays; a fetch that takes longer is
+answered `503`.
+
+Under `ALT_SERVER_ROOT`, a file `users` in the root names who may come: a
+name, a tab, the BLAKE3 hash of a token in hex and, behind another tab, rules
+as `<repository>:<r|w|rw|n>` with blanks between them, `*` for the repositories
+no rule names. The rules that name a repository decide for it. A user without
+a column of rules is held to none. A rule that does not read is an error of
+the file: the server does not start with it, and while the file has it answers
+`500` to every request that names a user and `401` to one that names none.
+`altd-server check-users <file>` reads a file
+as the server does and lists the users held to no rules and those whose rules
+gave more when they were added up, which they were before.
+
+A server that started with a `users` file lets nobody in without one. While
+the file is not there, or is not a file that reads, a request that names no
+user is answered `401` and one that names a user `500`, as for a rule that does
+not read. Replace the file by writing the new one beside it and renaming it
+into place (`mv users.new users`), which is one step to the server; removing
+the file and writing it again leaves the server answering `500` in between. A
+server that started without a `users` file serves whoever asks, and begins to
+ask for users when the file appears; `ALT_SERVER_REQUIRE_AUTH=1` keeps such a
+server from starting at all.
 
 ## Status and roadmap
 

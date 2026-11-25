@@ -42,7 +42,10 @@ CREATE TABLE alt_credentials (
   identity_source text NOT NULL CHECK (identity_source IN ('self_hosted','cloud')),
   expires_at bigint NOT NULL,
   revoked boolean NOT NULL DEFAULT false,
-  administrator boolean NOT NULL DEFAULT false
+  administrator boolean NOT NULL DEFAULT false,
+  -- when it was revoked: a credential that is over is kept for a time from then
+  revoked_at bigint,
+  CONSTRAINT alt_credentials_revoked_at CHECK ((revoked_at IS NOT NULL) = revoked)
 );
 CREATE TABLE alt_grants (
   actor_id text NOT NULL,
@@ -78,8 +81,16 @@ CREATE TABLE alt_requests (
   reserved_bytes bigint NOT NULL CHECK (reserved_bytes >= 0),
   fence bigint NOT NULL DEFAULT 0 CHECK (fence >= 0),
   worker_lease_until bigint NOT NULL DEFAULT 0,
-  PRIMARY KEY(repository, epoch, actor_id, request_id)
+  -- when it was committed, rejected or expired: a request that is over is kept
+  -- for a time from then, and its id is refused as a repetition for as long. One
+  -- that ended before this was recorded is given it as the server runs.
+  settled_at bigint,
+  PRIMARY KEY(repository, epoch, actor_id, request_id),
+  CONSTRAINT alt_requests_settled_at CHECK (settled_at IS NULL OR state IN ('committed','rejected','expired'))
 );
+CREATE INDEX alt_requests_settled ON alt_requests(settled_at) WHERE settled_at IS NOT NULL;
+CREATE INDEX alt_requests_unsettled ON alt_requests(expires_at) WHERE settled_at IS NULL AND state IN ('committed','rejected','expired');
+CREATE INDEX alt_requests_open ON alt_requests(expires_at) WHERE state IN ('receiving','ready');
 -- State/verified updates of alt_blobs and alt_request_content do not change
 -- indexed keys. Their fillfactor reserves heap-page room for HOT updates rather
 -- than rewriting every index entry.
@@ -539,7 +550,7 @@ CREATE TABLE alt_segments (
         OR (owner_kind='compact' AND epoch IS NULL AND actor_id IS NULL AND request_id IS NULL)),
     CHECK (state<>'stored' OR index_digest IS NOT NULL)
 );
-CREATE INDEX alt_segments_owner ON alt_segments(repository,epoch,actor_id,request_id) WHERE state='uploading';
+CREATE INDEX alt_segments_request ON alt_segments(repository,epoch,actor_id,request_id);
 CREATE TABLE alt_blob_locations (
     repository text NOT NULL,
     blake3 text NOT NULL,

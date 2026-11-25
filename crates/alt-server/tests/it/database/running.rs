@@ -56,6 +56,15 @@ impl Running {
             body_timeout: Duration::from_secs(3),
             work_timeout: Duration::from_secs(10),
             connection_timeout: Duration::from_secs(30),
+            trusted_proxies: vec!["127.0.0.1".parse().unwrap()],
+            connections_each: 16,
+            receiving_each: 4,
+            receiving_bytes: 1 << 30,
+            expiry_interval: Duration::from_secs(3600),
+            password_places: 2,
+            verifying: Box::leak(Box::new(alt_server::PackMemory::new(4 << 30))),
+            base_files: None,
+            sending: alt_server::shares::Shares::passed_by_one_alone(u64::MAX),
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),
@@ -97,6 +106,17 @@ impl Running {
         browser: Option<alt_server::WebOptions>,
         abort: bool,
     ) -> Self {
+        let loopback = std::net::Ipv4Addr::LOCALHOST.into();
+        Self::serve_at(loopback, factory, options, browser, abort)
+    }
+    /// listening on `address`, which is one of this host
+    pub(super) fn serve_at(
+        address: std::net::IpAddr,
+        factory: StoreFactory,
+        options: HttpOptions,
+        browser: Option<alt_server::WebOptions>,
+        abort: bool,
+    ) -> Self {
         let (address_tx, address_rx) = std::sync::mpsc::channel();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let thread = std::thread::spawn(move || {
@@ -106,7 +126,7 @@ impl Running {
                 .build()
                 .unwrap();
             rt.block_on(async {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let listener = tokio::net::TcpListener::bind((address, 0)).await.unwrap();
                 address_tx.send(listener.local_addr().unwrap()).unwrap();
                 if abort {
                     let serving = tokio::spawn(alt_server::serve_with_browser(

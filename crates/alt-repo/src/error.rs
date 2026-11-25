@@ -32,6 +32,8 @@ pub enum RepoError {
     Config(alt_git_config::ConfigError),
     Odb(alt_odb::OdbError),
     NativeRefs(alt_refs::RefError),
+    /// whoever asked for a walk said it is to go on no longer
+    Stopped,
 }
 
 impl std::fmt::Display for RepoError {
@@ -65,6 +67,7 @@ impl std::fmt::Display for RepoError {
             Self::Config(e) => std::fmt::Display::fmt(e, f),
             Self::Odb(e) => std::fmt::Display::fmt(e, f),
             Self::NativeRefs(e) => std::fmt::Display::fmt(e, f),
+            Self::Stopped => f.write_str("stopped by whoever asked"),
         }
     }
 }
@@ -86,7 +89,8 @@ impl std::error::Error for RepoError {
             | Self::Format(_)
             | Self::AmbiguousShortOid { .. }
             | Self::LogShort { .. }
-            | Self::LogByDate(_) => None,
+            | Self::LogByDate(_)
+            | Self::Stopped => None,
         }
     }
 }

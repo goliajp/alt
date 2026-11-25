@@ -5,6 +5,7 @@ use alt_remote_protocol::{RecordKind, RequestKey};
 use alt_server_store::{Credential, Error, Result, Store};
 use alt_task_service::{ArtifactSource, RecordKey, TaskRecord, VerifiedPublication};
 use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(alt_json::FromJson)]
 struct Changes {
@@ -22,6 +23,41 @@ struct Version {
     mode: u32,
     utf8: Option<String>,
 }
+/// The reviews that are verified for their pages at once. A page has the whole
+/// of what it shows verified anew, on a worker and in the memory that takes, and
+/// a reader may ask for as many as there are workers: half of the workers do
+/// this at once, and a page beyond that is told to come again.
+pub struct Reviews {
+    under_way: AtomicUsize,
+    most: usize,
+}
+
+/// One review being verified, until it is dropped.
+pub struct Place<'a>(&'a Reviews);
+
+impl Reviews {
+    pub fn of(workers: usize) -> Self {
+        Reviews {
+            under_way: AtomicUsize::new(0),
+            most: workers.div_ceil(2),
+        }
+    }
+
+    pub fn begin(&self) -> Result<Place<'_>> {
+        if self.under_way.fetch_add(1, Ordering::AcqRel) >= self.most {
+            self.under_way.fetch_sub(1, Ordering::AcqRel);
+            return Err(Error::Busy("reviews being verified for their pages"));
+        }
+        Ok(Place(self))
+    }
+}
+
+impl Drop for Place<'_> {
+    fn drop(&mut self) {
+        self.0.under_way.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 pub fn inspect(
     store: &mut Store,
     credential: &Credential,
@@ -29,13 +65,8 @@ pub fn inspect(
     key: &RequestKey,
 ) -> Result<Value> {
     let limits = store.limits();
-    let work = store.acquire_review(
-        credential,
-        key,
-        options.worker_lease_ms,
-        limits.graph_objects,
-    )?;
-    let result = (|| {
+    let work = store.read_review(credential, key, limits.graph_objects)?;
+    {
         let verified = VerifiedPublication::verify(
             work.publication(),
             work.manifest(),
@@ -176,14 +207,6 @@ pub fn inspect(
         Ok(
             json!({"key":key,"inspected":inspected,"integration_id":integration_id,"candidate_id":review.candidate,"historical_reviewer":review.reviewer,"changes":projected,"changes_truncated":truncated,"original_changes_url":original_url,"evidence":[{"id":review.evidence,"command":evidence.actual_context.commands.iter().map(|v|v.join(" ")).collect::<Vec<_>>().join("\n"),"outcome":alt_json::to_string(&evidence.termination)?,"source":current.evidence.source_proof,"accepted":current.evidence.eligible,"reason":current.evidence.reasons.join(", ")}],"approved":current.approved,"eligible":current.eligible,"reason":current.reason}),
         )
-    })();
-    let released = store.release_publication(credential, &work);
-    match result {
-        Ok(value) => {
-            released?;
-            Ok(value)
-        }
-        Err(error) => Err(error),
     }
 }
 
@@ -197,5 +220,27 @@ mod json_tests {
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/json"),
             "web_review-Changes",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn half_of_the_workers_verify_reviews_at_once_and_one_more_is_told_to_come_again() {
+        let reviews = Reviews::of(3);
+        let (first, second) = (reviews.begin().unwrap(), reviews.begin().unwrap());
+        assert!(matches!(reviews.begin(), Err(Error::Busy(_))));
+        assert!(matches!(reviews.begin(), Err(Error::Busy(_))));
+        drop(first);
+        let third = reviews.begin().unwrap();
+        assert!(reviews.begin().is_err());
+        drop((second, third));
+        assert_eq!(reviews.under_way.load(Ordering::Acquire), 0);
+        // one worker has its one review
+        let alone = Reviews::of(1);
+        let _place = alone.begin().unwrap();
+        assert!(alone.begin().is_err());
     }
 }

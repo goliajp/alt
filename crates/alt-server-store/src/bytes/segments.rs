@@ -6,7 +6,10 @@ use std::{
     sync::Arc,
 };
 
+mod read;
+mod reader;
 mod session;
+pub use reader::StoredReader;
 pub(crate) use session::ReadSession;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,94 +89,6 @@ impl DurableSegment {
             index_digest: *self.index.digest(),
             offset: member.offset(),
         })
-    }
-}
-
-/// A bounded logical payload. Independent positional reads allow thousands of
-/// member proofs/readers to share one descriptor without sharing a seek cursor.
-pub struct StoredReader {
-    file: Arc<File>,
-    start: u64,
-    bytes: u64,
-    position: u64,
-}
-impl StoredReader {
-    /// Bound an independent complete temporary file for transport. Segment
-    /// members are constructed only through the checked location readers.
-    pub fn from_file(file: File, bytes: u64) -> io::Result<Self> {
-        let metadata = file.metadata()?;
-        if !metadata.is_file() || metadata.len() != bytes {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "temporary payload extent",
-            ));
-        }
-        Ok(Self {
-            file: Arc::new(file),
-            start: 0,
-            bytes,
-            position: 0,
-        })
-    }
-    /// Transfer a uniquely owned descriptor positioned at this logical cursor.
-    /// The descriptor is physically unbounded: transports must enforce `bytes`
-    /// separately (for example a fixed-length HTTP body).
-    pub fn into_file(self) -> io::Result<File> {
-        let mut file = Arc::try_unwrap(self.file)
-            .map_err(|_| io::Error::other("shared stored reader cannot transfer its descriptor"))?;
-        file.seek(SeekFrom::Start(self.start + self.position))?;
-        Ok(file)
-    }
-    /// Coalesce descriptors only inside one bounded, authorized operation.
-    /// Each reader has already opened and verified its current path and range.
-    pub(crate) fn share_backing(&mut self, other: &Self) -> Result<()> {
-        if Stamp::read(&self.file)? != Stamp::read(&other.file)? {
-            return Err(Error::Precondition("segment backing changed"));
-        }
-        self.file = other.file.clone();
-        Ok(())
-    }
-    pub fn metadata(&self) -> io::Result<fs::Metadata> {
-        self.file.metadata()
-    }
-    pub fn bytes(&self) -> u64 {
-        self.bytes
-    }
-}
-impl Read for StoredReader {
-    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        let capacity = (self.bytes - self.position).min(output.len() as u64) as usize;
-        if capacity == 0 {
-            return Ok(0);
-        }
-        let n = self
-            .file
-            .read_at(&mut output[..capacity], self.start + self.position)?;
-        if n == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "stored member truncated",
-            ));
-        }
-        self.position += n as u64;
-        Ok(n)
-    }
-}
-impl Seek for StoredReader {
-    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
-        let position = match from {
-            SeekFrom::Start(v) => i128::from(v),
-            SeekFrom::Current(v) => i128::from(self.position) + i128::from(v),
-            SeekFrom::End(v) => i128::from(self.bytes) + i128::from(v),
-        };
-        if position < 0 || position > i128::from(self.bytes) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "seek outside stored member",
-            ));
-        }
-        self.position = position as u64;
-        Ok(self.position)
     }
 }
 
@@ -488,86 +403,6 @@ impl ByteStore {
             .verify_checksum(&proof.checksum)
             .map_err(segment_error)?;
         self.check_segment_identity(proof)
-    }
-
-    /// Read a proof member without allocating another descriptor. The proof's
-    /// file identity is rechecked before granting the bounded reader.
-    pub fn read_durable_segment(
-        &self,
-        proof: &DurableSegment,
-        digest: &[u8; 32],
-    ) -> Result<StoredReader> {
-        self.check_segment_identity(proof)?;
-        let member = proof
-            .index
-            .find(digest)
-            .ok_or(Error::Integrity("missing proof member"))?;
-        Ok(StoredReader {
-            file: proof.file.clone(),
-            start: member.offset(),
-            bytes: member.bytes(),
-            position: 0,
-        })
-    }
-
-    /// Check the current file and exact database-selected index/member range.
-    /// This does not claim payload integrity: callers must verify canonical
-    /// identities through their existing publication/read validation path.
-    pub fn read_segment(
-        &self,
-        scope: &Scope,
-        digest: &str,
-        bytes: u64,
-        location: &SegmentLocation,
-    ) -> Result<StoredReader> {
-        check_digest(digest)?;
-        let digest = alt_hash::blake3::Hash::from_hex(digest)
-            .map_err(|_| Error::Integrity("segment digest"))?;
-        let path = self.segment_path(scope, &location.segment_id)?;
-        let mut file = open_segment(&path)?;
-        let index = Segment::open(&mut file, Limits::default())
-            .map_err(segment_error)?
-            .index()
-            .clone();
-        let member = index
-            .find(digest.as_bytes())
-            .ok_or(Error::Integrity("missing segment member"))?;
-        if index.digest() != &location.index_digest
-            || member.offset() != location.offset
-            || member.bytes() != bytes
-        {
-            return Err(Error::Integrity("segment location differs"));
-        }
-        Ok(StoredReader {
-            file: Arc::new(file),
-            start: member.offset(),
-            bytes,
-            position: 0,
-        })
-    }
-
-    pub fn verify_segment_member(
-        &self,
-        scope: &Scope,
-        digest: &str,
-        bytes: u64,
-        location: &SegmentLocation,
-    ) -> Result<StoredReader> {
-        let mut reader = self.read_segment(scope, digest, bytes, location)?;
-        let mut hash = alt_hash::blake3::Hasher::new();
-        let mut buffer = [0; 65536];
-        loop {
-            let n = reader.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buffer[..n]);
-        }
-        if hash.finalize().to_hex().as_str() != digest {
-            return Err(Error::Integrity("segment member hash"));
-        }
-        reader.rewind()?;
-        Ok(reader)
     }
 
     /// Coordinator-only operation: first commit a deleting marker and fence

@@ -1,11 +1,20 @@
 use crate::Jsonb;
 use crate::database::Transaction;
+pub(crate) use crate::repository_authority::{RepositoryAuthority, repository_authority};
 use crate::{ByteStore, Error, Result};
 use alt_crypto::ed25519::SigningKey;
 use alt_pg::Client;
 use alt_remote_protocol::{Attribution, DeploymentMode, Limits, ObjectFormat, Scope};
 use alt_repository_service::{Authorization, Grant, RefPolicy, RepositorySnapshot};
 use std::collections::BTreeSet;
+mod authority;
+pub(crate) use authority::{authorize, authorize_scope, credential_row, require_admin, snapshot};
+mod tokens;
+use tokens::insert_token;
+pub(crate) use tokens::{insert_known_token, token_digest, validate_token};
+mod instance;
+use instance::mode;
+pub(crate) use instance::{instance, instance_unlocked};
 
 #[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
@@ -422,7 +431,7 @@ impl Store {
         require_admin(&mut tx, &self.spec, admin)?;
         let actor: String = credential_row(&mut tx, &self.spec, admin)?.get("actor_id");
         tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1",
             &[&token_digest(token)],
         )?;
         crate::browser::audit_details(
@@ -453,282 +462,4 @@ pub(crate) fn now(tx: &mut Transaction<'_>) -> Result<u64> {
         )?
         .get(0),
     )
-}
-pub(crate) fn instance(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    key: &SigningKey,
-) -> Result<()> {
-    let row=tx.query_opt("SELECT installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id FROM alt_instance WHERE singleton FOR SHARE",&[])?.ok_or(Error::Precondition("instance not initialized"))?;
-    same_instance(&row, spec, key)?;
-    if spec.deployment_mode == DeploymentMode::Cloud {
-        crate::cloud::check_instance(tx, spec)?;
-    }
-    Ok(())
-}
-/// The identity check alone, without holding the instance row: it neither waits for
-/// a backup or an upgrade nor gives the transaction anything to flush. Only for
-/// work that changes no row and that a backup does not rely on standing still. A
-/// Cloud instance has no such check, because its check records the clock.
-pub(crate) fn instance_unlocked(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    key: &SigningKey,
-) -> Result<()> {
-    let row=tx.query_opt("SELECT installation_id,workspace_id,deployment_mode,runtime_generation,signing_key_id FROM alt_instance WHERE singleton",&[])?.ok_or(Error::Precondition("instance not initialized"))?;
-    same_instance(&row, spec, key)
-}
-fn same_instance(row: &alt_pg::Row, spec: &InstanceSpec, key: &SigningKey) -> Result<()> {
-    if row.get::<_, String>(0) != spec.installation_id
-        || row.get::<_, String>(1) != spec.workspace_id
-        || row.get::<_, String>(2) != spec.mode()
-        || unsigned(row.get(3))? != spec.runtime_generation
-        || row.get::<_, String>(4)
-            != alt_hash::blake3::hash(key.verifying_key().as_bytes())
-                .to_hex()
-                .as_str()
-    {
-        return Err(Error::Precondition(
-            "instance identity, mode, generation or signing key",
-        ));
-    }
-    Ok(())
-}
-fn mode(mode: DeploymentMode) -> &'static str {
-    match mode {
-        DeploymentMode::SelfHosted => "self_hosted",
-        DeploymentMode::Cloud => "cloud",
-    }
-}
-pub(crate) fn token_digest(token: &str) -> String {
-    alt_hash::blake3::derive_key("jp.golia.alt.server-token.v1", token.as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-fn insert_token(
-    tx: &mut Transaction<'_>,
-    actor: &str,
-    attribution: &Attribution,
-    source: DeploymentMode,
-    expires: u64,
-    administrator: bool,
-) -> Result<String> {
-    let mut secret = [0u8; 32];
-    alt_os::random::fill(&mut secret);
-    let token = format!(
-        "alt1_{}",
-        secret
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    );
-    insert_known_token(
-        tx,
-        &token,
-        actor,
-        attribution,
-        source,
-        expires,
-        administrator,
-    )?;
-    Ok(token)
-}
-pub(crate) fn validate_token(token: &str) -> Result<()> {
-    if token.len() != 69
-        || !token.starts_with("alt1_")
-        || !token.as_bytes()[5..]
-            .iter()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
-    {
-        return Err(Error::Unauthorized);
-    }
-    Ok(())
-}
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn insert_known_token(
-    tx: &mut Transaction<'_>,
-    token: &str,
-    actor: &str,
-    attribution: &Attribution,
-    source: DeploymentMode,
-    expires: u64,
-    administrator: bool,
-) -> Result<()> {
-    validate_token(token)?;
-    Scope {
-        installation_id: actor.into(),
-        repository_instance_id: "actor".into(),
-        recovery_epoch: 1,
-    }
-    .validate()?;
-    attribution.validate()?;
-    if expires <= now(tx)? {
-        return Err(Error::Precondition("credential expiry"));
-    }
-    let digest = token_digest(token);
-    let attribution = Jsonb::from(attribution)?;
-    tx.execute("INSERT INTO alt_credentials(token_digest,actor_id,attribution,identity_source,expires_at,administrator) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(token_digest) DO NOTHING",&[&digest,&actor,&attribution,&mode(source),&integer(expires)?,&administrator])?;
-    let row=tx.query_one("SELECT actor_id,attribution,identity_source,expires_at,administrator,revoked FROM alt_credentials WHERE token_digest=$1 FOR SHARE",&[&digest])?;
-    if row.get::<_, String>(0) != actor
-        || row.get::<_, Jsonb>(1) != attribution
-        || row.get::<_, String>(2) != mode(source)
-        || row.get::<_, i64>(3) != integer(expires)?
-        || row.get::<_, bool>(4) != administrator
-        || row.get::<_, bool>(5)
-    {
-        return Err(Error::Precondition(
-            "credential secret already has different or revoked claims",
-        ));
-    }
-    Ok(())
-}
-pub(crate) fn credential_row(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-) -> Result<alt_pg::Row> {
-    let row=tx.query_opt("SELECT actor_id,attribution,identity_source,expires_at,revoked,administrator FROM alt_credentials WHERE token_digest=$1 FOR SHARE",&[&credential.digest])?.ok_or(Error::Unauthorized)?;
-    if row.get::<_, String>(2) != spec.mode()
-        || row.get::<_, bool>(4)
-        || unsigned(row.get(3))? <= now(tx)?
-    {
-        return Err(Error::Unauthorized);
-    }
-    let delegated = crate::delegation::check(tx, spec, credential, &row)?;
-    if delegated {
-        crate::telemetry::authenticated(&row);
-        return Ok(row);
-    }
-    if spec.deployment_mode == DeploymentMode::Cloud {
-        crate::cloud::check_credential(tx, spec, credential, &row)?;
-    } else {
-        crate::browser::check_credential(tx, credential, &row.get::<_, String>("actor_id"))?;
-    }
-    crate::telemetry::authenticated(&row);
-    Ok(row)
-}
-pub(crate) fn require_admin(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-) -> Result<()> {
-    if !credential_row(tx, spec, credential)?.get::<_, bool>(5) {
-        return Err(Error::Unauthorized);
-    }
-    Ok(())
-}
-pub(crate) fn authorize(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-    snapshot: &RepositorySnapshot,
-) -> Result<Authorization> {
-    authorize_scope(
-        tx,
-        spec,
-        credential,
-        &snapshot.scope,
-        snapshot.revocation_generation,
-    )
-}
-
-/// Current repository authority, without a ref or publication-policy view.
-/// It cannot be passed to domain publication validation as a partial snapshot.
-pub(crate) struct RepositoryAuthority {
-    pub(crate) scope: Scope,
-    revocation_generation: u64,
-}
-impl RepositoryAuthority {
-    pub(crate) fn authorize(
-        &self,
-        tx: &mut Transaction<'_>,
-        spec: &InstanceSpec,
-        credential: &Credential,
-    ) -> Result<Authorization> {
-        authorize_scope(
-            tx,
-            spec,
-            credential,
-            &self.scope,
-            self.revocation_generation,
-        )
-    }
-}
-pub(crate) fn repository_authority(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    repository: &str,
-) -> Result<RepositoryAuthority> {
-    let row = tx.query_opt(
-        "SELECT recovery_epoch,object_format,revocation_generation FROM alt_repositories WHERE id=$1 FOR UPDATE",
-        &[&repository],
-    )?.ok_or(Error::Unauthorized)?;
-    if row.get::<_, String>(1) != "sha1" {
-        return Err(Error::Precondition("unsupported repository object format"));
-    }
-    Ok(RepositoryAuthority {
-        scope: Scope {
-            installation_id: spec.installation_id.clone(),
-            repository_instance_id: repository.into(),
-            recovery_epoch: unsigned(row.get(0))?,
-        },
-        revocation_generation: unsigned(row.get(2))?,
-    })
-}
-fn authorize_scope(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-    scope: &Scope,
-    revocation_generation: u64,
-) -> Result<Authorization> {
-    let row = credential_row(tx, spec, credential)?;
-    let actor: String = row.get(0);
-    let grant=tx.query_opt("SELECT can_read,publish_records,grants FROM alt_grants WHERE actor_id=$1 AND repository=$2",&[&actor,&scope.repository_instance_id])?.ok_or(Error::Unauthorized)?;
-    // Administrators do not get implicit access to repository contents.
-    if !grant.get::<_, bool>(0) {
-        return Err(Error::Unauthorized);
-    }
-    let mut auth = Authorization {
-        scope: scope.clone(),
-        runtime_generation: spec.runtime_generation,
-        actor_id: actor,
-        attribution: row.get::<_, Jsonb>(1).read()?,
-        expires_at: unsigned(row.get(3))?,
-        revocation_generation,
-        grants: grant.get::<_, Jsonb>(2).read()?,
-        publish_records: grant.get(1),
-    };
-    crate::delegation::restrict(tx, credential, &mut auth)?;
-    Ok(auth)
-}
-pub(crate) fn snapshot(
-    tx: &mut Transaction<'_>,
-    spec: &InstanceSpec,
-    repository: &str,
-) -> Result<RepositorySnapshot> {
-    let row=tx.query_opt("SELECT recovery_epoch,object_format,policy_version,revocation_generation,policies,writes_enabled AND portable_freeze IS NULL AND portable_import IS NULL FROM alt_repositories WHERE id=$1 FOR UPDATE",&[&repository])?.ok_or(Error::Unauthorized)?;
-    if row.get::<_, String>(1) != "sha1" {
-        return Err(Error::Precondition("unsupported repository object format"));
-    }
-    let refs = crate::refs::map(
-        tx.query_one(crate::refs::REFS_TEXT, &[&repository])?
-            .get::<_, Option<&str>>(0),
-    )?;
-    Ok(RepositorySnapshot {
-        scope: Scope {
-            installation_id: spec.installation_id.clone(),
-            repository_instance_id: repository.into(),
-            recovery_epoch: unsigned(row.get(0))?,
-        },
-        runtime_generation: spec.runtime_generation,
-        revocation_generation: unsigned(row.get(3))?,
-        policy_version: unsigned(row.get(2))?,
-        object_format: ObjectFormat::Sha1,
-        refs,
-        policies: row.get::<_, Jsonb>(4).read()?,
-        approved_publications: BTreeSet::new(),
-        writes_enabled: row.get::<_, bool>(5) && crate::cloud::writes_enabled(tx, spec)?,
-    })
 }

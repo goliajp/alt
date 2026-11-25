@@ -9,12 +9,31 @@
 
 services:
   alt-server:
-    build: .
+    build:
+      # the defaults build develop from GitHub and read nothing of this
+      # directory; a checkout is built by naming it as the context, with
+      # ALT_BUILD_DOCKERFILE=deploy/Dockerfile and ALT_SOURCE=context
+      context: ${ALT_BUILD_CONTEXT:-.}
+      dockerfile: ${ALT_BUILD_DOCKERFILE:-Dockerfile}
+      args:
+        ALT_SOURCE: ${ALT_SOURCE:-github}
+        ALT_REF: ${ALT_REF:-develop}
     container_name: alt-server
     restart: unless-stopped
     ports:
       # 8080 is taken by dadaya-server on t01 — bind 8090 on host instead.
       - "127.0.0.1:8090:8080"
+    environment:
+      # Caddy on the host reaches the published port from the gateway of
+      # the network below, so every client's connection comes from that
+      # one address. It is named as the proxy: the server then holds it to
+      # no part of the connections and of the room for bodies and
+      # responses, and counts each request for the address it says the
+      # request is of.
+      ALT_SERVER_TRUSTED_PROXIES: "172.30.90.1"
+      # Where clients reach the server: a signed push is taken for this
+      # address and for no other.
+      ALT_SERVER_ORIGINS: "https://alt.golia.jp"
     volumes:
       # Read-write because altd-server / alt-web both need to write the
       # oplog `sync.lock` on open even for read-only operations. The
@@ -30,7 +49,12 @@ services:
       start_period: 10s
 
   alt-web:
-    build: .
+    build:
+      context: ${ALT_BUILD_CONTEXT:-.}
+      dockerfile: ${ALT_BUILD_DOCKERFILE:-Dockerfile}
+      args:
+        ALT_SOURCE: ${ALT_SOURCE:-github}
+        ALT_REF: ${ALT_REF:-develop}
     container_name: alt-web
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/alt-web"]
@@ -51,3 +75,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# The addresses are fixed so that the gateway can be named above. Change
+# both where the subnet is taken on the host.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+          gateway: 172.30.90.1

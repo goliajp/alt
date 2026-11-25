@@ -15,6 +15,8 @@ use tokio_util::io::ReaderStream;
 pub(super) struct FileBody<R> {
     stream: ReaderStream<Take<R>>,
     remaining: u64,
+    /// what the file has of the room responses have on disk, until it is sent
+    _held: Option<alt_shares::Share>,
 }
 
 impl<R: AsyncRead> FileBody<R> {
@@ -22,7 +24,13 @@ impl<R: AsyncRead> FileBody<R> {
         Self {
             stream: ReaderStream::with_capacity(reader.take(bytes), 65536),
             remaining: bytes,
+            _held: None,
         }
+    }
+
+    pub(super) fn holding(mut self, held: Option<alt_shares::Share>) -> Self {
+        self._held = held;
+        self
     }
 }
 

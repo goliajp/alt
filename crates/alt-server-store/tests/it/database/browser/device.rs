@@ -21,7 +21,7 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         .unwrap();
     assert!(f.store.authenticate(&token).is_err());
     assert!(matches!(
-        f.store.poll_device_authorization(&device).unwrap(),
+        f.store.poll_device_authorization(&device, || true).unwrap(),
         DevicePoll::Waiting(DeviceError::SlowDown)
     ));
     f.client()
@@ -31,7 +31,7 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         )
         .unwrap();
     assert!(matches!(
-        f.store.poll_device_authorization(&device).unwrap(),
+        f.store.poll_device_authorization(&device, || true).unwrap(),
         DevicePoll::Waiting(DeviceError::AuthorizationPending)
     ));
     assert!(
@@ -96,7 +96,9 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
     assert_eq!(list[0].id, digest);
     assert!(!list[0].current);
     assert!(matches!(
-        restarted.poll_device_authorization(&device).unwrap(),
+        restarted
+            .poll_device_authorization(&device, || true)
+            .unwrap(),
         DevicePoll::Ready { .. }
     ));
     assert!(
@@ -120,9 +122,12 @@ fn device_consent_is_durable_owner_bound_and_independently_revocable() {
         .revoke_client_credential(&credential, &digest)
         .unwrap();
     assert!(restarted.authenticate(&token).is_err());
+    // the code was exchanged above: it is no code any more, revoked token or not
     assert!(matches!(
-        restarted.poll_device_authorization(&device).unwrap(),
-        DevicePoll::Waiting(DeviceError::AccessDenied)
+        restarted
+            .poll_device_authorization(&device, || true)
+            .unwrap(),
+        DevicePoll::Waiting(DeviceError::InvalidGrant)
     ));
     assert_eq!(
         f.client()
@@ -168,7 +173,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .unwrap();
     assert!(matches!(
         f.store
-            .poll_device_authorization(&format!("{:064x}", 1))
+            .poll_device_authorization(&format!("{:064x}", 1), || true)
             .unwrap(),
         DevicePoll::Waiting(DeviceError::AccessDenied)
     ));
@@ -185,7 +190,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .unwrap();
     assert!(matches!(
         f.store
-            .poll_device_authorization(&format!("{:064x}", 2))
+            .poll_device_authorization(&format!("{:064x}", 2), || true)
             .unwrap(),
         DevicePoll::Waiting(DeviceError::ExpiredToken)
     ));
@@ -205,7 +210,7 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         matches!(
             f.store
                 .device_consent(&parent, &origin(), "CCCC-4444", peer),
-            Err(alt_server_store::Error::Precondition(_))
+            Err(alt_server_store::Error::Attempts(_))
         ),
         "incorrect guesses consume the actor budget"
     );
@@ -217,4 +222,143 @@ fn device_refusal_expiry_guess_budget_and_account_reset_fail_closed() {
         .reset_local_password(&f.credential, "bob", "a replacement local password")
         .unwrap();
     assert!(f.store.authenticate(&tokens[2]).is_err());
+}
+
+/// An approved code is exchanged once. Eight devices that hold the same code ask
+/// at the same moment: one is given the token, the others are told the code is
+/// none, and so is whoever asks afterwards. A code whose token was revoked before
+/// it was exchanged stays refused, and is not used up by being asked for.
+#[test]
+#[ignore = "requires isolated PostgreSQL; an approved device code exchanged once"]
+fn an_approved_device_code_is_exchanged_for_its_token_once() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    let peer = "127.0.0.1".parse().unwrap();
+    let approved = |f: &mut Fixture, device: &str, code: &str| {
+        let token = alt_browser_auth::token();
+        let digest = alt_server_store::cloud_credential_digest(&token).unwrap();
+        f.store
+            .begin_device_authorization(&origin(), device, code, &digest, peer)
+            .unwrap();
+        f.store
+            .decide_device_authorization(&parent, &origin(), code, true, &token, None)
+            .unwrap();
+        digest
+    };
+
+    let device = "c".repeat(64);
+    approved(&mut f, &device, "CCCC-2345");
+    let start = std::sync::Barrier::new(8);
+    let told: Vec<DevicePoll> = std::thread::scope(|scope| {
+        let asking: Vec<_> = (0..8)
+            .map(|_| {
+                let mut store = f.reopen();
+                let (start, device) = (&start, &device);
+                scope.spawn(move || {
+                    start.wait();
+                    store.poll_device_authorization(device, || true).unwrap()
+                })
+            })
+            .collect();
+        asking.into_iter().map(|one| one.join().unwrap()).collect()
+    });
+    let given = told
+        .iter()
+        .filter(|poll| matches!(poll, DevicePoll::Ready { .. }));
+    assert_eq!(given.count(), 1);
+    let none = |poll: &&DevicePoll| matches!(poll, DevicePoll::Waiting(DeviceError::InvalidGrant));
+    assert_eq!(told.iter().filter(none).count(), 7);
+    assert!(matches!(
+        f.store.poll_device_authorization(&device, || true).unwrap(),
+        DevicePoll::Waiting(DeviceError::InvalidGrant)
+    ));
+
+    let device = "d".repeat(64);
+    let digest = approved(&mut f, &device, "DDDD-2345");
+    f.store.revoke_client_credential(&parent, &digest).unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            f.store.poll_device_authorization(&device, || true).unwrap(),
+            DevicePoll::Waiting(DeviceError::AccessDenied)
+        ));
+    }
+}
+
+/// Whoever guesses at a login from one address is held to ten attempts a minute
+/// there; the owner of the login, at another address, is not kept out by them.
+#[test]
+#[ignore = "requires isolated PostgreSQL; the attempts for one login from one address and from another"]
+fn the_attempts_for_a_login_from_one_address_keep_no_other_address_out() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    // a code nobody was given: each look for it is an attempt of this account
+    let looked = |f: &mut Fixture, address: &str| {
+        let address = address.parse().unwrap();
+        f.store
+            .device_consent(&parent, &origin(), "ZZZZ-9999", address)
+    };
+    for _ in 0..10 {
+        let refused = looked(&mut f, "192.0.2.1");
+        assert!(matches!(
+            refused,
+            Err(alt_server_store::Error::Unauthorized)
+        ));
+    }
+    let limited = looked(&mut f, "192.0.2.1");
+    assert!(matches!(limited, Err(alt_server_store::Error::Attempts(_))));
+    let elsewhere = looked(&mut f, "198.51.100.9");
+    assert!(matches!(
+        elsewhere,
+        Err(alt_server_store::Error::Unauthorized)
+    ));
+}
+
+/// Whoever has a network has more addresses than a login may be attempted from
+/// before everybody is refused for it. Their attempts end with what the network
+/// may attempt for the login, and the owner of the login, in another network, is
+/// let in.
+#[test]
+#[ignore = "requires isolated PostgreSQL; the attempts for one login from the addresses of one network"]
+fn the_attempts_for_a_login_from_one_network_keep_no_other_network_out() {
+    let mut f = Fixture::new();
+    f.store.enable_browser(&f.credential, &origin()).unwrap();
+    f.store
+        .create_local_user(&f.credential, "bob", "bob", "Bob", PASSWORD, false)
+        .unwrap();
+    let session = login(&mut f);
+    let parent = f.store.authenticate(&session.token).unwrap();
+    let looked = |f: &mut Fixture, address: &str| {
+        let address = address.parse().unwrap();
+        let looked = f
+            .store
+            .device_consent(&parent, &origin(), "ZZZZ-9999", address);
+        matches!(looked, Err(alt_server_store::Error::Unauthorized))
+    };
+    // ten attempts from each of sixteen hosts of one /48, and of one /24
+    for host in 0..16 {
+        for _ in 0..10 {
+            looked(&mut f, &format!("2001:db8:0:{host:x}::1"));
+        }
+    }
+    assert!(looked(&mut f, "2001:db9::1"));
+    for host in 0..16 {
+        for _ in 0..10 {
+            looked(&mut f, &format!("192.0.2.{host}"));
+        }
+    }
+    assert!(looked(&mut f, "198.51.100.9"));
+    // what each network was let in for the login: twenty, and its hosts no more
+    let let_in = |f: &mut Fixture, address: &str| (0..3).filter(|_| looked(f, address)).count();
+    assert_eq!(let_in(&mut f, "2001:db8:0:ff::1"), 0);
+    assert_eq!(let_in(&mut f, "192.0.2.200"), 0);
 }

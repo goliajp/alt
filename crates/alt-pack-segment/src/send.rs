@@ -7,7 +7,7 @@ use crate::{
     scan::{self, Form},
     select::Selection,
 };
-use std::{collections::HashSet, io::Write, sync::Arc};
+use std::{io::Write, sync::Arc};
 
 struct Hashing<'a, W: Write> {
     inner: &'a mut W,
@@ -122,14 +122,15 @@ impl SegmentSet {
         thin: bool,
         out: &mut impl Write,
     ) -> Result<(), Error> {
-        let chosen: HashSet<&Oid> = selection.objects.iter().collect();
+        let chosen: alt_hash::KeyedIdSet<&Oid> = selection.objects.iter().collect();
         let mut out = Hashing {
             inner: out,
             hasher: alt_hash::Sha1::new(),
         };
         out.put(&pack_header(selection.objects.len() as u64)?)?;
         for oid in &selection.objects {
-            let (segment, index) = self.locate(oid).ok_or(Error::NotFound(*oid))?;
+            let (at, index) = self.oldest(oid).ok_or(Error::NotFound(*oid))?;
+            let segment = &self.segments()[at];
             let record = segment.record(index)?;
             let entry = segment.entry(&record)?;
             if record.delta == Delta::Plain {
@@ -148,7 +149,7 @@ impl SegmentSet {
                 out.put(&entry[head..])?;
                 continue;
             }
-            let (kind, data) = self.read(oid)?;
+            let (kind, data) = self.read_at((at, index))?;
             out.put(&entry_header(kind as u8, data.len() as u64))?;
             out.put(&alt_deflate::compress(&data, 1, alt_deflate::Format::Zlib))?;
         }

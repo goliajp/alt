@@ -150,10 +150,8 @@ fn main() {
     let mode = args.next().unwrap_or_else(|| "whole".to_owned());
     let rounds: usize = args.next().map_or(7, |value| value.parse().unwrap());
     let limits = Limits {
-        objects: 1 << 24,
-        object_bytes: 1 << 32,
-        inflated_bytes: 1 << 40,
         delta_depth: 4096,
+        ..Limits::of(1 << 24, 1 << 32, 1 << 40)
     };
     let commits = history();
     let work = alt_os::temp::tempdir().unwrap();

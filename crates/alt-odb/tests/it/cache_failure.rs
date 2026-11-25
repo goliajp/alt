@@ -104,6 +104,41 @@ fn a_flush_reports_damage_it_finds_while_indexing() {
     assert_eq!(std::fs::metadata(&map).unwrap().len(), before);
 }
 
+/// The batch of a handle that leaves its syncs to a sink does not end
+/// whole: it may have failed in a sync of its own, which a second sync
+/// of the same files would not tell. The sink makes none from then on
+/// and records nothing as synced, and the write lock is free.
+#[test]
+fn a_sink_makes_no_sync_once_a_batch_of_its_handle_did_not_end_whole() {
+    use std::os::unix::fs::FileExt;
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let map = tmp.path().join("map.alt");
+    let mut odb = NativeOdb::open(tmp.path()).unwrap();
+    put(&mut odb, 0..600);
+    odb.flush().unwrap();
+    odb.set_defer_durability(true);
+    let sink = odb.sink().unwrap();
+    put(&mut odb, 600..610);
+    odb.flush().unwrap();
+    sink.fsync().unwrap();
+    let synced = super::marker::recorded(tmp.path()).whole;
+
+    let file = std::fs::OpenOptions::new().write(true).open(&map).unwrap();
+    file.write_all_at(&[0xff], 5 + 100 * 82 + 70).unwrap();
+    std::fs::remove_dir_all(tmp.path().join("map.alt.idx")).unwrap();
+    put(&mut odb, 610..900);
+    assert!(odb.flush().is_err());
+    assert!(sink.fsync().is_err());
+    assert_eq!(super::marker::recorded(tmp.path()).whole, synced);
+    // nor after a batch that ends whole
+    put(&mut odb, 900..910);
+    let _ = odb.flush();
+    assert!(sink.fsync().is_err());
+    assert_eq!(super::marker::recorded(tmp.path()).whole, synced);
+    let free = std::fs::File::open(tmp.path().join("odb.lock")).unwrap();
+    alt_os::sys::flock(&free, alt_os::sys::LOCK_EX | alt_os::sys::LOCK_NB).unwrap();
+}
+
 #[test]
 fn an_open_indexes_what_was_synced_and_a_write_reports_a_damaged_file() {
     let tmp = alt_os::temp::tempdir().unwrap();

@@ -4,13 +4,13 @@ use super::{git, git_in, objects, oid, segment, text};
 use alt_pack_segment::SegmentSet;
 use std::{collections::HashSet, fs, path::Path};
 
-fn write(dir: &Path, path: &str, body: &[u8]) {
+pub(super) fn write(dir: &Path, path: &str, body: &[u8]) {
     let path = dir.join(path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, body).unwrap();
 }
 
-fn commit(dir: &Path, message: &str) -> String {
+pub(super) fn commit(dir: &Path, message: &str) -> String {
     git(dir, &["add", "-A"]);
     git(dir, &["commit", "-q", "-m", message]);
     text(git(dir, &["rev-parse", "HEAD"]))
@@ -32,7 +32,13 @@ fn noise(len: usize) -> Vec<u8> {
 /// Selects `wants` for a client that holds `haves`, checks the selection against what
 /// Git itself would send, and applies the pack to a repository holding only `haves`.
 /// Returns the objects selected beyond Git's answer.
-fn fetch(dir: &Path, set: &SegmentSet, wants: &[&str], haves: &[&str], name: &str) -> Vec<String> {
+pub(super) fn fetch(
+    dir: &Path,
+    set: &SegmentSet,
+    wants: &[&str],
+    haves: &[&str],
+    name: &str,
+) -> Vec<String> {
     let mut range: Vec<String> = wants.iter().map(|want| want.to_string()).collect();
     range.extend(haves.iter().map(|have| format!("^{have}")));
     let range: Vec<&str> = range.iter().map(String::as_str).collect();
@@ -224,4 +230,110 @@ fn a_directory_that_returns_to_an_earlier_state_is_sent_whole() {
         fetch(&source, &set, &[&back], &[&created], "from the first state"),
         Vec::<String>::new()
     );
+}
+
+/// More versions of one directory than a walk keeps at once: those it let go of are
+/// made again, and the selection and the pack are what they are for a short history.
+#[test]
+fn a_history_of_more_trees_than_a_walk_keeps_is_selected_whole() {
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    // a directory of some eighty kilobytes, in three hundred versions
+    for file in 0..2000 {
+        write(
+            &source,
+            &format!("wide/file-with-a-long-name-{file:05}.txt"),
+            b"0\n",
+        );
+    }
+    let mut commits = vec![commit(&source, "wide")];
+    for version in 1..300usize {
+        let file = version * 7 % 2000;
+        write(
+            &source,
+            &format!("wide/file-with-a-long-name-{file:05}.txt"),
+            format!("{version}\n").as_bytes(),
+        );
+        commits.push(commit(&source, &format!("version {version}")));
+    }
+    git(&source, &["repack", "-adq", "--depth=50", "--window=10"]);
+    let pack = git_in(
+        &source,
+        &[
+            "pack-objects",
+            "--all",
+            "--stdout",
+            "-q",
+            "--delta-base-offset",
+        ],
+        b"",
+    );
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    let none = Vec::<String>::new();
+    let tip = commits.last().unwrap();
+    assert_eq!(fetch(&source, &set, &[tip], &[], "clone"), none);
+    assert_eq!(fetch(&source, &set, &[tip], &[&commits[150]], "half"), none);
+    assert_eq!(
+        fetch(&source, &set, &[&commits[150]], &[&commits[3]], "middle"),
+        none
+    );
+}
+
+/// Sixty commits are wanted, and the client says it has forty that are beside
+/// them. The trees of those forty are gone through once, not once for each commit
+/// that is wanted: the walk reads a few hundred trees, where forty for each of
+/// sixty would be thousands. It reads no more than it is given, and none once
+/// nobody waits for it.
+#[test]
+fn what_the_client_has_beside_the_wanted_is_gone_through_once_and_within_bounds() {
+    use alt_pack_segment::Error;
+    use std::sync::atomic::AtomicBool;
+    let work = alt_os::temp::tempdir().unwrap();
+    let source = work.path().join("source");
+    fs::create_dir(&source).unwrap();
+    git(&source, &["init", "-q", "--initial-branch=main"]);
+    write(&source, "main.txt", b"0\n");
+    write(&source, "side.txt", b"0\n");
+    let root = commit(&source, "root");
+    git(&source, &["checkout", "-q", "-b", "side"]);
+    let mut beside = Vec::new();
+    for version in 1..=40 {
+        write(&source, "side.txt", format!("side {version}\n").as_bytes());
+        beside.push(commit(&source, &format!("side {version}")));
+    }
+    git(&source, &["checkout", "-q", "main"]);
+    let mut tip = root;
+    for version in 1..=60 {
+        write(&source, "main.txt", format!("main {version}\n").as_bytes());
+        tip = commit(&source, &format!("main {version}"));
+    }
+    let pack = git_in(&source, &["pack-objects", "--all", "--stdout", "-q"], b"");
+    let set = SegmentSet::new(vec![segment(
+        work.path(),
+        "all.seg",
+        &pack,
+        &SegmentSet::default(),
+    )]);
+    let haves: Vec<&str> = beside.iter().map(String::as_str).collect();
+    assert_eq!(
+        fetch(&source, &set, &[&tip], &haves, "beside"),
+        Vec::<String>::new()
+    );
+    let (wants, haves) = ([oid(&tip)], haves.iter().map(|have| oid(have)));
+    let haves: Vec<_> = haves.collect();
+    let whole = set.select(&wants, &haves).unwrap();
+    let within = set.select_while(&wants, &haves, 400, None).unwrap();
+    assert_eq!(within.objects(), whole.objects());
+    let refused = set.select_while(&wants, &haves, 50, None);
+    assert!(matches!(refused, Err(Error::Limit(_))));
+    let gone = AtomicBool::new(true);
+    let ended = set.select_while(&wants, &haves, usize::MAX, Some(&gone));
+    assert!(matches!(ended, Err(Error::GivenUp)));
 }

@@ -50,38 +50,10 @@ pub(crate) fn parse(kind: Kind, data: &[u8]) -> Result<Parsed, Error> {
         }
         Kind::Tree => {
             let mut entries = Vec::new();
-            let mut rest = data;
-            while !rest.is_empty() {
-                let space = rest
-                    .iter()
-                    .position(|byte| *byte == b' ')
-                    .ok_or(Error::Format("tree entry mode"))?;
-                let mut mode = 0u32;
-                for digit in &rest[..space] {
-                    if !(b'0'..=b'7').contains(digit) || mode > 0o777777 {
-                        return Err(Error::Format("tree entry mode"));
-                    }
-                    mode = mode << 3 | u32::from(digit - b'0');
-                }
-                rest = &rest[space + 1..];
-                let nul = rest
-                    .iter()
-                    .position(|byte| *byte == 0)
-                    .ok_or(Error::Format("tree entry name"))?;
-                let name = &rest[..nul];
-                if name.is_empty() || name.contains(&b'/') || rest.len() < nul + 21 {
-                    return Err(Error::Format("tree entry name"));
-                }
-                let oid: Oid = rest[nul + 1..nul + 21].try_into().unwrap();
-                rest = &rest[nul + 21..];
-                match mode >> 12 {
-                    0o04 => entries.push((oid, Kind::Tree)),
-                    // a gitlink names a commit of another repository
-                    0o16 => {}
-                    0o10 | 0o12 => entries.push((oid, Kind::Blob)),
-                    _ => return Err(Error::Format("tree entry mode")),
-                }
-            }
+            tree(data, &mut |oid, kind| {
+                entries.push((oid, kind));
+                Ok(())
+            })?;
             Ok(Parsed::Tree(entries))
         }
         Kind::Tag => {
@@ -99,5 +71,56 @@ pub(crate) fn parse(kind: Kind, data: &[u8]) -> Result<Parsed, Error> {
             };
             Ok(Parsed::Tag { object, kind })
         }
+    }
+}
+
+/// Hands `each` every object a tree refers to, in the order of its entries. A tree
+/// is as large as an object may be, and what it refers to is not gathered here.
+pub(crate) fn tree(
+    data: &[u8],
+    each: &mut impl FnMut(Oid, Kind) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut rest = data;
+    while !rest.is_empty() {
+        let space = rest
+            .iter()
+            .position(|byte| *byte == b' ')
+            .ok_or(Error::Format("tree entry mode"))?;
+        let names = names(&rest[..space]).ok_or(Error::Format("tree entry mode"))?;
+        rest = &rest[space + 1..];
+        let nul = rest
+            .iter()
+            .position(|byte| *byte == 0)
+            .ok_or(Error::Format("tree entry name"))?;
+        let name = &rest[..nul];
+        if name.is_empty() || name.contains(&b'/') || rest.len() < nul + 21 {
+            return Err(Error::Format("tree entry name"));
+        }
+        let oid: Oid = rest[nul + 1..nul + 21].try_into().unwrap();
+        rest = &rest[nul + 21..];
+        if let Some(kind) = names {
+            each(oid, kind)?;
+        }
+    }
+    Ok(())
+}
+
+/// What an entry of a tree names by its mode: a tree, a file, or with `Some(None)`
+/// a commit of another repository, which is no object of this one. A mode is
+/// the number it is written as, with zeros before it or without: Git reads
+/// `040000` as the directory `40000` is, and warns of it at the most.
+pub(crate) fn names(mode: &[u8]) -> Option<Option<Kind>> {
+    let mut number = 0u32;
+    for digit in mode {
+        if !(b'0'..=b'7').contains(digit) || number > 0o777777 {
+            return None;
+        }
+        number = number << 3 | u32::from(digit - b'0');
+    }
+    match number >> 12 {
+        0o04 => Some(Some(Kind::Tree)),
+        0o16 => Some(None),
+        0o10 | 0o12 => Some(Some(Kind::Blob)),
+        _ => None,
     }
 }

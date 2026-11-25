@@ -4,30 +4,9 @@
 //! its stored result and in its outbox event as well; schema 20 checked a foreign
 //! key for every ref.
 use super::maintenance::{encryption_key, prepare, publish};
+use super::schema_21::{as_schema_20, refs_foreign_key};
 use super::*;
 
-/// makes the database the schema 20 one it stands in for
-fn as_schema_20(db: &OperatorDb) {
-    Client::connect(&db.dsn)
-        .unwrap()
-        .batch_execute(
-            "DELETE FROM alt_schema WHERE version=21;
-             ALTER TABLE alt_refs DROP CONSTRAINT IF EXISTS alt_refs_repository_fkey;
-             ALTER TABLE alt_refs ADD CONSTRAINT alt_refs_repository_fkey FOREIGN KEY (repository) REFERENCES alt_repositories(id)",
-        )
-        .unwrap();
-}
-/// whether refs still have a foreign key to their repository
-fn refs_foreign_key(dsn: &str) -> bool {
-    Client::connect(dsn)
-        .unwrap()
-        .query_one(
-            "SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='alt_refs'::regclass AND contype='f')",
-            &[],
-        )
-        .unwrap()
-        .get(0)
-}
 /// Makes the database the schema 19 one it stands in for. The longer rows are built
 /// from the audit records, which hold whole receipts in every version.
 fn as_schema_19(db: &OperatorDb) {
@@ -88,7 +67,7 @@ fn as_schema_18(db: &OperatorDb, store: &Store, objects: &[(&ContentEntry, &Vec<
 /// schema, ref pins, object mappings, objects in live segments, and whether the
 /// stored bytes are the live segments plus the counted content
 /// schema, and how many stored results and outbox events hold a publication
-fn copies(dsn: &str) -> (i32, i64, i64) {
+pub(super) fn copies(dsn: &str) -> (i32, i64, i64) {
     let row = Client::connect(dsn).unwrap().query_one("SELECT (SELECT max(version) FROM alt_schema),(SELECT count(*) FROM alt_requests WHERE result #> '{receipt,body}' ? 'publication'),(SELECT count(*) FROM alt_outbox WHERE event #> '{receipt,body}' ? 'publication')", &[]).unwrap();
     (row.get(0), row.get(1), row.get(2))
 }
@@ -104,7 +83,12 @@ fn opened(db: &OperatorDb, config: &str) -> Store {
     .unwrap()
 }
 /// what the request query returns for a committed request: all of it, and its receipt
-fn observed(db: &OperatorDb, config: &str, admin: &str, key: &RequestKey) -> (Vec<u8>, Vec<u8>) {
+pub(super) fn observed(
+    db: &OperatorDb,
+    config: &str,
+    admin: &str,
+    key: &RequestKey,
+) -> (Vec<u8>, Vec<u8>) {
     let mut store = opened(db, config);
     let token = alt_server::operator::read_token(std::path::Path::new(admin)).unwrap();
     let credential = store.authenticate(&token).unwrap();
@@ -122,7 +106,7 @@ fn observed(db: &OperatorDb, config: &str, admin: &str, key: &RequestKey) -> (Ve
 }
 /// The receipt of the one publication, from its outbox row restored to the whole
 /// event. A restored instance has revoked the credentials the request query needs.
-fn delivered_receipt(db: &OperatorDb, config: &str) -> Vec<u8> {
+pub(super) fn delivered_receipt(db: &OperatorDb, config: &str) -> Vec<u8> {
     let event = opened(db, config)
         .outbox_event("repository", 1)
         .unwrap()
@@ -187,9 +171,9 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "18", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(shape(&source.dsn), (21, 0, 0, 3, true));
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(shape(&source.dsn), (22, 0, 0, 3, true));
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -226,8 +210,8 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(shape(&target.dsn), (21, 0, 0, 3, true));
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(shape(&target.dsn), (22, 0, 0, 3, true));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
     assert_eq!(target.ok(&["health"])["ready"], true);
 }
 
@@ -269,8 +253,8 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "19", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -312,7 +296,7 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
         delivered_receipt(&target, target.config.to_str().unwrap()),
@@ -358,8 +342,8 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "20", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 21);
-    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert_eq!(migrated["schema"], 22);
+    assert_eq!(copies(&source.dsn), (22, 0, 0));
     assert!(!refs_foreign_key(&source.dsn));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
@@ -401,7 +385,7 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (21, 0, 0));
+    assert_eq!(copies(&target.dsn), (22, 0, 0));
     assert!(!refs_foreign_key(&target.dsn));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
@@ -425,7 +409,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!migrated.status.success());
     assert!(
         String::from_utf8_lossy(&migrated.stderr).contains(
-            "this release upgrades from schema 18, 19 and 20 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
+            "this release upgrades from schema 18, 19, 20 and 21 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
         ),
         "{}",
         String::from_utf8_lossy(&migrated.stderr)
@@ -447,7 +431,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!created.status.success());
     assert!(
         String::from_utf8_lossy(&created.stderr)
-            .contains("this release backs up and restores schema 18, 19, 20 and 21 only"),
+            .contains("this release backs up and restores schema 18, 19, 20, 21 and 22 only"),
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );

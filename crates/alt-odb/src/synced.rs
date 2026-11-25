@@ -34,7 +34,6 @@
 
 use std::cell::Cell;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
 use alt_store::Basis;
 /// Every append file starts with a five-byte header.
@@ -384,10 +383,7 @@ pub(crate) fn distrust(path: &Path) -> std::io::Result<()> {
     })
 }
 
-/// What a handle whose fsyncs are left to a sink (the daemon) last finished
-/// writing, for that sink to record once it has synced: the boundaries and
-/// the marker's generation when they were written.
-pub(crate) type Deferred = Arc<Mutex<Option<(Lens, u64)>>>;
+pub(crate) use crate::odb::sink::Deferred;
 
 #[cfg(test)]
 mod tests {

@@ -23,6 +23,12 @@ pub const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 
 pub const SIGCONT: c_int = 18;
 
+/// The `lseek` origins that find the next data and the next hole of a file.
+pub const SEEK_DATA: c_int = 3;
+pub const SEEK_HOLE: c_int = 4;
+/// "operation not supported" (`EOPNOTSUPP`, which `ENOTSUP` equals here).
+pub const ENOTSUP: c_int = 95;
+
 /// The character-type category in the mask `newlocale` takes.
 pub const LC_CTYPE_MASK: c_int = 1 << 0;
 /// The `nl_langinfo` item that names the character set.
@@ -31,7 +37,11 @@ pub const CODESET: c_int = 14;
 pub const RLIMIT_NOFILE: rlimit_resource_t = 7;
 
 pub const SOL_SOCKET: c_int = 1;
+/// `recv` waits for nothing
+pub const MSG_DONTWAIT: c_int = 0x40;
 pub const SO_RCVBUF: c_int = 8;
+/// the request of `ioctl` for the bytes of a socket not yet acknowledged
+pub const SIOCOUTQ: c_ulong = 0x5411;
 
 pub const RENAME_NOREPLACE: c_uint = 1;
 
@@ -154,6 +164,7 @@ unsafe extern "C" {
     #[link_name = "__errno_location"]
     pub fn errno_location() -> *mut c_int;
 
+    pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
     pub fn renameat2(
         olddirfd: c_int,
         oldpath: *const c_char,

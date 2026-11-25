@@ -131,16 +131,44 @@ impl Drop for TempDir {
     }
 }
 
+/// Makes `directory` where it is not there, has it its owner's alone (mode
+/// 0700), and removes whatever is in it: the place of a process for what
+/// it writes for a time, in which nothing an earlier process left is of use.
+/// A link that stands where the directory is to be is an error: what it
+/// points to is not this process's to empty.
+pub fn emptied(directory: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    match std::fs::DirBuilder::new().mode(0o700).create(directory) {
+        Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
+        _ => {}
+    }
+    if !std::fs::symlink_metadata(directory)?.file_type().is_dir() {
+        return Err(io::ErrorKind::NotADirectory.into());
+    }
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// Sets the name prefix of a temporary directory before creating it.
 #[derive(Debug)]
 pub struct Builder<'a> {
     prefix: &'a OsStr,
+    owner_only: bool,
 }
 
 impl Default for Builder<'_> {
     fn default() -> Self {
         Self {
             prefix: OsStr::new(DEFAULT_PREFIX),
+            owner_only: false,
         }
     }
 }
@@ -156,11 +184,23 @@ impl<'a> Builder<'a> {
         self
     }
 
+    /// Has the directory created for its owner alone (mode 0700): what a
+    /// server keeps of its peers in it is no other account's to read.
+    pub fn owner_only(&mut self) -> &mut Self {
+        self.owner_only = true;
+        self
+    }
+
     /// Creates the directory inside `directory`, with the permissions a
-    /// plain `mkdir` gives it.
+    /// plain `mkdir` gives it unless it is [`Self::owner_only`].
     pub fn tempdir_in(&self, directory: impl AsRef<Path>) -> io::Result<TempDir> {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        if self.owner_only {
+            builder.mode(0o700);
+        }
         create_unique(directory.as_ref(), self.prefix, |path| {
-            std::fs::create_dir(&path)?;
+            builder.create(&path)?;
             Ok(TempDir { path, keep: false })
         })
     }

@@ -51,26 +51,20 @@ pub(super) async fn handle(request: Request, state: Arc<App>) -> Response<Respon
             Retry::Never,
         );
     }
+    // received first: a body that is slow to come keeps no worker waiting
+    let receipt = body::Receipt::of(&state, None);
+    let Ok(source) = spool(request.into_body(), 16_384, receipt).await else {
+        return failure(
+            400,
+            ErrorCode::InvalidRequest,
+            "Invalid probe",
+            None,
+            Retry::Never,
+        );
+    };
     let permit = match state.workers.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => return unavailable(),
-    };
-    let source = match tokio::time::timeout(
-        state.options.body_timeout,
-        spool(request.into_body(), 16_384),
-    )
-    .await
-    {
-        Ok(Ok(source)) => source,
-        _ => {
-            return failure(
-                400,
-                ErrorCode::InvalidRequest,
-                "Invalid probe",
-                None,
-                Retry::Never,
-            );
-        }
     };
     let factory = state.factory.clone();
     match tokio::time::timeout(

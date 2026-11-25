@@ -181,12 +181,6 @@ impl Store {
         materialize_at(&self.bytes, repository, existing, objects)
     }
 
-    /// the live segments of a repository as of now, for a caller that has yet to
-    /// authorize whatever it decides from them
-    pub(crate) fn published_segments(&mut self, repository: &str) -> Result<SegmentSet> {
-        Ok(self.live_segments(repository)?.1)
-    }
-
     /// the live segments with the list they were opened from
     pub(crate) fn live_segments(
         &mut self,

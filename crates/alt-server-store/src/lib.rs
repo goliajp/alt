@@ -2,6 +2,7 @@
 mod bytes;
 mod committed;
 mod database;
+mod earlier_requests;
 mod gc;
 mod jsonb;
 pub use jsonb::Jsonb;
@@ -12,7 +13,11 @@ pub use portable_import::*;
 mod open_segments;
 mod pack_compaction;
 mod pack_native;
+mod pack_scrub;
+mod pack_sweep;
 pub use pack_compaction::PACK_RETIRED_GRACE_MS;
+pub use pack_scrub::{NO_REPOSITORY, Reading, Scrubbed, Unread};
+pub use pack_sweep::{Writing, writing};
 mod pack_view;
 pub use pack_view::{ARRAY_TIPS, DEFERRED_REFS, PackView, RefFilter, RefScope};
 mod packs;
@@ -21,17 +26,25 @@ mod provenance;
 mod publication;
 mod read;
 mod refs;
+mod review;
 pub use refs::Refs;
 mod registration;
+mod repository_authority;
 mod requests;
+mod retention;
 pub use publication::*;
 pub use read::*;
 pub use registration::MAX_REGISTER_CONTENTS;
+pub use retention::{
+    CREDENTIAL_RETENTION_MS, REQUEST_RETENTION_MS, Removed, RequestsSeen, SESSION_RETENTION_MS,
+};
 mod schema;
 pub use schema::{LZ4_REQUIRED, OLDEST_SCHEMA, UNSUPPORTED_SOURCE_SCHEMA, check_backup_schema};
 mod schema_v19;
 mod schema_v20;
 mod segments;
+mod serving;
+pub use serving::{SERVED, Serving};
 mod store;
 mod tasks;
 pub use bytes::*;
@@ -48,7 +61,13 @@ pub enum Error {
     Json(alt_json::Error),
     Integrity(&'static str),
     Limit(&'static str),
+    /// what the request needs is taken by other requests, and was not given back
+    /// in the time it had to wait
+    Busy(&'static str),
     Precondition(&'static str),
+    /// as many sign-ins or device codes were attempted in the minute as may be;
+    /// the milliseconds until the minute is over
+    Attempts(u64),
     AuthorityUnavailable,
     Unauthorized,
     OutcomeUnknown,
@@ -66,7 +85,15 @@ impl std::fmt::Display for Error {
             Self::Json(e) => write!(f, "encoding: {e}"),
             Self::Integrity(what) => write!(f, "integrity failure: {what}"),
             Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
+            Self::Busy(what) => write!(f, "busy with other requests: {what}"),
             Self::Precondition(what) => write!(f, "precondition failed: {what}"),
+            Self::Attempts(left) => {
+                write!(
+                    f,
+                    "admission limit; retry after {} seconds",
+                    left.div_ceil(1000)
+                )
+            }
             Self::AuthorityUnavailable => {
                 f.write_str("current account authority is temporarily unavailable")
             }
@@ -90,7 +117,9 @@ impl std::error::Error for Error {
             Self::Json(e) => Some(e),
             Self::Integrity(_)
             | Self::Limit(_)
+            | Self::Busy(_)
             | Self::Precondition(_)
+            | Self::Attempts(_)
             | Self::AuthorityUnavailable
             | Self::Unauthorized
             | Self::OutcomeUnknown => None,
@@ -151,11 +180,11 @@ pub use chunks::*;
 mod browser;
 pub use browser::*;
 mod workbench;
-pub use tasks::CurrentReviewAssessment;
+pub use review::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 21;
+pub const SCHEMA_VERSION: u32 = 22;
 
 mod change_channel;
 mod link_history;
@@ -182,7 +211,10 @@ mod cloud_browser;
 mod cloud_login;
 pub use cloud_login::CloudLoginClaim;
 
+mod client_credentials;
 mod device_login;
+mod reading;
+pub use client_credentials::*;
 pub use device_login::*;
 
 pub use change_repair::RepairTaskClaim;

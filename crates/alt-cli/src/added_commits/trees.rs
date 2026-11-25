@@ -7,64 +7,186 @@
 //! there, and a blob is asked for where that history has another or
 //! none. Nothing is left out for being in the tree of a commit the push
 //! adds as well: a tree found whole is not read again, and that alone
-//! keeps each tree of the push to one read. A tree of the history served
-//! is kept as it was read, so it is read once as well, whatever the
-//! number of trees and of parents it is looked up for.
+//! keeps each tree of the push to one read.
+//!
+//! A tree of the history served is kept as it was read, so that it is
+//! read once whatever the number of trees and of parents it is looked up
+//! for, while those kept fit [`BASES`]. A push names the commits it is
+//! on top of, as many as it likes, and a tree of it stands in the place
+//! of one tree of each: what is read of them is bounded by the
+//! repository, not by the push. Past the limit the trees kept longest
+//! without being looked at are let go of, and read again when they come
+//! up; a tree of the push is held against one of them at a time.
+//!
+//! The trees in the place of a directory are found when that directory is
+//! come to, and for the directories of one tree together: each tree in the
+//! place of that tree is looked at once for all of them, so that trees
+//! which do not fit are read once for a tree of the push and not once for
+//! each of its directories. What is found waits with the directories, and
+//! is held to [`PLACES`]: past that the directories of a tree are taken
+//! fewer at a time.
+//!
+//! A push can be made so that what it stands in the place of never fits
+//! and is read over and over: a merge of many commits whose trees are
+//! large, with many directories of its own. All that is read of the
+//! history served, the first time or again, is counted, and a push that
+//! has [`READ`] times what may be kept read for it is refused.
 
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use alt_git_codec::{ObjectId, ObjectKind, Tree, TreeEntry};
+use alt_git_codec::{ObjectId, TreeEntry};
+use alt_hash::KeyedIdSet;
 
 use super::{Res, Source};
+use kept::{Bases, entries};
 
-/// What a tree has at each name: whether it is a directory, and its
-/// object.
-type Places = HashMap<Vec<u8>, (bool, ObjectId)>;
+mod kept;
+#[cfg(test)]
+mod tests;
 
-#[derive(Default)]
+/// The bytes of trees of the history served that are kept, as they are
+/// counted here: about what they take in memory.
+pub(super) const BASES: usize = 64 << 20;
+/// How many times that may be read of the history served for one push.
+const READ: usize = 64;
+/// How many trees are held as the ones in the place of directories that
+/// wait, all those directories together.
+const PLACES: usize = 1 << 20;
+/// What a push is refused with when more would have to be read.
+pub const COSTLY: &str = "the trees under the commits this push is on top of are read too often";
+
 pub(super) struct Trees {
     /// trees found whole
-    whole: HashSet<ObjectId>,
+    whole: KeyedIdSet<ObjectId>,
     /// the trees and blobs found outside what the refs reach
-    pub(super) added: HashSet<ObjectId>,
-    /// the trees history the refs reach has, as they were read: `None`
-    /// for one that does not read
-    bases: HashMap<ObjectId, Option<Rc<Places>>>,
+    pub(super) added: KeyedIdSet<ObjectId>,
+    /// the trees of the history served
+    served: Bases,
+    /// how many trees may be held for the directories that wait
+    places: usize,
 }
 
-/// The entries of the tree `oid`; `None` for what is not held, or does
-/// not read as a tree.
-fn entries(source: &Source<'_>, oid: &ObjectId) -> Res<Option<Tree>> {
-    let Some(raw) = (source.get)(oid)? else {
-        return Ok(None);
-    };
-    if raw.kind != ObjectKind::Tree {
-        return Ok(None);
-    }
-    Ok(Tree::parse(&raw.data, oid.algo()).ok())
-}
-
-/// An entry by its name: whether it is a directory, and its object.
-fn place(entry: &TreeEntry) -> (Vec<u8>, (bool, ObjectId)) {
-    (entry.name.to_vec(), (entry.mode.is_tree(), entry.oid))
+/// A directory of a tree of the push that waits to be looked at.
+enum Waiting {
+    /// its tree, and the trees in its place
+    Placed(ObjectId, Rc<Vec<ObjectId>>),
+    /// its tree, the trees in the place of the tree it is in, and the name
+    /// it has there
+    Named(ObjectId, Rc<Vec<ObjectId>>, Vec<u8>),
 }
 
 impl Trees {
-    /// Those of `bases` that read: one that does not has nothing in its
-    /// place. Each is read once, however many trees of the push stand in
-    /// its place, and however many commits under the push have it.
-    fn read(&mut self, source: &Source<'_>, bases: &[ObjectId]) -> Res<Vec<Rc<Places>>> {
-        let mut read = Vec::new();
-        for base in bases {
-            if !self.bases.contains_key(base) {
-                let tree = entries(source, base)?;
-                let places = tree.map(|tree| Rc::new(tree.entries.iter().map(place).collect()));
-                self.bases.insert(*base, places);
-            }
-            read.extend(self.bases[base].clone());
+    /// With trees of the history served kept up to `limit` bytes, and
+    /// [`READ`] times that read at most.
+    pub(super) fn holding(limit: usize) -> Self {
+        Self::reading(limit, limit.saturating_mul(READ))
+    }
+
+    fn reading(limit: usize, budget: usize) -> Self {
+        Trees {
+            whole: KeyedIdSet::default(),
+            added: KeyedIdSet::default(),
+            served: Bases::reading(limit, budget),
+            places: PLACES,
         }
-        Ok(read)
+    }
+
+    /// Why a tree was not found whole.
+    pub(super) fn lack(&self) -> &'static str {
+        match self.served.costly {
+            true => COSTLY,
+            false => super::MISSING,
+        }
+    }
+
+    /// The trees that `bases` have at each of the directories `names`, each
+    /// of `bases` looked at once.
+    fn under(
+        &mut self,
+        source: &Source<'_>,
+        bases: &[ObjectId],
+        names: &[Vec<u8>],
+    ) -> Res<Vec<Vec<ObjectId>>> {
+        let mut under = vec![Vec::new(); names.len()];
+        for base in bases {
+            let Some(places) = self.served.of(source, base)? else {
+                continue;
+            };
+            for (name, under) in names.iter().zip(&mut under) {
+                if let Some((true, oid)) = places.get(name) {
+                    under.push(*oid);
+                }
+            }
+        }
+        for under in &mut under {
+            under.sort_unstable();
+            under.dedup();
+        }
+        Ok(under)
+    }
+
+    /// Finds the trees in the place of the directory `first` and of those
+    /// that wait on top of `stack` under the same trees, as many of them as
+    /// the trees that may be held leave room for, and puts them back with
+    /// what was found. `held` is how many trees are held already.
+    fn place(
+        &mut self,
+        source: &Source<'_>,
+        first: (ObjectId, Vec<u8>),
+        above: &Rc<Vec<ObjectId>>,
+        stack: &mut Vec<Waiting>,
+        held: &mut usize,
+    ) -> Res<()> {
+        let room = self.places.saturating_sub(*held) / above.len().max(1);
+        let (mut trees, mut names) = (vec![first.0], vec![first.1]);
+        while trees.len() < room
+            && let Some(Waiting::Named(_, theirs, _)) = stack.last()
+            && Rc::ptr_eq(theirs, above)
+        {
+            let Some(Waiting::Named(oid, _, name)) = stack.pop() else {
+                unreachable!("it was looked at")
+            };
+            trees.push(oid);
+            names.push(name);
+        }
+        let under = self.under(source, above, &names)?;
+        // back in the order they waited in
+        for (oid, under) in trees.into_iter().zip(under).rev() {
+            *held += under.len();
+            stack.push(Waiting::Placed(oid, Rc::new(under)));
+        }
+        Ok(())
+    }
+
+    /// Whether each of `files`, of a tree of the push, is a blob that
+    /// one of `bases` has under the same name, or one that is held:
+    /// those are put among `blobs`.
+    fn files_held(
+        &mut self,
+        source: &Source<'_>,
+        files: &[&TreeEntry],
+        bases: &[ObjectId],
+        blobs: &mut KeyedIdSet<ObjectId>,
+    ) -> Res<bool> {
+        let mut theirs = vec![false; files.len()];
+        for base in bases.iter().filter(|_| !files.is_empty()) {
+            let Some(places) = self.served.of(source, base)? else {
+                continue;
+            };
+            for (file, theirs) in files.iter().zip(&mut theirs) {
+                *theirs |= places.get(&file.name[..]) == Some(&(false, file.oid));
+            }
+        }
+        for (file, theirs) in files.iter().zip(theirs) {
+            if !theirs
+                && !self.added.contains(&file.oid)
+                && blobs.insert(file.oid)
+                && !(source.holds)(&file.oid)?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Whether the tree `root` is held whole, `bases` being the trees
@@ -77,41 +199,51 @@ impl Trees {
     ) -> Res<bool> {
         // kept apart until the whole tree is found: one that lacks an
         // object vouches for none of its parts
-        let mut trees = HashSet::new();
-        let mut blobs = HashSet::new();
-        let mut stack = vec![(root, bases.to_vec())];
-        while let Some((oid, bases)) = stack.pop() {
-            if bases.contains(&oid) || self.whole.contains(&oid) || !trees.insert(oid) {
+        let mut trees = KeyedIdSet::default();
+        let mut blobs = KeyedIdSet::default();
+        let mut held = bases.len();
+        let mut stack = vec![Waiting::Placed(root, Rc::new(bases.to_vec()))];
+        while let Some(waiting) = stack.pop() {
+            let (oid, bases) = match waiting {
+                Waiting::Placed(oid, bases) => {
+                    held -= bases.len();
+                    (oid, bases)
+                }
+                Waiting::Named(oid, above, name) => {
+                    if !self.whole.contains(&oid) && !trees.contains(&oid) {
+                        self.place(source, (oid, name), &above, &mut stack, &mut held)?;
+                    }
+                    continue;
+                }
+            };
+            if self.whole.contains(&oid) || trees.contains(&oid) || bases.contains(&oid) {
                 continue;
             }
+            trees.insert(oid);
             let Some(tree) = entries(source, &oid)? else {
                 return Ok(false);
             };
-            let theirs = self.read(source, &bases)?;
-            for entry in &tree.entries {
-                // a commit of another repository
-                if entry.mode.is_gitlink() {
-                    continue;
-                }
-                let is_tree = entry.mode.is_tree();
-                let mut under: Vec<ObjectId> = theirs
-                    .iter()
-                    .filter_map(|base| base.get(&entry.name[..]))
-                    .filter(|(tree, _)| *tree == is_tree)
-                    .map(|(_, oid)| *oid)
-                    .collect();
-                under.sort_unstable();
-                under.dedup();
-                if is_tree {
-                    stack.push((entry.oid, under));
-                } else if !under.contains(&entry.oid)
-                    && !self.added.contains(&entry.oid)
-                    && blobs.insert(entry.oid)
-                    && !(source.holds)(&entry.oid)?
-                {
-                    return Ok(false);
-                }
+            if self.served.costly {
+                return Ok(false);
             }
+            // a commit of another repository is none of this one's
+            let (dirs, files): (Vec<&TreeEntry>, Vec<&TreeEntry>) = (tree.entries.iter())
+                .filter(|entry| !entry.mode.is_gitlink())
+                .partition(|entry| entry.mode.is_tree());
+            if !self.files_held(source, &files, &bases, &mut blobs)? {
+                return Ok(false);
+            }
+            for dir in dirs {
+                stack.push(Waiting::Named(
+                    dir.oid,
+                    Rc::clone(&bases),
+                    dir.name.to_vec(),
+                ));
+            }
+        }
+        // what was not read of the history served vouches for nothing
+        if self.served.costly {
+            return Ok(false);
         }
         self.whole.extend(trees.iter().copied());
         self.added.extend(trees);

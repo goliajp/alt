@@ -1,14 +1,18 @@
 //! Server-owned platform transport. Network operations never hold a product
 //! database transaction; every resulting lease is checked again by the store.
 use alt_cloud_client::{Client, GrantSealer};
-use alt_server_store::{Error, Result, Store};
+use alt_server_store::{Error, Renewal, Result, Store};
+use asking::Asked;
 use golia_platform_contract::{Audience, Secret};
+
+mod asking;
 
 pub struct Runtime {
     pub(crate) client: Client,
     pub(crate) sealer: GrantSealer,
     key_digest: String,
     provision_digest: Option<String>,
+    asking: asking::Asking,
 }
 pub(crate) fn clock() -> u64 {
     std::time::SystemTime::now()
@@ -25,6 +29,7 @@ impl Runtime {
             client: Client::new(audience, credential)?,
             key_digest,
             provision_digest: None,
+            asking: asking::Asking::default(),
         })
     }
     pub fn provisioned(mut self, digest: String) -> alt_cloud_client::Result<Self> {
@@ -111,34 +116,84 @@ impl Runtime {
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
         // Check that a local credential exists before admitting control traffic.
         store.cloud_refresh(token)?;
-        if store.cloud_service_refresh_needed()? {
-            match self.client.service(clock) {
-                Ok(service) => store.refresh_cloud_service(&service)?,
-                Err(alt_cloud_client::Error::Unauthorized) => store.revoke_cloud_service()?,
-                Err(_) => (), // Never extend the persisted lease on failure.
+        // one that waited for another's asking goes by what that one was told
+        let mut waited = false;
+        loop {
+            let renewal = store.cloud_service_renewal()?;
+            if renewal == Renewal::Fresh || waited {
+                break;
             }
+            match self.asking.turn(None, renewal == Renewal::Due) {
+                // the turn ends once what the platform said is written: whoever
+                // waited for it looks at the lease then
+                Asked::Turn(turn) => match self.client.service(clock) {
+                    Ok(service) => {
+                        let written = store.refresh_cloud_service(&service);
+                        turn.answered();
+                        written?
+                    }
+                    Err(alt_cloud_client::Error::Unauthorized) => {
+                        let written = store.revoke_cloud_service();
+                        turn.answered();
+                        written?
+                    }
+                    Err(_) => (), // Never extend the persisted lease on failure.
+                },
+                Asked::Look => {
+                    waited = true;
+                    continue;
+                }
+                Asked::No => (),
+            }
+            break;
         }
         // Service refresh may have advanced the shared revocation generation.
-        let descriptor = store.cloud_refresh(token)?;
-        if descriptor.refresh_needed {
-            let grant = self
-                .sealer
-                .open(&descriptor.sealed_grant, &descriptor.credential_digest)
-                .map_err(|_| Error::Unauthorized)?;
-            match self.client.introspect(&grant, clock) {
-                Ok(claims) => {
-                    store.refresh_cloud_account(&descriptor.credential_digest, &claims)?
+        let mut waited = false;
+        loop {
+            let descriptor = store.cloud_refresh(token)?;
+            if !descriptor.refresh_needed {
+                break;
+            }
+            let digest = &descriptor.credential_digest;
+            // whoever has no turn to ask goes on as one whose asking failed
+            let asked = match self.asking.turn(Some(digest), !descriptor.serves) {
+                Asked::Look if !waited => {
+                    waited = true;
+                    continue;
                 }
-                Err(alt_cloud_client::Error::Unauthorized) => {
-                    store.revoke_cloud_credential(&descriptor.credential_digest)?;
+                Asked::Look | Asked::No => None,
+                Asked::Turn(turn) if waited => {
+                    turn.unasked();
+                    None
+                }
+                Asked::Turn(turn) => {
+                    let Ok(grant) = self.sealer.open(&descriptor.sealed_grant, digest) else {
+                        // a grant that does not open is no silence of the platform
+                        turn.unasked();
+                        return Err(Error::Unauthorized);
+                    };
+                    Some((self.client.introspect(&grant, clock), turn))
+                }
+            };
+            match asked {
+                Some((Ok(claims), turn)) => {
+                    let written = store.refresh_cloud_account(digest, &claims);
+                    turn.answered();
+                    written?
+                }
+                Some((Err(alt_cloud_client::Error::Unauthorized), turn)) => {
+                    let written = store.revoke_cloud_credential(digest);
+                    turn.answered();
+                    written?;
                     return Err(Error::Unauthorized);
                 }
-                Err(_) => match store.authenticate(token) {
+                Some((Err(_), _)) | None => match store.authenticate(token) {
                     Ok(_) => (),
                     Err(Error::Unauthorized) => return Err(Error::AuthorityUnavailable),
                     Err(error) => return Err(error),
                 },
             }
+            break;
         }
         Ok(())
     }

@@ -1,8 +1,8 @@
 use crate::Jsonb;
-pub(crate) use crate::committed::request_row;
+pub(crate) use crate::committed::{request_row, request_seen};
 use crate::database::Transaction;
 use crate::store::{authorize, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, DurableBytes, Error, Result, Store};
+use crate::{Credential, DurableBytes, Error, Result, Store, reading, registration};
 use alt_remote_protocol::{
     ContentEntry, ContentKind, Manifest, Publication, RequestKey, RequestObservation, RequestState,
 };
@@ -25,9 +25,10 @@ impl Store {
         if ttl_ms == 0 || ttl_ms > 86_400_000 {
             return Err(Error::Limit("upload lifetime"));
         }
-        // Git objects the segments hold need no upload. Segments only gain objects, so
-        // a set opened before the transaction grants nothing a later one would not.
-        let segments = self.published_segments(&publication.key.scope.repository_instance_id)?;
+        // Git objects the segments give need no upload: told before the transaction,
+        // where what the refs lead to is read.
+        let published = self.published(&publication.key.scope.repository_instance_id)?;
+        let contents = selected_contents(manifest, &published)?;
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let snapshot = snapshot(
@@ -50,7 +51,6 @@ impl Store {
         let expires = time
             .checked_add(ttl_ms)
             .ok_or(Error::Limit("upload lifetime"))?;
-        let contents = selected_contents(manifest, &segments)?;
         let repository = &publication.key.scope.repository_instance_id;
         let mut reservation = 0u64;
         let selected: Vec<_> = contents.iter().collect();
@@ -64,7 +64,7 @@ impl Store {
             for (digest, content) in batch {
                 let stored = match existing.get(digest.as_str()) {
                     Some((bytes, state)) => {
-                        if unsigned(*bytes)? != content.bytes {
+                        if registration::another_size(state, *bytes, content.bytes)? {
                             return Err(Error::Integrity("content size collision"));
                         }
                         if state == "deleting" {
@@ -123,22 +123,22 @@ impl Store {
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(state)
     }
-    pub fn query(
+    pub(crate) fn query_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
     ) -> Result<RequestObservation> {
         key.validate()?;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let mut tx = crate::reading::transaction(&mut self.client, &self.spec)?;
+        let (spec, signing) = (&self.spec, &self.signing_key);
+        let current = reading::open(&mut tx, spec, signing, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if key.scope.installation_id != self.spec.installation_id || auth.actor_id != key.actor_id {
             return Err(Error::Unauthorized);
         }
         // Old epochs may return retained facts. Absence is meaningful only in
         // the current epoch; never turn a restored snapshot's gap into replay.
-        let row = request_row(&mut tx, key)?;
+        let row = request_seen(&mut tx, key)?;
         if let Some(row) = &row {
             check_request_attribution(row, &auth)?;
         }
@@ -270,7 +270,7 @@ impl Store {
                 &[repository, &entry.blake3],
             )?
             .ok_or(Error::Precondition("upload pin expired"))?;
-        if blob.get::<_, String>(0) == "deleting" || unsigned(blob.get(2))? != entry.bytes {
+        if registration::fenced(&blob.get::<_, String>(0), blob.get(2), entry.bytes)? {
             return Err(Error::Precondition("upload content fenced by GC"));
         }
         self.bytes.check_proof(proof)?;
@@ -281,8 +281,8 @@ impl Store {
             tx.execute("UPDATE alt_requests SET reserved_bytes=reserved_bytes-$5 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4",&[repository,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id,&integer(release)?])?;
         }
         tx.execute(
-            "UPDATE alt_blobs SET state='stored',accounted=true WHERE repository=$1 AND blake3=$2",
-            &[repository, &entry.blake3],
+            "UPDATE alt_blobs SET state='stored',accounted=true,bytes=$3 WHERE repository=$1 AND blake3=$2",
+            &[repository, &entry.blake3, &integer(entry.bytes)?],
         )?;
         if let Some(oid) = &entry.git_oid {
             let kind = git_kind(entry.kind)?;
@@ -400,7 +400,7 @@ struct SelectedContent<'a> {
     entries: Vec<&'a ContentEntry>,
     chunk: bool,
     /// some entry with these bytes, or made of this chunk, is not a Git object the
-    /// segments already hold
+    /// segments already give
     needed: bool,
 }
 impl SelectedContent<'_> {
@@ -411,7 +411,7 @@ impl SelectedContent<'_> {
 }
 fn selected_contents<'a>(
     manifest: &'a Manifest,
-    segments: &alt_pack_segment::SegmentSet,
+    published: &crate::publication::Published,
 ) -> Result<BTreeMap<String, SelectedContent<'a>>> {
     let mut selected = BTreeMap::new();
     let blank = |bytes| SelectedContent {
@@ -421,7 +421,7 @@ fn selected_contents<'a>(
         needed: false,
     };
     for entry in &manifest.entries {
-        let needed = !crate::pack_native::holds_entry(segments, entry)?;
+        let needed = !published.holds_entry(entry)?;
         let item = selected
             .entry(entry.blake3.clone())
             .or_insert_with(|| blank(entry.bytes));

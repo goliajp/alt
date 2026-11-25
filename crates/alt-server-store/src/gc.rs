@@ -1,9 +1,81 @@
+use crate::database::Transaction;
 use crate::publication::finish;
-use crate::store::{instance, integer, now, require_admin, snapshot, unsigned};
+use crate::store::{
+    instance, integer, now, repository_authority, require_admin, snapshot, unsigned,
+};
 use crate::{Credential, Error, Result, Store};
-use alt_remote_protocol::{RequestKey, RequestState};
+use alt_remote_protocol::{RequestKey, RequestState, Scope};
+
+/// Ends up to `limit` requests of the repository `scope` whose time to upload ran
+/// out before `time`: what they had reserved is free again. The row of the
+/// repository is locked by the caller, as for every change of its requests.
+fn expire(tx: &mut Transaction<'_>, scope: &Scope, time: u64, limit: u32) -> Result<usize> {
+    let repository = &scope.repository_instance_id;
+    // how many requests have expired decides how the rows are best reached
+    let rows = tx.query_for_values("SELECT epoch,actor_id,request_id,digest,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$4 AND state IN ('receiving','ready') AND expires_at<=$2 ORDER BY expires_at LIMIT $3 FOR UPDATE",&[repository,&integer(time)?,&i64::from(limit),&integer(scope.recovery_epoch)?])?;
+    for row in &rows {
+        let mut scope = scope.clone();
+        scope.recovery_epoch = unsigned(row.get(0))?;
+        let key = RequestKey {
+            scope,
+            actor_id: row.get(1),
+            request_id: row.get(2),
+        };
+        let state = RequestState::Expired { digest: row.get(3) };
+        let reserved = unsigned(row.get(4))?;
+        finish(tx, &key, "expired", &crate::Jsonb::from(&state)?, reserved)?;
+    }
+    Ok(rows.len())
+}
+
+/// the repositories asked for at a time, of those that have a request to end
+const PAGE: i64 = 256;
 
 impl Store {
+    /// Ends the requests whose time to upload ran out, in every repository that
+    /// has one, up to `limit` in each: a request that failed, was given up or lost
+    /// its connection holds what it reserved until then and no longer. Nobody has
+    /// to ask for this; the server does it as it runs. How many were ended.
+    ///
+    /// The repositories are gone through in the order of their names, all of them
+    /// in one round however many they are. One whose requests could not be ended
+    /// is told to `failed`, and the round goes on with the next. A request of an
+    /// epoch before a recovery is not ended: what became of it is not known, and
+    /// it reserves nothing.
+    pub fn expire_requests(
+        &mut self,
+        limit: u32,
+        failed: &mut dyn FnMut(&str, Error),
+    ) -> Result<usize> {
+        let late = "SELECT DISTINCT q.repository FROM alt_requests q JOIN alt_repositories r ON r.id=q.repository AND r.recovery_epoch=q.epoch WHERE q.state IN ('receiving','ready') AND q.expires_at<=floor(extract(epoch FROM clock_timestamp())*1000)::bigint AND q.repository>$1 ORDER BY q.repository LIMIT $2";
+        let (mut ended, mut after) = (0, String::new());
+        loop {
+            let mut tx = self.client.transaction()?;
+            let page = tx.query(late, &[&after, &PAGE])?;
+            tx.commit()?;
+            for row in &page {
+                after = row.get(0);
+                match self.expire_in(&after, limit) {
+                    Ok(count) => ended += count,
+                    Err(error) => failed(&after, error),
+                }
+            }
+            if (page.len() as i64) < PAGE {
+                return Ok(ended);
+            }
+        }
+    }
+
+    fn expire_in(&mut self, repository: &str, limit: u32) -> Result<usize> {
+        let mut tx = self.client.transaction()?;
+        instance(&mut tx, &self.spec, &self.signing_key)?;
+        let authority = repository_authority(&mut tx, &self.spec, repository)?;
+        let time = now(&mut tx)?;
+        let ended = expire(&mut tx, &authority.scope, time, limit)?;
+        tx.commit().map_err(|_| Error::OutcomeUnknown)?;
+        Ok(ended)
+    }
+
     /// Expire requests and reclaim unpinned bytes in bounded batches. Marking
     /// deletion commits before filesystem work; retries retain that marker.
     pub fn collect_orphans(
@@ -33,13 +105,7 @@ impl Store {
         let current = snapshot(&mut tx, &self.spec, repository)?;
         require_admin(&mut tx, &self.spec, admin)?;
         let time = now(&mut tx)?;
-        // how many requests have expired decides how the rows are best reached
-        for row in tx.query_for_values("SELECT epoch,actor_id,request_id,digest,reserved_bytes FROM alt_requests WHERE repository=$1 AND epoch=$4 AND state IN ('receiving','ready') AND expires_at<=$2 ORDER BY expires_at LIMIT $3 FOR UPDATE",&[&repository,&integer(time)?,&i64::from(limit),&integer(current.scope.recovery_epoch)?])? {
-            let mut scope=current.scope.clone(); scope.recovery_epoch=unsigned(row.get(0))?;
-            let key=RequestKey { scope,actor_id:row.get(1),request_id:row.get(2) };
-            let state=RequestState::Expired {digest:row.get(3)};
-            finish(&mut tx,&key,"expired",&crate::Jsonb::from(&state)?,unsigned(row.get(4))?)?;
-        }
+        expire(&mut tx, &current.scope, time, limit)?;
         tx.execute(
             "DELETE FROM alt_pins WHERE repository=$1 AND expires_at<=$2",
             &[&repository, &integer(time)?],

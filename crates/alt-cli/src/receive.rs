@@ -37,19 +37,24 @@
 //! way, as for any object the store holds unreferenced.
 
 mod batch;
+mod kept;
 mod ref_tx;
 pub mod signed;
+mod taken;
+
+pub use taken::{Recorded, Report, busy, take_in};
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use alt_git_codec::{HashAlgo, ObjectId, RawObject};
+use alt_hash::KeyedIdSet;
 use alt_odb::NativeOdb;
 use alt_refs::{RefChange, RefTarget};
 use alt_wire::push::RefUpdate;
 
-use crate::added_commits::{self, Source};
-use crate::held::Held;
+use crate::added_commits::{self, Lineage, Source};
 use crate::native::{Principal, Store};
 use batch::Batch;
 use signed::Checked;
@@ -65,16 +70,27 @@ pub const ATTEMPTS: usize = 4;
 /// order.
 pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
 
-/// Indexes the pack on disk at `path`. Nothing of the store is needed.
-pub fn prepare_pack(path: &std::path::Path) -> Res<PreparedPack> {
-    let indexed = alt_git_pack::index_pack(path, HashAlgo::Sha1, true)?;
+/// The memory a pack took to be indexed, which it keeps for as long as its
+/// objects are read out of it.
+pub type PackMemory = Option<alt_git_pack::Taken<'static>>;
+
+/// Indexes the pack on disk at `path`, which may hold what `limits`
+/// allows. A push is sent thin, its deltas made of objects the server
+/// has: those are read from `bases` and the pack is made whole with
+/// them. Nothing else of the store is needed.
+pub fn prepare_pack(
+    path: &std::path::Path,
+    limits: &alt_git_pack::IndexLimits<'_>,
+    bases: alt_git_pack::Bases<'_>,
+) -> Res<(PreparedPack, PackMemory)> {
+    let indexed = alt_git_pack::index_pack_thin(path, HashAlgo::Sha1, true, limits, Some(bases))?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
     let mut order: Vec<(u64, u32)> = (0..idx.len())
         .map(|i| (idx.offset_at(i).expect("idx in range"), i))
         .collect();
     order.sort_unstable();
-    Ok((ip, order))
+    Ok(((ip, order), indexed.memory))
 }
 
 /// The objects a push may name: those the odb holds and those of its
@@ -86,13 +102,25 @@ pub(crate) struct Objects<'a> {
 
 impl Objects<'_> {
     pub(crate) fn get(&self, oid: &ObjectId) -> Res<Option<RawObject>> {
-        if let Some(held) = self.odb.get(oid)? {
-            return Ok(Some(held));
+        Ok(match (self.odb.get(oid)?, self.pack) {
+            (Some(held), _) => Some(held),
+            (None, Some((ip, _))) => ip.read(oid)?.map(|packed| packed.to_raw()),
+            (None, None) => None,
+        })
+    }
+
+    /// The commit `oid`; `None` for what is not held here, or is no
+    /// commit.
+    pub(crate) fn commit(&self, oid: &ObjectId) -> Res<Option<Arc<Lineage>>> {
+        // one read before is not taken out of the store again: that it
+        // is held here is not known from another repository having it
+        if let Some(kept) = kept::commit(oid)
+            && self.contains(oid)?
+        {
+            return Ok(Some(kept));
         }
-        match self.pack {
-            Some((ip, _)) => Ok(ip.read(oid)?.map(|packed| packed.to_raw())),
-            None => Ok(None),
-        }
+        let commit = Lineage::of(oid, self.get(oid)?.as_ref());
+        Ok(commit.inspect(|commit| kept::keep(oid, commit)))
     }
 
     fn contains(&self, oid: &ObjectId) -> Res<bool> {
@@ -111,6 +139,10 @@ pub struct Push<'a> {
     pub checked: Option<&'a Checked>,
     pub updates: &'a [RefUpdate],
     pub principal: &'a Principal,
+    /// Whom the request signed in as, where a signature names another: the
+    /// push is held to what both may do. A signature tells who pushes, and
+    /// takes nothing off what the account it came in by is held to.
+    pub signed_in: Option<&'a Principal>,
     pub sig_label: &'a str,
 }
 
@@ -123,6 +155,9 @@ pub enum Landed {
     Unpack(String),
     /// every command is refused with this; nothing of the push is left
     Refused(String),
+    /// the ref transaction is in the log, where whoever reads the refs
+    /// sees them moved, and the push could not be made durable for this
+    Unsynced(String),
 }
 
 /// Where a push is on its way in.
@@ -146,13 +181,14 @@ fn vet(
     odb: &NativeOdb,
     push: &Push<'_>,
     served: &[ObjectId],
-) -> Res<Result<HashSet<ObjectId>, String>> {
+) -> Res<Result<KeyedIdSet<ObjectId>, String>> {
     let objects = Objects {
         odb,
         pack: push.pack,
     };
     let new: Vec<ObjectId> = push.updates.iter().filter_map(|u| u.new).collect();
     let get = |oid: &ObjectId| objects.get(oid);
+    let commit = |oid: &ObjectId| objects.commit(oid);
     let holds = |oid: &ObjectId| objects.contains(oid);
     let had = |oid: &ObjectId| -> Res<bool> { Ok(odb.contains(oid)?) };
     let fails = |oid: &ObjectId| match push.checked {
@@ -161,6 +197,7 @@ fn vet(
     };
     let source = Source {
         get: &get,
+        commit: &commit,
         holds: &holds,
         had: &had,
         fails: &fails,
@@ -205,7 +242,9 @@ fn attempt(
         if changes.iter().any(|c| now.get(&c.name) != c.old.as_ref()) {
             return Ok(());
         }
-        let pointed: HashSet<&ObjectId> = now.values().filter_map(oid).collect();
+        let mut pointed: KeyedIdSet<&ObjectId> = KeyedIdSet::default();
+        pointed.reserve(now.len());
+        pointed.extend(now.values().filter_map(oid));
         if added.is_some() && served.iter().all(|oid| pointed.contains(oid)) {
             return Ok(());
         }
@@ -224,7 +263,7 @@ fn attempt(
     let finished = stored.and_then(|()| tx.finish(refs, op).map_err(|e| e.to_string()));
     Ok(Some(match finished {
         Ok(()) => Landed::Moved,
-        Err(e) => Landed::Refused(format!("durability: {e}")),
+        Err(e) => Landed::Unsynced(e),
     }))
 }
 
@@ -236,7 +275,10 @@ pub fn land(store: &mut Store, push: &Push<'_>) -> Res<Landed> {
 
 /// [`land`], with `observe` called at each [`Step`] it comes to.
 pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step)) -> Res<Landed> {
-    let tx = ref_tx::Tx::new(store.capabilities_for(push.principal), push);
+    let held_to = [Some(push.principal), push.signed_in];
+    let caps = held_to.into_iter().flatten();
+    let caps = caps.map(|principal| store.capabilities_for(principal));
+    let tx = ref_tx::Tx::new(caps.collect(), push);
     if let Err(denied) = tx.names_allowed() {
         return Ok(Landed::Refused(format!("ref tx: {denied}")));
     }
@@ -248,53 +290,4 @@ pub fn land_observed(store: &mut Store, push: &Push<'_>, observe: &dyn Fn(Step))
     Ok(Landed::Refused(
         "the refs moved while the push was looked at: push again".into(),
     ))
-}
-
-/// How the unpack went and, when the refs moved, what `moved` gave (none
-/// for a push of no commands); otherwise the reason every command is
-/// refused with.
-pub type Report<T> = (Result<(), String>, Result<Option<T>, String>);
-
-/// Takes in the push of `updates` by `principal` (and how its signature
-/// went) with the pack at `pack`, when it sent one. The pack is indexed
-/// and the signatures of its commits are checked before the store is
-/// taken in hand; `moved` is called with it still in hand.
-pub fn take_in<T>(
-    store: &Held<Store>,
-    pack: Option<&std::path::Path>,
-    updates: &[RefUpdate],
-    (principal, sig_label): &(Principal, &str),
-    moved: impl FnOnce() -> T,
-) -> Res<Report<T>> {
-    // a pack that fails to index is reported as the unpack error
-    let prepared = match pack.map(prepare_pack) {
-        Some(Err(_)) => {
-            let unpack = Err("index-pack: failed to prepare pack".into());
-            return Ok((unpack, Err("pack unpack failed".into())));
-        }
-        Some(Ok(prepared)) => Some(prepared),
-        None => None,
-    };
-    // nothing would name the objects
-    if updates.is_empty() {
-        return Ok((Ok(()), Ok(None)));
-    }
-    let trust = signed::trust_for(&store.take(), principal)?;
-    let checked = match trust {
-        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
-        None => None,
-    };
-    let push = Push {
-        pack: prepared.as_ref(),
-        checked: checked.as_ref(),
-        updates,
-        principal,
-        sig_label,
-    };
-    let mut store = store.take();
-    Ok(match land(&mut store, &push)? {
-        Landed::Moved => (Ok(()), Ok(Some(moved()))),
-        Landed::Unpack(e) => (Err(e), Err("pack unpack failed".into())),
-        Landed::Refused(reason) => (Ok(()), Err(reason)),
-    })
 }

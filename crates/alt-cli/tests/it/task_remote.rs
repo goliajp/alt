@@ -1,13 +1,18 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod adopt;
+mod base;
+mod browser;
 mod changes;
+mod served;
 use alt_crypto::ed25519::SigningKey;
 use alt_json::{Value, json};
 use alt_pg::Client;
-use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode, Limits};
+use alt_remote_protocol::{ActorKind, Attribution, DeploymentMode};
 use alt_repository_service::{Grant, RefSelector};
-use alt_server::{HttpOptions, NativeOptions, StoreFactory};
+use alt_server::{HttpOptions, StoreFactory};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
+use browser::{browser_json, browser_login};
+use served::limits;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -16,37 +21,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-fn limits() -> Limits {
-    Limits {
-        request_bytes: 8 * 1024 * 1024,
-        ref_updates: 100,
-        record_roots: 100,
-        manifest_entries: 10000,
-        graph_objects: 10000,
-        graph_edges: 100000,
-        structured_bytes: 4 * 1024 * 1024,
-        tree_paths: 10000,
-        path_bytes: 4096,
-        walk_steps: 1_000_000,
-        chunk_bytes: 1024 * 1024,
-        object_bytes: 256 * 1024 * 1024,
-        total_bytes: 512 * 1024 * 1024,
-    }
-}
-fn task_limits() -> alt_task_service::TaskLimits {
-    alt_task_service::TaskLimits {
-        objects: 10000,
-        records: 1000,
-        edges: 10000,
-        structured_bytes: 4 * 1024 * 1024,
-        total_bytes: 512 * 1024 * 1024,
-        work_bytes: 4 * 1024 * 1024 * 1024,
-        artifact_bytes: 256 * 1024 * 1024,
-        paths: 10000,
-        path_bytes: 4096,
-        walk_steps: 1_000_000,
-    }
-}
 fn future() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -188,23 +162,7 @@ impl Server {
             connect_timeout: Duration::from_secs(3),
             statement_timeout: Duration::from_secs(10),
         };
-        let options = HttpOptions {
-            connections: 16,
-            workers: 4,
-            header_bytes: 16384,
-            headers: 32,
-            header_timeout: Duration::from_secs(3),
-            body_timeout: Duration::from_secs(15),
-            work_timeout: Duration::from_secs(30),
-            connection_timeout: Duration::from_secs(60),
-            native: NativeOptions {
-                portable: None,
-                task_limits: task_limits(),
-                upload_ttl_ms: 600_000,
-                worker_lease_ms: 60_000,
-                approval_ttl_ms: 300_000,
-            },
-        };
+        let options = served::options();
         let (url, shutdown, thread) =
             Self::start(socket, factory.clone(), options.clone(), browser.clone());
         Self {
@@ -417,12 +375,7 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
     let bw = root.path().join("bob-work");
     std::fs::create_dir(&alice).unwrap();
     ok(&alice, &server.token, &["init", "."]);
-    std::fs::write(alice.join("source.txt"), "base\n").unwrap();
-    std::fs::write(
-        alice.join("gate.sh"),
-        "test -s source.txt\nprintf verified\n",
-    )
-    .unwrap();
+    base::write(&alice);
     ok(&alice, &server.token, &["add", "."]);
     ok(&alice, &server.token, &["commit", "-m", "base"]);
     let baseline_git = root.path().join("baseline-git");
@@ -746,6 +699,23 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
             .contains("+second-client")
     );
     assert_eq!(browser_review["evidence"][0]["accepted"], true);
+    // the page is read while the request is leased to a worker, and takes no
+    // lease of its own: it is the same then, and the lease is as it was
+    let leased = |until: &str| {
+        let lease =
+            format!("UPDATE alt_requests SET worker_lease_until={until} WHERE request_id=$1");
+        let mut config: alt_pg::Config = server.admin_dsn.parse().unwrap();
+        config.set_dbname(&server.database);
+        let mut client = config.connect().unwrap();
+        assert_eq!(client.execute(&lease, &[&final_id]).unwrap(), 1);
+    };
+    leased("floor(extract(epoch FROM clock_timestamp())*1000)::bigint+60000");
+    let (status, while_leased) =
+        browser_json(&server, &format!("{web_base}/review"), &cookie, None, None);
+    assert_eq!(status, 200, "{while_leased}");
+    assert_eq!(while_leased["candidate_id"], browser_review["candidate_id"]);
+    assert_eq!(while_leased["eligible"], true, "{while_leased}");
+    leased("0");
     let mut stale = browser_review["inspected"].clone();
     stale["request_digest"] = json!("0".repeat(64));
     assert_eq!(
@@ -943,104 +913,4 @@ fn two_clients_continue_original_task_revalidate_review_publish_and_export_witho
         )["state"],
         "integrated",
     );
-}
-
-fn browser_request(
-    server: &Server,
-    path: &str,
-    cookie: Option<&str>,
-    csrf: Option<&str>,
-    body: Option<Value>,
-) -> (u16, String, Value) {
-    use std::io::Write;
-    let headers = alt_os::temp::NamedTempFile::new().unwrap();
-    let output = alt_os::temp::NamedTempFile::new().unwrap();
-    let mut command = Command::new("curl");
-    command
-        .args([
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "60",
-            "--dump-header",
-        ])
-        .arg(headers.path())
-        .arg("--output")
-        .arg(output.path())
-        .args(["--write-out", "%{http_code}", "--header"])
-        .arg(format!("Origin: {}", server.url));
-    if let Some(cookie) = cookie {
-        command.arg("--header").arg(format!("Cookie: {cookie}"));
-    }
-    if let Some(csrf) = csrf {
-        command.arg("--header").arg(format!("X-Alt-CSRF: {csrf}"));
-    }
-    if body.is_some() {
-        command.args([
-            "--header",
-            "Content-Type: application/json",
-            "--data-binary",
-            "@-",
-        ]);
-    }
-    let mut child = command
-        .arg(format!("{}{path}", server.url))
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    if let Some(body) = body {
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&alt_json::to_vec(&body).unwrap())
-            .unwrap();
-    } else {
-        drop(child.stdin.take());
-    }
-    let result = child.wait_with_output().unwrap();
-    assert!(
-        result.status.success(),
-        "browser request failed: {}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    (
-        std::str::from_utf8(&result.stdout)
-            .unwrap()
-            .parse()
-            .unwrap(),
-        std::fs::read_to_string(headers.path()).unwrap(),
-        alt_json::from_reader(std::fs::File::open(output.path()).unwrap()).unwrap(),
-    )
-}
-fn browser_login(server: &Server) -> (String, Value) {
-    let (status, headers, value) = browser_request(
-        server,
-        "/web/login",
-        None,
-        None,
-        Some(json!({"login_name":"reviewer","password":"a private browser acceptance password"})),
-    );
-    assert_eq!(status, 200, "{value}");
-    let cookie = headers
-        .lines()
-        .find_map(|line| {
-            line.split_once(':')
-                .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
-                .map(|(_, value)| value.trim().split(';').next().unwrap().to_owned())
-        })
-        .unwrap();
-    (cookie, value)
-}
-fn browser_json(
-    server: &Server,
-    path: &str,
-    cookie: &str,
-    csrf: Option<&str>,
-    body: Option<Value>,
-) -> (u16, Value) {
-    let (status, _, value) = browser_request(server, path, Some(cookie), csrf, body);
-    (status, value)
 }

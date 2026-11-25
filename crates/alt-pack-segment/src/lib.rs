@@ -9,30 +9,53 @@
 
 mod build;
 mod carried;
+mod chosen;
+mod descend;
 mod format;
 mod generation;
 mod ingest;
+mod led;
+mod limits;
+mod mend;
 mod merge;
 mod object;
+mod ordered;
+mod passes;
+mod plain;
+mod reach;
 mod readback;
+mod room;
 mod scan;
 mod search;
 mod select;
 mod send;
 mod set;
+mod settled;
 mod stream;
+mod told;
+mod trees;
+mod wanted;
 
+pub use alt_git_pack::{BASE_FILES, BaseFiles, IndexWork, Memory, SPILL_FILES, Wait};
 pub use build::{Builder, Built, Compress};
-pub use format::{CommitInfo, Record, Segment};
-pub use ingest::{Ingested, Limits, ingest, ingest_holding};
-pub use merge::merge;
+pub use format::{CommitInfo, Delta, Record, Segment};
+pub use ingest::{Ingested, ingest, ingest_holding, ingest_led, ingest_while_waited_for};
+pub use led::Led;
+pub use limits::Limits;
+pub use mend::{indexed_anew, unread, unread_holding, unread_telling};
+pub use merge::{merge, stands_on};
 pub use readback::UNREADABLE;
+pub use room::least_memory;
+pub use room::{DELTA_BYTES, ENTRY_BYTES};
 pub use select::Selection;
 pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
 pub use stream::ObjectStream;
 
 pub type Oid = [u8; 20];
+/// Tables keyed by ids a peer chooses.
+pub(crate) type OidMap<V> = alt_hash::KeyedIdMap<Oid, V>;
+pub(crate) type OidSet = alt_hash::KeyedIdSet<Oid>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -78,6 +101,11 @@ pub enum Error {
     MissingBase(Oid),
     Corrupt(&'static str),
     NotFound(Oid),
+    /// what the pack needs is taken by others, and was not given back in the time
+    /// the pack had to wait
+    Busy(&'static str),
+    /// whoever asked for the pack waits for it no longer
+    GivenUp,
 }
 
 impl std::fmt::Display for Error {
@@ -95,6 +123,8 @@ impl std::fmt::Display for Error {
             Self::MissingBase(v) => write!(f, "delta base {} is not available", hex(v)),
             Self::Corrupt(v) => write!(f, "segment corrupt: {v}"),
             Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
+            Self::Busy(v) => write!(f, "pack waits: {v}"),
+            Self::GivenUp => f.write_str("pack given up"),
         }
     }
 }
@@ -111,6 +141,19 @@ impl std::error::Error for Error {
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
+    }
+}
+
+impl From<alt_git_pack::PackError> for Error {
+    fn from(error: alt_git_pack::PackError) -> Self {
+        use alt_git_pack::PackError;
+        match error {
+            PackError::Io(error) => Self::Io(error),
+            PackError::Limit(what) => Self::Limit(what),
+            PackError::Format(_) => Self::Format("delta instructions"),
+            PackError::Busy(what) => Self::Busy(what),
+            PackError::GivenUp => Self::GivenUp,
+        }
     }
 }
 

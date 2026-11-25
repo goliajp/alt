@@ -11,7 +11,8 @@ use crate::lock::{lock_shared, unlock};
 use crate::read::{read_at, unfinished};
 use crate::scan::{BODY_FIXED_LEN, CHECKSUM_LEN, ends_the_log, parse_body, replay_records};
 use crate::synced::{self, Marker};
-use crate::{Op, OpId, OpLog, OpLogError, ROOT};
+use crate::v1::OpLog;
+use crate::{Op, OpId, OpLogError, ROOT};
 
 /// Bytes a writer cut off the end of the log.
 #[derive(Debug, Clone, PartialEq, Eq)]

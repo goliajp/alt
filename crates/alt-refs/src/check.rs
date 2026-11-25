@@ -34,6 +34,7 @@ impl RefStore {
     /// damaged record before that point, or a snapshot that says something
     /// the log does not.
     pub fn check(&self) -> Result<RefsChecked, RefError> {
+        self.oplog.verify()?;
         let ops = self.oplog.ops()?;
         // ops another writer appended that are not folded into `refs` yet
         let unapplied = self.oplog.recent().len() - self.applied;

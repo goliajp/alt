@@ -255,6 +255,30 @@ fn a_server_of_many_serves_what_lies_right_under_its_root_and_tells_no_path() {
             "{name}: {refused}"
         );
     }
+    // a directory of the root with no repository of its own is refused
+    // before any repository is looked for
     let logged = many.drain_stderr();
-    assert!(logged.contains("one above it is not served"), "{logged}");
+    assert!(
+        logged.contains("repo 'plain' not found under server root"),
+        "{logged}"
+    );
+    // a server of one repository named by a directory inside another
+    // does not start on the one above it: the directory has no store of
+    // its own to open
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_altd-server"));
+    cmd.args(["--bind", "127.0.0.1:0"])
+        .env("ALT_SERVER_REPO", root.join("plain/deeper"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    let mut said = String::new();
+    let mut stderr = std::io::BufReader::new(child.stderr.take().unwrap());
+    while std::io::BufRead::read_line(&mut stderr, &mut said).unwrap() != 0 {
+        if said.contains("listening on ") {
+            let _ = child.kill();
+            panic!("the server started: {said}");
+        }
+    }
+    assert!(!child.wait().unwrap().success(), "{said}");
+    assert!(said.contains("opening repo: "), "{said}");
 }

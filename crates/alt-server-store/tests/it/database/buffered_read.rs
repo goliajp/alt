@@ -291,7 +291,7 @@ fn metadata_responses_discard_results_after_authority_changes() {
                     }
                     "credential" => {
                         client
-                            .execute("UPDATE alt_credentials SET revoked=true", &[])
+                            .execute("UPDATE alt_credentials SET revoked=true,revoked_at=0", &[])
                             .unwrap();
                     }
                     "credential-expiry" => {

@@ -1,6 +1,5 @@
 //! One request from its route to its response: authority, body, execution.
 use super::*;
-use alt_server_store::{Credential, PackView};
 
 pub(super) fn key(route: &Route) -> Option<RequestKey> {
     match route {
@@ -15,6 +14,7 @@ pub(super) async fn handle(
     request: Request,
     state: Arc<App>,
     route: Option<Route>,
+    from: std::net::IpAddr,
 ) -> Response<ResponseBody> {
     let Some(route) = route else {
         return unknown();
@@ -86,13 +86,18 @@ pub(super) async fn handle(
     let prepared = tokio::time::timeout(
         state.options.work_timeout,
         spawn_observed(Phase::Authority, move || {
-            let (credential, size, view) =
-                prepare(&factory, &selected_route, &selected_options, &request_token)?;
-            Ok::<_, Error>((credential, permit, size, view))
+            // the worker is given back before the body is received
+            let _permit = permit;
+            work::prepare(&factory, &selected_route, &selected_options, &request_token)
         }),
     )
     .await;
-    let (credential, permit, size, view) = match prepared {
+    let work::Prepared {
+        credential,
+        caller,
+        size,
+        view,
+    } = match prepared {
         Ok(Ok(Ok(value))) => value,
         Ok(Ok(Err(error))) => return store_failure(error, request_key),
         _ => {
@@ -105,27 +110,14 @@ pub(super) async fn handle(
             );
         }
     };
-    if let Some(length) = request.headers().get(header::CONTENT_LENGTH) {
-        let declared = length.to_str().ok().and_then(|s| s.parse::<u64>().ok());
-        if declared.is_none_or(|n| n > size) {
-            return failure(
-                413,
-                ErrorCode::QuotaExceeded,
-                "Request body exceeds the selected bound",
-                request_key,
-                Retry::Never,
-            );
-        }
-    }
-    let source =
-        tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), size)).await;
-    let mut source = match source {
-        Ok(Ok(source)) => source,
-        Ok(Err(error)) => return body_failure(Some(error), request_key),
-        Err(_) => return body_failure(None, request_key),
+    let received = receiving::receive(&state, request, &caller, size, &request_key);
+    let (mut source, permit) = match received.await {
+        Ok(received) => received,
+        Err(refusal) => return *refusal,
     };
     let factory = state.factory.clone();
-    let work = Work {
+    let waiting = crate::git::Waiting::default();
+    let work = work::Work {
         factory: factory.clone(),
         credential,
         token,
@@ -134,6 +126,15 @@ pub(super) async fn handle(
         compaction: state.compaction.clone(),
         protocol_v2,
         view,
+        // half the time the answer is waited for: a push that waited in vain is
+        // told so while whoever sent it still listens
+        verifying: crate::git::Verifying {
+            memory: state.options.verifying,
+            by: std::time::Instant::now() + state.options.work_timeout / 2,
+            given_up: waiting.0.clone(),
+            files: state.options.base_files,
+            sending: (state.options.sending.clone(), alt_shares::address(from)),
+        },
     };
     let result = tokio::time::timeout(
         state.options.work_timeout,
@@ -220,166 +221,4 @@ fn unsupported_media(route: &Route, headers: &HeaderMap, gzip: bool) -> Option<&
         return Some("This endpoint requires application/json");
     }
     None
-}
-/// Authenticates the caller for the route and bounds the body it may send. A Git
-/// request gets its repository view from the same statement.
-fn prepare(
-    factory: &pool::Pool,
-    route: &Route,
-    options: &NativeOptions,
-    token: &str,
-) -> alt_server_store::Result<(Credential, u64, Option<PackView>)> {
-    let mut store = factory.open()?;
-    let (credential, view) = match route {
-        Route::GitReceive(repository)
-        | Route::GitUpload(repository)
-        | Route::GitAdvertise(repository, _) => {
-            let (credential, view) =
-                factory.git_open(&mut store, token, repository, crate::git::ref_filter(route))?;
-            (credential, Some(view))
-        }
-        _ => (factory.authenticate(&mut store, token)?, None),
-    };
-    let size = match route {
-        Route::ChangeLink(route) => {
-            crate::change_links::api::request_bytes(&mut store, &credential, route)?
-        }
-        Route::Portable(route) => {
-            crate::portable::request_bytes(&mut store, &credential, options, route)?
-        }
-        Route::IssueAgent => 16_384,
-        Route::GitReceive(_) => {
-            if !view.as_ref().is_some_and(|view| view.writable) {
-                return Err(Error::Unauthorized);
-            }
-            store
-                .limits()
-                .total_bytes
-                .checked_add(store.limits().request_bytes as u64)
-                .ok_or(Error::Limit("Git body bytes"))?
-        }
-        Route::GitUpload(_) => store.limits().request_bytes as u64,
-        Route::GitAdvertise(..) => 0,
-        Route::Request(key, RequestAction::Upload(digest)) => {
-            let entries = store.selected_upload(&credential, key, digest)?;
-            entries[0].bytes
-        }
-        Route::Request(key, RequestAction::UploadChunk(digest)) => {
-            store.selected_chunk(&credential, key, digest)?
-        }
-        Route::Begin(scope) => {
-            let info = store.repository_info(&credential, &scope.repository_instance_id)?;
-            if info.scope != *scope {
-                return Err(Error::Unauthorized);
-            }
-            store.limits().request_bytes as u64
-        }
-        Route::Request(_, RequestAction::Approve) => store.limits().request_bytes as u64,
-        _ => 0,
-    };
-    Ok((credential, size, view))
-}
-/// what the execution of an authorized request needs besides its body
-struct Work {
-    factory: pool::Pool,
-    credential: Credential,
-    token: String,
-    options: NativeOptions,
-    metrics: Arc<alt_server_telemetry::Metrics>,
-    compaction: crate::compaction::Compaction,
-    protocol_v2: bool,
-    view: Option<PackView>,
-}
-impl Work {
-    fn run(
-        self,
-        store: &mut Store,
-        route: Route,
-        source: &mut std::fs::File,
-    ) -> alt_server_store::Result<Output> {
-        match route {
-            Route::Metrics => observation::metrics(store, &self.credential, &self.metrics),
-            Route::ChangeLink(route) => {
-                let current = self.factory.authenticate(store, &self.token)?;
-                crate::change_links::api::execute(
-                    store,
-                    &current,
-                    &self.factory.change_links,
-                    route,
-                    source,
-                )
-            }
-            Route::Portable(route) => {
-                let current = self.factory.authenticate(store, &self.token)?;
-                crate::portable::execute(
-                    store,
-                    &current,
-                    &self.options,
-                    route,
-                    source,
-                    &mut |store| self.factory.authenticate(store, &self.token),
-                )
-            }
-            Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
-                let pushed = match &route {
-                    Route::GitReceive(repository) => Some(repository.clone()),
-                    _ => None,
-                };
-                let output = crate::git::execute_git_with_cache(
-                    store,
-                    &self.credential,
-                    route,
-                    self.protocol_v2,
-                    source,
-                    self.view.ok_or(Error::Integrity("Git repository view"))?,
-                )?;
-                if let Some(repository) = pushed {
-                    self.compaction.published(&repository);
-                }
-                Ok(output)
-            }
-            _ => {
-                // a native publication stores its Git objects as a segment too
-                let published = match &route {
-                    Route::Request(key, _) => Some(key.scope.repository_instance_id.clone()),
-                    _ => None,
-                };
-                let output = execute_native(store, &self.credential, &self.options, route, source)?;
-                if let Some(repository) = published {
-                    self.compaction.published(&repository);
-                }
-                Ok(output)
-            }
-        }
-    }
-}
-/// the response to a body that could not be received; no error means it ran out of time
-fn body_failure(error: Option<BodyError>, key: Option<RequestKey>) -> Response<ResponseBody> {
-    let (status, code, message, retry) = match error {
-        Some(BodyError::Limit) => (
-            413,
-            ErrorCode::QuotaExceeded,
-            "Request body exceeds the selected bound",
-            Retry::Never,
-        ),
-        Some(BodyError::Storage) => (
-            503,
-            ErrorCode::TemporarilyUnavailable,
-            "Request storage is temporarily unavailable",
-            Retry::SameRequest,
-        ),
-        Some(BodyError::Malformed) => (
-            400,
-            ErrorCode::InvalidRequest,
-            "Request body is incomplete or contains unsupported trailers",
-            Retry::SameRequest,
-        ),
-        None => (
-            408,
-            ErrorCode::TemporarilyUnavailable,
-            "Request body deadline exceeded",
-            Retry::SameRequest,
-        ),
-    };
-    failure(status, code, message, key, retry)
 }

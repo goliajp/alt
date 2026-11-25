@@ -1,12 +1,16 @@
 use crate::Jsonb;
-use crate::requests::{active, check_key, request_row, upload_request_row, upload_selection};
+use crate::requests::{active, check_key, upload_selection};
 use crate::store::{authorize, credential_row, instance, integer, now, snapshot, unsigned};
-use crate::{Credential, Error, InstanceSpec, PublicationWork, Result, Store};
-use alt_remote_protocol::{ContentEntry, Manifest, Publication, RequestKey, Scope};
+use crate::{Credential, Error, PublicationWork, Result, Store, reading};
+use alt_remote_protocol::{ContentEntry, Publication, RequestKey, Scope};
+
+mod git_content;
+pub(crate) use git_content::{Led, segment_content};
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
+
 impl Store {
-    pub fn published_records(
+    pub(crate) fn published_records_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -24,9 +28,9 @@ impl Store {
             .as_str()
             .ok_or(Error::Integrity("record kind"))?
             .to_owned();
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
+        let (spec, signing) = (&self.spec, &self.signing_key);
+        let current = reading::open(&mut tx, spec, signing, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
@@ -36,83 +40,18 @@ impl Store {
         tx.commit()?;
         Ok(records)
     }
-    /// A current reviewer inspects the exact selected pending publication.
-    /// The response is received history plus present refs, not approval.
-    pub fn review_selection(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-    ) -> Result<ReviewSelection> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (row, current) = review_request(&mut tx, &self.spec, credential, key)?;
-        let (collector_generation, _) =
-            crate::tasks::collector_policy(&mut tx, &key.scope.repository_instance_id)?;
-        let result = ReviewSelection {
-            publication: row.get::<_, Jsonb>("publication").read()?,
-            manifest: row.get::<_, Jsonb>("manifest").read()?,
-            current_refs: current
-                .refs
-                .into_iter()
-                .map(|(name, oid)| (name, oid.to_string()))
-                .collect(),
-            policy_version: current.policy_version.to_string(),
-            runtime_generation: self.spec.runtime_generation.to_string(),
-            collector_generation: collector_generation.to_string(),
-            revocation_generation: current.revocation_generation.to_string(),
-        };
-        tx.commit()?;
-        Ok(result)
-    }
-    pub fn open_review_content(
-        &mut self,
-        credential: &Credential,
-        key: &RequestKey,
-        digest: &str,
-    ) -> Result<(u64, crate::StoredReader)> {
-        alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (row, _) = review_request(&mut tx, &self.spec, credential, key)?;
-        let manifest: Manifest = row.get::<_, Jsonb>("manifest").read()?;
-        let entry = manifest
-            .entries
-            .iter()
-            .find(|entry| entry.blake3 == digest)
-            .ok_or(Error::Unauthorized)?;
-        let time = integer(now(&mut tx)?)?;
-        if tx.query_opt("SELECT 1 FROM alt_pins p JOIN alt_blobs b ON b.repository=p.repository AND b.blake3=p.blake3 WHERE p.repository=$1 AND p.pin_id=$2 AND p.blake3=$3 AND p.expires_at>$4 AND b.state='stored' AND b.bytes=$5", &[&key.scope.repository_instance_id,&crate::requests::upload_pin(key),&digest,&time,&integer(entry.bytes)?])?.is_none() {
-            // a selected Git object that was published earlier was not uploaded again
-            let entry = entry.clone();
-            tx.commit()?;
-            let segments = self.published_segments(&key.scope.repository_instance_id)?;
-            if crate::pack_native::holds_entry(&segments, &entry)?
-                && let Some(content) = segment_content(&segments, digest)?
-            {
-                return Ok(content);
-            }
-            return Err(Error::Precondition("review content pin expired"));
-        }
-        let location =
-            crate::segments::location(&mut tx, &key.scope.repository_instance_id, digest)?;
-        let file = self
-            .bytes
-            .read_payload(&key.scope, digest, entry.bytes, location.as_ref())?;
-        tx.commit()?;
-        Ok((entry.bytes, file))
-    }
     /// Early admission for Git receive-pack before reading a potentially large
     /// body. Exact per-ref/path/force checks still occur at publication.
-    pub fn check_git_receive_access(
+    pub(crate) fn check_git_receive_access_once(
         &mut self,
         credential: &Credential,
         repository: &str,
     ) -> Result<()> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let current = reading::snapshot(&mut tx, &self.spec, repository)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         if !current.writes_enabled
             || !auth
@@ -146,16 +85,15 @@ impl Store {
         tx.commit()?;
         Ok(value)
     }
-    pub fn repository_info(
+    pub(crate) fn repository_info_once(
         &mut self,
         credential: &Credential,
         repository: &str,
     ) -> Result<RepositoryInfo> {
-        let mut tx = self.client.transaction()?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         // only row locks are taken; nothing here needs a synchronous flush
         tx.execute("SET LOCAL synchronous_commit=off", &[])?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, repository)?;
+        let current = reading::open(&mut tx, &self.spec, &self.signing_key, repository)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         let result = RepositoryInfo {
             scope: current.scope,
@@ -224,19 +162,19 @@ impl Store {
         Ok(self.selected_upload_state(credential, key, digest)?.0)
     }
     /// the selected entries, and whether the request already has their content
-    pub(crate) fn selected_upload_state(
+    pub(crate) fn selected_upload_state_once(
         &mut self,
         credential: &Credential,
         key: &RequestKey,
         digest: &str,
     ) -> Result<(Vec<ContentEntry>, bool)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &key.scope.repository_instance_id)?;
         let auth = authorize(&mut tx, &self.spec, credential, &current)?;
         check_key(key, &current.scope, &auth.actor_id)?;
-        let row = upload_request_row(&mut tx, key)?.ok_or(Error::Unauthorized)?;
+        let row = reading::upload_request(&mut tx, key)?.ok_or(Error::Unauthorized)?;
         active(&row, now(&mut tx)?)?;
         let publication: Publication = row.get::<_, Jsonb>("publication").read()?;
         alt_repository_service::authorize_intent(
@@ -271,30 +209,32 @@ impl Store {
             crate::tasks::reviewer(&mut tx, &self.spec, credential, &current)?;
         }
         crate::publication::worker(&mut tx, work)?;
-        tx.execute("UPDATE alt_requests SET worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND fence=$5", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(work.fence)?])?;
+        tx.execute("UPDATE alt_requests SET worker_lease_until=0 WHERE repository=$1 AND epoch=$2 AND actor_id=$3 AND request_id=$4 AND fence=$5", &[&work.key.scope.repository_instance_id,&integer(work.key.scope.recovery_epoch)?,&work.key.actor_id,&work.key.request_id,&integer(work.fence.ok_or(Error::Precondition("stale publication worker"))?)?])?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)?;
         Ok(())
     }
     /// Download a permanently published raw payload, never a digest guessed
-    /// from another request's temporary upload. Open the descriptor under the
-    /// same repository lock used by GC; later unlink cannot invalidate it.
-    pub fn open_published_content(
+    /// from another request's temporary upload. The file is opened where the
+    /// view of this read places the payload, with no lock against the segment
+    /// being removed meanwhile: a file that is gone has the read begun again.
+    pub(crate) fn open_published_content_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
         digest: &str,
+        led: (Led, Option<&std::sync::atomic::AtomicBool>),
     ) -> Result<(u64, crate::StoredReader)> {
         alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
-        let mut tx = self.client.transaction()?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
         }
         let Some(row) = tx.query_opt("SELECT b.bytes FROM alt_blobs b WHERE b.repository=$1 AND b.blake3=$2 AND b.state='stored' AND EXISTS(SELECT 1 FROM alt_pins p WHERE p.repository=b.repository AND p.blake3=b.blake3 AND p.expires_at IS NULL)", &[&scope.repository_instance_id,&digest])? else {
             tx.commit()?;
-            return self.open_published_git_content(credential, scope, digest);
+            return self.open_published_git_content(credential, scope, digest, led);
         };
         let size = unsigned(row.get(0))?;
         let location = crate::segments::location(&mut tx, &scope.repository_instance_id, digest)?;
@@ -304,24 +244,10 @@ impl Store {
         tx.commit()?;
         Ok((size, file))
     }
-    /// A published Git object by the digest of its content. Git objects live in the
-    /// pack segments, whichever protocol brought them in.
-    fn open_published_git_content(
-        &mut self,
-        credential: &Credential,
-        scope: &Scope,
-        digest: &str,
-    ) -> Result<(u64, crate::StoredReader)> {
-        let view = self.pack_view(credential, &scope.repository_instance_id)?;
-        if &view.scope != scope {
-            return Err(Error::Unauthorized);
-        }
-        segment_content(&view.segments, digest)?.ok_or(Error::Unauthorized)
-    }
     /// Select published task bundles by any selected immutable record. Original manifest,
     /// publication and receipt are retained; a receiving client never invents
     /// a local request completion for the originating workspace.
-    pub fn bundles_for_record(
+    pub(crate) fn bundles_for_record_once(
         &mut self,
         credential: &Credential,
         scope: &Scope,
@@ -336,9 +262,9 @@ impl Store {
         if let Some(digest) = after_digest {
             alt_task::check_id(digest).map_err(|_| Error::Unauthorized)?;
         }
-        let mut tx = self.client.transaction()?;
+        let mut tx = reading::transaction(&mut self.client, &self.spec)?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
-        let current = snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
+        let current = reading::snapshot(&mut tx, &self.spec, &scope.repository_instance_id)?;
         authorize(&mut tx, &self.spec, credential, &current)?;
         if &current.scope != scope {
             return Err(Error::Unauthorized);
@@ -380,43 +306,4 @@ impl Store {
         tx.commit()?;
         Ok(result)
     }
-}
-fn review_request(
-    tx: &mut crate::database::Transaction<'_>,
-    spec: &InstanceSpec,
-    credential: &Credential,
-    key: &RequestKey,
-) -> Result<(alt_pg::Row, alt_repository_service::RepositorySnapshot)> {
-    key.validate()?;
-    let current = snapshot(tx, spec, &key.scope.repository_instance_id)?;
-    crate::tasks::reviewer(tx, spec, credential, &current)?;
-    if current.scope != key.scope {
-        return Err(Error::Unauthorized);
-    }
-    let row = request_row(tx, key)?.ok_or(Error::Unauthorized)?;
-    active(&row, now(tx)?)?;
-    if row.get::<_, String>("state") != "ready" {
-        return Err(Error::Precondition("publication not ready for review"));
-    }
-    Ok((row, current))
-}
-
-/// The object whose content has this digest, inflated into an unnamed temporary file
-/// as it is read from its segment.
-fn segment_content(
-    segments: &alt_pack_segment::SegmentSet,
-    digest: &str,
-) -> Result<Option<(u64, crate::StoredReader)>> {
-    let key = alt_provenance::decode_hex::<32>(digest).map_err(|_| Error::Unauthorized)?;
-    let Some((_, _, size, mut stream)) = segments
-        .open_blake3(&key)
-        .map_err(|_| Error::Integrity("published object bytes"))?
-    else {
-        return Ok(None);
-    };
-    let mut file = alt_os::temp::tempfile()?;
-    if std::io::copy(&mut stream, &mut file)? != size {
-        return Err(Error::Integrity("published object bytes"));
-    }
-    Ok(Some((size, crate::StoredReader::from_file(file, size)?)))
 }

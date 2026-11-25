@@ -19,22 +19,51 @@ macro_rules! receipt_sql {
         "jsonb_set(q.result->'receipt','{body,publication}',q.publication)"
     };
 }
-/// The event outbox row `o` stands for, which is what its audit record holds. It is
-/// null when the request the row names is not there.
+/// The event outbox row `o` stands for, which is what its audit record holds. The
+/// publication is read from the request the row names, and from the audit record
+/// once that request was kept its time and removed.
 macro_rules! outbox_event_sql {
     () => {
-        "CASE WHEN o.event ? 'request' THEN (SELECT jsonb_build_object('kind',o.event->'kind','receipt',jsonb_set(o.event->'receipt','{body,publication}',q.publication)) FROM alt_requests q WHERE q.repository=o.repository AND q.epoch=(o.event#>>'{request,scope,recovery_epoch}')::bigint AND q.actor_id=o.event#>>'{request,actor_id}' AND q.request_id=o.event#>>'{request,request_id}') ELSE o.event END"
+        "CASE WHEN o.event ? 'request' THEN COALESCE((SELECT jsonb_build_object('kind',o.event->'kind','receipt',jsonb_set(o.event->'receipt','{body,publication}',q.publication)) FROM alt_requests q WHERE q.repository=o.repository AND q.epoch=(o.event#>>'{request,scope,recovery_epoch}')::bigint AND q.actor_id=o.event#>>'{request,actor_id}' AND q.request_id=o.event#>>'{request,request_id}'),(SELECT a.event FROM alt_audit a WHERE a.repository=o.repository AND a.sequence=o.sequence)) ELSE o.event END"
     };
 }
 pub(crate) use {outbox_event_sql, receipt_sql, state_sql};
 
+macro_rules! request_sql {
+    () => {
+        concat!(
+            "SELECT q.*,",
+            state_sql!(),
+            " AS outcome FROM alt_requests q WHERE q.repository=$1 AND q.epoch=$2 AND q.actor_id=$3 AND q.request_id=$4"
+        )
+    };
+}
+
 /// The row of a request, with its state as the protocol has it in `outcome`: `result`
-/// alone is not that state once the request is committed.
+/// alone is not that state once the request is committed. The row is locked: the
+/// request is not changed by another until the transaction is over.
 pub(crate) fn request_row(
     tx: &mut Transaction<'_>,
     key: &RequestKey,
 ) -> Result<Option<alt_pg::Row>> {
-    Ok(tx.query_opt(concat!("SELECT q.*,", state_sql!(), " AS outcome FROM alt_requests q WHERE q.repository=$1 AND q.epoch=$2 AND q.actor_id=$3 AND q.request_id=$4 FOR UPDATE"),&[&key.scope.repository_instance_id,&integer(key.scope.recovery_epoch)?,&key.actor_id,&key.request_id])?)
+    let epoch = integer(key.scope.recovery_epoch)?;
+    let scope = &key.scope.repository_instance_id;
+    let key: [&(dyn alt_pg::ToSql + Sync); 4] = [scope, &epoch, &key.actor_id, &key.request_id];
+    Ok(tx.query_opt(concat!(request_sql!(), " FOR UPDATE"), &key)?)
+}
+
+/// The row [`request_row`] gives, as the transaction sees it and without a lock on
+/// it: for one that only tells what a request came to. Under the one view of a
+/// read a lock would fail where the request was changed since the read began, and
+/// the caller who asks what became of a request would be told that nobody knows.
+pub(crate) fn request_seen(
+    tx: &mut Transaction<'_>,
+    key: &RequestKey,
+) -> Result<Option<alt_pg::Row>> {
+    let epoch = integer(key.scope.recovery_epoch)?;
+    let scope = &key.scope.repository_instance_id;
+    let key: [&(dyn alt_pg::ToSql + Sync); 4] = [scope, &epoch, &key.actor_id, &key.request_id];
+    Ok(tx.query_opt(request_sql!(), &key)?)
 }
 
 /// a receipt without its publication, field for field

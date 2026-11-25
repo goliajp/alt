@@ -4,7 +4,7 @@
 use super::*;
 
 /// Posts `body` to the repository's receive-pack; the status and the report.
-fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
+pub(super) fn receive(url: &str, token: &str, body: &[u8]) -> (u16, String) {
     use std::io::Read;
     let response = match ureq::post(&format!("{url}/git-receive-pack"))
         .timeout(Duration::from_secs(15))
@@ -189,4 +189,34 @@ fn a_create_needs_its_object_with_an_empty_pack_or_none() {
         "{listed}"
     );
     assert!(!listed.contains("absent"), "{listed}");
+}
+
+/// Twelve files of nine megabytes of one letter each: a pack of some hundred
+/// kilobytes that inflates to more than a pack may have bytes. What a pack may
+/// inflate to is not what it may weigh.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_that_inflates_to_more_than_a_pack_may_weigh_is_taken() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let url = format!("{}/git/repository", server.url);
+    ok(
+        temp.path(),
+        &f.token,
+        &["init", "-q", "--initial-branch=main"],
+    );
+    identity(temp.path(), &f.token);
+    for n in 0..12u8 {
+        std::fs::write(temp.path().join(format!("{n}")), vec![b'a' + n; 9_000_000]).unwrap();
+    }
+    ok(temp.path(), &f.token, &["add", "."]);
+    ok(temp.path(), &f.token, &["commit", "-qm", "large"]);
+    let commit = text(ok(temp.path(), &f.token, &["rev-parse", "HEAD"]));
+    ok(temp.path(), &f.token, &["push", "-q", &url, "main"]);
+    let listed = text(ok(temp.path(), &f.token, &["ls-remote", "--refs", &url]));
+    assert!(
+        listed.contains(&format!("{commit}\trefs/heads/main")),
+        "{listed}"
+    );
 }

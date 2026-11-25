@@ -61,6 +61,13 @@ fn directory_has_the_permissions_of_a_plain_mkdir() {
     assert_eq!(mode(directory.path()), mode(&parent.path().join("plain")));
 }
 
+fn directory_of_its_owner_alone_is_closed_to_the_others() {
+    let parent = temp::tempdir().unwrap();
+    let mut builder = temp::Builder::new();
+    let directory = builder.owner_only().tempdir_in(parent.path()).unwrap();
+    assert_eq!(mode(directory.path()), 0o700);
+}
+
 fn kept_directory_stays_and_closed_directory_goes() {
     let parent = temp::tempdir().unwrap();
     let kept = temp::tempdir_in(parent.path()).unwrap().keep();
@@ -253,6 +260,7 @@ tests![
     directory_is_removed_with_its_contents_on_drop,
     directory_names_are_random_and_carry_the_prefix,
     directory_has_the_permissions_of_a_plain_mkdir,
+    directory_of_its_owner_alone_is_closed_to_the_others,
     kept_directory_stays_and_closed_directory_goes,
     relative_parent_gives_an_absolute_path,
     missing_parent_is_reported_as_not_found,

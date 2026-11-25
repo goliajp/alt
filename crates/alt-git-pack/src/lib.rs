@@ -11,20 +11,29 @@ mod idx;
 mod index_pack;
 mod ingress;
 mod pack;
+mod read;
 mod representation;
 mod write;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use alt_git_codec::{ObjectId, ObjectKind, RawObject};
+use alt_git_codec::{ObjectKind, RawObject};
 
 use cache::DeltaBaseCache;
 pub use delta_window::DeltaOptions;
 pub use idx::PackIndex;
-pub use index_pack::{IndexedPackOnDisk, index_pack};
+pub use index_pack::{
+    BASE_FILES, BaseFiles, Bases, EACH, IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH,
+    Memory, SPILL_FILES, Taken, Wait, index_pack, index_pack_thin, index_pack_within,
+};
+/// The walk below the bases of a pack, for whoever verifies packs its own way.
+pub mod walk {
+    pub use crate::index_pack::{Budget, Deltas, ObjectMemory, Objects, Of, Walk};
+}
 pub use ingress::*;
 pub use pack::{EntryInfo, EntryKind, Pack};
+pub use read::{HELD_FOR_AN_ENTRY, ReadWork};
 pub use representation::{PlainRepresentation, RepresentationLimits};
 pub use write::{PackWriter, WrittenPack};
 
@@ -33,6 +42,11 @@ pub enum PackError {
     Io(std::io::Error),
     Limit(&'static str),
     Format(&'static str),
+    /// what the pack needs is taken by others, and was not given back in
+    /// the time the pack had to wait
+    Busy(&'static str),
+    /// whoever asked for the pack waits for it no longer
+    GivenUp,
 }
 
 impl std::fmt::Display for PackError {
@@ -41,6 +55,8 @@ impl std::fmt::Display for PackError {
             Self::Io(_) => f.write_str("io"),
             Self::Limit(v) => write!(f, "pack resource limit: {v}"),
             Self::Format(v) => write!(f, "pack format: {v}"),
+            Self::Busy(v) => write!(f, "busy: {v}"),
+            Self::GivenUp => f.write_str("given up"),
         }
     }
 }
@@ -83,6 +99,9 @@ pub struct IndexedPack {
     idx: PackIndex,
     pack: Pack,
     cache: Mutex<DeltaBaseCache>,
+    /// Of the ids the pack holds in several entries, by the place of the
+    /// first of them in the index: the entry a read found the object in.
+    found_in: Mutex<std::collections::HashMap<u32, u64>>,
 }
 
 impl IndexedPack {
@@ -93,6 +112,7 @@ impl IndexedPack {
             idx: PackIndex::open(&idx_path, algo)?,
             pack: Pack::open(pack_path, algo)?,
             cache: Mutex::new(DeltaBaseCache::new(cache::DEFAULT_BUDGET)),
+            found_in: Mutex::default(),
         })
     }
 
@@ -102,57 +122,6 @@ impl IndexedPack {
 
     pub fn pack(&self) -> &Pack {
         &self.pack
-    }
-
-    /// Reads the object `oid` if this pack contains it.
-    pub fn read(&self, oid: &ObjectId) -> Result<Option<PackedObject>, PackError> {
-        match self.idx.lookup(oid) {
-            None => Ok(None),
-            Some(i) => self.read_at(self.idx.offset_at(i)?).map(Some),
-        }
-    }
-
-    /// Reads the object stored at pack offset `offset`, resolving its delta
-    /// chain iteratively (deep chains must not recurse).
-    pub fn read_at(&self, offset: u64) -> Result<PackedObject, PackError> {
-        // walk down the chain until a cached result or a plain entry
-        let mut frames: Vec<(u64, EntryInfo)> = Vec::new();
-        let mut cur = offset;
-        let (kind, mut data) = loop {
-            if let Some(hit) = self.cache.lock().unwrap().get(cur) {
-                break hit;
-            }
-            let info = self.pack.entry_info(cur)?;
-            match info.kind {
-                EntryKind::Plain(kind) => {
-                    let data = Arc::new(self.pack.inflate(info.data_at, info.size)?);
-                    self.cache.lock().unwrap().put(cur, kind, data.clone());
-                    break (kind, data);
-                }
-                EntryKind::OfsDelta { base_at } => {
-                    frames.push((cur, info));
-                    cur = base_at;
-                }
-                EntryKind::RefDelta { base } => {
-                    // on-disk packs are self-contained; thin packs exist only
-                    // on the wire
-                    let i = self
-                        .idx
-                        .lookup(&base)
-                        .ok_or(PackError::Format("ref-delta base not in pack"))?;
-                    frames.push((cur, info));
-                    cur = self.idx.offset_at(i)?;
-                }
-            }
-        };
-        // apply deltas back up, caching every intermediate result
-        for (off, info) in frames.iter().rev() {
-            let raw_delta = self.pack.inflate(info.data_at, info.size)?;
-            let out = Arc::new(delta::apply(&data, &raw_delta)?);
-            self.cache.lock().unwrap().put(*off, kind, out.clone());
-            data = out;
-        }
-        Ok(PackedObject { kind, data })
     }
 }
 

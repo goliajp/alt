@@ -53,12 +53,11 @@ pub fn discover_owned(start: &Path) -> Res<alt_repo::Repository> {
 /// error, which goes to whoever asked, tells nothing of where the
 /// repository is.
 pub fn discover_served(path: &Path) -> Res<alt_repo::Repository> {
-    let hidden = "access denied or repository not exported";
     let repo = match alt_repo::Repository::discover(path) {
         Ok(repo) => repo,
         Err(e) => {
             eprintln!("{e}");
-            return Err(hidden.into());
+            return Err(HIDDEN.into());
         }
     };
     let tree = looked_at(&repo).0;
@@ -67,11 +66,22 @@ pub fn discover_served(path: &Path) -> Res<alt_repo::Repository> {
             "no repository at {}: one above it is not served",
             path.display()
         );
-        return Err(hidden.into());
+        return Err(HIDDEN.into());
     }
-    if !alt_repo::owned::served_safe(&crate::git_settings::var, &repo)? {
-        eprint!("{}", dubious(tree));
-        return Err(hidden.into());
-    }
+    ensure_served(&repo)?;
     Ok(repo)
 }
+
+/// Refuses `repo`, as [`discover_served`] does, where it is another
+/// user's: a server that keeps a repository open asks this again of
+/// every request, as git asks it of every request it serves.
+pub fn ensure_served(repo: &alt_repo::Repository) -> Res<()> {
+    if !alt_repo::owned::served_safe(&crate::git_settings::var, repo)? {
+        eprint!("{}", dubious(looked_at(repo).0));
+        return Err(HIDDEN.into());
+    }
+    Ok(())
+}
+
+/// What a client that asked for a repository that is not served is told.
+const HIDDEN: &str = "access denied or repository not exported";

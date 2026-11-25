@@ -182,3 +182,11 @@ pub(super) fn metrics(
             .map_err(|_| Error::Integrity("metrics encoding"))?,
     })
 }
+
+/// [`spawn_blocking`], with the work counted as a phase of its request.
+pub(crate) fn spawn_observed<T: Send + 'static>(
+    phase: Phase,
+    work: impl FnOnce() -> alt_server_store::Result<T> + Send + 'static,
+) -> tokio::task::JoinHandle<alt_server_store::Result<T>> {
+    spawn_blocking(move || alt_server_store::telemetry::observe(phase, work))
+}

@@ -26,6 +26,8 @@ def main():
     parser.add_argument('--expected-version', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--port', type=int, default=18443)
+    parser.add_argument('--subnet', help='passed to prepare: the network of the edge, where the default is taken on this host')
+    parser.add_argument('--front-proxy', action='store_true', help='passed to prepare')
     args = parser.parse_args()
     bundle = args.bundle.resolve()
     manage = bundle / 'manage.py'
@@ -42,10 +44,20 @@ def main():
         run(['python3', manage, 'load', '--bundle', bundle])
         run(['python3', manage, 'prepare', '--bundle', bundle, '--directory', directory, '--project', project,
              '--origin', 'https://alt.smoke.test', '--https-port', args.port,
-             '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem'])
+             '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem',
+             *(['--subnet', args.subnet] if args.subnet else []), *(['--front-proxy'] if args.front_proxy else [])])
         prepared = True
+        written = dict(line.split('=', 1) for line in (directory / '.env').read_text().splitlines())
+        gateway = written['ALT_GATEWAY']
+        assert written['ALT_SUBNET'] == (args.subnet or '172.30.91.0/24') and written['ALT_FRONT_PROXY'] == (gateway if args.front_proxy else ''), written
+        proxies = json.loads((directory / 'config/config.json').read_text())['http']['trusted_proxies']
+        assert proxies == ['127.0.0.1', '::1', gateway], proxies
+        report['checks'].append('prepare names the edge and its gateway to the application, and a front proxy to the edge only when told of one')
         run(['python3', manage, 'initialize', '--directory', directory])
         report['checks'].append('load, prepare and initialize')
+        network = run(['docker', 'network', 'inspect', project + '_default', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{end}}']).strip()
+        assert network == f'{written["ALT_SUBNET"]} {gateway}', network
+        report['checks'].append('the network of the edge has the subnet and the gateway that were written down')
 
         def operator(*arguments):
             out = run(['python3', manage, 'operator', '--directory', directory, '--', *arguments])

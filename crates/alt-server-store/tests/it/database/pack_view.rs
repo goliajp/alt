@@ -88,3 +88,154 @@ fn a_view_by_tips_holds_the_references_at_the_wanted_objects_and_tells_of_the_ot
         }
     }
 }
+
+/// The scans of `alt_refs` that `asked` causes on a connection of its own, which
+/// reports them as it ends.
+fn reference_scans(f: &Fixture, asked: impl FnOnce(&mut Store)) -> i64 {
+    let mut client = f.client();
+    let scans = "SELECT coalesce(seq_scan,0)+coalesce(idx_scan,0) FROM pg_stat_user_tables WHERE relname='alt_refs'";
+    let backends = "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()";
+    let mut store = f.reopen();
+    let open: i64 = client.query_one(backends, &[]).unwrap().get(0);
+    let before: i64 = client.query_one(scans, &[]).unwrap().get(0);
+    asked(&mut store);
+    drop(store);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while client.query_one(backends, &[]).unwrap().get::<_, i64>(0) != open - 1 {
+        assert!(std::time::Instant::now() < deadline, "the connection stays");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    client.query_one(scans, &[]).unwrap().get::<_, i64>(0) - before
+}
+
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_references_are_not_read_for_a_caller_who_may_not_read_the_repository() {
+    let f = Fixture::new();
+    let oid = "1".repeat(40);
+    f.client()
+        .batch_execute(&format!(
+            "INSERT INTO alt_refs(repository,name,oid) VALUES('repository','refs/heads/a','{oid}');
+             INSERT INTO alt_repositories(id,recovery_epoch,object_format,quota_bytes) VALUES('other',1,'sha1',0);
+             INSERT INTO alt_refs(repository,name,oid) VALUES('other','refs/heads/elsewhere','{oid}')"
+        ))
+        .unwrap();
+    let prefixes = ["refs/".to_owned()];
+    let wants = [oid.clone()];
+    let many: Vec<String> = (0..=ARRAY_TIPS).map(|n| format!("e{n:039x}")).collect();
+    let every_way = |store: &mut Store, token: &str, repository: &str| -> usize {
+        let ways = [
+            RefFilter::All,
+            RefFilter::Bounded,
+            RefFilter::Prefixes(&prefixes),
+            RefFilter::Tips {
+                wants: &wants,
+                tags: true,
+            },
+            RefFilter::Tips {
+                wants: &many,
+                tags: true,
+            },
+        ];
+        let opened = ways.map(|way| store.git_open(token, repository, way));
+        opened.iter().filter(|view| view.is_ok()).count()
+    };
+
+    // who holds a grant has them read, each way
+    let read = reference_scans(&f, |store| {
+        assert_eq!(every_way(store, &f.token, "repository"), 5);
+    });
+    assert!(read >= 5, "{read} scans reported");
+    // a token nobody was given, and one with no grant on the repository asked for
+    let unknown = alt_browser_auth::token();
+    let refused = reference_scans(&f, |store| {
+        assert_eq!(every_way(store, &unknown, "repository"), 0);
+        assert_eq!(every_way(store, &f.token, "other"), 0);
+    });
+    assert_eq!(refused, 0);
+}
+
+/// A token of an agent takes the path that locks the repository's row. There too a
+/// repository the token has no grant on, and any repository once the token is
+/// revoked, has none of its references read.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_references_are_not_read_for_an_agent_that_may_not_read_the_repository() {
+    let mut f = Fixture::new();
+    let oid = "1".repeat(40);
+    f.client()
+        .batch_execute(&format!(
+            "INSERT INTO alt_refs(repository,name,oid) VALUES('repository','refs/heads/main','{oid}');
+             INSERT INTO alt_repositories(id,recovery_epoch,object_format,quota_bytes) VALUES('other',1,'sha1',0);
+             INSERT INTO alt_refs(repository,name,oid) VALUES('other','refs/heads/elsewhere','{oid}')"
+        ))
+        .unwrap();
+    let request = super::delegation::request();
+    let agent = request.access_token.clone();
+    f.store.issue_agent(&f.credential, &request).unwrap();
+
+    let read = reference_scans(&f, |store| {
+        let (_, view) = store
+            .git_open(&agent, "repository", RefFilter::All)
+            .unwrap();
+        assert_eq!(view.refs.len(), 1);
+    });
+    assert!(read >= 1, "{read} scans reported");
+    let elsewhere = reference_scans(&f, |store| {
+        assert!(store.git_open(&agent, "other", RefFilter::All).is_err());
+    });
+    assert_eq!(elsewhere, 0);
+    f.client()
+        .batch_execute("UPDATE alt_credentials SET revoked=true,revoked_at=0 WHERE token_digest IN (SELECT token_digest FROM alt_delegations)")
+        .unwrap();
+    let revoked = reference_scans(&f, |store| {
+        assert!(
+            store
+                .git_open(&agent, "repository", RefFilter::All)
+                .is_err()
+        );
+    });
+    assert_eq!(revoked, 0);
+}
+
+/// A Cloud instance reads for a Git request in a transaction of several
+/// statements. An account that signed in and was granted nothing on the
+/// repository has none of its references read; granted, it has.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_references_are_not_read_for_an_account_of_a_cloud_instance_that_may_not_read_the_repository()
+{
+    let mut f = super::cloud::cloud();
+    f.store
+        .create_repository(&f.credential, "repository", 100_000_000)
+        .unwrap();
+    let oid = "1".repeat(40);
+    let reference =
+        "INSERT INTO alt_refs(repository,name,oid) VALUES('repository','refs/heads/main',$1)";
+    f.client().execute(reference, &[&oid]).unwrap();
+    let token = f.token.clone();
+    let refused = reference_scans(&f, |store| {
+        assert!(
+            store
+                .git_open(&token, "repository", RefFilter::All)
+                .is_err()
+        );
+        let unknown = format!("alt1_{}", "c".repeat(64));
+        assert!(
+            store
+                .git_open(&unknown, "repository", RefFilter::All)
+                .is_err()
+        );
+    });
+    assert_eq!(refused, 0);
+    f.store
+        .set_grants(&f.credential, "repository", "owner", true, true, &grants())
+        .unwrap();
+    let read = reference_scans(&f, |store| {
+        let (_, view) = store
+            .git_open(&token, "repository", RefFilter::All)
+            .unwrap();
+        assert_eq!(view.refs.len(), 1);
+    });
+    assert!(read >= 1, "{read} scans reported");
+}

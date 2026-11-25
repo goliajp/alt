@@ -1,9 +1,21 @@
 //! RFC 8628 token endpoints. Browser consent uses the normal session/CSRF path;
 //! these form endpoints admit only the public CLI client, without cookies.
+mod exchange;
 use super::*;
 use alt_remote_protocol::login::*;
 use alt_server_store::DevicePoll;
+use exchange::{Handover, Leaving, Waiting};
 use std::{collections::BTreeMap, io::Read};
+
+/// what a device is refused with, and the seconds after which to ask again
+/// where that is known
+struct Refused(DeviceError, Option<u64>);
+
+impl From<DeviceError> for Refused {
+    fn from(error: DeviceError) -> Self {
+        Refused(error, None)
+    }
+}
 
 pub(super) fn credential(key: &alt_crypto::ed25519::SigningKey, device_digest: &str) -> String {
     let key = alt_hash::blake3::derive_key("alt device credential v1", &key.to_bytes());
@@ -12,8 +24,9 @@ pub(super) fn credential(key: &alt_crypto::ed25519::SigningKey, device_digest: &
         alt_hash::blake3::keyed_hash(&key, device_digest.as_bytes()).to_hex()
     )
 }
-fn failure(error: DeviceError) -> Response<ResponseBody> {
-    response(
+fn failure(refused: impl Into<Refused>) -> Response<ResponseBody> {
+    let Refused(error, again) = refused.into();
+    let mut output = response(
         if error == DeviceError::TemporarilyUnavailable {
             503
         } else {
@@ -21,7 +34,13 @@ fn failure(error: DeviceError) -> Response<ResponseBody> {
         },
         "application/json",
         full(alt_json::to_vec(&DeviceFailure { error }).expect("device error")),
-    )
+    );
+    if let Some(seconds) = again {
+        output
+            .headers_mut()
+            .insert(header::RETRY_AFTER, seconds.into());
+    }
+    output
 }
 fn form(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceError> {
     let text = std::str::from_utf8(bytes).map_err(|_| DeviceError::InvalidRequest)?;
@@ -39,10 +58,15 @@ fn form(bytes: &[u8]) -> Result<BTreeMap<String, String>, DeviceError> {
     }
     Ok(result)
 }
-fn mapped(error: Error) -> DeviceError {
+fn mapped(error: Error) -> Refused {
     match error {
-        Error::Unauthorized => DeviceError::AccessDenied,
-        _ => DeviceError::TemporarilyUnavailable,
+        Error::Unauthorized => DeviceError::AccessDenied.into(),
+        Error::Attempts(left) => Refused(
+            DeviceError::TemporarilyUnavailable,
+            Some(left.div_ceil(1000)),
+        ),
+        // a transaction that was ended for another is good again at once
+        _ => Refused(DeviceError::TemporarilyUnavailable, Some(1)),
     }
 }
 pub(super) async fn handle(
@@ -99,128 +123,117 @@ async fn inner(
     }
     let starting = request.uri().path() == "/oauth/device/code";
     let revoking = request.uri().path() == "/oauth/revoke";
+    // nobody is known yet: a body that is slow to come keeps no worker waiting
+    let Ok(mut slot) = state.receiving.begin(&receiving::address(peer), 0) else {
+        return failure(DeviceError::TemporarilyUnavailable);
+    };
+    let receipt = body::Receipt::of(&state, Some(&mut slot));
+    let Ok(source) = spool(request.into_body(), 2048, receipt).await else {
+        return failure(DeviceError::InvalidRequest);
+    };
+    drop(slot);
     let permit = match state.workers.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => return failure(DeviceError::TemporarilyUnavailable),
     };
-    let source =
-        match tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), 2048))
-            .await
-        {
-            Ok(Ok(source)) => source,
-            _ => return failure(DeviceError::InvalidRequest),
-        };
     let factory = state.factory.clone();
-    let outcome = tokio::time::timeout(
-        state.options.work_timeout,
-        crate::http::spawn_blocking(move || {
-            let _permit = permit;
-            let mut source = source;
-            source
-                .as_file_mut()
-                .rewind()
-                .map_err(|_| DeviceError::TemporarilyUnavailable)?;
-            let mut bytes = Vec::new();
-            source
-                .as_file_mut()
-                .read_to_end(&mut bytes)
-                .map_err(|_| DeviceError::TemporarilyUnavailable)?;
-            let mut input = form(&bytes)?;
-            if input.remove("client_id").as_deref() != Some(CLI_CLIENT_ID) {
-                return Err(DeviceError::InvalidClient);
+    let waiting = Waiting(Arc::new(Handover::default()));
+    let handover = waiting.0.clone();
+    let mut work = crate::http::spawn_blocking(move || {
+        let _permit = permit;
+        let mut source = source;
+        let unread = |_| DeviceError::TemporarilyUnavailable;
+        source.as_file_mut().rewind().map_err(unread)?;
+        let mut bytes = Vec::new();
+        source
+            .as_file_mut()
+            .read_to_end(&mut bytes)
+            .map_err(unread)?;
+        let mut input = form(&bytes)?;
+        if input.remove("client_id").as_deref() != Some(CLI_CLIENT_ID) {
+            return Err(DeviceError::InvalidClient.into());
+        }
+        let mut store = factory.open().map_err(mapped)?;
+        let bound = store.check_browser_binding(Some(&browser.origin));
+        bound.map_err(mapped)?;
+        if revoking {
+            let token = input.remove("token").ok_or(DeviceError::InvalidRequest)?;
+            let secret = token.strip_prefix("alt1_");
+            if !input.is_empty() || secret.is_none_or(|s| device_secret(s).is_err()) {
+                return Err(DeviceError::InvalidRequest.into());
             }
-            let mut store = factory.open().map_err(mapped)?;
-            store
-                .check_browser_binding(Some(&browser.origin))
-                .map_err(mapped)?;
-            if revoking {
-                let token = input.remove("token").ok_or(DeviceError::InvalidRequest)?;
-                if !input.is_empty()
-                    || token
-                        .strip_prefix("alt1_")
-                        .is_none_or(|s| device_secret(s).is_err())
-                {
-                    return Err(DeviceError::InvalidRequest);
-                }
-                store.revoke_client_token(&token).map_err(mapped)?;
-                Ok(alt_json::json!({}))
-            } else if starting {
-                if input.remove("scope").as_deref() != Some(CLI_SCOPE) {
-                    return Err(DeviceError::InvalidScope);
-                }
-                if !input.is_empty() {
-                    return Err(DeviceError::InvalidRequest);
-                }
-                let code = alt_browser_auth::secret();
-                let digest = alt_browser_auth::digest(&code);
-                let mut random = [0u8; 8];
-                alt_os::random::fill(&mut random);
-                let human: String = random
-                    .iter()
-                    .map(|b| USER_CODE_ALPHABET[(b & 31) as usize] as char)
-                    .collect();
-                let human = user_code(&human).expect("random human code");
-                let token = credential(&factory.signing_key, &digest);
-                store
-                    .begin_device_authorization(
-                        &browser.origin,
-                        &digest,
-                        &human,
-                        &alt_server_store::cloud_credential_digest(&token).map_err(mapped)?,
-                        peer,
-                    )
-                    .map_err(mapped)?;
-                let uri = format!("{}/#device", browser.origin.as_str());
-                alt_json::to_value(DeviceAuthorizationResponse {
-                    device_code: code,
-                    user_code: human.clone(),
-                    verification_uri: uri.clone(),
-                    verification_uri_complete: format!("{uri}?user_code={human}"),
-                    expires_in: DEVICE_LIFETIME_MS / 1000,
-                    interval: DEVICE_INTERVAL_MS / 1000,
-                })
-                .map_err(|_| DeviceError::TemporarilyUnavailable)
-            } else {
-                if input.remove("grant_type").as_deref() != Some(DEVICE_GRANT_TYPE) {
-                    return Err(DeviceError::UnsupportedGrantType);
-                }
-                let code = input
-                    .remove("device_code")
-                    .ok_or(DeviceError::InvalidRequest)?;
-                if !input.is_empty() || device_secret(&code).is_err() {
-                    return Err(DeviceError::InvalidRequest);
-                }
-                let digest = alt_browser_auth::digest(&code);
-                match store.poll_device_authorization(&digest).map_err(mapped)? {
-                    DevicePoll::Waiting(error) => Err(error),
-                    DevicePoll::Ready { expires_at_unix_ms } => {
-                        let token = credential(&factory.signing_key, &digest);
-                        factory.authenticate(&mut store, &token).map_err(mapped)?;
-                        let remaining =
-                            expires_at_unix_ms.saturating_sub(crate::cloud::clock()) / 1000;
-                        if remaining == 0 {
-                            return Err(DeviceError::ExpiredToken);
-                        }
-                        alt_json::to_value(DeviceTokenResponse {
-                            access_token: token,
-                            token_type: "Bearer".into(),
-                            expires_in: remaining,
-                            scope: CLI_SCOPE.into(),
-                        })
-                        .map_err(|_| DeviceError::TemporarilyUnavailable)
-                    }
-                }
+            store.revoke_client_token(&token).map_err(mapped)?;
+            Ok(alt_json::json!({}))
+        } else if starting {
+            begin(&factory, &mut store, &browser.origin, input, peer)
+        } else {
+            if input.remove("grant_type").as_deref() != Some(DEVICE_GRANT_TYPE) {
+                return Err(DeviceError::UnsupportedGrantType.into());
             }
-        }),
-    )
-    .await;
+            let code = input.remove("device_code");
+            let code = code.ok_or(DeviceError::InvalidRequest)?;
+            if !input.is_empty() || device_secret(&code).is_err() {
+                return Err(DeviceError::InvalidRequest.into());
+            }
+            let digest = alt_browser_auth::digest(&code);
+            exchange::exchange(&factory, &mut store, &digest, &handover)
+        }
+    });
+    let outcome = match tokio::time::timeout(state.options.work_timeout, &mut work).await {
+        Ok(outcome) => outcome,
+        Err(_) => match waiting.0.leave() {
+            Leaving::Unspent => return failure(DeviceError::TemporarilyUnavailable),
+            // its token is revoked by the worker: the device begins again
+            Leaving::Withdrawn => return failure(DeviceError::ExpiredToken),
+            Leaving::Answered => work.await,
+        },
+    };
     match outcome {
-        Ok(Ok(Ok(value))) => response(
+        Ok(Ok(value)) => response(
             200,
             "application/json",
             full(alt_json::to_vec(&value).expect("device response")),
         ),
-        Ok(Ok(Err(error))) => failure(error),
-        _ => failure(DeviceError::TemporarilyUnavailable),
+        Ok(Err(refused)) => failure(refused),
+        Err(_) => failure(DeviceError::TemporarilyUnavailable),
     }
+}
+
+/// A code begun for a device that asks for one, and what the device is told of it.
+fn begin(
+    factory: &StoreFactory,
+    store: &mut Store,
+    origin: &alt_browser_auth::PublicOrigin,
+    mut input: BTreeMap<String, String>,
+    peer: std::net::IpAddr,
+) -> Result<alt_json::Value, Refused> {
+    if input.remove("scope").as_deref() != Some(CLI_SCOPE) {
+        return Err(DeviceError::InvalidScope.into());
+    }
+    if !input.is_empty() {
+        return Err(DeviceError::InvalidRequest.into());
+    }
+    let code = alt_browser_auth::secret();
+    let digest = alt_browser_auth::digest(&code);
+    let mut random = [0u8; 8];
+    alt_os::random::fill(&mut random);
+    let human: String = random
+        .iter()
+        .map(|b| USER_CODE_ALPHABET[(b & 31) as usize] as char)
+        .collect();
+    let human = user_code(&human).expect("random human code");
+    let token = credential(&factory.signing_key, &digest);
+    let token = alt_server_store::cloud_credential_digest(&token).map_err(mapped)?;
+    let begun = store.begin_device_authorization(origin, &digest, &human, &token, peer);
+    begun.map_err(mapped)?;
+    let uri = format!("{}/#device", origin.as_str());
+    alt_json::to_value(DeviceAuthorizationResponse {
+        device_code: code,
+        user_code: human.clone(),
+        verification_uri: uri.clone(),
+        verification_uri_complete: format!("{uri}?user_code={human}"),
+        expires_in: DEVICE_LIFETIME_MS / 1000,
+        interval: DEVICE_INTERVAL_MS / 1000,
+    })
+    .map_err(|_| DeviceError::TemporarilyUnavailable.into())
 }

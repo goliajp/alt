@@ -11,3 +11,12 @@ alt-git-codec.workspace = true
 alt-hash.workspace = true
 alt-oplog.workspace = true
 alt-os.workspace = true
+
+[features]
+# the hooks of the log for the tests of this package (see `alt-oplog`)
+hooks = ["alt-oplog/hooks"]
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+required-features = ["hooks"]

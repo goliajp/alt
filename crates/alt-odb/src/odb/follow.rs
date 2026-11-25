@@ -20,6 +20,18 @@ impl Odb {
             || self.blobs.changed_on_disk()?)
     }
 
+    /// Whether a writer has the append lock now.
+    fn locked(&self) -> Result<bool, OdbError> {
+        use alt_os::sys::{LOCK_NB, LOCK_SH, flock};
+        // a descriptor of its own: closing it gives the lock up again
+        let lock = std::fs::File::open(self.alt_dir.join("odb.lock"))?;
+        match flock(&lock, LOCK_SH | LOCK_NB) {
+            Ok(()) => Ok(false),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Read-path catch-up for a long-lived odb (the daemon between requests):
     /// brings the in-memory state up to date with on-disk writes by concurrent
     /// processes, then releases — reusing the proven write-path catch-up so a
@@ -38,7 +50,7 @@ impl Odb {
         });
         self.release();
         if let Some(held) = held.transpose()? {
-            *self.deferred.lock().unwrap() = Some(held);
+            self.deferred.lock().unwrap().whole = Some(held);
         }
         Ok(())
     }
@@ -90,6 +102,20 @@ impl NativeOdb {
     /// passed over by that open and stays in the files. Must not be called
     /// mid-batch.
     pub fn follow(&mut self) -> Result<(), OdbError> {
+        self.follow_past(false)
+    }
+
+    /// [`Self::follow`] for a reader that asks for nothing a ref did not
+    /// name when this handle read the store. Where the files only grew
+    /// since and a writer has the append lock, the handle is kept as it
+    /// is: the next read would open the store under that lock, shared,
+    /// and wait for the writer's whole batch to end, for objects no ref
+    /// the reader knows names.
+    pub fn follow_behind_writer(&mut self) -> Result<(), OdbError> {
+        self.follow_past(true)
+    }
+
+    fn follow_past(&mut self, behind_writer: bool) -> Result<(), OdbError> {
         let Some(odb) = self.odb.get_mut() else {
             return Ok(());
         };
@@ -104,7 +130,9 @@ impl NativeOdb {
         let marker = Marker::read(&odb.durable_path);
         let now = marker.generation();
         let moved = odb.generation.replace(now).is_some_and(|at| at != now);
-        if moved || marker.recorded().is_none() || odb.changed_on_disk()? {
+        let grown =
+            || Ok::<_, OdbError>(odb.changed_on_disk()? && !(behind_writer && odb.locked()?));
+        if moved || marker.recorded().is_none() || grown()? {
             self.odb.take();
         }
         Ok(())

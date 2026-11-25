@@ -210,6 +210,36 @@ mod unix {
         }
     }
 
+    /// The command of a request as it is to run, or what the request is
+    /// answered with instead. A command that writes is refused once a
+    /// sync failed: it would append behind what that sync left in doubt.
+    fn prepared(payload: &[u8], group: &GroupCommit) -> Res<Result<Execution, daemon::Response>> {
+        let req = Request::decode(payload)?;
+        let args = std::iter::once("alt".into()).chain(req.args.iter().map(Into::into));
+        let parsed = match machine::parse(args.collect()) {
+            Ok(parsed) => parsed,
+            Err(response) => return Ok(Err(response)),
+        };
+        alt_cli::begin_command();
+        let id = Identity::from_map(&req.env);
+        let execution =
+            match Execution::prepare(parsed, req.cwd.clone(), id, req.id, req.drawn, None) {
+                Ok(execution) => execution,
+                Err(response) => return Ok(Err(response)),
+            };
+        match group.failed().filter(|_| execution.writing) {
+            Some(error) => {
+                let stopped = format!(
+                    "writes are stopped until the daemon is started again: a sync failed: {error}"
+                );
+                let id = execution.id.as_ref().map(|id| machine::hex(id));
+                let refusal = Failure::refusal("precondition_failed", stopped);
+                Ok(Err(refusal.response(execution.parsed.json, id.as_deref())))
+            }
+            None => Ok(Ok(execution)),
+        }
+    }
+
     /// Reads one request, runs it against the held store/repo, writes back.
     /// Framing I/O happens outside the lock; only `handle` (refresh + dispatch)
     /// holds it, so the serialized section is the store work, not the wire I/O.
@@ -220,27 +250,7 @@ mod unix {
         mut stream: UnixStream,
     ) -> Res<()> {
         let payload = daemon::read_frame(&mut stream)?;
-        let req = Request::decode(&payload)?;
-        let parsed = match machine::parse(
-            std::iter::once("alt".into())
-                .chain(req.args.iter().map(Into::into))
-                .collect(),
-        ) {
-            Ok(parsed) => parsed,
-            Err(response) => {
-                daemon::write_frame(&mut stream, &response.encode())?;
-                return Ok(());
-            }
-        };
-        alt_cli::begin_command();
-        let execution = match Execution::prepare(
-            parsed,
-            req.cwd.clone(),
-            Identity::from_map(&req.env),
-            req.id,
-            req.drawn,
-            None,
-        ) {
+        let execution = match prepared(&payload, group)? {
             Ok(execution) => execution,
             Err(response) => {
                 daemon::write_frame(&mut stream, &response.encode())?;

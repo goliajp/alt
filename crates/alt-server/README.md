@@ -86,10 +86,115 @@ resulting `dist` directory. Add a `browser` member to the instance configuration
 
 The origin must be canonical, without a trailing slash. HTTPS is required except
 for literal loopback or localhost development. The edge must preserve this
-browser origin. Forwarded client-address headers are not trusted; login admission
-uses the direct peer and a separate account/global budget. Asset files are frozen
+browser origin. Forwarded client-address headers are read only behind the proxies
+that `http.trusted_proxies` names (addresses or networks; none by default): the
+address of a caller is then the last one in `X-Forwarded-For` that is not such a
+proxy, and the direct peer otherwise. Sign-in attempts are counted for that
+address, for the network around it and for each login at each address; when the
+whole instance is busy with attempts, an address is held to a few a minute and
+nobody is refused for the attempts of others alone. Asset files are frozen
 at startup, bounded and restricted to regular files. Restart after installing a
 new workbench build.
+
+One address has no more than `http.connections_each` of the connections in use
+at once, a quarter of `connections` by default. A peer that is neither on this
+host nor a proxy named in `http.trusted_proxies` is counted by its connections,
+and one beyond that is closed unheard. The clients of a named proxy are counted by their requests under
+way, each for the address the proxy gives in `X-Forwarded-For`, and one beyond
+that is answered `429` with `retry: same_request` and `Retry-After`; a request
+the proxy names nobody for is the proxy's own and has no such limit. A clone, a
+fetch or a push of Git has one request under way at a time, so the default lets
+a quarter of `connections` such operations of one address go on at once and
+leaves the rest to other addresses. An address many people or build jobs share
+needs the key raised to what they do at once.
+
+A request keeps no worker while its body is received. One caller may have
+`http.receiving_each` bodies under way at once (an eighth of `connections` by
+default; `429` beyond), and the instance holds `http.receiving_megabytes` of
+bodies no worker has taken yet (four of the largest body by default; `503`
+beyond), of which the bodies of one caller have a quarter between them (`429`
+beyond; a caller's only body may be larger). A request whose body is whole waits for a worker for as long as a request
+may run, and is answered `503` with `retry: same_request` when none comes free:
+nothing of it was applied. Requests whose time to upload ran out are ended by the
+running server, which gives back what they had reserved.
+
+A peer may be as slow as its line. `http.body_timeout_ms` is the window the body
+of a request and a response have to move in, not a time either has in all: they
+go on for as long as they move, 1 KiB a second on average over each window, and a
+peer that stalls is let go of within two windows. For a request body the windows
+follow one another from when it began to come, and one that stalls is answered
+`408`. For a response they are counted in the time the peer keeps the server
+waiting to write, so the time the server takes to have the next piece is not the
+peer's; a connection whose response is not taken is closed.
+`http.connection_timeout_ms` is the time a connection has when nothing moves on
+it and no request of it waits for its answer, counted again from every piece of
+a request body that comes, from everything that is sent and from each answer.
+
+The packs of pushes are verified in `http.indexing_megabytes` of memory between
+them: 4096 by default, or what one pack that holds an object of
+`limits.object_bytes` takes where that is more, which is also the least the key
+may be set to. A pack has some of it for as long as it is verified: 268 bytes
+for each entry, of as many entries as it says it has and its bytes can hold, and
+88 more for each delta; what its entries inflate to while it is scanned, taken
+as it is kept, up to 256 MiB, and not kept where others leave no memory for it;
+the objects further deltas wait for, up to 96 MiB, beyond which they are kept in
+files of their own up to 1536 MiB and beyond those made again; and 4 MiB for
+each thread that resolves its deltas. A large object, of more than those 4 MiB,
+has memory for the time it is there: four times the largest object of its pack
+(as the base, the instructions of the delta, and the result twice), taken by the
+thread that comes to it. What the largest object of a pack takes is only what
+its sender says until the object is made, so nothing is taken for it
+beforehand: room for the largest that any pack being verified may make is kept
+free once for all of them, and the threads that come to a large object have it
+in turn, or at once where the packs leave more free. A pack of ten million
+small objects takes 2.5 GiB for its entries alone, and is refused (`index
+memory`) where the key is set lower than what it needs. Packs that find no
+memory wait in the order they came, and so do those that find no room for a
+base among the files while they have none there; a pack that has room is let
+in before one that waits for more, eight times at the most for each that waits.
+
+One process serves an instance at a time. `serve` takes a lock of the database
+(a session advisory lock, held by a connection of its own) and a lock on
+`temporary` in `bytes_directory`; a second `serve` that reaches the same
+database, on the same host or on another, waits two seconds for the first to
+be gone and then ends with `another server serves this database`, and one that
+reaches the same directory ends with `another server serves these bytes`. The
+server looks at its session every five seconds. Where the database ended it (a
+restart of the database, a failover), the server begins another and takes the
+lock again; where another process has the lock by then, the server stops and
+its exit says so. Between the end of a session and that look two processes may
+serve for some seconds: a second `serve` is not to be started against a
+database whose server may still run. A pooler between the server and the
+database that hands one session to several clients (transaction pooling) does
+not keep such a lock; the server needs sessions of its own.
+
+What the serving process writes for a time is under `temporary` in
+`bytes_directory`, on the disk of the stored bytes and not among the temporary
+files of the host, which a container often keeps in memory: request bodies while
+they are received, responses to fetches while they are sent, and the files of
+the bases above under `temporary/bases`. The directory is the server's alone
+(mode 0700) and is emptied whenever the server starts. The responses to fetches
+that are written to files (those of more than 8 MiB that are not a whole
+repository as it is stored) take no more than `http.sending_megabytes` between
+them until they are sent: half of what is free on that disk when the server
+starts where the key is absent. The responses to one address have a quarter of
+that; a single response of an address may pass the quarter as far as half of
+the room, one such response at a time, and one that is alone on the server is
+written whatever its size. A fetch
+whose response has no room is answered `503` with `Retry-After`. The files of bases of
+all the packs verified at once take no more than `http.indexing_megabytes`
+between them; a base that has no room there, or cannot be written, is made
+again instead, which counts against what its pack may inflate to. A pack that
+is verified when the caller is gone or its answer has been given up
+(`http.work_timeout_ms`) is verified no further. A push that finds the memory taken waits
+for half as long as a request may run (`http.work_timeout_ms`) and is then refused
+with nothing applied: Git shows `the packs of other pushes are being verified;
+push again`, and a client that reads no report is answered `503` with
+`retry: same_request` and `Retry-After`. A push whose client has gone leaves the
+line at once. What a pack inflates to counts its entries and the objects
+its deltas make, an object again each time it has to be made again, and may be
+128 times `limits.total_bytes`. The commits of one pack may name two parents for
+each of its entries and 65,536 beside (`commit parents` beyond that).
 
 Enable the configured origin and create a local browser account explicitly:
 
@@ -168,7 +273,9 @@ If login stops or its outcome is unconfirmed, repeat the same command with
 `--resume`. The adjacent `.login` directory contains private recovery state;
 retain it until completion. `--no-wait` saves the request and returns the public
 URL/code immediately; `--resume` later finishes that same authorization. Device
-requests expire after five minutes. A credential already saved in the journal
+requests expire after five minutes. An approved request is exchanged for its
+credential once; a response lost on the way means starting another login. A
+credential already saved in the journal
 can still be finalized after its device request expires. An expired request with
 no saved credential requires checking Settings for an approval before starting
 another login at a new destination.
@@ -309,10 +416,10 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18, 19 and 20, and backs up and restores schema
-18, 19, 20 and the current schema 21. A backup of an instance that is not yet
-upgraded requires its schema explicitly, `--schema 18`, `--schema 19` or
-`--schema 20`. Stop
+This release upgrades from schema 18, 19, 20 and 21, and backs up and restores
+schema 18 to 21 and the current schema 22. A backup of an instance that is not yet
+upgraded requires its schema explicitly, `--schema 18`, `--schema 19`,
+`--schema 20` or `--schema 21`. Stop
 the old service, save and verify its backup, then upgrade, naming the schema the
 instance is at:
 
@@ -321,7 +428,16 @@ alt-server --config server.json migrate --from-schema 19 --output-config server-
 alt-server --config server-next.json health
 ```
 
-From schema 18 every version in between is applied in the same transaction.
+The old version reads `server.json` until the new one is in use, and knows
+none of the keys this version added: add them to the configuration `migrate`
+writes, not to the one it reads. Where the old configuration names no proxy in
+`http.trusted_proxies`, `migrate` writes those the environment variable
+`ALT_TRUSTED_PROXIES` names (addresses or networks with commas between, as the
+package gives its application container), and none where the variable is not
+set.
+
+`migrate` refuses the configuration of a Cloud instance, whose schema moves with
+its platform generation. From schema 18 every version in between is applied in the same transaction.
 An instance at schema 17 or older is first upgraded to schema 18 with the last
 release that carries the migrations for schemas 1–17, and backed up again
 there. This release refuses such an instance, and a backup taken at schema 17
@@ -343,6 +459,53 @@ retained content. Uploads in progress keep their content and continue under the
 new generation. The released copies leave the disk with the next garbage
 collection.
 
+`collect <repository> [--limit N]` is the only thing that removes content from
+the content store: up to `N` contents (100 by default, 1000 at most) that no
+publication or upload retains, and the segments they leave empty. The server
+does not run it. Without it the uploads that were abandoned, expired or refused
+stay on disk; run it for each repository on a schedule, and repeat while
+`removed` equals the limit.
+
+`scrub [repository] [--mend]` reads every object of the live pack segments, of
+one repository or of all, the way a fetch reads it, and holds what it reads
+against the object id. It answers with the count of segments and objects read
+and, for each segment that does not give all of its objects back, the first
+sixteen of them with what their read ended in; `unread_objects` counts those
+that are still not read when the command ends. With `--mend` such a segment is
+replaced by its own pack with an index made anew, in one transaction as a merge
+replaces segments, and is then read again; a segment whose pack does not verify
+is left in place and named with `kept_because`. Versions before this one could
+take in a pack whose index then led reads of some objects down a delta chain
+longer than is read; run `scrub` once after upgrading from them. A repository
+that cannot be read through does not keep the others from being read: they are
+told of as above, the ones that failed are listed under `failed` with why, and
+the command ends with status 1 (75 where the outcome of a replacement is not
+known). A name that is no repository of the instance fails so, and is not told
+of as a repository without unread objects. A pack is indexed anew within
+`http.indexing_megabytes`; a segment whose pack takes more stays, with
+`kept_because`. A segment is read through with each delta applied to its base
+once, whatever the length of its chains; the objects kept for the deltas made of
+them take 256 MiB at the most.
+
+`backup` reads the instance through in the same way before it copies anything.
+Where a segment does not give all of its objects back it makes no backup, ends
+with status 1 and tells under `unread` which repository, which segment, how
+many objects and the first of them: run `scrub --mend` and back up again. A
+segment that stays unread after that (`kept_because`) does not keep the rest of
+the instance from being backed up: `backup --with-unread` makes the backup as
+the instance is, and its manifest names those segments under `unread`.
+`restore` reads what it restored before it activates it. Segments the manifest
+names are restored as they are and told of again in the answer. Where it finds
+unread objects the manifest does not name (a backup made by a version that did
+not read the objects), it restores nothing, unless `--with-unread` is given: the
+instance is then restored as it is, the segments are told of, and `scrub --mend`
+is run on the restored instance.
+
+While `scrub`, `backup` and `restore` read the objects they write a line to
+standard error every ten seconds, such as `scrub: 204800 of 414247 objects of
+example read`; a reading that is done sooner writes none. What the command found
+is on standard output as before.
+
 From schema 19 the transaction changes how a committed publication is stored.
 That version kept the whole publication four times: in the request, in the
 receipt of the request's stored result, in the audit record and in the outbox
@@ -361,6 +524,32 @@ From schema 20 the transaction removes the foreign key from a ref to its
 repository. The database checked it once for every ref a push created, while a
 ref is only ever written under the lock of its repository's row and no
 repository is removed. No row changes.
+
+From schema 21 the transaction adds the moment a request ended and the moment a
+credential was revoked, and three indexes. A revoked credential is given the
+moment of the upgrade there. No request row is written: building the indexes
+reads each once, and the table keeps its size. The statements of `migrate` are
+not held to `database_statement_timeout_ms`. The running server gives the
+finished requests their moment afterwards, 1000 rows in a transaction and 20
+transactions every half minute, with a vacuum of the table after each round: a
+committed request the moment in its receipt, a rejected or expired one the
+moment the server comes to it. A request without its moment is not removed, so
+nothing is removed sooner than it would have been. `health` counts the requests
+still waiting as `requests_awaiting_settled_at`; it is 0 on an instance that
+was created at this schema and on one where the server is done.
+
+## Retention
+
+The running server removes what is over, a bounded number of rows at a time:
+
+| What | Kept |
+|---|---|
+| A request that was committed, rejected or expired | 30 days from that moment. For as long, a repeated request ID is answered with what became of the request; after that the same ID is a new request. A request whose publication carried task records is their history and is not removed, and neither is one a stored content segment still names |
+| A request left unfinished by an epoch before a restore | until 30 days after its time to upload ran out. While it is there, asking for it answers that its outcome is unknown |
+| Browser sessions, device and platform credentials, delegations, review approvals | 30 days after the session or the credential under it expired or was revoked |
+| Device codes and platform logins | until they expire |
+| A credential | 90 days after it expired, or 90 days after it was revoked once it has also expired, and only when no row above still names it. The row of a revoked credential that has not expired is what keeps its token refused, so it stays |
+| Instance and repository audit records | not removed |
 
 For disaster recovery, externally stop and fence the old service first. Create
 a dedicated empty PostgreSQL database and a new config pointing to **absent**
@@ -385,13 +574,19 @@ preserves committed receipts. An old request that was unfinished at the backup
 watermark remains **unknown**, even after GC; the source might have committed
 it after the snapshot. Do not automatically replay it under a fresh request ID.
 
-An interrupted restore reports its failed stage and an unknown outcome. Keep
+A restore that fails before it activates the instance takes away what it
+wrote (the data directory, the receipt key, what the archive made in the
+database), ends with status 1 and `restoration failed at <stage>; nothing is
+left of it in the destination`, and can be run again against the same
+destination. A restore that fails at the activation or after it, or that could
+not take away what it wrote, reports its failed stage and an unknown outcome
+(status 75), and so does one whose process was killed: keep
 that isolated destination for inspection. `health` with the new config refuses
 the database until activation commits. If `health` succeeds after a lost
 response, inspect the retained `instance.restore` audit and verify the refs and
 objects before admitting traffic. Do not overwrite the target or restore an
-older snapshot over newly accepted writes. To retry an incomplete pre-activation
-restore, use another empty database and new absent volume/key paths.
+older snapshot over newly accepted writes. To retry after an unknown outcome,
+use another empty database and new absent volume/key paths.
 
 For a pre-browser backup or lost administrator token, the physical operator
 can recover an **existing local human administrator** using a new private token
@@ -410,7 +605,7 @@ normal credentials or create the first browser account, then revoke the short
 recovery token. Existing browser administrators can instead use the password
 recovery command above.
 
-Operator acceptance includes a schema 18, a schema 19 and a schema 20 instance, each
+Operator acceptance includes a schema 18, a schema 19, a schema 20 and a schema 21 instance, each
 upgraded in place and restored from the backup taken before its upgrade,
 encrypted backup verification and isolated restoration. Hosts without Docker can select an
 isolated native PostgreSQL installation with

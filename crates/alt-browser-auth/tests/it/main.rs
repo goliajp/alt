@@ -107,3 +107,20 @@ fn passwords_use_salted_bounded_argon2id_and_reject_unsupported_work_factors() {
         );
     }
 }
+
+#[test]
+#[ignore = "a measurement of what one password costs to hash and to verify, for --nocapture; needs --release"]
+fn the_time_of_a_password_hash() {
+    let password = "correct horse battery staple";
+    for round in 0..5 {
+        let began = std::time::Instant::now();
+        let encoded = password_hash(password).unwrap();
+        let hashed = began.elapsed();
+        let began = std::time::Instant::now();
+        assert!(password_verify(password, &encoded).unwrap());
+        println!(
+            "round {round}: hashed in {hashed:?}, verified in {:?}",
+            began.elapsed()
+        );
+    }
+}

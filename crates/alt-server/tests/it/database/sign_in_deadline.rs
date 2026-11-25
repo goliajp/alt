@@ -6,7 +6,10 @@ const ORIGIN: &str = "https://workbench.example.test";
 const PASSWORD: &str = "a private browser acceptance password";
 
 /// a service with one local user, after `adjust` changed its bounds
-fn start(f: &mut Fixture, adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions)) -> Running {
+pub(super) fn start(
+    f: &mut Fixture,
+    adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions),
+) -> Running {
     f.store
         .create_local_user(&f.credential, "reader", "reader", "reader", PASSWORD, false)
         .unwrap();
@@ -19,6 +22,18 @@ fn start(f: &mut Fixture, adjust: impl FnOnce(&mut StoreFactory, &mut HttpOption
         "<!doctype html><title>alt</title>",
     )
     .unwrap();
+    served(f, adjust)
+}
+
+/// A service of what [`start`] served before, after `adjust` changed its
+/// bounds: what a test brings about beforehand has a service with the bounds
+/// every test has, and only what it is about the bounds it sets.
+pub(super) fn served(
+    f: &Fixture,
+    adjust: impl FnOnce(&mut StoreFactory, &mut HttpOptions),
+) -> Running {
+    let origin = PublicOrigin::parse(ORIGIN).unwrap();
+    let assets = f.root.path().join("assets");
     let (mut factory, mut options) = Running::parts(f, None, vec![]);
     adjust(&mut factory, &mut options);
     Running::serve(
@@ -94,4 +109,92 @@ fn sign_in_whose_session_write_outlives_its_request_reports_an_unknown_outcome()
     // the write the request stopped waiting for still completes
     drop(server);
     assert_eq!(sessions(&f), 1);
+}
+
+/// the status and the message of what a sign-in was answered with, how long it
+/// took, and after how many seconds it was told to come again
+fn answered(server: &Running) -> (u16, String, Duration, Option<u64>) {
+    let body = alt_json::to_vec(&alt_json::json!({"login_name":"reader","password":PASSWORD}));
+    let began = std::time::Instant::now();
+    let response = match ureq::post(&format!("{}/web/login", server.url))
+        .timeout(Duration::from_secs(30))
+        .set("Origin", ORIGIN)
+        .set("Content-Type", "application/json")
+        .send_bytes(&body.unwrap())
+    {
+        Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+        Err(error) => panic!("{error}"),
+    };
+    let (status, taken) = (response.status(), began.elapsed());
+    let again = response.header("Retry-After").map(|v| v.parse().unwrap());
+    let failure: alt_json::Value = json::body(response);
+    let message = failure["message"].as_str().unwrap().to_owned();
+    (status, message, taken, again)
+}
+
+/// No place to check a password in comes free. A sign-in that is let in waits for
+/// one as long as a request may run. One that is refused for the number of
+/// sign-ins there have been is refused before it would wait: it takes no place,
+/// and keeps nobody who is let in from one.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_sign_in_refused_for_how_many_there_were_waits_for_no_place_to_check_its_password_in() {
+    let mut f = Fixture::new();
+    let wait = Duration::from_secs(3);
+    let server = start(&mut f, |_, options| {
+        options.password_places = 0;
+        options.work_timeout = wait;
+    });
+    let (status, message, taken, _) = answered(&server);
+    assert_eq!((status, message.as_str()), (503, "Sign-in service is busy"));
+    assert!(taken >= wait, "{taken:?}");
+    // every count of sign-ins is at what it may be
+    let spent = f
+        .client()
+        .execute("UPDATE alt_login_budgets SET attempts=1000000", &[])
+        .unwrap();
+    assert!(spent >= 3, "{spent} counts were kept of the sign-in");
+    let (status, message, taken, again) = answered(&server);
+    assert_eq!(status, 409, "{message}");
+    assert!(taken < wait, "{taken:?}");
+    // and told when the minute its sign-ins were counted in is over
+    assert!(
+        again.is_some_and(|seconds| (1..=60).contains(&seconds)),
+        "{again:?}"
+    );
+}
+
+/// No place to check a password in comes free, and a sign-in of an address
+/// waits for one. A second of the address is not let wait, and is told so before
+/// it is counted: it takes none of the attempts its address may make.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
+fn a_sign_in_that_is_not_let_wait_is_not_counted_among_the_attempts_of_its_address() {
+    let mut f = Fixture::new();
+    let wait = Duration::from_secs(4);
+    let server = start(&mut f, |_, options| {
+        options.password_places = 0;
+        options.work_timeout = wait;
+    });
+    let counted = |f: &Fixture| -> Option<i32> {
+        let key = format!("network:{}", alt_browser_auth::digest("127.0.0.1"));
+        let sql = "SELECT attempts FROM alt_login_budgets WHERE key=$1";
+        let row = f.client().query_opt(sql, &[&key]).unwrap();
+        row.map(|row| row.get(0))
+    };
+    std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| answered(&server));
+        // the first is counted, and waits
+        let began = std::time::Instant::now();
+        while counted(&f).is_none() {
+            assert!(began.elapsed() < wait, "the first sign-in was not counted");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let (status, message, taken, _) = answered(&server);
+        assert_eq!((status, message.as_str()), (503, "Sign-in service is busy"));
+        assert!(taken < wait / 2, "{taken:?}");
+        assert_eq!(counted(&f), Some(1));
+        let (status, _, taken, _) = waiting.join().unwrap();
+        assert!(status == 503 && taken >= wait, "{status} after {taken:?}");
+    });
 }

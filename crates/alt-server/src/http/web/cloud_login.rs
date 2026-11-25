@@ -115,6 +115,15 @@ pub(super) async fn handle(
             Err(error) => return store_failure(error, None),
         }
     };
+    // received first: a body that is slow to come keeps no worker waiting
+    let Ok(mut slot) = state.receiving.begin(&receiving::address(peer), 0) else {
+        return store_failure(Error::Unauthorized, None);
+    };
+    let receipt = body::Receipt::of(&state, Some(&mut slot));
+    if spool(request.into_body(), 0, receipt).await.is_err() {
+        return store_failure(Error::Unauthorized, None);
+    }
+    drop(slot);
     let permit = match state.workers.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -127,12 +136,6 @@ pub(super) async fn handle(
             );
         }
     };
-    if !matches!(
-        tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), 0)).await,
-        Ok(Ok(_))
-    ) {
-        return store_failure(Error::Unauthorized, None);
-    }
     let factory = state.factory.clone();
     let result = tokio::time::timeout(
         state.options.work_timeout,

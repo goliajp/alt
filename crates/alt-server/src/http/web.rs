@@ -1,4 +1,6 @@
+mod admission;
 mod cloud_login;
+mod content;
 mod execute;
 mod input;
 mod login;
@@ -195,69 +197,14 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             Retry::Never,
         );
     }
-    let permit = match state.workers.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
-            return failure(
-                503,
-                ErrorCode::TemporarilyUnavailable,
-                "Instance is busy",
-                None,
-                Retry::SameRequest,
-            );
-        }
+    let body = request.into_body();
+    let admitted = admission::admitted(&state, &browser, &route, &token, peer, body, writing);
+    let (source, permit, password_permit, attempt) = match admitted.await {
+        Ok(admitted) => admitted,
+        Err(refusal) => return *refusal,
     };
-    // An unauthenticated password flood cannot allocate one Argon2 arena per
-    // HTTP connection, nor starve all normal publication workers.
-    let password_permit = if matches!(route, WebRoute::Login | WebRoute::CreateUser) {
-        match state.passwords.clone().try_acquire_owned() {
-            Ok(permit) => Some(permit),
-            Err(_) => {
-                return failure(
-                    503,
-                    ErrorCode::TemporarilyUnavailable,
-                    "Sign-in service is busy",
-                    None,
-                    Retry::SameRequest,
-                );
-            }
-        }
-    } else {
-        None
-    };
-    let (permit, max) = if let WebRoute::Portable(selected) = &route {
-        match portable_bound(&state, &browser, selected.clone(), token.clone(), permit).await {
-            Ok(value) => value,
-            Err(Some(error)) => return store_failure(error, None),
-            Err(None) => {
-                return failure(
-                    503,
-                    ErrorCode::TemporarilyUnavailable,
-                    "Current migration authority could not be checked",
-                    None,
-                    Retry::SameRequest,
-                );
-            }
-        }
-    } else {
-        (
-            permit,
-            if writing {
-                state.factory.limits.request_bytes.min(16_384) as u64
-            } else {
-                0
-            },
-        )
-    };
-    let source =
-        match tokio::time::timeout(state.options.body_timeout, spool(request.into_body(), max))
-            .await
-        {
-            Ok(Ok(source)) => source,
-            Ok(Err(error)) => return unreceived(Some(error)),
-            Err(_) => return unreceived(None),
-        };
     let claim = Arc::new(login::Claim::default());
+    let waiting = crate::git::Waiting::default();
     let call = execute::Call {
         factory: state.factory.clone(),
         options: state.options.native.clone(),
@@ -265,6 +212,10 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         token,
         peer,
         claim: claim.clone(),
+        attempt,
+        reviews: state.reviews.clone(),
+        sending: state.options.sending.share(alt_shares::address(peer)),
+        gone: waiting.0.clone(),
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
@@ -278,7 +229,14 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     let unopened = login && outcome.is_err() && claim.abandon();
     match outcome {
         Ok(Ok(Ok((output, cookie)))) => {
-            let download = matches!(output, Output::File { .. } | Output::Temporary { .. });
+            // what was written out to be sent is a file where it is long, and
+            // bytes where it is not
+            const DOWNLOADS: [&str; 2] = ["application/octet-stream", crate::portable::ARCHIVE];
+            let download = match &output {
+                Output::File { .. } | Output::Temporary { .. } | Output::Sending { .. } => true,
+                Output::Bytes { content_type, .. } => DOWNLOADS.contains(content_type),
+                _ => false,
+            };
             let mut response = render_output(Ok(output), None);
             if let Some(cookie) = cookie {
                 response.headers_mut().insert(
@@ -303,62 +261,5 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         Ok(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
         Ok(Ok(Err(error))) => store_failure(error, None),
         _ => login::unfinished(writing, unopened),
-    }
-}
-/// the worker permit and the body bound of a migration request, once its caller is
-/// authorized; no error means the check did not finish
-async fn portable_bound(
-    state: &App,
-    browser: &WebOptions,
-    selected: crate::PortableRoute,
-    token: Option<String>,
-    permit: tokio::sync::OwnedSemaphorePermit,
-) -> std::result::Result<(tokio::sync::OwnedSemaphorePermit, u64), Option<Error>> {
-    let factory = state.factory.clone();
-    let token = token.ok_or(Error::Unauthorized);
-    let origin = browser.origin.clone();
-    let options = state.options.native.clone();
-    let prepared = tokio::time::timeout(
-        state.options.work_timeout,
-        crate::http::spawn_observed(Phase::Execute, move || {
-            let mut store = factory.open()?;
-            let token = token?;
-            let credential = factory.authenticate(&mut store, &token)?;
-            store.browser_session(&credential, &origin)?;
-            let max = crate::portable::request_bytes(&mut store, &credential, &options, &selected)?;
-            Ok::<_, Error>((permit, max))
-        }),
-    )
-    .await;
-    match prepared {
-        Ok(Ok(Ok(value))) => Ok(value),
-        Ok(Ok(Err(error))) => Err(Some(error)),
-        _ => Err(None),
-    }
-}
-/// the response to a body that could not be received; no error means it ran out of time
-fn unreceived(error: Option<BodyError>) -> Response<ResponseBody> {
-    match error {
-        Some(BodyError::Limit) => failure(
-            413,
-            ErrorCode::QuotaExceeded,
-            "Request body is too large",
-            None,
-            Retry::Never,
-        ),
-        Some(BodyError::Malformed) => failure(
-            400,
-            ErrorCode::InvalidRequest,
-            "Incomplete request body",
-            None,
-            Retry::Never,
-        ),
-        _ => failure(
-            503,
-            ErrorCode::TemporarilyUnavailable,
-            "Request could not be read",
-            None,
-            Retry::SameRequest,
-        ),
     }
 }

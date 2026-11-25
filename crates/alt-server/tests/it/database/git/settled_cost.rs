@@ -1,0 +1,77 @@
+//! What the index of the moments requests ended at costs the database for each
+//! push, measured in the instructions its processes take.
+use super::*;
+use std::io::Read;
+use std::process::Stdio;
+
+/// the processes of the database that serve this instance
+fn backends(f: &Fixture) -> Vec<String> {
+    let all = "SELECT pid::text FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND backend_type='client backend'";
+    let rows = f.client().query(all, &[]).unwrap();
+    rows.iter().map(|row| row.get(0)).collect()
+}
+
+/// The instructions the processes `pids` take in user space while `work` runs, as
+/// `perf` counts them; nothing where there is no `perf` to ask.
+fn instructions(pids: &[String], work: impl FnOnce()) -> Option<u64> {
+    let counting = Command::new("perf")
+        .args(["stat", "-x", ",", "-e", "instructions:u", "-p"])
+        .arg(pids.join(","))
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    // attached before the work begins
+    std::thread::sleep(Duration::from_millis(500));
+    work();
+    let mut counting = counting.ok()?;
+    let mut interrupt = Command::new("kill");
+    interrupt.args(["-INT", &counting.id().to_string()]);
+    assert!(interrupt.status().unwrap().success());
+    let mut counted = String::new();
+    counting
+        .stderr
+        .take()?
+        .read_to_string(&mut counted)
+        .unwrap();
+    counting.wait().unwrap();
+    let line = counted.lines().find(|line| line.contains("instructions"))?;
+    line.split(',').next()?.parse().ok()
+}
+
+#[test]
+#[ignore = "a measurement, for --nocapture and with ALT_MEASURE_PUSHES: counts instructions with perf; requires isolated PostgreSQL, loopback HTTP and real Git"]
+fn the_instructions_the_database_takes_for_a_push_with_and_without_the_index_of_moments() {
+    let pushes = std::env::var("ALT_MEASURE_PUSHES").ok();
+    let pushes: usize = pushes.and_then(|told| told.parse().ok()).unwrap_or(3);
+    for indexed in [true, false, true, false] {
+        let f = Fixture::new();
+        let server = Running::start(&f);
+        let temp = alt_os::temp::tempdir().unwrap();
+        let work = temp.path();
+        ok(work, &f.token, &["init", "-q", "--initial-branch=main"]);
+        identity(work, &f.token);
+        let url = format!("{}/git/repository", server.url);
+        let push = |n: usize| {
+            std::fs::write(work.join("file"), n.to_string()).unwrap();
+            ok(work, &f.token, &["add", "file"]);
+            ok(work, &f.token, &["commit", "-qm", "more"]);
+            ok(work, &f.token, &["push", "-q", &url, "main"]);
+        };
+        if !indexed {
+            let drop = "DROP INDEX alt_requests_settled";
+            f.client().batch_execute(drop).unwrap();
+        }
+        // the connections the service keeps are open, and their plans made
+        (0..10).for_each(push);
+        let pids = backends(&f);
+        let counted = instructions(&pids, || (10..10 + pushes).for_each(push));
+        let each = counted.map(|all| all / pushes as u64);
+        println!(
+            "index of moments {indexed}: {pushes} pushes, {} processes, {counted:?} instructions, {each:?} a push",
+            pids.len()
+        );
+        let settled = "SELECT count(*) FROM alt_requests WHERE settled_at IS NOT NULL";
+        let settled: i64 = f.client().query_one(settled, &[]).unwrap().get(0);
+        assert_eq!(settled, 10 + pushes as i64);
+    }
+}

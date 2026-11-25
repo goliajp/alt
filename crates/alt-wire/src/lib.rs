@@ -36,12 +36,14 @@
 //! of any structured request round-trips through decode.
 
 pub mod caps;
+mod certificate;
 pub mod fetch;
 pub mod ls_refs;
 pub mod pkt;
 pub mod push;
 
 pub use caps::{CapabilityAd, parse_capability_advertisement};
+pub use certificate::{CAP_ALT_PUSHEE, origin, push_certificate, pushee_is, pushee_is_at};
 pub use fetch::{
     FetchAck, FetchError, FetchPreamble, FetchRequest, ShallowInfo, WantedRef, drain_packfile,
     encode_fetch_request, read_fetch_preamble,

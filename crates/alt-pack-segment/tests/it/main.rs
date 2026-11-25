@@ -1,17 +1,25 @@
+mod across;
+mod base_files;
+mod bases;
 mod budget;
 mod build;
+mod deep;
 mod fetch;
+mod kinds;
+mod led;
+mod led_cost;
+mod many_of_one;
+mod mend;
 mod merge;
+mod modes;
+mod reach;
+mod readable;
+mod waiting;
 
 use alt_pack_segment::{Limits, Segment, SegmentSet, ingest};
 use std::{fs, io::Write, path::Path, process::Command, sync::Arc};
 
-const LIMITS: Limits = Limits {
-    objects: 1 << 20,
-    object_bytes: 1 << 30,
-    inflated_bytes: 1 << 32,
-    delta_depth: 4095,
-};
+const LIMITS: Limits = Limits::of(1 << 20, 1 << 30, 1 << 32);
 
 fn git(dir: &Path, args: &[&str]) -> Vec<u8> {
     let out = Command::new("git")

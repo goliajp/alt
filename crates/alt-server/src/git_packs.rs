@@ -3,16 +3,20 @@
 
 use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId};
-use alt_pack_segment::{Limits, Oid, Segment, SegmentSet, ingest};
+use alt_pack_segment::{Oid, Segment, SegmentSet};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
 use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
 use alt_wire::pkt;
 use std::{
-    collections::{BTreeSet, HashSet},
-    io::{Read, Write},
+    collections::BTreeSet,
+    io::{Read, Seek, Write},
     os::unix::fs::OpenOptionsExt,
     sync::Arc,
 };
+
+mod made;
+mod published;
+use published::{Spooled, publish, spool};
 
 pub(crate) fn raw(oid: ObjectId) -> Oid {
     oid.as_bytes().try_into().expect("sha1 object id")
@@ -27,6 +31,8 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
     match error {
         E::Io(error) => Error::Io(error),
         E::Limit(reason) => Error::Limit(reason),
+        E::Busy(reason) => Error::Busy(reason),
+        E::GivenUp => Error::Busy("the request is waited for no longer"),
         E::Format(reason) | E::Corrupt(reason) => Error::Integrity(reason),
         E::Dangling(..) | E::MissingBase(_) | E::NotFound(_) => {
             Error::Integrity("pack references an unavailable object")
@@ -43,7 +49,7 @@ fn ancestor(set: &SegmentSet, old: &Oid, new: &Oid, remaining: &mut usize) -> Re
     let Some(floor) = set.commit(old).map(|commit| commit.generation) else {
         return Ok(false);
     };
-    let mut seen = HashSet::new();
+    let mut seen = alt_hash::KeyedIdSet::default();
     let mut pending = vec![*new];
     while let Some(oid) = pending.pop() {
         *remaining = remaining
@@ -70,6 +76,7 @@ pub(crate) fn receive(
     repository: &str,
     source: &mut dyn Read,
     view: PackView,
+    room: Option<crate::git::Verifying>,
 ) -> Result<Output> {
     let limits = store.limits();
     // Before a body too large for its buffer, git sends a lone flush packet to probe
@@ -138,13 +145,14 @@ pub(crate) fn receive(
             path,
             file,
             pack,
+            ..
         }) => publish(
             store,
             credential,
             repository,
             &view,
             &head,
-            pack,
+            (pack, room),
             Some((id, path, file)),
             &mut created,
             &mut published,
@@ -155,7 +163,7 @@ pub(crate) fn receive(
             repository,
             &view,
             &head,
-            &pack,
+            (&pack, room),
             None,
             &mut created,
             &mut published,
@@ -181,6 +189,9 @@ pub(crate) fn receive(
         Err(Error::Unauthorized) => Some("access revoked".to_owned()),
         // the operator can raise a limit; the pusher has to know which one it was
         Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
+        Err(Error::Busy(_)) => {
+            Some("the packs of other pushes are being verified; push again".to_owned())
+        }
         Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
     };
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
@@ -226,212 +237,4 @@ pub(crate) fn receive(
             bytes: body,
         }),
     }
-}
-
-/// a pack that was written to its segment file as it arrived
-struct Spooled {
-    id: String,
-    path: std::path::PathBuf,
-    file: std::fs::File,
-    pack: alt_os::map::Mmap,
-}
-
-/// Writes `first` and the rest of `source` to a new segment file and maps it.
-fn spool(
-    store: &Store,
-    repository: &str,
-    first: &[u8],
-    source: &mut dyn Read,
-    limit: u64,
-) -> Result<Spooled> {
-    let mut nonce = [0u8; 16];
-    alt_os::random::fill(&mut nonce);
-    let id = hex(&nonce);
-    let path = store.pack_path(repository, &id)?;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)?;
-    let mut written = || -> Result<Spooled> {
-        file.write_all(first)?;
-        let rest = limit.saturating_add(1).saturating_sub(first.len() as u64);
-        let copied = std::io::copy(&mut source.take(rest), &mut file)?;
-        if first.len() as u64 + copied > limit {
-            return Err(Error::Limit("Git pack bytes"));
-        }
-        // the file is new and only this request writes to it; the index it gets
-        // later lies behind what is mapped here
-        let pack = unsafe { alt_os::map::Mmap::map(&file) }?;
-        Ok(Spooled {
-            id: id.clone(),
-            path: path.clone(),
-            file: file.try_clone()?,
-            pack,
-        })
-    };
-    let spooled = written();
-    if spooled.is_err() {
-        let _ = std::fs::remove_file(&path);
-    }
-    spooled
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one caller; the parts of one request"
-)]
-fn publish(
-    store: &mut Store,
-    credential: &Credential,
-    repository: &str,
-    view: &PackView,
-    head: &alt_wire::push::PushHead,
-    pack: &[u8],
-    spooled: Option<(&String, &std::path::PathBuf, &mut std::fs::File)>,
-    created: &mut Option<std::path::PathBuf>,
-    published: &mut bool,
-) -> Result<Option<RequestKey>> {
-    let limits = store.limits();
-    // A client may list refs it does not change. They take no part in the publication,
-    // but a stale expectation is still a conflict.
-    let mut changes = Vec::new();
-    for update in &head.updates {
-        if update.old != update.new {
-            changes.push(update);
-        } else if view.refs.get(&update.name) != update.old {
-            return Err(Error::Precondition("reference changed since it was read"));
-        }
-    }
-    if changes.is_empty() {
-        return Ok(None);
-    }
-    let mut nonce = [0u8; 40];
-    alt_os::random::fill(&mut nonce);
-    let mut segments = view.segments.segments().to_vec();
-    let mut stored = None;
-    if !pack.is_empty() {
-        let ingested =
-            alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Decode, || {
-                ingest(
-                    pack,
-                    &view.segments,
-                    &Limits {
-                        objects: limits.graph_objects as u64,
-                        object_bytes: limits.object_bytes,
-                        inflated_bytes: limits.total_bytes,
-                        delta_depth: 4095,
-                    },
-                )
-                .map_err(segment_error)
-            })?;
-        if ingested.objects() > 0 {
-            let (segment_id, path, bytes, inline) = match spooled {
-                Some((id, path, file)) => {
-                    // the pack is in its file already; the index goes behind it
-                    let mut index = Vec::with_capacity(ingested.objects() * 96 + 2048);
-                    ingested.write_index(&mut index).map_err(segment_error)?;
-                    file.write_all(&index)?;
-                    file.sync_all()?;
-                    std::fs::File::open(path.parent().expect("segment directory"))?.sync_all()?;
-                    let bytes = (pack.len() + index.len()) as u64;
-                    (id.clone(), path.clone(), bytes, None)
-                }
-                None => {
-                    let segment_id = hex(&nonce[..16]);
-                    let path = store.pack_path(repository, &segment_id)?;
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .mode(0o600)
-                        .open(&path)?;
-                    *created = Some(path.clone());
-                    let mut content =
-                        Vec::with_capacity(pack.len() + ingested.objects() * 96 + 2048);
-                    content.extend_from_slice(pack);
-                    ingested.write_index(&mut content).map_err(segment_error)?;
-                    file.write_all(&content)?;
-                    let bytes = content.len() as u64;
-                    let inline = content.len() <= alt_server_store::INLINE_SEGMENT_BYTES;
-                    if !inline {
-                        file.sync_all()?;
-                        std::fs::File::open(path.parent().expect("segment directory"))?
-                            .sync_all()?;
-                    }
-                    (segment_id, path, bytes, inline.then_some(content))
-                }
-            };
-            let segment = Arc::new(Segment::open(&path).map_err(segment_error)?);
-            segments.push(segment.clone());
-            stored = Some((
-                segment_id,
-                ingested.objects() as u64,
-                ingested.flags(),
-                segment,
-                inline,
-                bytes,
-            ));
-        }
-    }
-    let set = SegmentSet::new(segments);
-    let mut remaining = limits.walk_steps;
-    let mut refs = Vec::new();
-    for update in changes {
-        let force = match (update.old, update.new) {
-            (Some(old), Some(new)) => {
-                update.name.starts_with("refs/tags/")
-                    || !ancestor(&set, &raw(old), &raw(new), &mut remaining)?
-            }
-            _ => false,
-        };
-        refs.push(RefUpdate {
-            name: update.name.clone(),
-            expected: update.old.map(|oid| oid.to_string()),
-            new: update.new.map(|oid| oid.to_string()),
-            force,
-        });
-    }
-    let key = RequestKey {
-        scope: view.scope.clone(),
-        actor_id: view.actor_id.clone(),
-        request_id: format!("git-{}", hex(&nonce[16..])),
-    };
-    let manifest = Manifest {
-        protocol_version: VERSION,
-        object_format: ObjectFormat::Sha1,
-        entries: vec![],
-    };
-    let publication = Publication {
-        protocol_version: VERSION,
-        key: key.clone(),
-        attribution: view.attribution.clone(),
-        object_format: ObjectFormat::Sha1,
-        refs,
-        record_roots: vec![],
-        content_manifest: manifest.id(limits)?,
-    };
-    let graph = alt_server_store::SegmentGraph {
-        set: &set,
-        limits: limits.into(),
-    };
-    let segment = stored
-        .as_ref()
-        .map(|(id, objects, flags, _, inline, bytes)| NewSegment {
-            id,
-            objects: *objects,
-            bytes: *bytes,
-            flags: *flags,
-            inline: inline.as_deref(),
-        });
-    // Git has no durable client request id; the generated one records the server
-    // transaction for inspection, not for replay
-    alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-        store.pack_publish(credential, &publication, &graph, segment)
-    })?;
-    *published = stored.is_some();
-    if let Some((id, _, _, segment, _, _)) = stored {
-        store.adopt_segment(repository, &id, segment)?;
-    }
-    Ok(Some(key))
 }

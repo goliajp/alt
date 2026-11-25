@@ -284,7 +284,7 @@ impl Store {
         let actor: String = human(&mut tx, &self.spec, owner)?.get("actor_id");
         if tx.query_opt("SELECT 1 FROM alt_delegations d JOIN alt_credentials c USING(token_digest) WHERE token_digest=$1 AND actor_id=$2", &[&digest,&actor])?.is_none() { return Err(Error::Unauthorized); }
         if tx.execute(
-            "UPDATE alt_credentials SET revoked=true WHERE token_digest=$1 AND NOT revoked",
+            "UPDATE alt_credentials SET revoked=true,revoked_at=COALESCE(revoked_at,floor(extract(epoch FROM clock_timestamp())*1000)::bigint) WHERE token_digest=$1 AND NOT revoked",
             &[&digest],
         )? == 1
         {

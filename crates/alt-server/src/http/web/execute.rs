@@ -1,6 +1,7 @@
 //! A browser request once its body is received: session authority, then the store.
 use super::input::{DeviceDecision, Empty, NewUser, UserState};
 use super::*;
+use crate::git_response::Spill;
 use alt_json::{Value, json};
 use alt_server_store::{Credential, Store};
 use std::io::Read;
@@ -13,6 +14,12 @@ pub(super) struct Call {
     pub(super) token: Option<String>,
     pub(super) peer: IpAddr,
     pub(super) claim: Arc<login::Claim>,
+    pub(super) attempt: Option<alt_server_store::PasswordAttempt>,
+    pub(super) reviews: Arc<crate::web_review::Reviews>,
+    /// of the room responses have on disk, for what is written out to be sent
+    pub(super) sending: alt_shares::Share,
+    /// set once nobody waits for the answer
+    pub(super) gone: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Call {
     /// the output and, when the session changes, the cookie to set
@@ -28,6 +35,10 @@ impl Call {
             token,
             peer,
             claim,
+            attempt,
+            reviews,
+            sending,
+            gone,
         } = self;
         let mut source = source;
         source.as_file_mut().rewind()?;
@@ -48,6 +59,7 @@ impl Call {
                     store.browser_session(&current, &browser.origin)?;
                     Ok(current)
                 },
+                Some(sending),
             )?;
             return Ok((output, None));
         }
@@ -62,14 +74,8 @@ impl Call {
             ));
         }
         if route == WebRoute::Login {
-            return login::run(
-                &mut store,
-                &browser,
-                &factory.signing_key,
-                peer,
-                &claim,
-                &raw,
-            );
+            let key = &factory.signing_key;
+            return login::run(&mut store, &browser, key, attempt, &claim, &raw);
         }
         let token = token.ok_or(Error::Unauthorized)?;
         let credential = factory.authenticate(&mut store, &token)?;
@@ -88,16 +94,11 @@ impl Call {
                 )?;
                 Ok((output, None))
             }
-            WebRoute::Session => Ok((
-                Output::Json(session(
-                    &mut store,
-                    &credential,
-                    &browser.origin,
-                    &token,
-                    &factory.signing_key,
-                )?),
-                None,
-            )),
+            WebRoute::Session => {
+                let key = &factory.signing_key;
+                let told = session(&mut store, &credential, &browser.origin, &token, key)?;
+                Ok((Output::Json(told), None))
+            }
             WebRoute::Navigation => {
                 let cloud = factory.cloud.as_ref().ok_or(Error::Unauthorized)?;
                 Ok((
@@ -118,24 +119,18 @@ impl Call {
                 let consent =
                     store.device_consent(&credential, &browser.origin, &input.user_code, peer)?;
                 let local = crate::http::device::credential(&factory.signing_key, &consent.id);
-                let sealed = if input.allow {
-                    if let Some(cloud) = &factory.cloud {
+                let sealed = match &factory.cloud {
+                    Some(cloud) if input.allow => {
                         let descriptor = store.cloud_refresh(&token)?;
                         let grant = cloud
                             .sealer
                             .open(&descriptor.sealed_grant, &descriptor.credential_digest)
                             .map_err(|_| Error::Unauthorized)?;
-                        Some(
-                            cloud
-                                .sealer
-                                .seal(&grant, &alt_server_store::cloud_credential_digest(&local)?)
-                                .map_err(|_| Error::Integrity("Cloud grant encryption"))?,
-                        )
-                    } else {
-                        None
+                        let digest = alt_server_store::cloud_credential_digest(&local)?;
+                        let sealed = cloud.sealer.seal(&grant, &digest);
+                        Some(sealed.map_err(|_| Error::Integrity("Cloud grant encryption"))?)
                     }
-                } else {
-                    None
+                    _ => None,
                 };
                 Ok((
                     output(store.decide_device_authorization(
@@ -178,7 +173,22 @@ impl Call {
                     Some(browser.origin.clear_cookie()),
                 ))
             }
-            route => execute(&mut store, &credential, &options, route, &raw).map(|out| (out, None)),
+            WebRoute::Object(repository, oid, within, true) => {
+                crate::browse::shown(&mut store, &credential, &repository, oid, &within)?;
+                let found = store.open_published_object(&credential, &repository, oid)?;
+                let (mut file, mut body) = (found.2, Spill::within(Some(sending)));
+                let written = std::io::copy(&mut file, &mut body).map(drop);
+                let sent =
+                    body.into_output("application/octet-stream", written.map_err(Into::into));
+                Ok((sent?, None))
+            }
+            WebRoute::Review(key) => {
+                let _place = reviews.begin()?;
+                let page = crate::web_review::inspect(&mut store, &credential, &options, &key)?;
+                Ok((output(page)?, None))
+            }
+            route => execute(&mut store, &credential, (&options, &gone), route, &raw)
+                .map(|out| (out, None)),
         }
     }
 }
@@ -201,7 +211,7 @@ fn output(value: impl alt_json::ToJson) -> Result<Output> {
 fn execute(
     store: &mut Store,
     credential: &Credential,
-    options: &NativeOptions,
+    (options, gone): (&NativeOptions, &std::sync::atomic::AtomicBool),
     route: WebRoute,
     raw: &[u8],
 ) -> Result<Output> {
@@ -225,35 +235,23 @@ fn execute(
             after,
             40,
         )?),
-        WebRoute::Tree(repository, commit, path) => output(crate::browse::tree(
+        WebRoute::Tree(repository, commit, path, after) => output(crate::browse::tree(
             store,
             credential,
             &repository,
             commit,
             &path,
+            after,
         )?),
-        WebRoute::Object(repository, oid, false) => {
-            output(crate::browse::blob(store, credential, &repository, oid)?)
-        }
-        WebRoute::Object(repository, oid, true) => {
-            let (_, bytes, mut file) = store.open_published_object(credential, &repository, oid)?;
-            let mut copy = alt_os::temp::NamedTempFile::new()?;
-            std::io::copy(&mut file, copy.as_file_mut())?;
-            copy.as_file_mut().rewind()?;
-            Ok(Output::Temporary {
-                content_type: "application/octet-stream",
-                bytes,
-                file: copy,
-            })
-        }
+        WebRoute::Object(repository, oid, within, false) => output(crate::browse::blob(
+            store,
+            credential,
+            &repository,
+            oid,
+            &within,
+        )?),
         WebRoute::Content(repository, digest) => {
-            let scope = store.repository_info(credential, &repository)?.scope;
-            let (bytes, file) = store.open_published_content(credential, &scope, &digest)?;
-            Ok(Output::File {
-                bytes,
-                digest,
-                file,
-            })
+            super::content::given(store, credential, &repository, digest, gone)
         }
         WebRoute::Records(repository, kind, after) => output(crate::records::list(
             store,
@@ -270,15 +268,13 @@ fn execute(
             root,
             options.task_limits,
         )?),
-        WebRoute::Review(key) => output(crate::web_review::inspect(
-            store, credential, options, &key,
-        )?),
         WebRoute::ReviewContent(key, digest) => {
             let (bytes, file) = store.open_review_content(credential, &key, &digest)?;
             Ok(Output::File {
                 bytes,
                 digest,
                 file,
+                held: None,
             })
         }
         WebRoute::Approve(key) => execute_native(

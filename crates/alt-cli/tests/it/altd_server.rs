@@ -34,7 +34,7 @@ pub(crate) fn ok(o: Output) -> String {
 
 mod served;
 
-pub(crate) use served::{Server, spawn_server, spawn_server_with_env};
+pub(crate) use served::{Server, listening, spawn_server, spawn_server_with_env};
 
 #[test]
 fn altd_server_info_refs_serves_what_git_ls_remote_expects() {
@@ -1296,19 +1296,19 @@ fn altd_server_honors_git_clone_filter_blob_none() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    // The known blob oid must NOT be present on the partial clone — if
-    // the server ignored the filter and sent a full pack, this check
-    // would falsely pass `git cat-file -e`.
-    let exists = std::process::Command::new("git")
+    // the known blob did not come with the clone: a walk that fetches
+    // nothing lists it as missing (asked for by its id, it would be fetched)
+    let missing = std::process::Command::new("git")
         .arg("-C")
         .arg(&target)
-        .args(["cat-file", "-e", &blob_oid])
+        .args(["rev-list", "--objects", "--missing=print", "HEAD"])
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .output()
         .unwrap();
+    assert!(missing.status.success());
     assert!(
-        !exists.status.success(),
+        String::from_utf8_lossy(&missing.stdout).contains(&format!("?{blob_oid}")),
         "blob {blob_oid} must be absent from the partial clone (server ignored --filter=blob:none?)"
     );
 
@@ -2509,11 +2509,11 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let started = loop {
         line.clear();
-        reader.read_line(&mut line).unwrap();
+        let read = reader.read_line(&mut line).unwrap();
         if line.contains("listening on ") {
             break true;
         }
-        if Instant::now() > deadline {
+        if read == 0 || Instant::now() > deadline {
             break false;
         }
     };
@@ -2786,7 +2786,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    // 1) info/refs must carry an `alt-nonce=` cap of 32 hex chars.
+    // 1) info/refs must carry an `alt-nonce=` cap of 64 hex chars.
     let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
     conn.write_all(
         b"GET /info/refs?service=git-receive-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
@@ -2806,8 +2806,8 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
         .unwrap_or_default();
     assert_eq!(
         nonce.len(),
-        32,
-        "server must advertise a 32-hex-char alt-nonce in receive-pack info/refs: {advert}"
+        64,
+        "server must advertise a 64-hex-char alt-nonce in receive-pack info/refs: {advert}"
     );
 
     // 2) a signed alt push succeeds end-to-end (the client picked up

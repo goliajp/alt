@@ -147,7 +147,7 @@ pub fn execute_git(
         _ => return Err(Error::Precondition("not a Git endpoint")),
     };
     let view = store.pack_view_with(credential, &repository, ref_filter(&route))?;
-    execute_git_with_cache(store, credential, route, protocol_v2, source, view)
+    execute_git_with_cache(store, credential, route, protocol_v2, source, view, None)
 }
 
 pub(crate) fn execute_git_with_cache(
@@ -157,6 +157,7 @@ pub(crate) fn execute_git_with_cache(
     protocol_v2: bool,
     source: &mut dyn Read,
     view: alt_server_store::PackView,
+    room: Option<Verifying>,
 ) -> Result<Output> {
     let (repository, receive, advertisement) = match &route {
         Route::GitAdvertise(repository, receive) => (repository.clone(), *receive, true),
@@ -171,7 +172,7 @@ pub(crate) fn execute_git_with_cache(
         if !view.writable {
             return Err(Error::Unauthorized);
         }
-        return crate::git_packs::receive(store, credential, &repository, source, view);
+        return crate::git_packs::receive(store, credential, &repository, source, view, room);
     }
     let command = command(source, advertisement, store.limits())?;
     // the first view authorized the caller without the references; this one checks
@@ -199,5 +200,87 @@ pub(crate) fn execute_git_with_cache(
         }
         _ => view,
     };
-    crate::git_read::read(store.limits(), receive, &command, view)
+    let room = room.as_ref();
+    let sending = room.map(|room| room.sending.0.share(room.sending.1));
+    let gone = room.map(|room| &*room.given_up);
+    crate::git_read::read(store.limits(), receive, &command, view, sending, gone)
+}
+
+/// What a Git request takes of what the instance has for all of them: the memory
+/// the packs of pushes are verified in, and until when the pack of one request
+/// waits for its part of it; the room on disk the responses to fetches have.
+#[derive(Clone)]
+pub(crate) struct Verifying {
+    pub memory: &'static alt_pack_segment::Memory,
+    pub by: std::time::Instant,
+    /// set once nobody waits for the answer: the pack is verified no further
+    pub given_up: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub files: Option<&'static alt_pack_segment::BaseFiles>,
+    /// the room the responses to fetches have on disk, and the address the
+    /// caller is counted under there
+    pub sending: (std::sync::Arc<alt_shares::Shares>, Option<std::net::IpAddr>),
+}
+
+/// Held by whoever waits for the answer to a request. Dropped, when the answer is
+/// there, the time for it is over or the caller is gone, it sets its mark.
+#[derive(Default)]
+pub(crate) struct Waiting(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// What verifying the pack of a push may take. A base held while its deltas are
+/// resolved is held as an index of a pack holds it.
+pub(crate) fn pack_limits(
+    limits: alt_remote_protocol::Limits,
+    room: Option<&Verifying>,
+) -> alt_pack_segment::Limits {
+    alt_pack_segment::Limits {
+        memory: room.map(|room| room.memory),
+        memory_by: room.map(|room| room.by),
+        files: room.and_then(|room| room.files),
+        ..alt_pack_segment::Limits::of(
+            limits.graph_objects as u64,
+            limits.object_bytes,
+            inflated_bytes(limits.total_bytes),
+        )
+    }
+}
+
+/// The pack of a push verified against the segments there are, for as long as
+/// its answer is waited for. `led` is what of the segments the one who pushes
+/// is led to, where that is not all they hold.
+pub(crate) fn verified(
+    pack: &[u8],
+    segments: &alt_pack_segment::SegmentSet,
+    limits: alt_remote_protocol::Limits,
+    room: Option<&Verifying>,
+    led: Option<&alt_pack_segment::Led>,
+) -> Result<alt_pack_segment::Ingested> {
+    let within = pack_limits(limits, room);
+    let given_up = room.map(|room| &room.given_up);
+    match (led, given_up) {
+        (Some(led), _) => alt_pack_segment::ingest_led(pack, (segments, led), &within, given_up),
+        (None, Some(given_up)) => {
+            alt_pack_segment::ingest_while_waited_for(pack, segments, &within, given_up)
+        }
+        (None, None) => alt_pack_segment::ingest(pack, segments, &within),
+    }
+    .map_err(crate::git_packs::segment_error)
+}
+
+/// The least memory the packs of pushes can be verified in: what one pack takes
+/// that holds an object as large as one may be.
+pub(crate) fn least_verifying_bytes(limits: alt_remote_protocol::Limits) -> u64 {
+    alt_pack_segment::least_memory(&pack_limits(limits, None))
+}
+
+/// What the objects of a push may inflate to, all together, where its pack may
+/// have `pack_bytes`. The packs of long histories inflate to some thirty times
+/// their size, and more where large files change a little at a time; this is four
+/// times that, and still a bound on what a pack made to be costly has hashed.
+pub(crate) fn inflated_bytes(pack_bytes: u64) -> u64 {
+    pack_bytes.saturating_mul(128)
 }
