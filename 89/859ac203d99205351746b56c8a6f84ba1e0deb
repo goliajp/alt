@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: a read of the segments a Git request waits for is boxed in its step
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git.rs
