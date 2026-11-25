@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the tests that hook the store take turns, and refused-trees is looked at on a repository nothing was pushed to
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/read_moved.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
