@@ -88,7 +88,7 @@ impl SegmentSet {
         while found.len() < sought.len()
             && let Some((_, oid)) = heap.pop()
         {
-            if taken % LOOKED_EVERY == 0 && gone.is_some_and(|gone| gone.load(Relaxed)) {
+            if taken.is_multiple_of(LOOKED_EVERY) && gone.is_some_and(|gone| gone.load(Relaxed)) {
                 return Err(Error::GivenUp);
             }
             taken += 1;
