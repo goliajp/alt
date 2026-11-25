@@ -41,7 +41,7 @@ fn instructions(pids: &[String], work: impl FnOnce()) -> Option<u64> {
 /// Pushes `main` to `url` as [`ok`] runs Git, with what went over HTTP
 /// written down: a push that fails is told with the status and the body of
 /// each answer, which say which bound of the service it met.
-fn pushed(work: &Path, token: &str, url: &str) {
+pub(super) fn pushed(work: &Path, token: &str, url: &str) {
     let trace = work.join("trace");
     let auth = alt_base64::STANDARD.encode(format!("alt:{token}"));
     let output = Command::new("git")

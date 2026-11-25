@@ -321,7 +321,7 @@ fn real_git_small_pushes_are_merged_and_stay_readable() {
             &f.token,
             &["commit", "-qm", &format!("push {index}")],
         );
-        ok(&first, &f.token, &["push", "-q", &url, "main"]);
+        settled_cost::pushed(&first, &f.token, &url);
     }
     let count = |f: &Fixture, state: &str| -> i64 {
         f.client()
