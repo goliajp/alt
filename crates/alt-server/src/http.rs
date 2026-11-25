@@ -6,6 +6,8 @@ mod device;
 mod encoding;
 mod expiry;
 mod file_body;
+mod gate;
+pub use gate::{CLOSED, Gate};
 mod handle;
 mod hashers;
 mod observation;
@@ -56,9 +58,21 @@ pub struct StoreFactory {
     pub limits: Limits,
     pub connect_timeout: Duration,
     pub statement_timeout: Duration,
+    /// shut while the process may not hold the lock of its database
+    pub gate: Arc<Gate>,
 }
 impl StoreFactory {
+    /// A store in use until it is dropped: none while the gate is shut.
     pub fn open(&self) -> alt_server_store::Result<Store> {
+        let inside = self.gate.enter()?;
+        let mut store = self.connect()?;
+        store.holding(Some(Box::new(inside)));
+        Ok(store)
+    }
+    /// A store whatever the gate: for the session that holds the lock of
+    /// the database, and for a store kept between pieces of work, each of
+    /// which goes through the gate.
+    pub(crate) fn connect(&self) -> alt_server_store::Result<Store> {
         let mut config = self.database.clone();
         config.set_connect_timeout(self.connect_timeout);
         let mut client = config.connect()?;
@@ -66,6 +80,9 @@ impl StoreFactory {
         if timeout == 0 || timeout > 300_000 {
             return Err(Error::Limit("database statement timeout"));
         }
+        // each statement of the opening is bounded by the database; a line
+        // gone silent is not waited for without end
+        client.set_read_timeout(Some(self.statement_timeout + self.connect_timeout))?;
         // a plan cached while a table is one page scans it sequentially and stays in
         // use as the table grows; once statistics make a plan for each parameter look
         // cheaper, every execution is planned again. both hinge on when analyze runs
@@ -81,6 +98,7 @@ impl StoreFactory {
             self.limits,
         )?;
         self.check_mode(&mut store)?;
+        store.answers_within(None)?;
         Ok(store)
     }
     fn check_mode(&self, store: &mut Store) -> alt_server_store::Result<()> {
@@ -227,7 +245,8 @@ pub async fn serve_with_browser(
         return Err(std::io::Error::other("invalid HTTP limits"));
     }
     let serves = factory.clone();
-    let mut alone = spawn_blocking(move || serving::alone(serves))
+    let drain = options.work_timeout;
+    let mut alone = spawn_blocking(move || serving::alone(serves, drain))
         .await
         .map_err(|_| std::io::Error::other("serving session unavailable"))??;
     if options.trusted_proxies.is_empty() {

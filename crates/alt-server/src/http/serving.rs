@@ -1,9 +1,12 @@
 //! The session by which this process is the one that serves its database,
 //! looked at every so often for as long as it serves.
 //!
-//! The lock lives as long as the session. A session the database ended is
-//! begun again, and the lock asked for again: until it is had, another process
-//! may have taken it, and then this one serves no longer.
+//! The lock lives as long as the session. A session the database does not
+//! answer for is one the process may have lost, and the lock with it: the
+//! process stops serving (the gate of its stores shuts, and what is in use is
+//! let end, for as long as a request may take), ends the session, and begins
+//! another and asks for the lock again. It serves again once it has it; where
+//! another process took it meanwhile, this one serves no longer.
 
 use super::StoreFactory;
 use alt_server_store::{Error, SERVED, Serving};
@@ -27,11 +30,12 @@ pub(super) struct Alone {
 }
 
 fn begun(factory: &StoreFactory, wait: Duration) -> alt_server_store::Result<Serving> {
-    factory.open()?.serve_alone(wait)
+    factory.connect()?.serve_alone(wait)
 }
 
-/// Takes the lock, or fails where another process serves the database.
-pub(super) fn alone(factory: StoreFactory) -> std::io::Result<Alone> {
+/// Takes the lock, or fails where another process serves the database. A
+/// request in use when the session is lost is let end for `drain`.
+pub(super) fn alone(factory: StoreFactory, drain: Duration) -> std::io::Result<Alone> {
     let serving = begun(&factory, WAIT).map_err(|error| match error {
         Error::Precondition(SERVED) => std::io::Error::other(SERVED),
         _ => std::io::Error::other("the database is not reached"),
@@ -47,10 +51,17 @@ pub(super) fn alone(factory: StoreFactory) -> std::io::Result<Alone> {
             if held.is_some_and(|held| held.is_ok()) {
                 continue;
             }
-            // the session that was lost ends here, where the database still has it
-            serving = None;
+            if serving.is_some() {
+                // nothing new is served, and what is served ends, while the
+                // session is still held where the database still has it
+                factory.gate.close(std::time::Instant::now() + drain);
+                serving = None;
+            }
             match begun(&factory, AGAIN) {
-                Ok(again) => serving = Some(again),
+                Ok(again) => {
+                    serving = Some(again);
+                    factory.gate.open();
+                }
                 Err(Error::Precondition(SERVED)) => {
                     log.failed("serving", "", &SERVED);
                     let _ = lose.send(());

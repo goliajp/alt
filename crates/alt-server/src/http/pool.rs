@@ -68,6 +68,7 @@ impl Pool {
         };
         let store = match retained {
             Some(mut store) => {
+                store.holding(Some(Box::new(self.0.factory.gate.enter()?)));
                 // Every store transaction checks the instance row itself, and a
                 // dead connection fails its first statement; neither is retried.
                 self.0.factory.check_mode(&mut store)?;
@@ -121,6 +122,8 @@ impl Drop for Lease {
         let mut idle = self.pool.0.idle.lock().expect("idle stores");
         let mut store = self.store.take().expect("store lease");
         store.restoring_within(None);
+        // an idle store is none in use
+        store.holding(None);
         // a connection that died during the request is dropped, not reused
         if !idle.closed && !store.is_closed() && idle.stores.len() < self.pool.0.limit {
             idle.stores.push(store);

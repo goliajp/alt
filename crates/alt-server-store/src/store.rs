@@ -67,6 +67,8 @@ pub struct Store {
     pub(crate) waited: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// set while a request is served, for the objects stored as deltas it reads
     pub(crate) restoring: Option<alt_pack_segment::Restoring>,
+    /// what the owner of the store has it hold for as long as it is told
+    pub(crate) held: Option<Box<dyn std::any::Any + Send>>,
 }
 impl Store {
     /// Explicit first initialization, never invoked as a fallback from open.
@@ -135,6 +137,7 @@ impl Store {
             limits,
             waited: None,
             restoring: None,
+            held: None,
         })
     }
     /// What the walks of the refs this store is asked for look at to end
@@ -147,6 +150,20 @@ impl Store {
     /// restored in, until it is told none again.
     pub fn restoring_within(&mut self, room: Option<alt_pack_segment::Restoring>) {
         self.restoring = room;
+    }
+    /// Holds `held` in the place of what it held, until it is told again or
+    /// dropped: for an owner that counts the stores in use.
+    pub fn holding(&mut self, held: Option<Box<dyn std::any::Any + Send>>) {
+        self.held = held;
+    }
+    /// How long an answer of the database is waited for, without end where
+    /// none; one that waits longer fails, and the connection with it.
+    pub fn answers_within(&mut self, timeout: Option<std::time::Duration>) -> Result<()> {
+        match timeout {
+            Some(timeout) => self.client.set_read_timeout(timeout)?,
+            None => self.client.clear_read_timeout()?,
+        }
+        Ok(())
     }
     pub fn spec(&self) -> &InstanceSpec {
         &self.spec

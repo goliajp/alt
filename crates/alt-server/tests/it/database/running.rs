@@ -46,6 +46,7 @@ impl Running {
             limits: limits(),
             connect_timeout: Duration::from_secs(3),
             statement_timeout: Duration::from_secs(5),
+            gate: Default::default(),
         };
         let options = HttpOptions {
             connections: 16,

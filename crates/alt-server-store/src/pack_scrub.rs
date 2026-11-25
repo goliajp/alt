@@ -243,6 +243,7 @@ impl Store {
             limits,
             waited: None,
             restoring: None,
+            held: None,
         })
     }
 

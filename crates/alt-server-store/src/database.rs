@@ -30,6 +30,10 @@ impl Connection {
     pub fn set_read_timeout(&mut self, timeout: std::time::Duration) -> Result<(), Error> {
         self.client.set_read_timeout(Some(timeout))
     }
+    /// answers are waited for without end again
+    pub fn clear_read_timeout(&mut self) -> Result<(), Error> {
+        self.client.set_read_timeout(None)
+    }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)

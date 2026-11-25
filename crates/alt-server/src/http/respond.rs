@@ -150,6 +150,13 @@ fn refused(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
             key,
             Retry::SameRequest,
         ),
+        Error::Busy(super::CLOSED) => failure(
+            503,
+            ErrorCode::TemporarilyUnavailable,
+            "The instance is taking its lock of the database again; retry the same request",
+            key,
+            Retry::SameRequest,
+        ),
         Error::Busy(_) => failure(
             503,
             ErrorCode::TemporarilyUnavailable,

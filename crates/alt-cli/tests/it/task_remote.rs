@@ -161,6 +161,7 @@ impl Server {
             limits: limits(),
             connect_timeout: Duration::from_secs(3),
             statement_timeout: Duration::from_secs(10),
+            gate: Default::default(),
         };
         let options = served::options();
         let (url, shutdown, thread) =
