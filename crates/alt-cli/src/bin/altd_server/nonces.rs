@@ -121,7 +121,13 @@ impl NonceTable {
         // those that are good no longer are told from the used by their age
         let oldest = self.at(now).saturating_sub(LIFE.as_millis() as u64);
         inner.used = inner.used.split_off(&Given(oldest, [0; 8]));
-        inner.used.len() < MOST && inner.used.insert(given)
+        if inner.used.len() >= MOST {
+            eprintln!(
+                "altd-server: a signed push is refused: the {MOST} nonces used within a day are kept, and no more"
+            );
+            return false;
+        }
+        inner.used.insert(given)
     }
 
     /// Whether no nonce of the table is good any more: the table may be
