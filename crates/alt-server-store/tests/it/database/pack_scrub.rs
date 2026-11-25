@@ -215,7 +215,7 @@ fn a_segment_indexed_anew_takes_no_place_where_the_segments_before_it_were_merge
     planted(&f, &astray, sequence + 1, &bytes);
 
     // once the segment indexed anew is written, the first is merged into one of its own
-    let merged = "m".repeat(32);
+    let merged = "b".repeat(32);
     let this = f.root.path().file_name().unwrap().to_owned();
     let mut dsn: alt_pg::Config = f.admin_dsn.parse().unwrap();
     dsn.set_dbname(&f.database);
