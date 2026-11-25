@@ -108,6 +108,64 @@ fn thin(directory: &Path, new: &str, bases: &[&str]) -> Vec<u8> {
     packed
 }
 
+/// A pack of the commit `commit` and its tree, whole, and of a file of the
+/// tree as a delta of `base`, which it does not carry: the file is `base` and
+/// the bytes `more` after it. Git makes its thin packs of what the
+/// parents of the commits it sends hold; this one leans on what it is told.
+fn leaning(directory: &Path, commit: &str, (base, more): (&str, &[u8])) -> Vec<u8> {
+    let object = |kind: &str, name: &str| -> Vec<u8> {
+        let mut shown = Command::new("git");
+        shown.args(["cat-file", kind, name]).current_dir(directory);
+        shown.output().unwrap().stdout
+    };
+    let size = |mut n: usize, out: &mut Vec<u8>| loop {
+        let byte = (n & 0x7f) as u8;
+        n >>= 7;
+        out.push(if n > 0 { byte | 0x80 } else { byte });
+        if n == 0 {
+            return;
+        }
+    };
+    let header = |kind: u8, len: usize, out: &mut Vec<u8>| {
+        let mut byte = kind << 4 | (len & 0x0f) as u8;
+        let mut rest = len >> 4;
+        while rest > 0 {
+            out.push(byte | 0x80);
+            byte = (rest & 0x7f) as u8;
+            rest >>= 7;
+        }
+        out.push(byte);
+    };
+    let base_bytes = object("blob", base);
+    // copy all of the base, then put `more` after it
+    let mut delta = Vec::new();
+    size(base_bytes.len(), &mut delta);
+    size(base_bytes.len() + more.len(), &mut delta);
+    delta.push(0x80 | 0x10 | 0x20 | 0x40);
+    delta.extend_from_slice(&(base_bytes.len() as u32).to_le_bytes()[..3]);
+    delta.push(more.len() as u8);
+    delta.extend_from_slice(more);
+    let mut named = Command::new("git");
+    named
+        .args(["rev-parse", &format!("{commit}^{{tree}}")])
+        .current_dir(directory);
+    let tree = text(named.output().unwrap().stdout);
+    let mut pack = b"PACK".to_vec();
+    pack.extend_from_slice(&2u32.to_be_bytes());
+    pack.extend_from_slice(&3u32.to_be_bytes());
+    for (kind, data) in [(1, object("commit", commit)), (2, object("tree", &tree))] {
+        header(kind, data.len(), &mut pack);
+        pack.extend_from_slice(&alt_deflate::compress(&data, 1, alt_deflate::Format::Zlib));
+    }
+    header(7, delta.len(), &mut pack);
+    let base_id = (0..20).map(|at| u8::from_str_radix(&base[at * 2..at * 2 + 2], 16).unwrap());
+    pack.extend(base_id);
+    pack.extend_from_slice(&alt_deflate::compress(&delta, 1, alt_deflate::Format::Zlib));
+    let trailer = alt_hash::sha1(&pack);
+    pack.extend_from_slice(&trailer);
+    pack
+}
+
 /// The push of `body` held between its verification and its publication
 /// while `meanwhile` runs, and what it was answered.
 fn held_while(
@@ -204,12 +262,13 @@ fn a_push_is_told_a_ref_changed_only_where_it_leans_on_what_the_ref_led_to() {
     assert!(report.contains("ok refs/heads/main"), "{report}");
 
     // a file like the one only `gone` held, its delta made of that one
+    let gone_file = git(&["rev-parse", "gone:gone.txt"]);
     let last = commit("copy.txt", &(only_gone + "more\n"), "last");
     let command = format!("{next} {last} refs/heads/main\0report-status\n");
     let mut body = Vec::new();
     alt_wire::pkt::write_data(&mut body, command.as_bytes()).unwrap();
     alt_wire::pkt::write_flush(&mut body).unwrap();
-    body.extend_from_slice(&thin(work, "main", &[&next, "gone"]));
+    body.extend_from_slice(&leaning(work, &last, (&gone_file, b"more\n")));
     let (status, report) = held_while(&f, &url, &token, body, || {
         git(&["push", "-q", &url, ":gone"]);
     });
