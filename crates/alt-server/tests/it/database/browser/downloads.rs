@@ -5,13 +5,13 @@ use crate::database::git::{identity, ok, text};
 use alt_server::shares::Shares;
 use std::io::Read;
 
-const ROOM: u64 = 24 << 20;
+const ROOM: u64 = 48 << 20;
 const FILE: usize = 9_500_000;
 
-/// The room is twenty-four megabytes and the file a browser downloads nine and
-/// a half. An address that has another taker in the room is held to its quarter
-/// and told to come again; another address is given the file, and the room is
-/// given back when it is sent.
+/// The room is forty-eight megabytes and the file a browser downloads nine and
+/// a half, within the quarter of an address. An address whose other takers have
+/// its quarter is held to it and told to come again; another address is given
+/// the file, and the room is given back when it is sent.
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by browser acceptance and closing gate"]
 fn a_file_written_out_for_a_browser_takes_of_the_room_and_an_address_a_quarter_of_it() {
@@ -68,14 +68,14 @@ fn a_file_written_out_for_a_browser_takes_of_the_room_and_an_address_a_quarter_o
     };
     let (one, other) = ("203.0.113.9", "203.0.113.10");
     let mut mine = room.share(Some(one.parse().unwrap()));
-    mine.take(1).unwrap();
+    mine.take(ROOM / 4).unwrap();
     let (status, again, ..) = download(one);
     assert_eq!((status, again.as_deref()), (503, Some("60")));
     let (status, again, named, body) = download(other);
     assert_eq!((status, again, named), (200, None, true));
     assert!(body == noise);
     let began = std::time::Instant::now();
-    while room.held() > 1 {
+    while room.held() > ROOM / 4 {
         assert!(began.elapsed() < Duration::from_secs(30), "{}", room.held());
         std::thread::sleep(Duration::from_millis(20));
     }
