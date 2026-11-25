@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: take each -m of a tag as a paragraph of its message, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/cli/native.rs
+touched: crates/alt-cli/src/sequence_args.rs
+touched: crates/alt-cli/tests/it/tag.rs
