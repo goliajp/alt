@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: perf
+summary: an id whose kept entry a read found beside its way is not gone through again
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/read.rs
+touched: crates/alt-git-pack/tests/it/read_bounds.rs
