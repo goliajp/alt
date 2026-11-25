@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the list of the oldest hundred pending change events, which only tests read, is gone
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/change_events.rs
+touched: crates/alt-server-store/tests/it/database/change_links.rs
