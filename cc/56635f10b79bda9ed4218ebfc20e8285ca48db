@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a request that looked at what another was told takes no turn a new request would wait for
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/cloud.rs
+touched: crates/alt-server/src/cloud/asking.rs
