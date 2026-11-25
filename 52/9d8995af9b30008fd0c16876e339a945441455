@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: open no repository under a name that begins with a dot in alt-web
+author-type: human
+author: doracawl
+touched: crates/alt-web/src/lib.rs
