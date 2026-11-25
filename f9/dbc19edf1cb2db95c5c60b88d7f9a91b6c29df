@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: what reads trees and files for a walk of git fsck has a name
+author-type: human
+author: doracawl
+touched: crates/alt-git-fsck/src/lib.rs
+touched: crates/alt-git-fsck/src/walk.rs
