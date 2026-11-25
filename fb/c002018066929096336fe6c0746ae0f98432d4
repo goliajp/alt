@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a large response is hurried only while one of another address waits for its turn
+author-type: human
+author: doracawl
+touched: crates/alt-shares/src/lib.rs
+touched: crates/alt-shares/src/share.rs
+touched: crates/alt-shares/src/tests.rs
