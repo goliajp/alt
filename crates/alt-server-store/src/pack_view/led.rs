@@ -138,16 +138,18 @@ pub(crate) fn led(
         _ => Error::Integrity("objects the refs reach"),
     };
     let from = begun(repository, segments, &tips, steps, gone, disk)?;
-    let anew = from.as_ref().is_none_or(|(_, whole)| !whole);
     let from = from.map_or_else(Led::default, |(led, _)| (*led).clone());
     let had = from.len();
     let (led, ended) = segments.led_beyond(from, &tips, steps, gone);
     let led = Arc::new(led);
     match ended {
         Ok(()) => {
-            let all = anew && segments.all_led(&led).map_err(unfit)?;
+            // what was found is kept whether or not the objects it holds are
+            // told; that it holds all of them is asked also of a walk that
+            // went on from one that did, as a branch it reached may have gone
             store(repository, &tips, &led, had == 0);
             keep(repository, tips, led.clone(), true);
+            let all = segments.all_led(&led).map_err(unfit)?;
             Ok((led, all))
         }
         Err(error) => {
