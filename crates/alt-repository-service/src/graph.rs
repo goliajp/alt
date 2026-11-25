@@ -536,20 +536,8 @@ pub fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node>
                     oid: entry.oid,
                 });
             }
-            // Canonical Git tree order treats directories as if suffixed '/'.
-            let sort_key = |entry: &TreeLink| {
-                let mut key = entry.name.clone();
-                if entry.mode == 0o040000 {
-                    key.push(b'/');
-                }
-                key
-            };
-            if entries
-                .windows(2)
-                .any(|pair| sort_key(&pair[0]) >= sort_key(&pair[1]))
-            {
-                return Err(Error::Integrity("unsorted tree"));
-            }
+            // a tree out of the order Git writes is taken as Git takes it: its
+            // bytes, and so its id, are what they are
             Node::Tree(entries)
         }
     })

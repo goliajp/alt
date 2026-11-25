@@ -1,4 +1,5 @@
 use super::*;
+mod fsck;
 mod given_up;
 mod led;
 mod led_raced;

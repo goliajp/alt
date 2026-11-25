@@ -41,6 +41,9 @@ impl<'a> Told<'a> {
     ) -> Result<Option<CommitRow>, Error> {
         let want = |to, kind| self.wanted.want(index, oid, to, kind);
         if kind == Kind::Tree {
+            if let Some(wrong) = crate::unsafe_names::found(data) {
+                return Err(Error::Unsafe(*oid, wrong));
+            }
             object::tree(data, &mut { want })?;
             return Ok(None);
         }

@@ -19,4 +19,4 @@ pub use kind::{ObjectKind, ParseKindError};
 pub use loose::{LooseError, LooseStore, RawObject};
 pub use oid::{HashAlgo, ObjectId, ParseOidError};
 pub use tag::Tag;
-pub use tree::{EntryMode, Tree, TreeEntry};
+pub use tree::{EntryMode, MODE_DIGITS, Tree, TreeEntry};

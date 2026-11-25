@@ -211,15 +211,17 @@ fn refused(error: Error, key: Option<RequestKey>) -> Response<ResponseBody> {
             key,
             Retry::SameRequest,
         ),
-        Error::Integrity(_) | Error::Task(_) | Error::Repository(_) | Error::Portable(_) => {
-            failure(
-                422,
-                ErrorCode::IntegrityError,
-                "Selected content or dependency validation failed",
-                key,
-                Retry::NewIntent,
-            )
-        }
+        Error::Integrity(_)
+        | Error::Fsck(..)
+        | Error::Task(_)
+        | Error::Repository(_)
+        | Error::Portable(_) => failure(
+            422,
+            ErrorCode::IntegrityError,
+            "Selected content or dependency validation failed",
+            key,
+            Retry::NewIntent,
+        ),
         Error::Database(_) | Error::Io(_) => failure(
             503,
             ErrorCode::TemporarilyUnavailable,

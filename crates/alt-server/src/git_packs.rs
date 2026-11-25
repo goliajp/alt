@@ -33,6 +33,7 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
         E::Limit(reason) => Error::Limit(reason),
         E::Busy(reason) => Error::Busy(reason),
         E::GivenUp => Error::Busy("the request is waited for no longer"),
+        E::Unsafe(oid, what) => Error::Fsck(oid, what),
         E::Format(reason) | E::Corrupt(reason) => Error::Integrity(reason),
         E::Dangling(..) | E::MissingBase(_) | E::NotFound(_) => {
             Error::Integrity("pack references an unavailable object")
@@ -192,6 +193,8 @@ pub(crate) fn receive(
         Err(Error::Busy(_)) => {
             Some("the packs of other pushes are being verified; push again".to_owned())
         }
+        // as Git answers a pack its fsck refuses
+        Err(Error::Fsck(..)) => Some("unpacker error".to_owned()),
         Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
     };
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
@@ -212,11 +215,24 @@ pub(crate) fn receive(
             None => alt_wire::push::CommandStatus::Ok(update.name.clone()),
         })
         .collect();
+    let refused = match &outcome {
+        Err(Error::Fsck(oid, what)) => Some(format!("error: object {}: {what}\n", hex(oid))),
+        _ => None,
+    };
+    let unpack = refused
+        .as_ref()
+        .map_or(Ok(()), |_| Err("index-pack abnormal exit"));
     let mut report = Vec::new();
-    alt_wire::push::encode_report_status(&mut report, Ok(()), &commands)?;
+    alt_wire::push::encode_report_status(&mut report, unpack, &commands)?;
     let body = if head.capabilities.iter().any(|cap| cap == "side-band-64k") {
-        // the report travels on band 1, closed by a flush packet
+        // what fsck says on band 2, which the client shows after `remote:`; the
+        // report on band 1, closed by a flush packet
         let mut framed = Vec::with_capacity(report.len() + 16);
+        if let Some(said) = &refused {
+            framed.extend_from_slice(format!("{:04x}", said.len() + 5).as_bytes());
+            framed.push(2);
+            framed.extend_from_slice(said.as_bytes());
+        }
         for chunk in report.chunks(65515) {
             framed.extend_from_slice(format!("{:04x}", chunk.len() + 5).as_bytes());
             framed.push(1);

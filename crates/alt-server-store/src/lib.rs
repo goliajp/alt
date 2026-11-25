@@ -60,6 +60,8 @@ pub enum Error {
     Repository(alt_repository_service::Error),
     Json(alt_json::Error),
     Integrity(&'static str),
+    /// an object of a pack `git fsck` refuses, and what it says of it
+    Fsck([u8; 20], &'static str),
     Limit(&'static str),
     /// what the request needs is taken by other requests, and was not given back
     /// in the time it had to wait
@@ -84,6 +86,7 @@ impl std::fmt::Display for Error {
             Self::Repository(e) => write!(f, "repository: {e}"),
             Self::Json(e) => write!(f, "encoding: {e}"),
             Self::Integrity(what) => write!(f, "integrity failure: {what}"),
+            Self::Fsck(oid, what) => write!(f, "object {}: {what}", alt_pack_segment::hex(oid)),
             Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
             Self::Busy(what) => write!(f, "busy with other requests: {what}"),
             Self::Precondition(what) => write!(f, "precondition failed: {what}"),
@@ -116,6 +119,7 @@ impl std::error::Error for Error {
             Self::Repository(e) => Some(e),
             Self::Json(e) => Some(e),
             Self::Integrity(_)
+            | Self::Fsck(..)
             | Self::Limit(_)
             | Self::Busy(_)
             | Self::Precondition(_)

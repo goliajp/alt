@@ -266,5 +266,6 @@ fn again(error: &Error) -> Error {
         Error::NotFound(oid) => Error::NotFound(*oid),
         Error::Busy(what) => Error::Busy(what),
         Error::GivenUp => Error::GivenUp,
+        Error::Unsafe(oid, what) => Error::Unsafe(*oid, what),
     }
 }

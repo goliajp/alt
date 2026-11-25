@@ -198,7 +198,7 @@ fn malformed_parent_duplicate_tree_and_tag_type_are_rejected() {
     assert!(objects.graph(&[tag]).is_err());
 }
 #[test]
-fn unsafe_names_modes_duplicates_order_and_zero_oids_are_rejected() {
+fn unsafe_names_modes_duplicates_and_zero_oids_are_rejected_and_order_is_not_asked() {
     let mut objects = Objects::default();
     let blob = objects.put(ObjectKind::Blob, b"");
     for name in [b"".as_slice(), b"..", b"a/b", b".git", b".ALT"] {
@@ -207,13 +207,15 @@ fn unsafe_names_modes_duplicates_order_and_zero_oids_are_rejected() {
     }
     for entries in [
         vec![("100644", b"a".as_slice(), blob), ("100755", b"a", blob)],
-        vec![("100644", b"z".as_slice(), blob), ("100644", b"a", blob)],
         vec![("777777", b"a".as_slice(), blob)],
         vec![("160000", b"a".as_slice(), ObjectId::Sha1([0; 20]))],
     ] {
         let tree = objects.tree(&entries);
         assert!(objects.graph(&[tree]).is_err());
     }
+    // out of the order Git writes, as Git takes it
+    let tree = objects.tree(&[("100644", b"z", blob), ("100644", b"a", blob)]);
+    assert!(objects.graph(&[tree]).is_ok());
 }
 #[test]
 fn graph_limits_apply_before_unbounded_read_or_expansion() {

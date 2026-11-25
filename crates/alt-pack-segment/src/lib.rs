@@ -34,6 +34,7 @@ mod settled;
 mod stream;
 mod told;
 mod trees;
+mod unsafe_names;
 mod wanted;
 
 pub use alt_git_pack::{BASE_FILES, BaseFiles, IndexWork, Memory, SPILL_FILES, Wait};
@@ -106,6 +107,8 @@ pub enum Error {
     Busy(&'static str),
     /// whoever asked for the pack waits for it no longer
     GivenUp,
+    /// a tree whose names `git fsck` refuses, and what it says of them
+    Unsafe(Oid, &'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -125,6 +128,7 @@ impl std::fmt::Display for Error {
             Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
             Self::Busy(v) => write!(f, "pack waits: {v}"),
             Self::GivenUp => f.write_str("pack given up"),
+            Self::Unsafe(oid, what) => write!(f, "object {}: {what}", hex(oid)),
         }
     }
 }
