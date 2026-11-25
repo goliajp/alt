@@ -2,6 +2,12 @@
 //! together into one, but the Hangul syllables, which it makes by
 //! rule: the first, the second, and the one they become. In the order
 //! of the first and then of the second.
+//!
+//! The table is what `iconv -f UTF-8-MAC -t UTF-8` of macOS does: each
+//! code point up to U+FFFF is given to it followed by each code point
+//! that any decomposition has in second place, and a pair is kept where
+//! one code point comes back. It is made again the same way when a
+//! release of macOS changes what its decoder composes.
 
 #[rustfmt::skip]
 pub(crate) const PAIRS: [(u16, u16, u16); 917] = [
