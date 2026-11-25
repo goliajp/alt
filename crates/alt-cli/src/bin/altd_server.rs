@@ -58,6 +58,8 @@ mod told;
 mod until;
 #[path = "altd_server/upload.rs"]
 mod upload;
+#[path = "altd_server/workers.rs"]
+mod workers;
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -132,7 +134,7 @@ fn main() {
         (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
-    // N workers each call `server.recv()` in a loop, so that concurrent
+    // N workers each take requests in a loop, so that concurrent
     // clients do not queue behind a slow push
     let told = told::told();
     let workers = told.workers;
@@ -160,42 +162,21 @@ fn main() {
         );
     }
 
-    let mode = Arc::new(mode);
-    let mut handles = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let server = Arc::clone(&server);
-        let mode = Arc::clone(&mode);
-        handles.push(std::thread::spawn(move || {
-            loop {
-                let req = match server.recv() {
-                    Ok(r) => r,
-                    Err(_) => break, // unblocked or socket dead
-                };
-                dispatch::serve_one(&mode, req);
-            }
-        }));
-    }
+    let workers = workers::Workers::start(Arc::clone(&server), Arc::new(mode), workers);
 
     // Poll the shutdown flag on the main thread. Once SIGTERM/SIGINT
-    // fires, unblock all worker `recv()` calls (pending recv → Err,
-    // in-flight responses keep going) and join. The poll is cheap
+    // fires, the workers take no request that is not there yet (in-flight
+    // responses keep going) and are waited for. The poll is cheap
     // (100 ms) and only the main thread runs it.
-    loop {
-        if shutdown::SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
-            eprintln!("altd-server: shutdown signal received, unblocking workers");
-            // `unblock()` frees one blocked recv() per call
-            for _ in 0..workers {
-                server.unblock();
-            }
-            break;
-        }
+    while !shutdown::SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    eprintln!("altd-server: shutdown signal received, unblocking workers");
 
     // a stuck worker (long ingest_pack, a malicious slow
     // client, a deadlocked Mutex<Store>) must not pin the process
     // forever. Spawn a watchdog that hard-exits after the deadline if
-    // `handles.join()` hasn't returned by then. systemd / k8s see
+    // the workers have not ended by then. systemd / k8s see
     // exit 0 either way — graceful was the goal, the deadline is the
     // hard limit, both paths are an acceptable shutdown.
     let deadline_ms = told.shutdown.as_millis();
@@ -204,10 +185,7 @@ fn main() {
         eprintln!("altd-server: graceful shutdown timed out after {deadline_ms} ms; force-exiting");
         std::process::exit(0);
     });
-
-    for h in handles {
-        let _ = h.join();
-    }
+    workers.close();
     eprintln!("altd-server: all workers stopped, exiting cleanly");
 }
 

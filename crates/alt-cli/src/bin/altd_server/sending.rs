@@ -43,14 +43,20 @@ impl Room {
 
     /// Has `file` written within the room, for a peer counted under `from`
     /// that is gone where its mark is set: where it would be large, it waits
-    /// for its turn until `by` while the peer is there.
+    /// for its turn until `by` while the peer is there, with `aside` given
+    /// back meanwhile.
     pub(super) fn writing(
         &self,
         file: File,
         (from, gone): (Option<IpAddr>, &Arc<AtomicBool>),
         by: Option<Instant>,
+        aside: Option<Box<dyn alt_shares::Aside>>,
     ) -> Written {
         let taken = self.0.share(from).waiting(by, Some(Arc::clone(gone)));
+        let taken = match aside {
+            Some(aside) => taken.aside(aside),
+            None => taken,
+        };
         Written { file, taken }
     }
 
@@ -131,7 +137,7 @@ mod tests {
     fn written_from(room: &Room, from: Option<u8>, bytes: usize) -> io::Result<Written> {
         let from = from.map(|from| IpAddr::from([192, 0, 2, from]));
         let gone = Arc::new(AtomicBool::new(false));
-        let mut file = room.writing(alt_os::temp::tempfile()?, (from, &gone), None);
+        let mut file = room.writing(alt_os::temp::tempfile()?, (from, &gone), None, None);
         file.write_all(&vec![7; bytes])?;
         Ok(file)
     }

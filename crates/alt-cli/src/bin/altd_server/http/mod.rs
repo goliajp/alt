@@ -42,6 +42,8 @@ struct Waiting {
     requests: VecDeque<Request>,
     /// the calls of `recv` that are to return without a request
     unblocked: usize,
+    /// every call that finds no request returns without one
+    closed: bool,
 }
 
 struct Shared {
@@ -171,7 +173,8 @@ impl Server {
     }
 
     /// The next request whose head was read, or an error for a call that
-    /// [`Server::unblock`] lets go of.
+    /// [`Server::unblock`] lets go of, or that finds none once the server is
+    /// [closed](Server::close).
     pub(crate) fn recv(&self) -> io::Result<Request> {
         let mut waiting = self.shared.waiting.lock().expect("requests");
         loop {
@@ -182,6 +185,9 @@ impl Server {
                 waiting.unblocked -= 1;
                 return Err(io::ErrorKind::Interrupted.into());
             }
+            if waiting.closed {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
             waiting = self.shared.arrived.wait(waiting).expect("requests");
         }
     }
@@ -189,6 +195,12 @@ impl Server {
     /// Has one call of [`Server::recv`] that finds no request return.
     pub(crate) fn unblock(&self) {
         self.shared.waiting.lock().expect("requests").unblocked += 1;
+        self.shared.arrived.notify_all();
+    }
+
+    /// Has every call of [`Server::recv`] that finds no request return.
+    pub(crate) fn close(&self) {
+        self.shared.waiting.lock().expect("requests").closed = true;
         self.shared.arrived.notify_all();
     }
 }

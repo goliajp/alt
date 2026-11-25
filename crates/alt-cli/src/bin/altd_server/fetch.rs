@@ -8,6 +8,7 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::{net::IpAddr, sync::Arc, sync::atomic::AtomicBool};
 
 use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
 use alt_hash::KeyedIdSet;
@@ -194,22 +195,20 @@ fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<Obje
 /// pack then leaves out what the commits acknowledged so far reach, which
 /// may be less than a longer negotiation would have found.
 ///
-/// The file is written within the room responses have between them, and has
-/// its part of it until it is sent; its turn to be large is waited for. It is written for as long as `until`
-/// says, and the error is a [`Stopped`] where that is over.
+/// The file has its part of the room responses have until it is sent; its turn to be large is
+/// waited for with the worker given back meanwhile. It is written for as long as `until` says,
+/// and the error is a [`Stopped`] where that is over.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
     room: &Room,
-    from: (
-        Option<std::net::IpAddr>,
-        &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ),
+    from: (Option<IpAddr>, &Arc<AtomicBool>),
     until: &Until,
 ) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
-    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from, until.by));
+    let aside = Some(super::workers::Workers::aside(Arc::clone(from.1), until.by));
+    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from, until.by, aside));
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };

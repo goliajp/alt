@@ -3,7 +3,7 @@
 //! others waiting for their turn for as long as a fetch may take. One kept by a
 //! peer that takes it slowly is let go of once another waits for its turn.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
@@ -190,4 +190,50 @@ fn a_large_response_taken_at_the_pace_the_server_is_told_is_read_whole_while_ano
     let after = after.join().unwrap();
     assert!(after.starts_with(b"HTTP/1.1 200"));
     assert_eq!(after.len(), whole);
+}
+
+/// What is answered to a request for the refs, read for no longer than a
+/// third of the window: a kept response nobody reads is let go of at the end
+/// of the window, and the turn with it.
+fn refs_asked(address: &str) -> Vec<u8> {
+    let mut socket = TcpStream::connect(address).unwrap();
+    socket.set_read_timeout(Some(LARGE_WINDOW / 3)).unwrap();
+    let asked = "GET /info/refs?service=git-upload-pack HTTP/1.1\r\nHost: h\r\nGit-Protocol: version=2\r\nConnection: close\r\n\r\n";
+    socket.write_all(asked.as_bytes()).unwrap();
+    answer(socket)
+}
+
+/// One worker, so one turn. A fetch of another address that waits for the
+/// turn while it is kept gives the worker back: a request for the refs that
+/// comes after it is answered meanwhile. Once the turn is given back it is
+/// answered whole, and the worker it took again serves the next request.
+#[test]
+fn a_large_response_that_waits_for_its_turn_holds_no_worker() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let env = [
+        ("ALT_SERVER_WORKERS", "1"),
+        ("ALT_SERVER_MAX_FETCH_MS", "120000"),
+    ];
+    let (server, head) = served(&tmp.path().join("origin"), &env);
+    let whole = answer(asked_for(&server.addr, &head, Some("203.0.113.9"))).len();
+    let first = kept(&server, &head, "203.0.113.9");
+    let second = waiting(&server, &head, "203.0.113.10");
+    // its body is received and it is ahead of the next request
+    std::thread::sleep(Duration::from_secs(2));
+    let refs = refs_asked(&server.addr);
+    assert!(
+        refs.starts_with(b"HTTP/1.1 200"),
+        "{:.200}",
+        String::from_utf8_lossy(&refs)
+    );
+    assert!(!second.is_finished());
+    drop(first);
+    let second = second.join().unwrap();
+    assert!(
+        second.starts_with(b"HTTP/1.1 200"),
+        "{:.200}",
+        String::from_utf8_lossy(&second)
+    );
+    assert_eq!(second.len(), whole);
+    assert!(refs_asked(&server.addr).starts_with(b"HTTP/1.1 200"));
 }
