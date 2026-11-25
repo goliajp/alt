@@ -523,7 +523,7 @@ fn mapping_projects_verified_delivery_and_receipts_cannot_regress_latest_mapping
     assert_eq!(r.get::<_, String>(1), digest2);
     assert!(
         f.store
-            .pending_change_events(&f.credential, &s, &c.channel, &c.configuration_digest)
+            .pending_change_page(&f.credential, &s, &c.channel, &c.configuration_digest, None)
             .unwrap()
             .is_empty()
     );
@@ -667,11 +667,12 @@ fn native_delivery_cannot_be_invented_and_source_revocation_blocks_dispatch() {
     );
     assert_eq!(
         f.store
-            .pending_change_events(
+            .pending_change_page(
                 &integration,
                 &s,
                 &separate.channel,
-                &separate.configuration_digest
+                &separate.configuration_digest,
+                None
             )
             .unwrap(),
         vec![digest]

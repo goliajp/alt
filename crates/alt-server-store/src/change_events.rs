@@ -176,26 +176,6 @@ impl Store {
         Ok(history)
     }
 
-    /// A bounded discovery list; each item still requires dispatch authorization.
-    pub fn pending_change_events(
-        &mut self,
-        credential: &Credential,
-        scope: &Scope,
-        channel: &str,
-        config: &str,
-    ) -> Result<Vec<String>> {
-        let mut tx = self.client.transaction()?;
-        instance(&mut tx, &self.spec, &self.signing_key)?;
-        let (_, _, installed) = binding(
-            &mut tx, &self.spec, scope, credential, channel, config, false,
-        )?;
-        integration(credential, &installed)?;
-        let rows=tx.query("SELECT event_digest FROM alt_link_outbox WHERE repository=$1 AND epoch=$2 AND channel=$3 AND delivered_at IS NULL ORDER BY created_at,entity,revision LIMIT 100", &[&scope.repository_instance_id,&integer(scope.recovery_epoch)?,&channel])?;
-        let result = rows.into_iter().map(|r| r.get(0)).collect();
-        tx.commit()?;
-        Ok(result)
-    }
-
     /// Check the installed integration and the original enqueue actor now.
     /// Cloud adapters must refresh those current account leases before calling.
     pub fn change_dispatch(
