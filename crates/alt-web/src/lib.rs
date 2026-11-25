@@ -103,13 +103,13 @@ impl MultiRepo {
 /// Names are URL path segments and must not be allowed to escape the
 /// root (`..`) or carry separators (`/`, `\`, NUL). This mirrors what
 /// altd-server's `resolve_repo` enforces — same model, same defence.
+/// A name that begins with a dot is served by neither, listed or not.
 fn is_safe_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains('/')
         && !name.contains('\\')
         && !name.contains('\0')
-        && name != ".."
-        && name != "."
+        && !name.starts_with('.')
 }
 
 /// Errors the API surface produces. Each maps to one HTTP status; the
@@ -175,6 +175,7 @@ mod tests {
         assert!(!is_safe_name("a\\b"));
         assert!(!is_safe_name(".."));
         assert!(!is_safe_name("."));
+        assert!(!is_safe_name(".hidden"));
         assert!(!is_safe_name("a\0b"));
     }
 
@@ -206,6 +207,12 @@ mod tests {
         match m.open("../escape") {
             Err(ApiError::RepoNotFound(_)) => {}
             other => panic!("expected RepoNotFound for traversal, got {:?}", other.err()),
+        }
+        // a store under a name that begins with a dot is not looked at
+        std::fs::create_dir_all(tmp.path().join(".hidden/.alt")).unwrap();
+        match m.open(".hidden") {
+            Err(ApiError::RepoNotFound(_)) => {}
+            other => panic!("expected RepoNotFound for .hidden, got {:?}", other.err()),
         }
     }
 }
