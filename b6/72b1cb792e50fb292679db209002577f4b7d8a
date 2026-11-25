@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the second server of a silent line asks for the lock as a server does
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/serving.rs
