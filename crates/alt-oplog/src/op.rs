@@ -15,6 +15,23 @@ pub enum OpLogError {
     },
     /// the log was cut back past records this handle read or wrote
     CutBack,
+    /// The op at byte `unheld` past where the log is known synced names
+    /// content that is not stored, and a frame after it, at byte `kept`,
+    /// was left by a writer that syncs, with what it names stored. A sync
+    /// may have covered that frame without seeing to the op at `unheld`,
+    /// and a command may have been answered for it. The log is not cut.
+    Kept {
+        unheld: u64,
+        kept: u64,
+    },
+    /// The op at byte `at`, past where the log is known synced, was
+    /// left by another boot, and nobody has looked since at whether
+    /// what it names is stored; a sync does not see to what it names.
+    /// The log is not recorded as synced over it: a writer looks first
+    /// ([`crate::OpLog::settle`]).
+    Unjudged {
+        at: u64,
+    },
 }
 
 impl std::fmt::Display for OpLogError {
@@ -27,6 +44,18 @@ impl std::fmt::Display for OpLogError {
                 f,
                 "the operation log ends at byte {holds}, but records up to byte {synced} of \
                  it were committed and synced: committed operations are gone"
+            ),
+            Self::Kept { unheld, kept } => write!(
+                f,
+                "the operation at byte {unheld} of the operation log names content that is \
+                 not stored, and an operation to keep follows it at byte {kept} in the part \
+                 of the log that is not known to be synced: the log is left as it is"
+            ),
+            Self::Unjudged { at } => write!(
+                f,
+                "nobody has looked at whether what the operation at byte {at} of the \
+                 operation log names is stored, which was never synced: the log is not \
+                 recorded as synced over it"
             ),
             Self::CutBack => f.write_str(
                 "the operation log was cut back: operations that were never synced and \
@@ -85,6 +114,32 @@ pub struct Op {
     pub actor: String,
     /// Opaque to the log; the caller's encoding of what happened.
     pub payload: Vec<u8>,
+    /// Where a version 2 log holds the op; `None` for an op of a version
+    /// 1 log and for one made of a body alone.
+    pub frame: Option<Framed>,
+}
+
+/// The frame of an op in a version 2 log: where it lies and what it says
+/// of the op beside its body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Framed {
+    pub at: u64,
+    pub end: u64,
+    /// the op's number in the log, counted from one
+    pub seq: u64,
+    pub flags: u8,
+    /// zeros for an op of no workspace
+    pub workspace: [u8; 8],
+    /// a ref transaction: its frame names the one before it
+    pub linked: bool,
+    /// the frame of the op this one undoes
+    pub inverse_of: Option<u64>,
+    pub request: Option<[u8; 16]>,
+    /// the frame says what closes the index of its workspace once the op
+    /// is done: the op changes that index
+    pub staged: bool,
+    /// the workspace is gone with this op
+    pub retired: bool,
 }
 
 impl Op {

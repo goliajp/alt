@@ -31,6 +31,13 @@ pub(crate) fn read(path: &Path, log_dir: &Path) -> (Option<Snapshot>, Option<Opt
         return (None, None);
     };
     let end = snap.anchor.map_or(0, |anchor| anchor.end);
+    if let Some(boot) = snap.boot {
+        // of a version 2 log: what lies past where the log was synced is
+        // there for as long as the boot that wrote it runs
+        let within = snap.synced.is_some_and(|synced| end <= synced);
+        let running = alt_oplog::v2::running_boot() == Some(boot);
+        return ((within || running).then_some(snap), None);
+    }
     if snap.synced.is_some_and(|noted| end <= noted) {
         return (Some(snap), None);
     }
@@ -43,7 +50,11 @@ impl RefStore {
     /// Whether enough of the log that is known synced follows the
     /// snapshot for it to be written anew.
     pub(crate) fn snapshot_is_due(&self) -> bool {
-        let synced = self.synced.max(self.oplog.synced_here());
+        // the snapshot of a version 2 log is anchored wherever the log ends
+        let synced = match self.framed() {
+            true => u64::MAX,
+            false => self.synced.max(self.oplog.synced_here()),
+        };
         let behind = (self.oplog.appended_len().min(synced)).saturating_sub(self.snapshot_end);
         behind > 0
             && self.ops_since_snapshot > 0
@@ -72,7 +83,12 @@ impl RefStore {
         // ops this handle appended were synced since it was opened; a log
         // whose marker records no boundary is taken for synced
         let mut within = u64::MAX;
-        if !self.known_synced()
+        let boot = self
+            .framed()
+            .then(|| alt_oplog::v2::running_boot().unwrap_or_default());
+        if boot.is_some() {
+            self.synced = self.oplog.bounded_to().unwrap_or(0);
+        } else if !self.known_synced()
             && let Some(whole) = self.oplog.bounded_to()
         {
             (self.synced, within) = (whole, whole);
@@ -97,7 +113,8 @@ impl RefStore {
             self.refs.turn(&tx.changes, true);
         }
         let (refs, synced) = (&self.refs, self.synced);
-        let written = snapshot::write(&self.snapshot_path, &at, synced, refs.len(), refs.iter());
+        let path = &self.snapshot_path;
+        let written = snapshot::write(path, &at, synced, boot, refs.len(), refs.iter());
         for tx in &later {
             self.refs.turn(&tx.changes, false);
         }

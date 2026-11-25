@@ -9,6 +9,7 @@ Adversarial-input fuzzing for the parser modules. A standalone crate (its own
 - `codec_parse` — git commit/tree/tag object parsers on arbitrary bytes.
 - `pack_delta_apply` — git delta resolution against a base (untrusted pack).
 - `store_delta_decode` — lineage delta (zstd ref-prefix) decode on corrupt input.
+- `oplog_frames` — version 2 operation log blocks and frames on arbitrary bytes.
 
 ## Run
 

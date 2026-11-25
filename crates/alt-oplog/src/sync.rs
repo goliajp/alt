@@ -1,10 +1,11 @@
 //! Making what a handle appended durable, and recording how far.
 
+use crate::OpLogError;
 use crate::left::open_sync_lock;
 use crate::lock::{lock_exclusive, unlock};
 use crate::sink::OpLogSink;
 use crate::synced::{self, Marker, SyncNamed};
-use crate::{OpLog, OpLogError};
+use crate::v1::OpLog;
 
 impl OpLog {
     /// Durability point for everything appended so far. Group commit: fsync

@@ -8,6 +8,7 @@ pub mod blake2b;
 pub mod blake3;
 mod cache;
 pub mod crc32;
+pub mod crc32c;
 mod hmac;
 mod ident;
 pub mod sha1;
@@ -18,6 +19,7 @@ pub mod sha512;
 pub use adler32::adler32;
 pub use blake2b::Blake2b;
 pub use crc32::{Crc32, crc32};
+pub use crc32c::{Crc32c, crc32c};
 pub use hmac::{HmacSha256, hmac_sha256, pbkdf2_hmac_sha256};
 pub use ident::{
     IdBuildHasher, IdHasher, IdMap, IdSet, KeyedIdBuildHasher, KeyedIdHasher, KeyedIdMap,

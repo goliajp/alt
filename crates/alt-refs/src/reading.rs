@@ -97,10 +97,16 @@ impl RefStore {
     /// only reads: the ops other writers committed are folded in under the
     /// log's shared lock and nothing is written. An append that never
     /// finished stays at the end of the log, passed over.
+    ///
+    /// Ops this store held that another writer cut are dropped from the
+    /// refs, here as in [`Self::refresh`], and nobody is told by either. A
+    /// transaction of this store among them that was never synced is told
+    /// of by the sync that was to cover it: the next one asked of this
+    /// store, or, where the store leaves its syncs to a sink, the sink.
     pub fn follow(&mut self) -> Result<(), RefError> {
         match self.oplog.follow() {
             // another writer cut ops this handle held
-            Err(OpLogError::CutBack) => self.oplog.reopen()?,
+            Err(OpLogError::CutBack) => self.oplog.reread()?,
             followed => followed?,
         }
         if self.oplog.reads() != self.reads_seen {

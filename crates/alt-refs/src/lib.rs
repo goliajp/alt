@@ -29,7 +29,7 @@ use alt_git_codec::ObjectId;
 use alt_oplog::OpLog;
 use state::Refs;
 
-pub use alt_oplog::{OpId, Unconfirmed};
+pub use alt_oplog::{Answer, OpId, Ticket, Unconfirmed};
 pub use check::RefsChecked;
 pub use policy::{RefError, RefPolicy, StateCheck};
 pub use reading::left_out;
@@ -106,7 +106,13 @@ impl RefStore {
             _ => told.unwrap_or_else(|| oplog.bounded_to()).unwrap_or(0),
         };
 
-        let recent = oplog.recent();
+        let framed = oplog.format() == 2;
+        // a version 2 log is read from its last checkpoint on: without a
+        // snapshot it holds, the ops before that are read as well
+        let recent = match framed && !oplog.anchored() {
+            true => oplog.ops()?,
+            false => oplog.recent(),
+        };
         let (mut refs, replay_from, snapshot_end, snapshot_len) =
             reading::start_from(snapshot, oplog.anchored(), recent);
 
@@ -116,7 +122,7 @@ impl RefStore {
 
         let mut store = Self {
             ops_since_snapshot: recent.len() - replay_from,
-            applied,
+            applied: oplog.recent().len(),
             oplog,
             snapshot_path,
             refs,
@@ -128,7 +134,8 @@ impl RefStore {
         };
         // a reader refreshes a snapshot that has fallen behind (or predates
         // anchors, or the note), so the next open is short whoever runs it
-        let unnoted = noted.is_some_and(|noted| noted != Some(synced))
+        let unnoted = !framed
+            && noted.is_some_and(|noted| noted != Some(synced))
             && synced >= store.oplog.appended_len();
         if snapshots && !store.oplog.clamped() && (store.snapshot_is_due() || unnoted) {
             // a cache: where it cannot be written, the open still stands
@@ -151,7 +158,7 @@ impl RefStore {
     pub fn refresh(&mut self) -> Result<(), RefError> {
         match self.oplog.refresh() {
             // another writer cut ops this handle held
-            Err(alt_oplog::OpLogError::CutBack) => self.oplog.reopen()?,
+            Err(alt_oplog::OpLogError::CutBack) => self.oplog.reread()?,
             refreshed => refreshed?,
         }
         if self.oplog.reads() != self.reads_seen {

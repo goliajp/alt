@@ -23,6 +23,12 @@ pub const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 
 pub const SIGCONT: c_int = 18;
 
+/// The `lseek` origins that find the next data and the next hole of a file.
+pub const SEEK_DATA: c_int = 3;
+pub const SEEK_HOLE: c_int = 4;
+/// "operation not supported" (`EOPNOTSUPP`, which `ENOTSUP` equals here).
+pub const ENOTSUP: c_int = 95;
+
 /// The character-type category in the mask `newlocale` takes.
 pub const LC_CTYPE_MASK: c_int = 1 << 0;
 /// The `nl_langinfo` item that names the character set.

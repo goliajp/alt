@@ -18,6 +18,7 @@ alt-prism-deflate = { path = "../crates/alt-prism-deflate" }
 alt-git-index = { path = "../crates/alt-git-index" }
 alt-diff = { path = "../crates/alt-diff" }
 alt-merge = { path = "../crates/alt-merge" }
+alt-oplog = { path = "../crates/alt-oplog" }
 sha1 = "0.10"
 
 # Standalone workspace: the fuzz crate needs nightly + libfuzzer and must
@@ -72,6 +73,13 @@ bench = false
 [[bin]]
 name = "merge3"
 path = "fuzz_targets/merge3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "oplog_frames"
+path = "fuzz_targets/oplog_frames.rs"
 test = false
 doc = false
 bench = false

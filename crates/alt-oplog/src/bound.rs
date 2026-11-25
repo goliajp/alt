@@ -3,7 +3,8 @@
 
 use crate::lock::{lock_exclusive, unlock};
 use crate::synced::{self, Marker};
-use crate::{OpLog, OpLogError, relaxed_durability};
+use crate::v1::OpLog;
+use crate::{OpLogError, relaxed_durability};
 
 impl OpLog {
     /// Sees to it, as a writer does before it appends, that the marker

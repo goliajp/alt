@@ -12,3 +12,14 @@ alt-marker.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 alt-os.workspace = true
+
+[features]
+# what tests have a log do that no machine does on its own (`v2/hooks.rs`);
+# no manifest asks for it, so that no build of the workspace has it unless
+# it is named on the command line for this package
+hooks = []
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+required-features = ["hooks"]
