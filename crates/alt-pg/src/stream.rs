@@ -50,6 +50,13 @@ impl Stream {
         }
     }
 
+    pub fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_read_timeout(timeout),
+            Self::Unix(stream) => stream.set_read_timeout(timeout),
+        }
+    }
+
     fn receive(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Tcp(stream) => stream.read(buffer),

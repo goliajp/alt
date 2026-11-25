@@ -1,6 +1,9 @@
 //! One process serves a database at a time, wherever the processes run.
 
 use super::*;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::{Arc, Mutex};
 
 const SERVED: &str = "another server serves this database";
 /// the sessions that hold the lock of the serving process, or wait for it
@@ -106,4 +109,104 @@ fn a_database_is_served_by_one_process_at_a_time() {
     assert_eq!(served.unwrap(), Err(SERVED.to_owned()));
     serving.join().unwrap();
     drop(other);
+}
+
+/// A line to the database a test can make go silent: each connection made to
+/// it goes on to the socket of the database, and those made before
+/// [`Line::silent`] carry nothing more either way, without being closed. Once
+/// the line is dropped they are closed.
+struct Line {
+    address: std::net::SocketAddr,
+    /// how many connections were made, and how many of them carry nothing more
+    made: Arc<(AtomicUsize, AtomicUsize)>,
+    clients: Arc<Mutex<Vec<std::net::TcpStream>>>,
+}
+
+impl Line {
+    fn to(socket: std::path::PathBuf) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let made = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
+        let clients = Arc::new(Mutex::new(Vec::new()));
+        let (counts, kept) = (made.clone(), clients.clone());
+        std::thread::spawn(move || {
+            for client in listener.incoming() {
+                let Ok(client) = client else { return };
+                let number = counts.0.fetch_add(1, SeqCst);
+                let database = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+                kept.lock().unwrap().push(client.try_clone().unwrap());
+                let ends: [(Box<dyn Read + Send>, Box<dyn Write + Send>); 2] = [
+                    (
+                        Box::new(client.try_clone().unwrap()),
+                        Box::new(database.try_clone().unwrap()),
+                    ),
+                    (Box::new(database), Box::new(client)),
+                ];
+                for (mut from, mut to) in ends {
+                    let counts = counts.clone();
+                    std::thread::spawn(move || {
+                        let mut buffer = vec![0; 64 << 10];
+                        while let Ok(read @ 1..) = from.read(&mut buffer) {
+                            if counts.1.load(SeqCst) > number {
+                                return;
+                            }
+                            if to.write_all(&buffer[..read]).is_err() {
+                                return;
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        Line {
+            address,
+            made,
+            clients,
+        }
+    }
+
+    fn silent(&self) {
+        self.made.1.store(self.made.0.load(SeqCst), SeqCst);
+    }
+}
+
+impl Drop for Line {
+    fn drop(&mut self) {
+        for client in self.clients.lock().unwrap().iter() {
+            let _ = client.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// The server reaches its database over a line that goes silent, and the
+/// database ends the session that holds the lock, as it does one it hears
+/// nothing of. The server hears nothing more of that session either: it
+/// gives up on it once its answer is late, begins another and takes the lock
+/// again, and a second server is turned away.
+#[test]
+#[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
+fn a_server_whose_session_goes_silent_takes_the_lock_again_with_another() {
+    let mut f = Fixture::new();
+    let admin: alt_pg::Config = f.admin_dsn.parse().unwrap();
+    let Some(alt_pg::Host::Unix(directory)) = admin.host() else {
+        panic!("the test database is reached on a socket of the host");
+    };
+    let socket = directory.join(format!(".s.PGSQL.{}", admin.port().unwrap_or(5432)));
+    let (user, database) = (admin.user().unwrap().to_owned(), f.database.clone());
+    // the line is dropped first, and the server can end what it reads on it
+    let server;
+    let line = Line::to(socket);
+    let port = line.address.port();
+    server = super::sign_in_deadline::start(&mut f, |factory, _| {
+        let reached = format!("host=127.0.0.1 port={port} user={user} dbname={database}");
+        factory.database = reached.parse().unwrap();
+    });
+    let before = held_until(&f, "the lock of the server", |held| held.len() == 1);
+    line.silent();
+    ended(&f, before[0]);
+    held_until(&f, "the lock taken again", |held| {
+        held.len() == 1 && held != before
+    });
+    assert_eq!(Running::refusal(&f, None), SERVED);
+    drop((line, server));
 }

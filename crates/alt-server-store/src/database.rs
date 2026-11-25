@@ -22,6 +22,14 @@ impl Connection {
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
     }
+    /// statements outside any transaction block, uncached
+    pub fn batch_execute(&mut self, sql: &str) -> Result<(), Error> {
+        self.client.batch_execute(sql)
+    }
+    /// how long a read of an answer waits; a read that waits longer closes the connection
+    pub fn set_read_timeout(&mut self, timeout: std::time::Duration) -> Result<(), Error> {
+        self.client.set_read_timeout(Some(timeout))
+    }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)

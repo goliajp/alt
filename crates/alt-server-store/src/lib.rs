@@ -44,7 +44,7 @@ mod schema_v19;
 mod schema_v20;
 mod segments;
 mod serving;
-pub use serving::{SERVED, Serving};
+pub use serving::{SERVED, Serving, UNHEARD};
 mod store;
 mod tasks;
 pub use bytes::*;
