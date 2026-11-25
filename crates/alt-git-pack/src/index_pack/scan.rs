@@ -10,6 +10,18 @@ use crate::{EntryKind, Pack, PackError};
 /// of nothing.
 const ENTRY_MIN: usize = 9;
 
+/// What indexing keeps of `entries` entries at once.
+pub(super) fn held(entries: usize) -> u64 {
+    (entries as u64).saturating_mul(super::HELD_FOR_AN_INDEXED_ENTRY)
+}
+
+/// [`held`] of the entries a pack that says it has `count` may have: no
+/// more than its body holds.
+pub(super) fn held_by(pack: &Pack, count: u32) -> u64 {
+    let body = pack.bytes().len() - pack.algo().raw_len();
+    held((count as usize).min(body / ENTRY_MIN))
+}
+
 pub(super) enum Form {
     Plain(ObjectKind),
     /// a delta of the entry at this index

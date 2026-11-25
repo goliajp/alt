@@ -7,7 +7,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use alt_git_codec::HashAlgo;
-use alt_git_pack::{IndexLimits, Memory, PackError, Wait, index_pack_within};
+use alt_git_pack::{
+    HELD_FOR_AN_INDEXED_ENTRY, IndexLimits, Memory, PackError, Wait, index_pack_within,
+};
 use alt_os::temp::TempDir;
 
 use crate::index_pack::{delta, ofs_entry, plain_entry, wide, written};
@@ -43,16 +45,19 @@ fn indexed(
     )
 }
 
+/// what is kept of the two entries of the pack of [`indexed`]
+const KEPT: u64 = 2 * HELD_FOR_AN_INDEXED_ENTRY;
+
 #[test]
 fn a_pack_has_room_for_its_largest_object_three_times_over_and_gives_it_back() {
     let dir = TempDir::new().unwrap();
-    let (_, refused) = indexed(&dir, 2999);
+    let (_, refused) = indexed(&dir, 2999 + KEPT);
     assert!(
         matches!(refused, Err(PackError::Limit("index memory"))),
         "{refused:?}"
     );
 
-    let (memory, taken) = indexed(&dir, 3000);
+    let (memory, taken) = indexed(&dir, 3000 + KEPT);
     let taken = taken.unwrap();
     // while its objects may be read the three thousand are kept free for them
     let (tell, told) = mpsc::channel();
@@ -73,7 +78,7 @@ fn a_pack_has_room_for_its_largest_object_three_times_over_and_gives_it_back() {
     told.recv_timeout(Duration::from_secs(60)).unwrap();
     waiting.join().unwrap();
     let late = Some(Instant::now() + Duration::from_secs(60));
-    drop(memory.take_by(3000, late).unwrap());
+    drop(memory.take_by(3000 + KEPT, late).unwrap());
 }
 
 /// whether `done` is told of within a fifth of a second
@@ -253,4 +258,42 @@ fn a_pack_that_waits_to_be_let_in_is_not_kept_out_by_the_objects_being_made() {
         drop(two);
         heard.recv_timeout(LONG).unwrap();
     });
+}
+
+/// Two thousand objects of a few bytes inflate to little, and what indexing
+/// keeps of each entry is more than that: a pack of them holds two hundred
+/// bytes for each throughout, and is refused where the memory has no room for
+/// as many while it is scanned.
+#[test]
+fn a_pack_holds_what_is_kept_of_each_of_its_entries() {
+    let dir = TempDir::new().unwrap();
+    let entries: Vec<Vec<u8>> = (0..2000)
+        .map(|n| plain_entry(format!("{n}").as_bytes()))
+        .collect();
+    let pack = written(&dir, &entries);
+    let index = |bytes: u64| {
+        let memory: &'static Memory = Box::leak(Box::new(Memory::new(bytes)));
+        let limits = IndexLimits {
+            object_bytes: 100,
+            base_bytes: 0,
+            each_bytes: 0,
+            memory: Some(memory),
+            ..IndexLimits::default()
+        };
+        (
+            memory,
+            index_pack_within(&pack, HashAlgo::Sha1, false, &limits),
+        )
+    };
+    let (memory, indexed) = index(64 << 20);
+    let indexed = indexed.unwrap();
+    assert!(HELD_FOR_AN_INDEXED_ENTRY >= 200);
+    assert_eq!(memory.taken().0, 2000 * HELD_FOR_AN_INDEXED_ENTRY);
+    drop(indexed);
+    assert_eq!(memory.taken(), (0, 0));
+    let (_, refused) = index(2000 * 200);
+    assert!(
+        matches!(refused, Err(PackError::Limit("index memory"))),
+        "{refused:?}"
+    );
 }
