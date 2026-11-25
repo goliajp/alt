@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a request held for its place is sent again only where it was refused for it
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections/sources.rs
