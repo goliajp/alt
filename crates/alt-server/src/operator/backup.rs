@@ -24,6 +24,18 @@ pub use unread::Unread;
 pub use verify::{VerifiedBackup, verify};
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
+
+/// The directory `path` is in, where what a command writes on its way to `path`
+/// is put: on the disk `path` is on, not among the temporary files of the host,
+/// which may be small or kept in memory, and a backup is as large as the bytes
+/// of the instance.
+pub fn beside(path: &Path) -> Result<&Path> {
+    match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Ok(Path::new(".")),
+        Some(parent) => Ok(parent),
+        None => Err(Error::Config("a directory to write beside")),
+    }
+}
 #[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct FileDigest {
@@ -175,7 +187,7 @@ fn create_inner(
         .mode(0o700)
         .create(output)
         .map_err(|_| Error::Config("backup output must be a new directory"))?;
-    let work = alt_os::temp::tempdir().map_err(|_| Error::File)?;
+    let work = alt_os::temp::tempdir_in(beside(output)?).map_err(|_| Error::File)?;
     let mut client = config.client()?;
     let signing_key = config.signing_key()?;
     let snapshot = MaintenanceSnapshot::begin(

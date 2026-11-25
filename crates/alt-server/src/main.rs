@@ -105,8 +105,10 @@ fn execute(args: &Args) -> Result<Value> {
                     "--source-fenced is required for disaster recovery",
                 ));
             }
+            // read out beside the bytes it is restored to
+            let work = operator::backup::beside(&config.bytes_directory)?;
             let verified = operator::backup::verify(
-                input,
+                (input, work),
                 identity,
                 public_key(trusted_receipt_key)?,
                 *maximum_bytes,

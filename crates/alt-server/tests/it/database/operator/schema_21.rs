@@ -101,15 +101,19 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     let offsite = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(offsite.path());
     let backup = source.path("backup");
-    let created = source.ok(&[
-        "backup",
-        "--schema",
-        "21",
-        "--recipient",
-        &recipient,
-        "--output",
-        &backup,
-    ]);
+    // what a backup writes on its way is beside it, and what a restore reads out
+    // is beside the bytes it restores: the temporary files of the host are not
+    // there to be written
+    let away = |db: &OperatorDb, args: &[&str]| {
+        let mut command = db.command();
+        command.env("TMPDIR", db.path("nowhere")).args(args);
+        let done = command.output().unwrap();
+        let said = String::from_utf8_lossy(&done.stderr);
+        assert!(done.status.success(), "{args:?}: {said}");
+        alt_json::from_slice::<alt_json::Value>(&done.stdout).unwrap()
+    };
+    let to = ["--recipient", &recipient, "--output", &backup];
+    let created = away(&source, &[&["backup", "--schema", "21"][..], &to].concat());
     assert_eq!(created["backup_created"], true);
 
     // in place, told the proxies in front of it as the package tells its container
@@ -165,18 +169,10 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
         alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
     config["instance"]["runtime_generation"] = alt_json::json!(10);
     std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
-    let restored = target.ok(&[
-        "restore",
-        "--input",
-        &backup,
-        "--identity",
-        &identity,
-        "--trusted-receipt-key",
-        &trust,
-        "--maximum-bytes",
-        "100000000",
-        "--source-fenced",
-    ]);
+    let from = ["restore", "--input", &backup, "--identity", &identity];
+    let trusted = ["--trusted-receipt-key", &trust, "--source-fenced"];
+    let most = ["--maximum-bytes", "100000000"];
+    let restored = away(&target, &[&from[..], &trusted, &most].concat());
     assert_eq!(restored["restored"], true);
     assert_eq!(
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
