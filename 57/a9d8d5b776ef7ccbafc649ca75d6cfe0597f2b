@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: perf
+summary: schema 23 indexes what manifests name, and the content route asks them first
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/schema-v23.sql
+touched: crates/alt-server-store/src/schema.rs
+touched: crates/alt-server-store/src/schema.sql
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server-store/tests/it/database/schema_20.rs
+touched: crates/alt-server-store/tests/it/database/schema_21.rs
+touched: crates/alt-server-store/tests/it/database/schema_22.rs
+touched: crates/alt-server-store/tests/it/database/schema_23.rs
+touched: crates/alt-server-store/tests/it/database/single_copy/baseline.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
+touched: crates/alt-server/tests/it/database/operator/upgrade.rs
+touched: self-hosted/README.md
