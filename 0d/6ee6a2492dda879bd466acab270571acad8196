@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: leave a fifo, a socket or a device in the working tree unlisted and unadded, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/add_hidden.rs
+touched: crates/alt-cli/tests/it/add_hidden/special.rs
+touched: crates/alt-worktree/src/scan.rs
+touched: crates/alt-worktree/src/untracked.rs
+touched: crates/alt-worktree/src/walk/listing.rs
