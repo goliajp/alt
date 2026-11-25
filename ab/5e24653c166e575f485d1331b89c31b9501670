@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the dispatch of a request and the end of the old server have modules of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/dispatch.rs
+touched: crates/alt-cli/src/bin/altd_server/shutdown.rs
