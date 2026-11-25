@@ -64,7 +64,7 @@ impl Running {
             password_places: 2,
             verifying: Box::leak(Box::new(alt_server::PackMemory::new(4 << 30))),
             base_files: None,
-            sending: alt_server::shares::Shares::passed_by_one_alone(u64::MAX),
+            sending: alt_server::shares::Shares::passed_by_one_alone(u64::MAX, 1),
             native: NativeOptions {
                 portable: Some(portable::bounds()),
                 task_limits: task_limits(),

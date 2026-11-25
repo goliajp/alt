@@ -141,8 +141,8 @@ fn main() {
     // supervisor may signal as soon as it sees it, and a signal landing
     // earlier would take the default action and skip the drain.
     install_signal_handlers();
-
-    let server = Server::listen(&bind, told.io, told.connections, told.here, told.proxies);
+    let most = (told.connections, workers / 2);
+    let server = Server::listen(&bind, told.io, most, told.here, told.proxies);
     let server = Arc::new(server.unwrap_or_else(|e| die(&format!("bind {bind}: {e}"))));
     eprintln!(
         "altd-server: listening on {} ({}, workers={workers})",

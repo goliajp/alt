@@ -201,7 +201,7 @@ pub(crate) fn execute_git_with_cache(
         _ => view,
     };
     let room = room.as_ref();
-    let sending = room.map(|room| room.sending.0.share(room.sending.1));
+    let sending = room.map(Verifying::share);
     let gone = room.map(|room| &*room.given_up);
     crate::git_read::read(store.limits(), receive, &command, view, sending, gone)
 }
@@ -219,6 +219,15 @@ pub(crate) struct Verifying {
     /// the room the responses to fetches have on disk, and the address the
     /// caller is counted under there
     pub sending: (std::sync::Arc<alt_shares::Shares>, Option<std::net::IpAddr>),
+}
+
+impl Verifying {
+    /// What the response takes of the room the responses to fetches have: it
+    /// waits for its turn to be large while the answer is waited for.
+    pub fn share(&self) -> alt_shares::Share {
+        let gone = Some(self.given_up.clone());
+        self.sending.0.share(self.sending.1).waiting(None, gone)
+    }
 }
 
 /// Held by whoever waits for the answer to a request. Dropped, when the answer is

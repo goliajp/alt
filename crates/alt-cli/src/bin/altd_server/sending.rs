@@ -14,6 +14,8 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use super::http::{Share, Shares};
 
@@ -24,19 +26,29 @@ pub(super) const FULL: &str = "the responses being sent take all the room they h
 pub(super) struct Room(Arc<Shares>);
 
 impl Room {
-    pub(super) fn of(most: u64) -> Self {
-        Room(Shares::passed_by_one_alone(most))
+    /// `most` bytes, of which `large` responses at once may have more than the
+    /// part of their address.
+    pub(super) fn of(most: u64, large: usize) -> Self {
+        Room(Shares::passed_by_one_alone(most, large))
     }
 
     /// The room all the responses of this server have.
     pub(super) fn shared() -> &'static Room {
         static ROOM: std::sync::OnceLock<Room> = std::sync::OnceLock::new();
-        ROOM.get_or_init(|| Room::of(super::told::told().sending_bytes))
+        let told = super::told::told();
+        ROOM.get_or_init(|| Room::of(told.sending_bytes, told.workers / 2))
     }
 
-    /// Has `file` written within the room, for a peer counted under `from`.
-    pub(super) fn writing(&self, file: File, from: Option<IpAddr>) -> Written {
-        let taken = self.0.share(from);
+    /// Has `file` written within the room, for a peer counted under `from`
+    /// that is gone where its mark is set: where it would be large, it waits
+    /// for its turn until `by` while the peer is there.
+    pub(super) fn writing(
+        &self,
+        file: File,
+        (from, gone): (Option<IpAddr>, &Arc<AtomicBool>),
+        by: Option<Instant>,
+    ) -> Written {
+        let taken = self.0.share(from).waiting(by, Some(Arc::clone(gone)));
         Written { file, taken }
     }
 
@@ -90,8 +102,14 @@ impl Sent {
 }
 
 impl Read for Sent {
+    /// A large response another waits for its turn behind goes on only as fast
+    /// as such a one has to.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.file.read(buf)
+        let read = self.file.read(buf)?;
+        match self.taken.sent(read as u64) {
+            Ok(()) => Ok(read),
+            Err(slow) => Err(io::Error::new(io::ErrorKind::TimedOut, slow)),
+        }
     }
 }
 
@@ -110,14 +128,15 @@ mod tests {
 
     fn written_from(room: &Room, from: Option<u8>, bytes: usize) -> io::Result<Written> {
         let from = from.map(|from| IpAddr::from([192, 0, 2, from]));
-        let mut file = room.writing(alt_os::temp::tempfile()?, from);
+        let gone = Arc::new(AtomicBool::new(false));
+        let mut file = room.writing(alt_os::temp::tempfile()?, (from, &gone), None);
         file.write_all(&vec![7; bytes])?;
         Ok(file)
     }
 
     #[test]
     fn the_responses_there_are_take_no_more_than_their_room_and_one_alone_whatever_it_is() {
-        let room = Room::of(1000);
+        let room = Room::of(1000, 1);
         let first = written(&room, 600).unwrap();
         let second = written(&room, 400).unwrap();
         assert_eq!(room.held(), 1000);
@@ -143,7 +162,7 @@ mod tests {
 
     #[test]
     fn the_responses_to_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
-        let room = Room::of(1000);
+        let room = Room::of(1000, 1);
         let slow: Vec<Written> = (0..5)
             .map(|_| written_from(&room, Some(1), 50).unwrap())
             .collect();

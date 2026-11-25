@@ -14,7 +14,7 @@ pub(crate) fn asked(address: &str, head: &str) -> TcpStream {
 }
 
 /// The same, where `from` as a proxy that says whose the request is.
-fn asked_for(address: &str, head: &str, from: Option<&str>) -> TcpStream {
+pub(crate) fn asked_for(address: &str, head: &str, from: Option<&str>) -> TcpStream {
     let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4);
     let want = pkt(&format!("want {head}\n"));
     let command = [

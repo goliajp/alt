@@ -214,7 +214,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         claim: claim.clone(),
         attempt,
         reviews: state.reviews.clone(),
-        sending: state.options.sending.share(alt_shares::address(peer)),
+        sending: (state.options.sending.share(alt_shares::address(peer)))
+            .waiting(None, Some(waiting.0.clone())),
         gone: waiting.0.clone(),
     };
     let outcome = tokio::time::timeout(

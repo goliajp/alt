@@ -1,6 +1,5 @@
 //! The responses to fetches that are written to files take of one room on disk
 //! until they are sent, and those of one address a quarter of it.
-use super::bodies::connect;
 use super::slow_readers::noise;
 use super::*;
 use crate::database::git::{identity, ok, text};
@@ -8,13 +7,13 @@ use crate::database::sign_in_deadline::start;
 use alt_server::shares::Shares;
 use std::io::{BufRead, Read, Write};
 
-const FILE: usize = 6 << 20;
-const ROOM: u64 = 40 << 20;
+pub(super) const FILE: usize = 6 << 20;
+pub(super) const ROOM: u64 = 40 << 20;
 
 /// Pushes a branch of two files of noise and one beside it, and gives the tip of
 /// the first: a fetch of it alone is of a part of the repository, which is
 /// written out object by object.
-fn pushed(f: &Fixture, server: &Running) -> String {
+pub(super) fn pushed(f: &Fixture, server: &Running) -> String {
     let temp = alt_os::temp::tempdir().unwrap();
     let work = temp.path();
     ok(work, &f.token, &["init", "-q", "--initial-branch=main"]);
@@ -38,9 +37,19 @@ fn pushed(f: &Fixture, server: &Running) -> String {
 
 /// A fetch of `head` that the proxy says comes from `from`, sent: its answer is
 /// there to be read.
-fn asked(
+pub(super) fn asked(
     f: &Fixture,
     server: &Running,
+    head: &str,
+    from: &str,
+) -> std::io::BufReader<std::net::TcpStream> {
+    asked_at(&server.url, &f.token, head, from)
+}
+
+/// [`asked`] of the server at `url`, with `token`.
+pub(super) fn asked_at(
+    url: &str,
+    token: &str,
     head: &str,
     from: &str,
 ) -> std::io::BufReader<std::net::TcpStream> {
@@ -52,10 +61,14 @@ fn asked(
     alt_wire::pkt::write_flush(&mut command).unwrap();
     let head = format!(
         "POST /git/repository/git-upload-pack HTTP/1.1\r\nHost: alt\r\nAuthorization: Bearer {}\r\nX-Forwarded-For: {from}\r\nGit-Protocol: version=2\r\nContent-Type: application/x-git-upload-pack-request\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
-        f.token,
+        token,
         command.len()
     );
-    let (mut socket, reader) = connect(server);
+    let socket = std::net::TcpStream::connect(url.strip_prefix("http://").unwrap()).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let (mut socket, reader) = (socket.try_clone().unwrap(), std::io::BufReader::new(socket));
     socket.write_all(head.as_bytes()).unwrap();
     socket.write_all(&command).unwrap();
     reader
@@ -63,8 +76,23 @@ fn asked(
 
 /// What a fetch of `head` from `from` is answered with: the status, the seconds
 /// after which to come again, the bytes of the body.
-fn fetched(f: &Fixture, server: &Running, head: &str, from: &str) -> (u16, Option<u64>, usize) {
-    let mut reader = asked(f, server, head, from);
+pub(super) fn fetched(
+    f: &Fixture,
+    server: &Running,
+    head: &str,
+    from: &str,
+) -> (u16, Option<u64>, usize) {
+    fetched_at(&server.url, &f.token, head, from)
+}
+
+/// [`fetched`] of the server at `url`, with `token`.
+pub(super) fn fetched_at(
+    url: &str,
+    token: &str,
+    head: &str,
+    from: &str,
+) -> (u16, Option<u64>, usize) {
+    let mut reader = asked_at(url, token, head, from);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     let status = line.split(' ').nth(1).unwrap().parse().unwrap();
@@ -85,7 +113,7 @@ fn fetched(f: &Fixture, server: &Running, head: &str, from: &str) -> (u16, Optio
 }
 
 /// what the room is left with once the responses that were sent have let go
-fn left(room: &Shares) -> u64 {
+pub(super) fn left(room: &Shares) -> u64 {
     let began = std::time::Instant::now();
     while room.held() > 1 && began.elapsed() < Duration::from_secs(30) {
         std::thread::sleep(Duration::from_millis(20));
@@ -93,24 +121,28 @@ fn left(room: &Shares) -> u64 {
     room.held()
 }
 
-/// The room is forty megabytes, a response twelve. An address that has another
-/// taker in the room is held to its quarter, and its fetch is told to come again;
-/// the fetch of another address is answered, and so is that of the first once it
-/// is the only one of its address. With little left in the room for anybody, a
-/// fetch is told to come again whoever it comes from.
+/// The room is forty megabytes, a response twelve, written to its file eight
+/// megabytes at first. An address whose other takers have its quarter is held
+/// to it, and its fetch is told to come again; the fetch of another address is
+/// answered, and so is that of the first once it has room in its part. With
+/// little left in the room for anybody, a fetch is told to come again whoever
+/// it comes from.
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn the_responses_to_fetches_that_are_files_take_of_one_room_and_an_address_a_quarter_of_it() {
     let mut f = Fixture::new();
-    let room = Shares::passed_by_one_alone(ROOM);
+    let room = Shares::passed_by_one_alone(ROOM, 1);
     let server = start(&mut f, |_, options| options.sending = room.clone());
     let head = pushed(&f, &server);
     let (one, other) = ("203.0.113.9", "203.0.113.10");
 
     let mut mine = room.share(Some(one.parse().unwrap()));
-    mine.take(1).unwrap();
+    mine.take(ROOM / 4).unwrap();
     let (status, again, _) = fetched(&f, &server, &head, one);
     assert_eq!((status, again), (503, Some(60)));
+    drop(mine);
+    let mut mine = room.share(Some(one.parse().unwrap()));
+    mine.take(1).unwrap();
     let (status, again, bytes) = fetched(&f, &server, &head, other);
     assert_eq!((status, again), (200, None));
     assert!(bytes >= 2 * FILE, "{bytes}");

@@ -16,7 +16,7 @@ const FILE: usize = 9_500_000;
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by browser acceptance and closing gate"]
 fn a_file_written_out_for_a_browser_takes_of_the_room_and_an_address_a_quarter_of_it() {
     let mut f = Fixture::new();
-    let room = Shares::passed_by_one_alone(ROOM);
+    let room = Shares::passed_by_one_alone(ROOM, 1);
     let server = crate::database::sign_in_deadline::start(&mut f, |_, options| {
         options.sending = room.clone()
     });

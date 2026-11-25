@@ -6,38 +6,105 @@
 //! address have a part between them and no more: one address with many
 //! slow connections then leaves the rest to the others.
 //!
-//! One taker is given more than that: the only one of its address may pass
-//! the part, so that what is larger than a part can still be sent and
-//! received. It is the one large taker there is then, and has half of the
-//! amount at the most: a second that would pass its part is refused until
-//! the first is gone, and the other half stays for those that keep within
-//! theirs. A single slow peer with one large thing holds half, not all.
+//! A taker may pass the part, so that what is larger than a part can still
+//! be sent and received: it is then a large one, and has half of the amount
+//! at the most. One address has one large taker at a time, and the server as
+//! many as it is told ([`Shares::of`]), half its workers. A taker that would
+//! be large while that many are, or while its address has one, waits for its
+//! turn where it is told how long it may ([`Share::waiting`]), and is
+//! refused otherwise. The turns go round the addresses that wait: the many
+//! takers of one address do not keep those of another waiting.
 //! Where the amount is one that a single taker may pass
 //! ([`Shares::passed_by_one_alone`]), a taker that is alone on the server is
 //! given whatever it needs: a repository larger than the amount can still be
 //! cloned.
+//!
+//! A large taker that another waits for has to go on faster than a peer has
+//! to in general: what it holds is sent at no less than [`LARGE_RATE`] in each
+//! [`LARGE_WINDOW`] while another waits ([`Share::sent`]). A peer on a slow
+//! line that is alone in a turn has it for as long as it takes; one that would
+//! keep a turn by taking a kilobyte a second, the least a peer takes before
+//! it is let go of, is let go of once another wants the turn.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 /// the parts the amount has for one address: a quarter each
 const PARTS: u64 = 4;
+/// how often a taker that waits for its turn looks whether it is still waited for
+const LOOK: Duration = Duration::from_millis(100);
+/// what a large taker that another waits for sends at the least, in bytes a second
+pub const LARGE_RATE: u64 = 1 << 20;
+/// the time over which that is counted
+pub const LARGE_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 struct Held {
     all: u64,
-    /// what the takers of each address that is counted have between them
+    /// what the takers of each address that keep within the part have between them
     by: HashMap<IpAddr, u64>,
-    /// one taker of an address has more than a part
-    large: bool,
+    /// the addresses that have a large taker, or one let in to be one
+    large: HashSet<IpAddr>,
+    /// the takers that wait to be large, by address, the oldest first
+    waiting: HashMap<IpAddr, VecDeque<u64>>,
+    /// the addresses that have takers waiting, in the order their turns come
+    turns: VecDeque<IpAddr>,
+    /// takers let in to be large that have not yet seen it
+    let_in: HashSet<u64>,
+    /// the number the next taker that waits is known by
+    next: u64,
+    /// what a large taker another waits for sends at the least, and over what time
+    pace: (u64, Duration),
+}
+
+impl Held {
+    /// Lets in as many of the takers that wait as there is room for large
+    /// ones, the oldest of an address at a time, the addresses in turn.
+    fn let_in(&mut self, most: usize) {
+        let mut passed = 0;
+        while self.large.len() < most && passed < self.turns.len() {
+            let from = self.turns.pop_front().expect("a turn");
+            if self.large.contains(&from) {
+                self.turns.push_back(from);
+                passed += 1;
+                continue;
+            }
+            let queue = self.waiting.get_mut(&from).expect("takers that wait");
+            let taker = queue.pop_front().expect("a taker");
+            if queue.is_empty() {
+                self.waiting.remove(&from);
+            } else {
+                self.turns.push_back(from);
+            }
+            self.large.insert(from);
+            self.let_in.insert(taker);
+            passed = 0;
+        }
+    }
+
+    /// the taker `taker` of `from` waits no more, and was not let in
+    fn waits_no_more(&mut self, from: IpAddr, taker: u64) {
+        let queue = self.waiting.get_mut(&from).expect("takers that wait");
+        queue.retain(|waiting| *waiting != taker);
+        if queue.is_empty() {
+            self.waiting.remove(&from);
+            self.turns.retain(|turn| *turn != from);
+        }
+    }
 }
 
 pub struct Shares {
     most: u64,
     /// a taker that is alone has no limit
     alone: bool,
+    /// the large takers there may be at once
+    large: usize,
     held: Mutex<Held>,
+    /// told whenever a large taker is gone or one that waits is let in
+    changed: Condvar,
 }
 
 /// What one taker has, given back when it is gone.
@@ -46,33 +113,88 @@ pub struct Share {
     /// the address it counts for; none for this host
     from: Option<IpAddr>,
     bytes: u64,
-    /// the one that has more than a part
+    /// the one of its address that has more than a part
     large: bool,
+    /// how long it waits for its turn to be large; it does not where none
+    waits: Option<Wait>,
+    /// since when it is sent in the window that is running, and what it sent in it
+    sending: Option<(Instant, u64)>,
+}
+
+struct Wait {
+    by: Option<Instant>,
+    gone: Option<Arc<AtomicBool>>,
+}
+
+impl Wait {
+    fn goes_on(&self) -> bool {
+        let gone = self
+            .gone
+            .as_ref()
+            .is_some_and(|gone| gone.load(Ordering::Relaxed));
+        !gone && self.by.is_none_or(|by| Instant::now() < by)
+    }
 }
 
 /// there is no room for what a taker asked for
 #[derive(Debug)]
 pub struct Full;
 
+/// a large taker that another waits for is sent too slowly
+#[derive(Debug, PartialEq)]
+pub struct Slow;
+
+impl std::fmt::Display for Slow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a large response that another waits for is taken too slowly")
+    }
+}
+
+impl std::error::Error for Slow {}
+
 impl Shares {
-    pub fn of(most: u64) -> Arc<Self> {
-        let (alone, held) = (false, Mutex::default());
-        Arc::new(Shares { most, alone, held })
+    /// `most` bytes, of which `large` takers at once may have more than a part.
+    pub fn of(most: u64, large: usize) -> Arc<Self> {
+        Self::new(most, large, false)
     }
 
-    pub fn passed_by_one_alone(most: u64) -> Arc<Self> {
-        let (alone, held) = (true, Mutex::default());
-        Arc::new(Shares { most, alone, held })
+    pub fn passed_by_one_alone(most: u64, large: usize) -> Arc<Self> {
+        Self::new(most, large, true)
+    }
+
+    fn new(most: u64, large: usize, alone: bool) -> Arc<Self> {
+        let pace = (LARGE_RATE, LARGE_WINDOW);
+        let held = Mutex::new(Held {
+            pace,
+            ..Held::default()
+        });
+        let (changed, large) = (Condvar::new(), large.max(1));
+        Arc::new(Shares {
+            most,
+            alone,
+            large,
+            held,
+            changed,
+        })
+    }
+
+    /// The large takers another waits for send `rate` bytes a second in each
+    /// `window` at the least, and not [`LARGE_RATE`] in [`LARGE_WINDOW`].
+    pub fn paced(self: Arc<Self>, rate: u64, window: Duration) -> Arc<Self> {
+        self.lock().pace = (rate, window);
+        self
     }
 
     /// A taker for the address `from`, which has nothing yet.
     pub fn share(self: &Arc<Self>, from: Option<IpAddr>) -> Share {
-        let (of, bytes, large) = (Arc::clone(self), 0, false);
+        let (of, bytes, large, waits, sending) = (Arc::clone(self), 0, false, None, None);
         Share {
             of,
             from,
             bytes,
             large,
+            waits,
+            sending,
         }
     }
 
@@ -83,7 +205,16 @@ impl Shares {
 
     /// what all the takers there are have between them
     pub fn held(&self) -> u64 {
-        self.held.lock().expect("shares").all
+        self.lock().all
+    }
+
+    /// the takers that wait for their turn to be large
+    pub fn waiting(&self) -> usize {
+        self.lock().waiting.values().map(VecDeque::len).sum()
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Held> {
+        self.held.lock().expect("shares")
     }
 }
 
@@ -124,46 +255,138 @@ impl Share {
         self.bytes
     }
 
+    /// The taker waits for its turn to be large until `by`, and while `gone`
+    /// is not set.
+    pub fn waiting(mut self, by: Option<Instant>, gone: Option<Arc<AtomicBool>>) -> Self {
+        self.waits = Some(Wait { by, gone });
+        self
+    }
+
+    /// Whether the taker is a large one that another waits for: one that would
+    /// be let in once it is gone, being of its address or of one that has no
+    /// large taker.
+    pub fn waited_for(&self) -> bool {
+        let (Some(from), true) = (self.from, self.large) else {
+            return false;
+        };
+        let held = self.of.lock();
+        (held.waiting.keys()).any(|waiting| *waiting == from || !held.large.contains(waiting))
+    }
+
+    /// The peer took `bytes` more of what the taker holds. Where a window is
+    /// over in which the taker was large, another waited for it, and fewer
+    /// bytes than its pace asks were taken, it is [`Slow`].
+    pub fn sent(&mut self, bytes: u64) -> Result<(), Slow> {
+        self.sent_at(bytes, Instant::now())
+    }
+
+    fn sent_at(&mut self, bytes: u64, now: Instant) -> Result<(), Slow> {
+        let (since, moved) = self.sending.get_or_insert((now, 0));
+        *moved += bytes;
+        let (rate, window) = self.of.lock().pace;
+        let over = now.duration_since(*since);
+        if over < window {
+            return Ok(());
+        }
+        let slow = (*moved as u128) * 1000 < rate as u128 * over.as_millis();
+        self.sending = Some((now, 0));
+        match slow && self.waited_for() {
+            true => Err(Slow),
+            false => Ok(()),
+        }
+    }
+
     /// Takes `bytes` more, or nothing where they are not there to be taken.
+    /// A taker that would be large waits for its turn as long as it is told.
     pub fn take(&mut self, bytes: u64) -> Result<(), Full> {
-        let mut held = self.of.held.lock().expect("shares");
-        let (most, part) = (self.of.most, self.of.most / PARTS);
+        let of = Arc::clone(&self.of);
+        let mut held = of.lock();
+        let (most, part) = (of.most, of.most / PARTS);
         let mine = self.bytes + bytes;
-        let all = held.all + bytes;
-        let alone = self.of.alone && all == mine;
-        if all > most && !alone {
+        let alone = |held: &Held| of.alone && held.all + bytes == mine;
+        let over = |held: &Held| held.all + bytes > most && !alone(held);
+        if over(&held) {
             return Err(Full);
         }
-        let mut large = self.large;
-        if let Some(from) = self.from {
-            let theirs = held.by.get(&from).copied().unwrap_or(0) + bytes;
-            if theirs > part && theirs > mine {
+        let Some(from) = self.from else {
+            held.all += bytes;
+            self.bytes = mine;
+            return Ok(());
+        };
+        if self.large || mine <= part {
+            if self.large && mine > most / 2 && !alone(&held) {
                 return Err(Full);
             }
-            large = mine > part;
-            if large && !alone && (mine > most / 2 || (held.large && !self.large)) {
-                return Err(Full);
+            if !self.large {
+                let theirs = held.by.get(&from).copied().unwrap_or(0) + bytes;
+                if theirs > part {
+                    return Err(Full);
+                }
+                held.by.insert(from, theirs);
             }
-            held.by.insert(from, theirs);
+            held.all += bytes;
+            self.bytes = mine;
+            return Ok(());
         }
-        held.large |= large;
-        self.large = large;
-        held.all = all;
-        self.bytes = mine;
+        // only a taker alone may be larger than half: one that is not now waits in vain
+        if mine > most / 2 && !of.alone {
+            return Err(Full);
+        }
+        held = self.turn(held, from)?;
+        if over(&held) || (mine > most / 2 && !alone(&held)) {
+            held.large.remove(&from);
+            held.let_in(of.large);
+            of.changed.notify_all();
+            return Err(Full);
+        }
+        let theirs = held.by.get(&from).copied().unwrap_or(0) - self.bytes;
+        match theirs {
+            0 => held.by.remove(&from),
+            theirs => held.by.insert(from, theirs),
+        };
+        held.all += bytes;
+        (self.bytes, self.large) = (mine, true);
         Ok(())
+    }
+
+    /// Waits for the turn of the taker to be large, as long as it is told to.
+    fn turn<'a>(
+        &self,
+        mut held: MutexGuard<'a, Held>,
+        from: IpAddr,
+    ) -> Result<MutexGuard<'a, Held>, Full> {
+        let taker = held.next;
+        held.next += 1;
+        held.waiting.entry(from).or_default().push_back(taker);
+        if !held.turns.contains(&from) {
+            held.turns.push_back(from);
+        }
+        held.let_in(self.of.large);
+        loop {
+            if held.let_in.remove(&taker) {
+                return Ok(held);
+            }
+            if !self.waits.as_ref().is_some_and(Wait::goes_on) {
+                held.waits_no_more(from, taker);
+                return Err(Full);
+            }
+            held = self.of.changed.wait_timeout(held, LOOK).expect("shares").0;
+        }
     }
 }
 
 impl Drop for Share {
     fn drop(&mut self) {
-        let mut held = self.of.held.lock().expect("shares");
+        let mut held = self.of.lock();
         held.all -= self.bytes;
+        let Some(from) = self.from else {
+            return;
+        };
         if self.large {
-            held.large = false;
-        }
-        if let Some(from) = self.from
-            && let Some(theirs) = held.by.get_mut(&from)
-        {
+            held.large.remove(&from);
+            held.let_in(self.of.large);
+            self.of.changed.notify_all();
+        } else if let Some(theirs) = held.by.get_mut(&from) {
             *theirs -= self.bytes;
             if *theirs == 0 {
                 held.by.remove(&from);
@@ -173,92 +396,4 @@ impl Drop for Share {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn taker(shares: &Arc<Shares>, from: u8, bytes: u64) -> Result<Share, Full> {
-        let mut share = shares.share(Some(IpAddr::from([192, 0, 2, from])));
-        share.take(bytes)?;
-        Ok(share)
-    }
-
-    #[test]
-    fn the_takers_of_one_address_have_a_quarter_between_them_and_the_rest_is_for_others() {
-        let shares = Shares::of(1000);
-        // one address fills its quarter with many takers, and has no more
-        let many: Vec<Share> = (0..5).map(|_| taker(&shares, 1, 50).unwrap()).collect();
-        assert!(taker(&shares, 1, 1).is_err());
-        assert_eq!(shares.held(), 250);
-        // a taker that had some is refused more, and keeps what it had
-        let mut one = shares.share(Some(IpAddr::from([192, 0, 2, 1])));
-        assert!(one.take(1).is_err());
-        assert_eq!((one.bytes(), shares.held()), (0, 250));
-        // the other addresses have theirs, each its quarter
-        let others = [2, 3, 4].map(|from| taker(&shares, from, 250).unwrap());
-        assert_eq!(shares.held(), 1000);
-        // with all of it taken there is none for a fifth address, nor for this host
-        assert!(taker(&shares, 5, 1).is_err());
-        assert!(shares.share(None).take(1).is_err());
-        drop(others);
-        // this host is held to the amount alone
-        let mut host = shares.share(None);
-        host.take(750).unwrap();
-        assert!(host.take(1).is_err());
-        drop((many, host));
-        assert_eq!(shares.held(), 0);
-        assert!(shares.held.lock().unwrap().by.is_empty());
-    }
-
-    #[test]
-    fn one_taker_at_a_time_passes_its_part_and_has_half_and_one_alone_whatever_it_needs() {
-        let shares = Shares::of(1000);
-        let other = taker(&shares, 2, 100).unwrap();
-        // the only taker of its address: past its quarter, as far as half
-        let mut only = taker(&shares, 1, 300).unwrap();
-        only.take(200).unwrap();
-        assert!(only.take(1).is_err());
-        // while it has that, a second of its address has nothing
-        assert!(taker(&shares, 1, 1).is_err());
-        // and no other passes its part, though there is room: within it, it takes
-        assert!(taker(&shares, 3, 251).is_err());
-        let third = taker(&shares, 3, 250).unwrap();
-        // four addresses of one slow taker each do not have it all between them
-        let fourth = taker(&shares, 4, 150).unwrap();
-        assert_eq!(shares.held(), 1000);
-        drop((other, third, fourth));
-        // alone on the server it still has half and no more
-        assert!(only.take(1).is_err());
-        drop(only);
-        // the next may pass its part once the one that did is gone
-        let next = taker(&shares, 3, 251).unwrap();
-        drop(next);
-        assert_eq!(shares.held(), 0);
-        assert!(!shares.held.lock().unwrap().large);
-        // unless the amount is one that a taker alone may pass
-        let shares = Shares::passed_by_one_alone(1000);
-        let mut only = taker(&shares, 1, 5000).unwrap();
-        assert!(taker(&shares, 2, 1).is_err());
-        only.take(900).unwrap();
-        drop(only);
-        let other = taker(&shares, 2, 1).unwrap();
-        assert!(taker(&shares, 1, 1000).is_err());
-        assert!(taker(&shares, 1, 501).is_err());
-        let large = taker(&shares, 1, 500).unwrap();
-        drop((other, large));
-        assert_eq!(shares.held(), 0);
-    }
-
-    #[test]
-    fn a_peer_is_counted_under_its_address_or_the_network_of_its_host() {
-        let under = |peer: &str| address(peer.parse().unwrap()).map(|under| under.to_string());
-        for here in ["127.0.0.1", "::1", "::ffff:127.0.0.9"] {
-            assert_eq!(under(here), None, "{here}");
-        }
-        assert_eq!(under("203.0.113.7").unwrap(), "203.0.113.7");
-        assert_eq!(under("::ffff:203.0.113.7").unwrap(), "203.0.113.7");
-        assert_eq!(under("2001:db8:1:2:3:4:5:6").unwrap(), "2001:db8:1:2::");
-        assert_eq!(under("fe80::1:2").unwrap(), "fe80::1:2");
-        let free = half_of_what_is_free(&std::env::temp_dir()).unwrap();
-        assert!(free > 0);
-    }
-}
+mod tests;

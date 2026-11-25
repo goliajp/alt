@@ -195,18 +195,21 @@ fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<Obje
 /// may be less than a longer negotiation would have found.
 ///
 /// The file is written within the room responses have between them, and has
-/// its part of it until it is sent. It is written for as long as `until`
+/// its part of it until it is sent; its turn to be large is waited for. It is written for as long as `until`
 /// says, and the error is a [`Stopped`] where that is over.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
     room: &Room,
-    from: Option<std::net::IpAddr>,
+    from: (
+        Option<std::net::IpAddr>,
+        &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ),
     until: &Until,
 ) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
-    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from));
+    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from, until.by));
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };

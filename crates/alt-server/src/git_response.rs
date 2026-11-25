@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn a_body_that_moves_to_a_file_takes_of_the_room_it_is_given_until_it_is_let_go_of() {
-        let room = alt_shares::Shares::of(3 * IN_MEMORY as u64);
+        let room = alt_shares::Shares::of(3 * IN_MEMORY as u64, 1);
         let written = |bytes: usize| {
             let mut body = Spill::within(Some(room.share(None)));
             let written = body.write_all(&vec![7; bytes]);

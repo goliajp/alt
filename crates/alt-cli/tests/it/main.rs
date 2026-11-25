@@ -17,6 +17,7 @@ mod altd_server_connected;
 mod altd_server_fetch_time;
 mod altd_server_index_memory;
 mod altd_server_landing;
+mod altd_server_large_turns;
 mod altd_server_left_unsynced;
 mod altd_server_many_repos;
 mod altd_server_no_new_objects;

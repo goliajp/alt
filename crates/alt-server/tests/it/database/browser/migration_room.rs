@@ -21,7 +21,7 @@ fn the_archive_of_a_migration_and_a_file_of_it_take_of_the_room_and_an_address_a
     store
         .set_grants(admin, "repository", "browser", true, true, &grants())
         .unwrap();
-    let room = Shares::passed_by_one_alone(ROOM);
+    let room = Shares::passed_by_one_alone(ROOM, 1);
     let server = crate::database::sign_in_deadline::start(&mut f, |_, options| {
         options.sending = room.clone()
     });

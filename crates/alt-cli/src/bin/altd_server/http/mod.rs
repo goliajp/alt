@@ -115,11 +115,12 @@ impl Shared {
 impl Server {
     /// Listens at `address` for `most` connections at once, whose peers are
     /// given `limits`; those of the networks `here` are of this host, and
-    /// those of `proxies` among them say whose their requests are.
+    /// those of `proxies` among them say whose their requests are. `large`
+    /// bodies at once may pass the part of their address.
     pub(crate) fn listen(
         address: &str,
         limits: Limits,
-        most: usize,
+        (most, large): (usize, usize),
         here: &'static [Network],
         proxies: &'static [Network],
     ) -> io::Result<Server> {
@@ -129,7 +130,7 @@ impl Server {
             arrived: Condvar::new(),
             open: AtomicUsize::new(0),
             from: Mutex::default(),
-            held: Shares::of(limits.spool),
+            held: Shares::of(limits.spool, large),
             limits,
             here,
             proxies,

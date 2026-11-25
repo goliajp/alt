@@ -119,7 +119,7 @@ impl Work {
                     route,
                     source,
                     &mut |store| self.factory.authenticate(store, &self.token),
-                    Some(self.verifying.sending.0.share(self.verifying.sending.1)),
+                    Some(self.verifying.share()),
                 )
             }
             Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {

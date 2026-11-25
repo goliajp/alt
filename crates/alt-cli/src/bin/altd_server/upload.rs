@@ -87,6 +87,7 @@ pub(super) fn handle_upload_pack(
                 by: Some(std::time::Instant::now() + super::told::told().fetch),
                 gone: Some(req.given_up()),
             };
+            let from = (from, req.given_up());
             let sent = match fetch::response(&repo, &fetch_req, room, from, &until) {
                 Ok(sent) => sent,
                 Err(e) if e.downcast_ref() == Some(&fetch::Stopped::Late) => {

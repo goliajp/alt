@@ -274,7 +274,7 @@ impl Request {
     }
 
     /// Set once the peer has closed its side: nobody waits for an answer.
-    pub(crate) fn given_up(&self) -> &std::sync::atomic::AtomicBool {
+    pub(crate) fn given_up(&self) -> &Arc<std::sync::atomic::AtomicBool> {
         &self.back.gone
     }
 

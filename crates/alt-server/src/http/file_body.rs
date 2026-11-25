@@ -16,7 +16,7 @@ pub(super) struct FileBody<R> {
     stream: ReaderStream<Take<R>>,
     remaining: u64,
     /// what the file has of the room responses have on disk, until it is sent
-    _held: Option<alt_shares::Share>,
+    held: Option<alt_shares::Share>,
 }
 
 impl<R: AsyncRead> FileBody<R> {
@@ -24,12 +24,12 @@ impl<R: AsyncRead> FileBody<R> {
         Self {
             stream: ReaderStream::with_capacity(reader.take(bytes), 65536),
             remaining: bytes,
-            _held: None,
+            held: None,
         }
     }
 
     pub(super) fn holding(mut self, held: Option<alt_shares::Share>) -> Self {
-        self._held = held;
+        self.held = held;
         self
     }
 }
@@ -50,7 +50,16 @@ impl<R: AsyncRead + Unpin> Body for FileBody<R> {
             Some(Ok(bytes)) => {
                 // Take limits reads to the declared response extent.
                 this.remaining -= bytes.len() as u64;
-                Ok(Frame::data(bytes))
+                // a large response another waits for its turn behind goes on
+                // only as fast as such a one has to
+                let sent = this.held.as_mut().map(|held| held.sent(bytes.len() as u64));
+                match sent {
+                    Some(Err(slow)) => {
+                        this.remaining = 0;
+                        Err(io::Error::new(io::ErrorKind::TimedOut, slow))
+                    }
+                    _ => Ok(Frame::data(bytes)),
+                }
             }
             Some(Err(error)) => {
                 this.remaining = 0;
