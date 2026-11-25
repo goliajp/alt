@@ -61,3 +61,41 @@ fn the_bodies_one_account_sends_slowly_take_a_quarter_of_the_bytes_and_leave_the
     let begun = second(over_a_quarter);
     assert!(begun.starts_with("HTTP/1.1 100"), "{begun}");
 }
+
+/// A body of the account that says nothing of its length is begun beside a push
+/// that is under the quarter yet. The push goes on past the quarter and lands:
+/// it came first, and the one that came later is held to the quarter.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_body_of_no_length_begun_beside_a_push_does_not_end_the_push() {
+    let mut f = Fixture::new();
+    let body = push_of(&f, &noise(200_000));
+    let all = 2 * body.len() as u64;
+    let server = start(&mut f, |_, options| {
+        options.receiving_bytes = all;
+        options.receiving_each = 8;
+        options.body_timeout = Duration::from_secs(120);
+    });
+    let (mut socket, mut reader) = connect(&server);
+    socket
+        .write_all(push_head(&f, body.len()).as_bytes())
+        .unwrap();
+    gone_on(&mut reader);
+    let (first, rest) = body.split_at(body.len() / 8);
+    socket.write_all(first).unwrap();
+
+    let (mut later, mut later_reader) = connect(&server);
+    let chunked = push_head(&f, 0).replace("Content-Length: 0", "Transfer-Encoding: chunked");
+    later.write_all(chunked.as_bytes()).unwrap();
+    gone_on(&mut later_reader);
+    later.write_all(b"4\r\n0000\r\n").unwrap();
+
+    for piece in rest.chunks(rest.len() / 7 + 1) {
+        socket.write_all(piece).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (status, report) = answer(&mut reader);
+    assert_eq!(status, "HTTP/1.1 200 OK", "{report}");
+    assert!(report.contains("ok refs/heads/queued"), "{report}");
+    assert_eq!(queued_refs(&f), 1);
+}
