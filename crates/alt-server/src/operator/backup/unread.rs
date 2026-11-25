@@ -11,6 +11,7 @@
 
 use super::{Error, Result};
 use alt_json::{Value, json};
+use alt_server_store::Read;
 
 /// A segment of a backup that does not give back all of its objects.
 #[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
@@ -32,16 +33,26 @@ pub(super) fn found(
     store: &mut alt_server_store::Store,
     command: &'static str,
 ) -> Result<Vec<Unread>> {
+    Ok(found_besides(store, command, &Read::new())?.0)
+}
+
+/// [`found`] of the segments that are not among those `done` already; and
+/// those that are live, as read by now.
+pub(super) fn found_besides(
+    store: &mut alt_server_store::Store,
+    command: &'static str,
+    done: &Read,
+) -> Result<(Vec<Unread>, Read)> {
     let mut reading = crate::operator::reading::Reading::by(command);
     let mut read = |repository: &str, read, all| reading.read(repository, read, all);
-    let unread = store.unread_packs(&mut read)?;
+    let (unread, now_read) = store.unread_packs_besides(done, &mut read)?;
     let told = |(repository, unread): (String, alt_server_store::Unread)| Unread {
         repository,
         segment: unread.segment,
         objects: unread.objects,
         first: unread.named,
     };
-    Ok(unread.into_iter().map(told).collect())
+    Ok((unread.into_iter().map(told).collect(), now_read))
 }
 
 /// Whether a backup names each of `found` among the segments it was made with.

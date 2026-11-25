@@ -275,3 +275,48 @@ fn a_segment_indexed_anew_takes_no_place_where_the_segments_before_it_were_merge
         .collect();
     assert_eq!(live, [merged, anew]);
 }
+
+/// The live segments read besides those read already, as a backup reads those
+/// published after it read the rest: a segment read already is not read
+/// again, and is still read behind for those after it.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn the_segments_read_besides_those_read_already_are_those_published_since() {
+    let mut f = Fixture::new();
+    Payload::new("first", None).publish_new(&mut f.store, &f.credential);
+    let first: String = f
+        .client()
+        .query_one("SELECT segment_id FROM alt_pack_segments", &[])
+        .unwrap()
+        .get(0);
+    let mut none = |_: &str, _, _| ();
+    let (unread, done) = f
+        .store
+        .unread_packs_besides(&Default::default(), &mut none)
+        .unwrap();
+    assert!(unread.is_empty());
+    let known = ("repository".to_owned(), first.clone());
+    assert_eq!(done, [known.clone()].into());
+    // the same pack once more, its index leading the read of one object to the other
+    let row = f
+        .client()
+        .query_one("SELECT sequence,inline FROM alt_pack_segments", &[])
+        .unwrap();
+    let written: Vec<u8> = (row.get::<_, Option<Vec<u8>>>(1)).unwrap_or_else(|| {
+        std::fs::read(f.store.pack_path("repository", &first).unwrap()).unwrap()
+    });
+    let mut bytes = written;
+    turned(&mut bytes);
+    let astray = "a".repeat(32);
+    planted(&f, &astray, row.get::<_, i64>(0) + 1, &bytes);
+    let (unread, now) = f.store.unread_packs_besides(&done, &mut none).unwrap();
+    assert_eq!(unread.len(), 1);
+    assert_eq!(unread[0].1.segment, astray);
+    let astray = ("repository".to_owned(), astray);
+    assert_eq!(now, [known, astray.clone()].into());
+    let (unread, _) = f.store.unread_packs_besides(&now, &mut none).unwrap();
+    assert!(unread.is_empty(), "those read already are read again");
+    let besides = [astray].into();
+    let found = f.store.unread_packs_besides(&besides, &mut none).unwrap();
+    assert!(found.0.is_empty(), "the one read already is read again");
+}

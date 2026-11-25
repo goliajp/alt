@@ -4,7 +4,7 @@
 use super::{Config, Error, Result, create_private, read_regular};
 use alt_base64::STANDARD;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
-use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
+use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog, Store};
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
@@ -25,6 +25,11 @@ pub use unread::Unread;
 pub use verify::{VerifiedBackup, verify};
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
+
+/// What the objects were found to be before the snapshot: the operation, the
+/// segments not read, and those that were, with whether a backup is made
+/// with such.
+type Found<'a> = (&'a str, Vec<Unread>, (alt_server_store::Read, bool));
 
 /// The directory `path` is in, where what a command writes on its way to `path`
 /// is put: on the disk `path` is on, not among the temporary files of the host,
@@ -96,9 +101,9 @@ pub fn create(
     }
     // a copy of segments that do not give their objects back is no backup,
     // unless it is asked for as that
-    let unread = match &mut store {
-        Some(store) => unread::found(store, "backup")?,
-        None => Vec::new(),
+    let (unread, read) = match &mut store {
+        Some(store) => unread::found_besides(store, "backup", &Default::default())?,
+        None => Default::default(),
     };
     if !unread.is_empty() && !with_unread {
         return Err(unread::refused(
@@ -111,7 +116,8 @@ pub fn create(
     if let Some(store) = &mut store {
         store.record_backup_event(&operation, alt_server_store::BackupEvent::Started)?;
     }
-    let result = create_inner(config, schema, recipient, output, (&operation, unread));
+    let found = (operation.as_str(), unread, (read, with_unread));
+    let result = create_inner(config, schema, recipient, output, (store.as_mut(), found));
     if let Some(store) = &mut store {
         let event = if result.is_ok() {
             alt_server_store::BackupEvent::Created
@@ -131,7 +137,7 @@ fn create_inner(
     schema: u32,
     recipient: &str,
     output: &Path,
-    (operation, unread): (&str, Vec<Unread>),
+    (store, (operation, mut unread, (read, with_unread))): (Option<&mut Store>, Found<'_>),
 ) -> Result<Manifest> {
     alt_server_store::check_backup_schema(schema).map_err(Error::Config)?;
     config.check_volume()?;
@@ -149,6 +155,15 @@ fn create_inner(
         &signing_key,
         schema,
     )?;
+    // what was published after the objects were read is read now, the writes
+    // held behind the snapshot
+    if let Some(store) = store {
+        let (later, _) = unread::found_besides(store, "backup", &read)?;
+        if !later.is_empty() && !with_unread {
+            return Err(unread::refused("backup_created", &later, unread::BACKED_UP));
+        }
+        unread.extend(later);
+    }
     let database = work.path().join("database.dump");
     let mut dump = Process(
         postgres_command(config, "pg_dump")?
