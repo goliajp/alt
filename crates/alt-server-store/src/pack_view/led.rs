@@ -38,6 +38,12 @@ static ASKED: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
 static WALKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static ENDED: Condvar = Condvar::new();
 
+/// Called with what the answers of a repository are kept under, where a walk
+/// found that its refs lead to every object its segments hold and before that
+/// is written down: a test moves the refs and the segments in between. None
+/// is set outside tests.
+#[doc(hidden)]
+pub static FOUND_ALL: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
 /// The one walk a repository has at a time: the others that ask wait for it
 /// and go on from what it found.
 struct Turn<'a>(&'a str);
@@ -208,15 +214,27 @@ impl Store {
         let steps = self.limits.walk_steps;
         let (led, all) = led(&view.led_under, &view.segments, tips.clone(), steps, gone)?;
         if all {
-            self.all_led(repository, tips)?;
+            self.all_led(repository, tips, &view.segment_ids)?;
         }
         Ok(led)
     }
 
     /// Writes down that the segments of a repository hold nothing but what
-    /// its refs lead to, where its refs are at `tips` still: whoever moves
-    /// them holds the row of the repository, and none does while they are read.
-    pub(crate) fn all_led(&mut self, repository: &str, mut tips: Vec<Oid>) -> Result<()> {
+    /// its refs lead to, where its refs are at `tips` and its live segments
+    /// are `segments` still: whoever moves either holds the row of the
+    /// repository, and none does while they are read. The refs alone could be
+    /// back where they were with a segment more, which holds what a branch
+    /// pushed and deleted in the meantime held.
+    pub(crate) fn all_led(
+        &mut self,
+        repository: &str,
+        mut tips: Vec<Oid>,
+        segments: &[String],
+    ) -> Result<()> {
+        let found_all = FOUND_ALL.lock().expect("found all").clone();
+        if let Some(found_all) = found_all {
+            found_all(&self.led_under(repository));
+        }
         tips.sort_unstable();
         tips.dedup();
         let tips: Vec<String> = tips.iter().map(alt_pack_segment::hex).collect();
@@ -225,7 +243,9 @@ impl Store {
         let held = "SELECT 1 FROM alt_repositories WHERE id=$1 AND pack_unreachable FOR UPDATE";
         if tx.query_opt(held, &[&repository])?.is_some() {
             let now = "SELECT coalesce(string_agg(DISTINCT oid COLLATE \"C\",' ' ORDER BY oid COLLATE \"C\"),'') FROM alt_refs WHERE repository=$1";
-            if tx.query_one(now, &[&repository])?.get::<_, String>(0) == tips.join(" ") {
+            let live = Self::live_segment_ids(&mut tx, repository)?;
+            let same = live.iter().map(|(id, _)| id).eq(segments);
+            if same && tx.query_one(now, &[&repository])?.get::<_, String>(0) == tips.join(" ") {
                 let all = "UPDATE alt_repositories SET pack_unreachable=false WHERE id=$1";
                 tx.execute(all, &[&repository])?;
             }

@@ -4,7 +4,7 @@ use super::raw_push::receive;
 use super::*;
 
 /// A pack of the objects `named` and of no others.
-fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
+pub(super) fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
     use std::io::Write;
     let ids: String = (named.iter())
         .map(|name| text(ok(directory, token, &["rev-parse", name])) + "\n")

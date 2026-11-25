@@ -81,6 +81,8 @@ impl Listed {
 /// the live segments of a repository, and what they give to a publication
 pub(crate) struct Published {
     pub(crate) segments: SegmentSet,
+    /// the ids of the segments, in their order
+    ids: Vec<String>,
     pub(crate) reached: Reached,
 }
 
@@ -123,14 +125,15 @@ impl Store {
     fn walked(&mut self, repository: &str, published: Published) -> Result<Published> {
         published.reached.led(&published.segments)?;
         if let Some(tips) = published.reached.all() {
-            self.all_led(repository, tips)?;
+            self.all_led(repository, tips, &published.ids)?;
         }
         Ok(published)
     }
     fn published_as(&mut self, repository: &str, listed: Listed) -> Result<Published> {
-        let (_, segments) = self.open_listed_segments(repository, listed.ids)?;
+        let (ids, segments) = self.open_listed_segments(repository, listed.ids)?;
         Ok(Published {
             segments,
+            ids: ids.into_iter().map(|(id, _)| id).collect(),
             reached: Reached {
                 repository: self.led_under(repository),
                 tips: listed.tips,
