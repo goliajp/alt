@@ -1882,7 +1882,7 @@ Arguments:
 Options:
   -d, --delete <DELETE>        Delete a tag by name. Mutually exclusive with `name`
   -a, --annotate               Create an *annotated* tag (writes a tag object carrying the message + tagger ident, instead of a bare ref)
-  -m, --message <MESSAGE>      Annotated-tag message. Required when `-a` is set
+  -m, --message <MESSAGE>      Annotated-tag message. Required when `-a` is set. Given more than once, each is a paragraph of its own
       --json                   JSON output for list mode (ignored otherwise)
       --workspace <WORKSPACE>  Operate in the named parallel workspace instead of the default one
       --request-id <HEX>       Stable request identity for a write in an existing native repository
