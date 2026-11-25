@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: refuse a branch renamed, a tag or a flow branch above or beneath another name, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native.rs
+touched: crates/alt-cli/src/native/branch.rs
+touched: crates/alt-cli/src/native/branch/moved.rs
+touched: crates/alt-cli/src/native/flow.rs
+touched: crates/alt-cli/src/native/flow/tag.rs
+touched: crates/alt-cli/tests/it/export_under_way/beneath.rs
