@@ -67,8 +67,15 @@ fn a_large_response_waits_for_its_turn_while_its_fetch_may_take() {
     let first = kept(&server, &head, one);
     let second = waiting(&server, &head, one);
     std::thread::sleep(Duration::from_secs(1));
+    let began = Instant::now();
     let beside = answer(asked_for(&server.addr, &head, Some(other)));
-    assert!(beside.starts_with(b"HTTP/1.1 200") && beside.len() > BYTES);
+    assert!(
+        beside.starts_with(b"HTTP/1.1 200") && beside.len() > BYTES,
+        "{} bytes after {:?}: {:.300}",
+        beside.len(),
+        began.elapsed(),
+        String::from_utf8_lossy(&beside)
+    );
     assert!(!second.is_finished());
     drop(first);
     let second = second.join().unwrap();
