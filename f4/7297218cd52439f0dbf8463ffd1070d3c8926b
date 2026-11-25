@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a response waiting for its turn and one told to come again when its time is over are looked at on servers of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
