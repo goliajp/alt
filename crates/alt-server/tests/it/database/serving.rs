@@ -207,6 +207,11 @@ fn a_server_whose_session_goes_silent_takes_the_lock_again_with_another() {
     held_until(&f, "the lock taken again", |held| {
         held.len() == 1 && held != before
     });
-    assert_eq!(Running::refusal(&f, None), SERVED);
+    let second = Running::parts(&f, None, vec![]).0.open().unwrap();
+    let refused = second.serve_alone(Duration::from_secs(2)).err().unwrap();
+    assert!(
+        matches!(refused, alt_server_store::Error::Precondition(SERVED)),
+        "{refused}"
+    );
     drop((line, server));
 }
