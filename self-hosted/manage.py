@@ -88,6 +88,10 @@ def prepare(args):
         raise ValueError('installation destination must not exist')
     if not re.fullmatch(r'[a-z][a-z0-9_-]{0,48}', args.project):
         raise ValueError('project must be a lowercase Compose project identity')
+    # an edge that takes connections from anywhere would take what any of
+    # them says it forwards for, where they come through the gateway
+    if args.front_proxy and args.bind != '127.0.0.1':
+        raise ValueError('--front-proxy is for an edge only a proxy on this host connects to: keep --bind 127.0.0.1')
     origin = urlsplit(args.origin)
     if origin.scheme != 'https' or not origin.hostname or origin.username or origin.password or origin.path not in ['', '/'] or origin.query or origin.fragment:
         raise ValueError('public origin must be an explicit HTTPS origin')

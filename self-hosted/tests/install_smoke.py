@@ -42,6 +42,11 @@ def main():
              '-keyout', work / 'key.pem', '-out', work / 'cert.pem', '-days', '2', '-subj', '/CN=alt.smoke.test',
              '-addext', 'subjectAltName=DNS:alt.smoke.test,IP:127.0.0.1'])
         run(['python3', manage, 'load', '--bundle', bundle])
+        public = subprocess.run(['python3', manage, 'prepare', '--bundle', bundle, '--directory', work / 'public', '--project', project,
+                                 '--origin', 'https://alt.smoke.test', '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem',
+                                 '--front-proxy', '--bind', '0.0.0.0'], capture_output=True, text=True)
+        assert public.returncode != 0 and 'keep --bind 127.0.0.1' in public.stderr and not (work / 'public').exists(), public
+        report['checks'].append('prepare refuses a front proxy for an edge that takes connections from anywhere')
         run(['python3', manage, 'prepare', '--bundle', bundle, '--directory', directory, '--project', project,
              '--origin', 'https://alt.smoke.test', '--https-port', args.port,
              '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem',
