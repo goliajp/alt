@@ -174,7 +174,8 @@ impl Call {
                 ))
             }
             WebRoute::Object(repository, oid, within, true) => {
-                crate::browse::shown(&mut store, &credential, &repository, oid, &within)?;
+                let asked = (oid, Some(&*gone));
+                crate::browse::shown(&mut store, &credential, &repository, asked, &within)?;
                 let found = store.open_published_object(&credential, &repository, oid)?;
                 let (mut file, mut body) = (found.2, Spill::within(Some(sending)));
                 let written = std::io::copy(&mut file, &mut body).map(drop);
@@ -232,14 +233,14 @@ fn execute(
             store,
             credential,
             &repository,
-            after,
+            (after, Some(gone)),
             40,
         )?),
         WebRoute::Tree(repository, commit, path, after) => output(crate::browse::tree(
             store,
             credential,
             &repository,
-            commit,
+            (commit, Some(gone)),
             &path,
             after,
         )?),
@@ -247,7 +248,7 @@ fn execute(
             store,
             credential,
             &repository,
-            oid,
+            (oid, Some(gone)),
             &within,
         )?),
         WebRoute::Content(repository, digest) => {

@@ -17,7 +17,7 @@ pub fn history(
     store: &mut Store,
     credential: &Credential,
     repository: &str,
-    after: Option<ObjectId>,
+    (after, gone): (Option<ObjectId>, Option<&std::sync::atomic::AtomicBool>),
     limit: usize,
 ) -> Result<Page<CommitSummary>> {
     if limit == 0 || limit > 100 {
@@ -26,7 +26,7 @@ pub fn history(
     let info = store.repository_info(credential, repository)?;
     let start = match after {
         Some(oid) => {
-            super::reached::led_to(store, credential, repository, oid)?;
+            super::reached::led_to(store, credential, repository, (oid, gone))?;
             Some(oid)
         }
         None => info
