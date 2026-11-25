@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: what indexing keeps of each entry of a pack is counted against the memory packs are indexed in
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/limits.rs
+touched: crates/alt-git-pack/src/index_pack/scan.rs
+touched: crates/alt-git-pack/src/lib.rs
+touched: crates/alt-git-pack/tests/it/index_memory.rs
