@@ -6,7 +6,7 @@
 //! info/refs entry round-trips through alt-wire's capability-advert +
 //! ls-refs encoders without a real git server in the loop.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -96,14 +96,14 @@ pub(crate) fn spawn_server_with_env(env: &[(&str, &str)]) -> Server {
     let deadline = Instant::now() + Duration::from_secs(5);
     let addr = loop {
         let before = said.len();
-        if reader.read_line(&mut said).unwrap() == 0 {
+        if (&mut reader).take(1 << 16).read_line(&mut said).unwrap() == 0 {
             let ended = child.wait();
             panic!("altd-server ended before it listened ({ended:?}), having said: {said}");
         }
         if let Some((_, after)) = said[before..].split_once("listening on ") {
             break after.split_whitespace().next().unwrap().to_owned();
         }
-        if Instant::now() > deadline {
+        if Instant::now() > deadline || said.len() > 1 << 20 {
             panic!("altd-server never logged its listening address, having said: {said}");
         }
     };
