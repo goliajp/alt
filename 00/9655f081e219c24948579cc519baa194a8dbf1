@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the line to the database is let go of before the server that waits on it is joined
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/serving.rs
