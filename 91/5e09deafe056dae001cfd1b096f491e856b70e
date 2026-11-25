@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: refactor
+summary: alt-shares is split into the takers, what they hold and the disk
+author-type: human
+author: doracawl
+touched: crates/alt-shares/src/disk.rs
+touched: crates/alt-shares/src/held.rs
+touched: crates/alt-shares/src/lib.rs
+touched: crates/alt-shares/src/share.rs
+touched: crates/alt-shares/src/tests.rs
