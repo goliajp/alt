@@ -205,6 +205,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     };
     let claim = Arc::new(login::Claim::default());
     let waiting = crate::git::Waiting::default();
+    let worker = worker::Slot::new(permit, &state.workers);
+    let done = worker.until_done();
     let call = execute::Call {
         factory: state.factory.clone(),
         options: state.options.native.clone(),
@@ -215,13 +217,14 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         attempt,
         reviews: state.reviews.clone(),
         sending: (state.options.sending.share(alt_shares::address(peer)))
-            .waiting(None, Some(waiting.0.clone())),
+            .waiting(None, Some(waiting.0.clone()))
+            .aside(worker.aside(waiting.0.clone())),
         gone: waiting.0.clone(),
     };
     let outcome = tokio::time::timeout(
         state.options.work_timeout,
         crate::http::spawn_observed(Phase::Execute, move || {
-            let _permit = permit;
+            let _done = done;
             let _password_permit = password_permit;
             call.run(route, source)
         }),

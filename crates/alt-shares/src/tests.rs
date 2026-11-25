@@ -1,13 +1,15 @@
 use super::*;
+
+mod aside;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-fn at(from: u8) -> Option<IpAddr> {
+pub(super) fn at(from: u8) -> Option<IpAddr> {
     Some(IpAddr::from([192, 0, 2, from]))
 }
 
-fn taker(shares: &Arc<Shares>, from: u8, bytes: u64) -> Result<Share, Full> {
+pub(super) fn taker(shares: &Arc<Shares>, from: u8, bytes: u64) -> Result<Share, Full> {
     let mut share = shares.share(at(from));
     share.take(bytes)?;
     Ok(share)
@@ -28,7 +30,7 @@ fn waiter(
     })
 }
 
-fn until_waiting(shares: &Shares, count: usize) {
+pub(super) fn until_waiting(shares: &Shares, count: usize) {
     let by = Instant::now() + Duration::from_secs(20);
     while shares.waiting() != count {
         assert!(

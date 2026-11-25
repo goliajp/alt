@@ -113,3 +113,43 @@ fn a_large_response_waits_for_its_turn_and_one_kept_slowly_is_let_go_of_for_anot
     assert_eq!(begun(&mut alone), 200);
     assert_eq!(taken(alone, 256 << 10, Duration::from_millis(60)), whole);
 }
+
+/// One worker, and one large response at a time. A large response of another
+/// address that waits for its turn gives the worker back meanwhile: a request
+/// that takes a worker is answered while it waits, and it has the worker again
+/// once its turn comes. Two of one address do not let one another go: the
+/// first, read slower than the pace, is read whole while the second waits,
+/// which has its turn after it.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_large_response_that_waits_for_its_turn_holds_no_worker_and_its_own_address_hurries_nobody() {
+    let mut f = Fixture::new();
+    let room = Shares::passed_by_one_alone(ROOM, 1).paced(8 << 20, Duration::from_secs(1));
+    let server = start(&mut f, |_, options| {
+        options.sending = room.clone();
+        options.workers = 1;
+        options.work_timeout = Duration::from_secs(120);
+        options.body_timeout = Duration::from_secs(120);
+    });
+    let head = pushed(&f, &server);
+    let (one, other) = ("203.0.113.9", "203.0.113.10");
+    let (_, _, whole) = fetched(&f, &server, &head, one);
+
+    let mut kept = asked(&f, &server, &head, one);
+    assert_eq!(begun(&mut kept), 200);
+    let second = waiting(&f, &server, &head, other);
+    until_waiting(&room, 1);
+    let metrics = server.send("GET", "/v1/instance/metrics", Some(&f.token), b"");
+    assert_eq!(metrics.status(), 200);
+    assert!(!second.is_finished());
+    drop(kept);
+    assert_eq!(second.join().unwrap(), (200, whole));
+
+    let mut kept = asked(&f, &server, &head, one);
+    assert_eq!(begun(&mut kept), 200);
+    let second = waiting(&f, &server, &head, one);
+    until_waiting(&room, 1);
+    // a megabyte a second, slower than the pace by eight
+    assert_eq!(taken(kept, 64 << 10, Duration::from_millis(60)), whole);
+    assert_eq!(second.join().unwrap(), (200, whole));
+}

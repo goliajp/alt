@@ -159,6 +159,48 @@ pub(crate) fn execute_git_with_cache(
     view: alt_server_store::PackView,
     room: Option<Verifying>,
 ) -> Result<Output> {
+    match prepared(store, credential, route, protocol_v2, source, view, room)? {
+        Step::Done(output) => Ok(output),
+        Step::Read(read) => read.answered(),
+    }
+}
+
+/// A Git request once what it needs of the database is read: its answer, or
+/// what reads it from the segments without the database.
+pub(crate) enum Step {
+    Done(Output),
+    Read(Reading),
+}
+
+/// What a read of the segments is answered from.
+pub(crate) struct Reading {
+    limits: alt_remote_protocol::Limits,
+    receive: bool,
+    command: Command,
+    view: alt_server_store::PackView,
+    room: Option<Verifying>,
+}
+
+impl Reading {
+    pub(crate) fn answered(self) -> Result<Output> {
+        let room = self.room.as_ref();
+        let sending = room.map(Verifying::share);
+        let gone = room.map(|room| &*room.given_up);
+        let (limits, receive, command) = (self.limits, self.receive, &self.command);
+        crate::git_read::read(limits, receive, command, self.view, sending, gone)
+    }
+}
+
+/// [`execute_git_with_cache`] up to what is read of the database.
+pub(crate) fn prepared(
+    store: &mut Store,
+    credential: &Credential,
+    route: Route,
+    protocol_v2: bool,
+    source: &mut dyn Read,
+    view: alt_server_store::PackView,
+    room: Option<Verifying>,
+) -> Result<Step> {
     let (repository, receive, advertisement) = match &route {
         Route::GitAdvertise(repository, receive) => (repository.clone(), *receive, true),
         Route::GitUpload(repository) => (repository.clone(), false, false),
@@ -172,7 +214,9 @@ pub(crate) fn execute_git_with_cache(
         if !view.writable {
             return Err(Error::Unauthorized);
         }
-        return crate::git_packs::receive(store, credential, &repository, source, view, room);
+        let received =
+            crate::git_packs::receive(store, credential, &repository, source, view, room);
+        return received.map(Step::Done);
     }
     let command = command(source, advertisement, store.limits())?;
     // the first view authorized the caller without the references; this one checks
@@ -200,10 +244,14 @@ pub(crate) fn execute_git_with_cache(
         }
         _ => view,
     };
-    let room = room.as_ref();
-    let sending = room.map(Verifying::share);
-    let gone = room.map(|room| &*room.given_up);
-    crate::git_read::read(store.limits(), receive, &command, view, sending, gone)
+    let limits = store.limits();
+    Ok(Step::Read(Reading {
+        limits,
+        receive,
+        command,
+        view,
+        room,
+    }))
 }
 
 /// What a Git request takes of what the instance has for all of them: the memory
@@ -219,14 +267,21 @@ pub(crate) struct Verifying {
     /// the room the responses to fetches have on disk, and the address the
     /// caller is counted under there
     pub sending: (std::sync::Arc<alt_shares::Shares>, Option<std::net::IpAddr>),
+    /// the worker of the request, given back while a response waits for its turn
+    pub worker: Option<crate::http::worker::Slot>,
 }
 
 impl Verifying {
     /// What the response takes of the room the responses to fetches have: it
-    /// waits for its turn to be large while the answer is waited for.
+    /// waits for its turn to be large while the answer is waited for, and the
+    /// worker of the request serves others meanwhile.
     pub fn share(&self) -> alt_shares::Share {
         let gone = Some(self.given_up.clone());
-        self.sending.0.share(self.sending.1).waiting(None, gone)
+        let share = self.sending.0.share(self.sending.1).waiting(None, gone);
+        match &self.worker {
+            Some(worker) => share.aside(worker.aside(self.given_up.clone())),
+            None => share,
+        }
     }
 }
 

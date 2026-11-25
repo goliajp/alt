@@ -92,12 +92,16 @@ pub(super) struct Work {
     pub(super) verifying: crate::git::Verifying,
 }
 impl Work {
+    /// The answer of the request. The store is let go of before the segments
+    /// are read for a Git request: a response that waits for its turn holds
+    /// no connection of the database.
     pub(super) fn run(
         self,
-        store: &mut Store,
+        lease: &mut Option<pool::Lease>,
         route: Route,
         source: &mut std::fs::File,
     ) -> alt_server_store::Result<Output> {
+        let store: &mut Store = lease.as_mut().expect("a store");
         match route {
             Route::Metrics => observation::metrics(store, &self.credential, &self.metrics),
             Route::ChangeLink(route) => {
@@ -127,7 +131,7 @@ impl Work {
                     Route::GitReceive(repository) => Some(repository.clone()),
                     _ => None,
                 };
-                let output = crate::git::execute_git_with_cache(
+                let step = crate::git::prepared(
                     store,
                     &self.credential,
                     route,
@@ -136,6 +140,13 @@ impl Work {
                     self.view.ok_or(Error::Integrity("Git repository view"))?,
                     Some(self.verifying),
                 )?;
+                let output = match step {
+                    crate::git::Step::Done(output) => output,
+                    crate::git::Step::Read(reading) => {
+                        drop(lease.take());
+                        reading.answered()?
+                    }
+                };
                 if let Some(repository) = pushed {
                     self.compaction.published(&repository);
                 }

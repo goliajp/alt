@@ -177,6 +177,8 @@ impl Call {
                 let asked = (oid, Some(&*gone));
                 crate::browse::shown(&mut store, &credential, &repository, asked, &within)?;
                 let found = store.open_published_object(&credential, &repository, oid)?;
+                // a response that waits for its turn holds no connection of the database
+                drop(store);
                 let (mut file, mut body) = (found.2, Spill::within(Some(sending)));
                 let written = std::io::copy(&mut file, &mut body).map(drop);
                 let sent =

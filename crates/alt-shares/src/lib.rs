@@ -39,7 +39,7 @@ use std::time::Duration;
 
 pub use disk::half_of_what_is_free;
 use held::Held;
-pub use share::{Full, Share, Slow};
+pub use share::{Aside, Full, Share, Slow};
 
 /// the parts the amount has for one address: a quarter each
 const PARTS: u64 = 4;

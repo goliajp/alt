@@ -24,6 +24,7 @@ mod serving;
 mod sources;
 mod web;
 mod work;
+pub(crate) mod worker;
 use crate::{NativeOptions, Output, RequestAction, Route, execute_native, parse_route};
 use alt_remote_protocol::{ErrorCode, Failure, Limits, RequestKey, Retry};
 use alt_server_store::{ByteStore, Error, InstanceSpec, Store};

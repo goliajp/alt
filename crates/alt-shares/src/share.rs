@@ -18,6 +18,18 @@ pub struct Share {
     waits: Option<Wait>,
     /// since when it is sent in the window that is running, and what it sent in it
     sending: Option<(Instant, u64)>,
+    /// what it gives back while it waits for its turn
+    aside: Option<Box<dyn Aside>>,
+}
+
+/// What a taker gives back while it waits for its turn to be large, and
+/// takes back once it has it: the worker of a server, which serves others
+/// meanwhile.
+pub trait Aside: Send {
+    fn step_aside(&mut self);
+    /// Takes back what was given back, for as long as the taker is waited
+    /// for: false where it was not had again.
+    fn step_back(&mut self) -> bool;
 }
 
 struct Wait {
@@ -61,6 +73,7 @@ impl Share {
             large,
             waits,
             sending,
+            aside: None,
         }
     }
 
@@ -72,6 +85,12 @@ impl Share {
     /// is not set.
     pub fn waiting(mut self, by: Option<Instant>, gone: Option<Arc<AtomicBool>>) -> Self {
         self.waits = Some(Wait { by, gone });
+        self
+    }
+
+    /// While the taker waits for its turn, `aside` is given back.
+    pub fn aside(mut self, aside: Box<dyn Aside>) -> Self {
+        self.aside = Some(aside);
         self
     }
 
@@ -146,7 +165,7 @@ impl Share {
         if mine > most / 2 && !of.alone {
             return Err(Full);
         }
-        held = self.turn(held, from)?;
+        held = self.turn(&of, held, from)?;
         if over(&held) || (mine > most / 2 && !alone(&held)) {
             held.large.remove(&from);
             held.let_in(of.large);
@@ -163,9 +182,11 @@ impl Share {
         Ok(())
     }
 
-    /// Waits for the turn of the taker to be large, as long as it is told to.
+    /// Waits for the turn of the taker to be large, as long as it is told to,
+    /// with what it gives back while it waits given back.
     fn turn<'a>(
-        &self,
+        &mut self,
+        of: &'a Shares,
         mut held: MutexGuard<'a, Held>,
         from: IpAddr,
     ) -> Result<MutexGuard<'a, Held>, Full> {
@@ -175,16 +196,33 @@ impl Share {
         if !held.turns.contains(&from) {
             held.turns.push_back(from);
         }
-        held.let_in(self.of.large);
+        held.let_in(of.large);
+        let mut aside = false;
         loop {
             if held.let_in.remove(&taker) {
-                return Ok(held);
+                if !aside {
+                    return Ok(held);
+                }
+                drop(held);
+                let back = self.aside.as_mut().is_some_and(|aside| aside.step_back());
+                held = of.lock();
+                if back {
+                    return Ok(held);
+                }
+                held.large.remove(&from);
+                held.let_in(of.large);
+                of.changed.notify_all();
+                return Err(Full);
             }
             if !self.waits.as_ref().is_some_and(Wait::goes_on) {
                 held.waits_no_more(from, taker);
                 return Err(Full);
             }
-            held = self.of.changed.wait_timeout(held, LOOK).expect("shares").0;
+            if !aside && let Some(given) = self.aside.as_mut() {
+                given.step_aside();
+                aside = true;
+            }
+            held = of.changed.wait_timeout(held, LOOK).expect("shares").0;
         }
     }
 }
