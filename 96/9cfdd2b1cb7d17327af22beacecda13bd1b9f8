@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: the bases appended to a thin pack take of the room on the disk the bases in files share, until the pack is let go of
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/files.rs
+touched: crates/alt-git-pack/src/index_pack/thin.rs
+touched: crates/alt-git-pack/tests/it/thin_pack.rs
