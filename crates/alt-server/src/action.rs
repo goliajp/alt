@@ -220,7 +220,8 @@ pub(crate) enum Action {
         #[arg(long, default_value = "100")]
         limit: u32,
     },
-    /// List the trees a push is now refused for, of one repository or all; changes nothing
+    /// List the trees a push is now refused for, of one repository or all; changes nothing and
+    /// needs no credential
     RefusedTrees {
         repository: Option<String>,
     },

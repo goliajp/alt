@@ -195,18 +195,27 @@ impl Store {
         Ok(unread)
     }
 
+    /// The repositories of the instance, in the order of their names, for one
+    /// who has the configuration and the database of the instance in hand.
+    pub fn repositories(&mut self) -> Result<Vec<String>> {
+        let mut tx = self.client.transaction()?;
+        instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
+        let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
+        tx.commit()?;
+        Ok(rows.iter().map(|row| row.get(0)).collect())
+    }
+
     /// The trees of the live segments of `repository` that a push is now
     /// refused for: each with its segment, its id and why, in the words of
-    /// `git fsck`. Nothing is changed.
+    /// `git fsck`. Nothing is changed, and nothing is read that schema 21 does
+    /// not have: it is asked before an instance is upgraded.
     pub fn refused_trees(
         &mut self,
-        admin: &Credential,
         repository: &str,
         told: Reading<'_>,
     ) -> Result<Vec<(String, String, &'static str)>> {
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
-        require_admin(&mut tx, &self.spec, admin)?;
         let known = tx.query_opt("SELECT 1 FROM alt_repositories WHERE id=$1", &[&repository])?;
         if known.is_none() {
             return Err(Error::Precondition(NO_REPOSITORY));

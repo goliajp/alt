@@ -495,7 +495,8 @@ digits. Each is told with its repository, segment, tree id and the reason in
 the words of `git fsck`. It changes nothing. Where there are any, or a
 repository could not be read, the command ends with status 1. Versions before
 this one took such trees in; run it before upgrading, with the new version
-against the instance as it is. A tree it lists is still served; a portable export of its
+against the instance as it is: it needs no credential, and reads nothing of
+the database that schema 21 does not have. A tree it lists is still served; a portable export of its
 repository fails on it, and `scrub --mend` cannot index anew a segment that
 holds it.
 

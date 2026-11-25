@@ -43,21 +43,18 @@ pub fn read(
 
 /// The trees of `repository`, or of every repository, that a push is now
 /// refused for. Where there are any, they are told and the command fails, as
-/// it does where a repository could not be read; nothing is changed.
-pub fn refused_trees(
-    store: &mut Store,
-    admin: &Credential,
-    repository: Option<&str>,
-) -> Result<Value> {
+/// it does where a repository could not be read; nothing is changed. What is
+/// read of the database is what schema 21 already has.
+pub fn refused_trees(store: &mut Store, repository: Option<&str>) -> Result<Value> {
     let repositories = match repository {
         Some(repository) => vec![repository.to_owned()],
-        None => store.repositories_to_scrub(admin)?,
+        None => store.repositories()?,
     };
     let (mut refused, mut failed) = (Vec::new(), Vec::new());
     let mut reading = super::reading::Reading::by("refused-trees");
     let mut read = |repository: &str, read, all| reading.read(repository, read, all);
     for repository in &repositories {
-        match store.refused_trees(admin, repository, &mut read) {
+        match store.refused_trees(repository, &mut read) {
             Ok(found) => refused.extend(found.into_iter().map(|(segment, tree, why)| {
                 json!({"repository":repository,"segment":segment,"tree":tree,"reason":why})
             })),

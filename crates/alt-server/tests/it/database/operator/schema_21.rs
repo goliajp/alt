@@ -91,6 +91,12 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(copies(&source.dsn), (21, 0, 0));
     assert_eq!(moments(&source.dsn), None);
     assert!(!source.run(&["health"]).status.success());
+    // the trees a push of this version refuses are listed before the upgrade,
+    // with no credential, and nothing is changed
+    let refused = source.ok(&["refused-trees"]);
+    assert_eq!(refused["refused_trees"], 0, "{refused}");
+    assert!(refused["repositories"].as_u64() >= Some(1), "{refused}");
+    assert_eq!(copies(&source.dsn), (21, 0, 0));
 
     let offsite = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(offsite.path());

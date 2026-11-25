@@ -132,23 +132,12 @@ fn execute(args: &Args) -> Result<Value> {
     match &args.command {
         Action::Serve => {
             drop(store);
-            let factory = config.factory()?;
-            let options = config.serving_options()?;
-            let browser = config.browser_options()?;
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(config.http.workers.min(16))
-                .enable_all()
-                .build()
-                .map_err(|_| Error::Config("async runtime"))?;
-            runtime.block_on(async {
-                let listener=tokio::net::TcpListener::bind(config.listen).await.map_err(|_|Error::Config("listener unavailable"))?;
-                let address=listener.local_addr().map_err(|_|Error::Config("listener identity"))?;
-                let line=json!({"event":"listening","address":address,"instance":config.instance,"build":build_info()});
-                println!("{line}");std::io::stdout().flush().map_err(|_|Error::File)?;
-                let mut termination=tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|_|Error::Config("termination signal"))?;
-                alt_server::serve_with_browser(listener,factory,options,browser,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|error|Error::Serve(error.to_string()))
-            })?;
-            return Ok(json!({"event":"stopped"}));
+            return serve(&config);
+        }
+        // read alone, with no credential: it is run with this version against
+        // an instance of an older schema, before that is upgraded
+        Action::RefusedTrees { repository } => {
+            return operator::scrub::refused_trees(&mut store, repository.as_deref());
         }
         Action::Health => {
             return Ok(
@@ -201,6 +190,27 @@ fn execute(args: &Args) -> Result<Value> {
     let admin = config.factory()?.authenticate(&mut store, &token)?;
     administered::execute(args, &config, &mut store, (&admin, &token))
 }
+/// Serves the instance of `config` until it is told to stop.
+fn serve(config: &Config) -> Result<Value> {
+    let factory = config.factory()?;
+    let options = config.serving_options()?;
+    let browser = config.browser_options()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(config.http.workers.min(16))
+        .enable_all()
+        .build()
+        .map_err(|_| Error::Config("async runtime"))?;
+    runtime.block_on(async {
+        let listener=tokio::net::TcpListener::bind(config.listen).await.map_err(|_|Error::Config("listener unavailable"))?;
+        let address=listener.local_addr().map_err(|_|Error::Config("listener identity"))?;
+        let line=json!({"event":"listening","address":address,"instance":config.instance,"build":build_info()});
+        println!("{line}");std::io::stdout().flush().map_err(|_|Error::File)?;
+        let mut termination=tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|_|Error::Config("termination signal"))?;
+        alt_server::serve_with_browser(listener,factory,options,browser,async move {tokio::select! {_=tokio::signal::ctrl_c()=>{},_=termination.recv()=>{}}}).await.map_err(|error|Error::Serve(error.to_string()))
+    })?;
+    Ok(json!({"event":"stopped"}))
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
     let _logging = if matches!(args.command, Action::Serve) {
@@ -235,6 +245,7 @@ fn main() -> ExitCode {
                     | Action::Status
                     | Action::Audit { .. }
                     | Action::BackupVerify { .. }
+                    | Action::RefusedTrees { .. }
             );
             let unknown = matches!(error, Error::Unknown | Error::RestoreStage(_))
                 || (writing && matches!(error, Error::Store | Error::Database));
