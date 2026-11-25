@@ -169,14 +169,28 @@ def operator(directory, arguments, mounts=(), image=None):
 
 
 def network_of(directory):
-    """The default network as the files of the installation have it, and as Docker has it (None where there is none)."""
+    """The project, the subnet and gateway of its default network as the files of the installation have them, and the subnets and gateways of that network as Docker has them (None where there is none)."""
     values = dict(line.split('=', 1) for line in regular(directory / '.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
     project = values.get('COMPOSE_PROJECT_NAME') or directory.name
-    written = f"{values.get('ALT_SUBNET') or '172.30.91.0/24'} {values.get('ALT_GATEWAY') or '172.30.91.1'}"
-    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{end}}'], capture_output=True, text=True)
+    written = (values.get('ALT_SUBNET') or '172.30.91.0/24', values.get('ALT_GATEWAY') or '172.30.91.1')
+    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{json .IPAM.Config}}'], capture_output=True, text=True)
     if found.returncode and 'not found' not in found.stderr and 'No such network' not in found.stderr:
         raise ValueError(f'docker network inspect: {found.stderr.strip()}')
-    return written, (found.stdout.strip() if found.returncode == 0 else None)
+    if found.returncode:
+        return project, written, None
+    configs = json.loads(found.stdout) or []
+    return project, written, [(config.get('Subnet'), config.get('Gateway')) for config in configs]
+
+
+def strangers_on(project):
+    """The containers on the default network of the project that are not of the project: Compose cannot take the network down while they are on it."""
+    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{json .Containers}}'], capture_output=True, text=True, check=True)
+    strangers = []
+    for container, endpoint in (json.loads(found.stdout) or {}).items():
+        label = subprocess.run(['docker', 'inspect', container, '--format', '{{index .Config.Labels "com.docker.compose.project"}}'], capture_output=True, text=True)
+        if label.returncode or label.stdout.strip() != project:
+            strangers.append(endpoint.get('Name') or container)
+    return strangers
 
 
 def start(directory, *services):
@@ -184,14 +198,19 @@ def start(directory, *services):
     # the network carries the digest of the configuration it was made from:
     # one an older Compose made is kept as it is, on a subnet Docker chose,
     # and the gateway the edge and the application are told of is not where
-    # a proxy on the host connects from. Such a network is taken down first.
-    written, found = network_of(directory)
-    if found is not None and found != written:
+    # a proxy on the host connects from. Such a network is taken down first,
+    # and only where nothing but the containers of the project is on it: a
+    # stranger on it would stop the taking down half way, the services down.
+    project, written, found = network_of(directory)
+    if found is not None and written not in found:
+        strangers = strangers_on(project)
+        if strangers:
+            raise ValueError(f'the network of the edge is to be made anew, and containers that are not of the installation are on it: {", ".join(strangers)}; disconnect them first')
         print(json.dumps({'network': found, 'written': written, 'taken_down': True}), file=sys.stderr)
-        compose(directory, 'down')
+        compose(directory, 'down', '--remove-orphans')
     compose(directory, 'up', '-d', '--wait', *services)
-    written, found = network_of(directory)
-    if found != written:
+    project, written, found = network_of(directory)
+    if found is None or written not in found:
         raise ValueError(f'the network of the edge is {found}, where {written} is written down')
 
 
@@ -253,7 +272,7 @@ def main():
         initialize(args)
     elif args.command == 'start':
         start(args.directory.resolve(strict=True))
-        print(json.dumps({'started': True, 'network': network_of(args.directory.resolve(strict=True))[1]}))
+        print(json.dumps({'started': True, 'network': network_of(args.directory.resolve(strict=True))[2]}))
     else:
         arguments = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
         if not arguments:
