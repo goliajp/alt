@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: what is kept of an entry is asked of in a const block, as clippy asks
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/tests/it/index_memory.rs
