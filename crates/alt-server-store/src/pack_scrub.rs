@@ -149,16 +149,10 @@ impl Store {
             let mut stands = (part.clone(), Arc::clone(segment));
             if !lost.is_empty() {
                 let mut unread = Unread::of(&part.0, &lost);
-                if let Some(memory) = mend {
-                    let behind = (&older_ids[..], &before);
-                    match self.index_anew(repository, (part, segment), behind, memory) {
-                        Ok(anew) => {
-                            unread.replaced_by = Some(anew.0.0.clone());
-                            stands = anew;
-                        }
-                        Err(Error::OutcomeUnknown) => return Err(Error::OutcomeUnknown),
-                        Err(error) => unread.kept_because = Some(error.to_string()),
-                    }
+                let behind = (&older_ids[..], &before);
+                let found = (part, segment, &mut unread);
+                if let Some(anew) = self.mended(repository, found, behind, mend)? {
+                    stands = anew;
                 }
                 scrubbed.unread.push(unread);
             }

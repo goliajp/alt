@@ -91,9 +91,8 @@ pub(super) fn publish(
     }
     let limits = store.limits();
     let gone = room.as_ref().map(|room| &*room.given_up);
-    let led = (view.unreachable)
-        .then(|| store.led(view, gone))
-        .transpose()?;
+    let led = (view.unreachable).then(|| store.led(view, gone));
+    let led = led.transpose()?;
     let mut behind = (view.segment_ids.clone(), view.segments.clone());
     let mut push = Push {
         view,

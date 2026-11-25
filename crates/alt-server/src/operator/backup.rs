@@ -106,11 +106,7 @@ pub fn create(
         None => Default::default(),
     };
     if !unread.is_empty() && !with_unread {
-        return Err(unread::refused(
-            "backup_created",
-            &unread,
-            unread::BACKED_UP,
-        ));
+        return Err(unread::not_backed_up(&unread));
     }
     let operation = alt_browser_auth::secret();
     if let Some(store) = &mut store {
@@ -160,7 +156,7 @@ fn create_inner(
     if let Some(store) = store {
         let (later, _) = unread::found_besides(store, "backup", &read)?;
         if !later.is_empty() && !with_unread {
-            return Err(unread::refused("backup_created", &later, unread::BACKED_UP));
+            return Err(unread::not_backed_up(&later));
         }
         unread.extend(later);
     }
@@ -201,31 +197,14 @@ fn create_inner(
     );
     let mut archive = alt_tar::Builder::new(encrypt.0.stdin.take().ok_or(Error::File)?);
     let mut files = BTreeMap::new();
-    files.insert(
-        "database.dump".into(),
-        append(&mut archive, "database.dump", &mut regular(&database)?)?,
-    );
-    create_private(&work.path().join("receipt.key"), &signing_key.to_bytes())?;
-    files.insert(
-        "receipt.key".into(),
-        append(
-            &mut archive,
-            "receipt.key",
-            &mut regular(&work.path().join("receipt.key"))?,
-        )?,
-    );
-    create_private(
-        &work.path().join("config.json"),
-        &alt_json::to_vec(config).map_err(|_| Error::File)?,
-    )?;
-    files.insert(
-        "config.json".into(),
-        append(
-            &mut archive,
-            "config.json",
-            &mut regular(&work.path().join("config.json"))?,
-        )?,
-    );
+    let key = signing_key.to_bytes().to_vec();
+    let told = alt_json::to_vec(config).map_err(|_| Error::File)?;
+    let written = [("receipt.key", Some(&key)), ("config.json", Some(&told))];
+    for (name, content) in [("database.dump", None)].into_iter().chain(written) {
+        let content = content.map(Vec::as_slice);
+        let appended = archive::appended(&mut archive, (work.path(), name), content)?;
+        files.insert(name.into(), appended);
+    }
     for blob in &snapshot.catalog().blobs {
         let name = blob_path(blob);
         let description = append(&mut archive, &name, &mut snapshot.read_verified(blob)?)?;

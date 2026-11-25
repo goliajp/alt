@@ -72,3 +72,8 @@ pub(super) fn refused(what: &str, found: &[Unread], hint: &str) -> Error {
     told[what] = Value::Bool(false);
     Error::Partly(told, false)
 }
+
+/// What a backup not made for segments that are not read ends with.
+pub(super) fn not_backed_up(found: &[Unread]) -> Error {
+    refused("backup_created", found, BACKED_UP)
+}

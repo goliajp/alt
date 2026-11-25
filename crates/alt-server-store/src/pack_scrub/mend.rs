@@ -1,18 +1,44 @@
 //! A segment that does not give its objects back put out of the way by its
 //! pack indexed anew.
 
-use super::NO_MEMORY;
+use super::{NO_MEMORY, Unread};
 use crate::{Error, Result, Store, packs::INLINE_SEGMENT_BYTES};
 use alt_pack_segment::{Memory, Segment, SegmentSet};
 use std::sync::Arc;
 
 impl Store {
+    /// Where `mend` gives memory, `segment` put out of the way by its pack
+    /// indexed anew, as [`Self::index_anew`] does; `unread` is told what took
+    /// its place, or why nothing did.
+    pub(super) fn mended(
+        &mut self,
+        repository: &str,
+        (part, segment, unread): (&(String, bool), &Arc<Segment>, &mut Unread),
+        behind: (&[(String, bool)], &SegmentSet),
+        mend: Option<&'static Memory>,
+    ) -> Result<Option<((String, bool), Arc<Segment>)>> {
+        let Some(memory) = mend else {
+            return Ok(None);
+        };
+        match self.index_anew(repository, (part, segment), behind, memory) {
+            Ok(anew) => {
+                unread.replaced_by = Some(anew.0.0.clone());
+                Ok(Some(anew))
+            }
+            Err(Error::OutcomeUnknown) => Err(Error::OutcomeUnknown),
+            Err(error) => {
+                unread.kept_because = Some(error.to_string());
+                Ok(None)
+            }
+        }
+    }
+
     /// Puts the pack of `segment`, indexed anew behind `before`, in the place of
     /// the live segment `part`. The new segment, with its id and whether its
     /// row holds it. It takes the place of `part` only where the live
     /// segments still begin with those of `before_ids` and `part`, and those
     /// published behind `part` meanwhile stand on it, as a merge does.
-    pub(super) fn index_anew(
+    fn index_anew(
         &mut self,
         repository: &str,
         (part, segment): (&(String, bool), &Arc<Segment>),

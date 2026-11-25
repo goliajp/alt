@@ -58,3 +58,17 @@ pub(super) fn blob_path(blob: &alt_server_store::SnapshotBlob) -> String {
 pub(super) fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
     format!("packs/{}/{}", segment.repository, segment.segment)
 }
+
+/// Appends the file `name` in `work`, written with `content` first where
+/// that is given, to the archive.
+pub(super) fn appended<W: Write>(
+    archive: &mut alt_tar::Builder<W>,
+    (work, name): (&Path, &str),
+    content: Option<&[u8]>,
+) -> Result<FileDigest> {
+    let path = work.join(name);
+    if let Some(content) = content {
+        crate::operator::create_private(&path, content)?;
+    }
+    append(archive, name, &mut regular(&path)?)
+}
