@@ -43,13 +43,12 @@ fn ntfs(name: &[u8], word: &[u8; 3]) -> bool {
         .all(|byte| matches!(byte, b'.' | b' '))
 }
 
-/// HFS+ leaves out code points that take no space, and folds case
+/// HFS+ leaves out code points that take no space, and folds case; as Git
+/// reads a name, one ends where its bytes stop being UTF-8
 fn hfs(name: &[u8], dotted: &[u8]) -> bool {
-    let Ok(name) = std::str::from_utf8(name) else {
-        return false;
-    };
+    let read = name.utf8_chunks().next().map_or("", |chunk| chunk.valid());
     let ignored = |c: &char| matches!(*c as u32, 0x200c..=0x200f | 0x202a..=0x202e | 0x206a..=0x206f | 0xfeff);
-    let mut left = name.chars().filter(|c| !ignored(c));
+    let mut left = read.chars().filter(|c| !ignored(c));
     let mut needle = dotted.iter().map(|byte| char::from(*byte));
     loop {
         match (left.next(), needle.next()) {
@@ -58,6 +57,68 @@ fn hfs(name: &[u8], dotted: &[u8]) -> bool {
             _ => return false,
         }
     }
+}
+
+/// Whether `name` is read as `.<file>` by Git, by HFS+ or by NTFS, whose short
+/// names for it begin with `short` (as `git fsck` has them, `gi7eba` for
+/// `gitmodules`). With `backslashes`, also what follows a backslash, as Git
+/// reads a name for `.gitmodules`.
+pub fn dot_file(name: &[u8], file: &str, short: &[u8; 6], backslashes: bool) -> bool {
+    let dotted = [b".", file.as_bytes()].concat();
+    let mut parts = (name.iter().enumerate()).filter(|(_, byte)| **byte == b'\\');
+    hfs(name, &dotted)
+        || ntfs_short(name, file.as_bytes(), short)
+        || backslashes && parts.any(|(at, _)| ntfs_short(&name[at + 1..], file.as_bytes(), short))
+}
+
+/// NTFS as Git reads it for a file of `.<file>`: dots and spaces at the end
+/// and a stream after a colon dropped, the short name of the first six
+/// letters and `~1` to `~4`, and the short name made of `short` where those
+/// are taken
+fn ntfs_short(name: &[u8], file: &[u8], short: &[u8; 6]) -> bool {
+    let rest = |from: usize| {
+        let rest = name.get(from..).unwrap_or_default();
+        let end = rest.iter().position(|byte| *byte == b':');
+        rest[..end.unwrap_or(rest.len())]
+            .iter()
+            .all(|byte| matches!(byte, b'.' | b' '))
+    };
+    let long = name.len() > file.len() && name[0] == b'.';
+    if long && name[1..=file.len()].eq_ignore_ascii_case(file) {
+        return rest(file.len() + 1);
+    }
+    if name.len() >= 8
+        && name[..6].eq_ignore_ascii_case(&file[..6])
+        && name[6] == b'~'
+        && (b'1'..=b'4').contains(&name[7])
+    {
+        return rest(8);
+    }
+    let mut tilde = false;
+    let mut at = 0;
+    while at < 8 {
+        let Some(&byte) = name.get(at) else {
+            return false;
+        };
+        if tilde {
+            if !byte.is_ascii_digit() {
+                return false;
+            }
+        } else if byte == b'~' {
+            at += 1;
+            if !name
+                .get(at)
+                .is_some_and(|digit| (b'1'..=b'9').contains(digit))
+            {
+                return false;
+            }
+            tilde = true;
+        } else if at >= 6 || byte.to_ascii_lowercase() != short[at] {
+            return false;
+        }
+        at += 1;
+    }
+    rest(8)
 }
 
 #[cfg(test)]
@@ -111,5 +172,52 @@ mod tests {
         assert_eq!(unsafe_name(b".."), Some("hasDotdot: contains '..'"));
         let full = Some("fullPathname: contains full pathnames");
         assert_eq!(unsafe_name(b"a/b"), full);
+    }
+
+    #[test]
+    fn dot_files_are_found_as_git_fsck_finds_them() {
+        let gitmodules = |name: &[u8]| dot_file(name, "gitmodules", b"gi7eba", true);
+        let found: [&[u8]; 11] = [
+            b".gitmodules",
+            b".GITMODULES",
+            b".gitmodules. .",
+            b".gitmodules:x",
+            b"gitmod~1",
+            b"GITMOD~4 ",
+            b"gi7eba~1",
+            b".git\xe2\x80\x8cmodules",
+            b"a\\.gitmodules",
+            b"a\\gitmod~2",
+            b".gitmodules\xff",
+        ];
+        for name in found {
+            assert!(gitmodules(name), "{}", name.escape_ascii());
+        }
+        let not: [&[u8]; 10] = [
+            b"gi7eba~12",
+            b".gitmodulesx",
+            b"gitmod~5",
+            b"gi7eba~a",
+            b"gi7ebb~1",
+            b"gitmodules",
+            b"a\\.gitmodules\\b",
+            b".gitmodule",
+            b"gi7eba~",
+            b"gi7eb~1",
+        ];
+        for name in not {
+            assert!(!gitmodules(name), "{}", name.escape_ascii());
+        }
+        // what follows a backslash is read for `.gitmodules` alone
+        assert!(!dot_file(
+            b"a\\.gitattributes",
+            "gitattributes",
+            b"gi7d29",
+            false
+        ));
+        assert!(dot_file(b"gi7d29~1", "gitattributes", b"gi7d29", false));
+        // a name whose bytes stop being UTF-8 ends there
+        assert_eq!(unsafe_name(b".git\xff"), Some("hasDotgit: contains '.git'"));
+        assert_eq!(unsafe_name(b".gi\xfft"), None);
     }
 }

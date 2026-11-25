@@ -1,0 +1,11 @@
+[package]
+name = "alt-git-fsck"
+description = "What git fsck refuses in the trees and blobs a push brings, and what of it is new beside the trees before"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+alt-git-codec.workspace = true
+alt-git-config.workspace = true

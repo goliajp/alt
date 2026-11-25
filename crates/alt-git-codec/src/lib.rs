@@ -18,7 +18,7 @@ pub use commit::Commit;
 pub use headers::ObjectParseError;
 pub use kind::{ObjectKind, ParseKindError};
 pub use loose::{LooseError, LooseStore, RawObject};
-pub use names::unsafe_name;
+pub use names::{dot_file, unsafe_name};
 pub use oid::{HashAlgo, ObjectId, ParseOidError};
 pub use tag::Tag;
 pub use tree::{EntryMode, MODE_DIGITS, Tree, TreeEntry};

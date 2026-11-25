@@ -11,7 +11,7 @@ use std::path::Path;
 use alt_bytes::{BStr, BString};
 
 pub use include::IncludeContext;
-pub use parse::parse_file;
+pub use parse::{parse_file, parse_until_wrong};
 pub use wildmatch::wildmatch;
 
 /// One configuration line, fully qualified.
