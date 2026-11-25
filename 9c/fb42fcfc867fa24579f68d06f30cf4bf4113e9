@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the segment a merge makes in the place of the first is named as segments are
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/tests/it/database/pack_scrub.rs
