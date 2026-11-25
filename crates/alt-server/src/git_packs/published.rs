@@ -41,6 +41,9 @@ pub(super) fn spool(
         if first.len() as u64 + copied > limit {
             return Err(Error::Limit("Git pack bytes"));
         }
+        // synced as it is received: a publication writes the index behind it and
+        // syncs the file, the last of them with the row of its repository held
+        file.sync_data()?;
         // the file is new and only this request writes to it; the index it gets
         // later lies behind what is mapped here
         let pack = unsafe { alt_os::map::Mmap::map(&file) }?;
