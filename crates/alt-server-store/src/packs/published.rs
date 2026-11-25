@@ -28,7 +28,7 @@ impl Store {
         publication: &Publication,
         graph: &SegmentGraph<'_>,
         segment: Option<NewSegment<'_>>,
-        (behind, read): (&[String], &crate::Refs),
+        (behind, read, leans): (&[String], &crate::Refs, &super::Leans),
     ) -> Result<Receipt> {
         let repository = &publication.key.scope.repository_instance_id;
         super::still_led::push_verified(self.bytes.root());
@@ -40,7 +40,7 @@ impl Store {
             return Err(Error::Precondition(crate::SEGMENTS_MOVED));
         }
         let steps = self.limits.walk_steps;
-        super::still_led::still_led(&current, publication, read, graph.set, steps)?;
+        super::still_led::still_led(&current, publication, (read, leans), graph.set, steps)?;
         let held = (tx, &current, self.bytes.root());
         published(
             held,
@@ -63,7 +63,7 @@ impl Store {
     pub fn pack_publish_held(
         &mut self,
         credential: &Credential,
-        (repository, read): (&str, &crate::Refs),
+        (repository, read, leans): (&str, &crate::Refs, &super::Leans),
         made: &mut dyn FnMut(&[String], &SegmentSet) -> Result<HeldPublication>,
     ) -> Result<Receipt> {
         let mut tx = self.client.transaction()?;
@@ -80,7 +80,7 @@ impl Store {
             return Err(Error::Unauthorized);
         }
         let steps = self.limits.walk_steps;
-        super::still_led::still_led(&current, &publication, read, &set, steps)?;
+        super::still_led::still_led(&current, &publication, (read, leans), &set, steps)?;
         let graph = SegmentGraph {
             set: &set,
             limits: self.limits.into(),

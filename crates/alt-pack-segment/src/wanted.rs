@@ -94,7 +94,13 @@ impl<'a> Wanted<'a> {
 
     /// Fails unless every object referred to is carried or held by a segment
     /// present, as the kind it is referred to as. `of` is the id of an entry.
-    pub fn check(self, carried: &Carried, of: impl Fn(u32) -> Oid + Sync) -> Result<(), Error> {
+    /// The objects held and not carried, each once: what the pack leans on.
+    pub fn check(
+        self,
+        carried: &Carried,
+        of: impl Fn(u32) -> Oid + Sync,
+    ) -> Result<Vec<(Oid, Kind)>, Error> {
+        let leans = Mutex::new(Vec::new());
         alt_threads::try_for_each(&self.shards, 1, |shard| {
             let shard = shard.lock().expect("wanted");
             for (to, (kind, from)) in &shard.own {
@@ -102,17 +108,23 @@ impl<'a> Wanted<'a> {
                     return Err(Error::Dangling(of(*from), *to));
                 }
             }
+            let mut held = Vec::new();
             for (to, (kind, from)) in &shard.fresh {
                 let found = match carried.kind(to) {
                     Some(found) => Some(found),
-                    None => self.held(to)?,
+                    None => {
+                        held.push((*to, *kind));
+                        self.held(to)?
+                    }
                 };
                 if found != Some(*kind) {
                     return Err(Error::Dangling(of(*from), *to));
                 }
             }
+            leans.lock().expect("leans").extend(held);
             Ok(())
-        })
+        })?;
+        Ok(leans.into_inner().expect("leans"))
     }
 }
 
@@ -158,7 +170,7 @@ mod tests {
             }
             wanted.check(carried, id)
         };
-        wanted(&all).unwrap();
+        assert!(wanted(&all).unwrap().is_empty());
         let missing = wanted(&but_one);
         assert!(matches!(missing, Err(Error::Dangling(a, b)) if a == id(0) && b == id(0)));
 

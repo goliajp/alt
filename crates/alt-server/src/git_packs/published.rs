@@ -108,6 +108,7 @@ pub(super) fn publish(
     for _ in 0..MOVED_MOST {
         let fresh = fresh(store, repository)?;
         let made = push.made(fresh, (&behind.0, &behind.1))?;
+        let leans = leaned(&push);
         let segment = made.stored.as_ref().map(|stored| NewSegment {
             id: &stored.0.id,
             objects: stored.0.objects,
@@ -123,7 +124,7 @@ pub(super) fn publish(
         // transaction for inspection, not for replay
         let committed =
             alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-                let read = (&behind.0[..], &view.refs);
+                let read = (&behind.0[..], &view.refs, &leans);
                 store.pack_publish(credential, &made.publication, &graph, segment, read)
             });
         match committed {
@@ -136,9 +137,11 @@ pub(super) fn publish(
     }
     // the segments moved under it time after time: no other is let by now
     let fresh = fresh(store, repository)?;
+    let leans = leaned(&push);
     let mut last = None;
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-        store.pack_publish_held(credential, (repository, &view.refs), &mut |ids, set| {
+        let read = (repository, &view.refs, &leans);
+        store.pack_publish_held(credential, read, &mut |ids, set| {
             let mut made = push.made(fresh.clone(), (ids, set))?;
             let segment = made.stored.as_mut().map(|stored| HeldSegment {
                 inline: stored.0.inline.take(),
@@ -152,6 +155,12 @@ pub(super) fn publish(
     })?;
     let made = last.expect("made where it was published");
     made.adopted(store, repository, published)
+}
+
+/// What of the segments the pack of `push` leans on, once it is verified.
+fn leaned(push: &Push<'_>) -> alt_server_store::Leans {
+    let leans = push.verified.as_ref().map(|pack| pack.leans());
+    alt_server_store::Leans::of(leans.unwrap_or_default())
 }
 
 /// The updates of a push that change a ref. A client may list refs it does not

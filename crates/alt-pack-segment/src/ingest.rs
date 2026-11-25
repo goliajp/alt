@@ -33,6 +33,10 @@ pub(crate) const HELD: u64 = 256 << 20;
 pub struct Ingested {
     records: Vec<Record>,
     pub(crate) commits: Vec<CommitRow>,
+    /// the objects of the segments the pack leans on, each once, in the order
+    /// of the ids: what it names and does not carry, and the bases of its
+    /// deltas there
+    leans: Vec<(Oid, Kind)>,
     /// the trees `git fsck` looks at again, each once, in the order of the ids
     pub(crate) flagged: Vec<(Oid, alt_git_fsck::Flagged<Oid>)>,
     flags: u32,
@@ -53,6 +57,13 @@ impl Ingested {
 
     pub fn flags(&self) -> u32 {
         self.flags
+    }
+
+    /// The objects of the segments the pack was verified behind that it leans
+    /// on: those it names and does not carry, and the bases of its deltas
+    /// there, each once with its kind, in the order of the ids.
+    pub fn leans(&self) -> &[(Oid, Kind)] {
+        &self.leans
     }
 
     pub fn contains(&self, oid: &Oid) -> bool {
@@ -217,7 +228,7 @@ fn verified(
         metas[index] = Some(meta);
     }
     // thin pack: bases that live in earlier segments, numbered behind the entries
-    let (mut outside, mut below) = (Vec::new(), Vec::new());
+    let (mut outside, mut below, mut bases) = (Vec::new(), Vec::new(), Vec::new());
     let mut outer = Vec::new();
     for named in deltas.by_object() {
         let base = named[0].0;
@@ -234,6 +245,7 @@ fn verified(
                 way: Vec::new(),
             });
             outside.push(base);
+            bases.push((base, record.kind));
             below.push(record.depth);
             scanned.largest = scanned.largest.max(record.size);
         }
@@ -285,13 +297,19 @@ fn verified(
     flagged.sort_unstable_by_key(|(tree, _)| *tree);
     flagged.dedup_by_key(|(tree, _)| *tree);
     // every reference resolves inside the pack or in the segments already present
+    let mut leans = Vec::new();
     let settled = resolved.settle(existing, |carried| {
-        told.wanted
-            .check(carried, |from| resolved.metas[from as usize].oid)
+        let of = |from: u32| resolved.metas[from as usize].oid;
+        leans = told.wanted.check(carried, of)?;
+        Ok(())
     })?;
+    leans.extend(bases);
+    leans.sort_unstable_by_key(|(oid, _)| *oid);
+    leans.dedup_by_key(|(oid, _)| *oid);
     Ok(Ingested {
         records: settled.records,
         commits: settled.commits,
+        leans,
         flagged,
         flags: settled.flags,
         pack_len: pack.len() as u64,
