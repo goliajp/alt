@@ -416,10 +416,10 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18, 19, 20 and 21, and backs up and restores
-schema 18 to 21 and the current schema 22. A backup of an instance that is not yet
+This release upgrades from schema 18, 19, 20, 21 and 22, and backs up and restores
+schema 18 to 22 and the current schema 23. A backup of an instance that is not yet
 upgraded requires its schema explicitly, `--schema 18`, `--schema 19`,
-`--schema 20` or `--schema 21`. Stop
+`--schema 20`, `--schema 21` or `--schema 22`. Stop
 the old service, save and verify its backup, then upgrade, naming the schema the
 instance is at:
 
@@ -524,6 +524,12 @@ From schema 20 the transaction removes the foreign key from a ref to its
 repository. The database checked it once for every ref a push created, while a
 ref is only ever written under the lock of its repository's row and no
 repository is removed. No row changes.
+
+From schema 22 the transaction adds two indexes, over what the manifests of
+committed requests and of archived publications name: the native content route
+asks them whether a published publication of records names an object no ref
+leads to, which read every manifest of the repository without them. Building
+them reads each committed request once; no row changes.
 
 From schema 21 the transaction adds the moment a request ended and the moment a
 credential was revoked, and three indexes. A revoked credential is given the

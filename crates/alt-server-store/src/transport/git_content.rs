@@ -14,7 +14,10 @@ pub(crate) enum Led {
     RefsOrRecords,
 }
 
-const NAMED: &str = "SELECT EXISTS(SELECT 1 FROM alt_task_bundles b JOIN alt_requests q ON q.repository=b.repository AND q.epoch=b.epoch AND q.actor_id=b.actor_id AND q.request_id=b.request_id WHERE b.repository=$1 AND q.state='committed' AND q.manifest->'entries' @> jsonb_build_array(jsonb_build_object('blake3',$2::text))) OR EXISTS(SELECT 1 FROM alt_archived_publications p WHERE p.repository=$1 AND EXISTS(SELECT 1 FROM alt_archived_records r WHERE r.repository=p.repository AND r.digest=p.digest) AND p.manifest->'entries' @> jsonb_build_array(jsonb_build_object('blake3',$2::text)))";
+// The manifests that name the content are found first, from their index, and
+// whole: asked under the EXISTS, the planner goes through every request of the
+// repository for the first that names it.
+const NAMED: &str = "WITH q AS MATERIALIZED (SELECT epoch,actor_id,request_id FROM alt_requests WHERE repository=$1 AND state='committed' AND manifest->'entries' @> $2::text::jsonb), p AS MATERIALIZED (SELECT digest FROM alt_archived_publications WHERE repository=$1 AND manifest->'entries' @> $2::text::jsonb) SELECT EXISTS(SELECT 1 FROM q JOIN alt_task_bundles b ON b.repository=$1 AND b.epoch=q.epoch AND b.actor_id=q.actor_id AND b.request_id=q.request_id) OR EXISTS(SELECT 1 FROM p WHERE EXISTS(SELECT 1 FROM alt_archived_records r WHERE r.repository=$1 AND r.digest=p.digest))";
 
 impl Store {
     /// A published Git object by the digest of its content. Git objects live in the
@@ -59,7 +62,9 @@ impl Store {
     /// repository that holds what no ref leads to, for a Git object alone.
     fn named(&mut self, scope: &Scope, digest: &str) -> Result<bool> {
         let mut tx = reading::transaction(&mut self.client, &self.spec)?;
-        let row = tx.query_one(NAMED, &[&scope.repository_instance_id, &digest])?;
+        // a constant the index of the manifests is searched with; the digest is hex
+        let entry = format!("[{{\"blake3\":\"{digest}\"}}]");
+        let row = tx.query_one(NAMED, &[&scope.repository_instance_id, &entry])?;
         tx.commit()?;
         Ok(row.get(0))
     }

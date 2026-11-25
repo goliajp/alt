@@ -12,7 +12,9 @@ fn as_schema_21(db: &OperatorDb) {
     Client::connect(&db.dsn)
         .unwrap()
         .batch_execute(
-            "DELETE FROM alt_schema WHERE version=22;
+            "DELETE FROM alt_schema WHERE version>=22;
+             DROP INDEX IF EXISTS alt_requests_manifest_entries;
+             DROP INDEX IF EXISTS alt_archived_publications_manifest_entries;
              ALTER TABLE alt_requests DROP CONSTRAINT IF EXISTS alt_requests_settled_at;
              DROP INDEX IF EXISTS alt_requests_settled;
              DROP INDEX IF EXISTS alt_requests_unsettled;
@@ -114,8 +116,8 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert!(migrated.status.success(), "{said}");
     let migrated: alt_json::Value = alt_json::from_slice(&migrated.stdout).unwrap();
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 22);
-    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(migrated["schema"], 23);
+    assert_eq!(copies(&source.dsn), (23, 0, 0));
     // The configuration from before had no memory for the packs of pushes told,
     // which is 4096 MiB. The next one has what goes with the memory of the
     // container of the package, which this process is told no other than.
@@ -174,7 +176,7 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(copies(&target.dsn), (23, 0, 0));
     // the restore revoked every credential of the source, at its own moment
     assert_eq!(moments(&target.dsn).map(|(requests, _)| requests), Some(0));
     let health = target.ok(&["health"]);

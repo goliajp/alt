@@ -171,9 +171,9 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "18", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 22);
-    assert_eq!(shape(&source.dsn), (22, 0, 0, 3, true));
-    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(migrated["schema"], 23);
+    assert_eq!(shape(&source.dsn), (23, 0, 0, 3, true));
+    assert_eq!(copies(&source.dsn), (23, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -210,8 +210,8 @@ fn a_schema_18_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(shape(&target.dsn), (22, 0, 0, 3, true));
-    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(shape(&target.dsn), (23, 0, 0, 3, true));
+    assert_eq!(copies(&target.dsn), (23, 0, 0));
     assert_eq!(target.ok(&["health"])["ready"], true);
 }
 
@@ -253,8 +253,8 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "19", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 22);
-    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(migrated["schema"], 23);
+    assert_eq!(copies(&source.dsn), (23, 0, 0));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
         .arg(&next)
@@ -296,7 +296,7 @@ fn a_schema_19_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(copies(&target.dsn), (23, 0, 0));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
         delivered_receipt(&target, target.config.to_str().unwrap()),
@@ -342,8 +342,8 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
     let next = source.path("next.json");
     let migrated = source.ok(&["migrate", "--from-schema", "20", "--output-config", &next]);
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 22);
-    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(migrated["schema"], 23);
+    assert_eq!(copies(&source.dsn), (23, 0, 0));
     assert!(!refs_foreign_key(&source.dsn));
     let upgraded = Command::new(env!("CARGO_BIN_EXE_alt-server"))
         .arg("--config")
@@ -385,7 +385,7 @@ fn a_schema_20_instance_upgrades_in_place_and_from_its_backup() {
         restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(copies(&target.dsn), (23, 0, 0));
     assert!(!refs_foreign_key(&target.dsn));
     assert_eq!(target.ok(&["health"])["ready"], true);
     assert_eq!(
@@ -409,7 +409,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!migrated.status.success());
     assert!(
         String::from_utf8_lossy(&migrated.stderr).contains(
-            "this release upgrades from schema 18, 19, 20 and 21 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
+            "this release upgrades from schema 18, 19, 20, 21 and 22 only; upgrade an older instance to schema 18 with the last release that carries those migrations first"
         ),
         "{}",
         String::from_utf8_lossy(&migrated.stderr)
@@ -431,7 +431,7 @@ fn an_instance_older_than_schema_18_is_told_which_release_upgrades_it() {
     assert!(!created.status.success());
     assert!(
         String::from_utf8_lossy(&created.stderr)
-            .contains("this release backs up and restores schema 18, 19, 20, 21 and 22 only"),
+            .contains("this release backs up and restores schema 18, 19, 20, 21, 22 and 23 only"),
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );

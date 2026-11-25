@@ -6,6 +6,7 @@ mod earlier_requests;
 
 /// makes the database the schema 21 one it stands in for; harmless on one that is
 pub(super) fn as_schema_21(f: &Fixture) {
+    super::schema_23::as_schema_22(f);
     f.client()
         .batch_execute(
             "DELETE FROM alt_schema WHERE version=22;

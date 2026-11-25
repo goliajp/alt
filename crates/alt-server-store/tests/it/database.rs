@@ -23,6 +23,7 @@ mod review_reads;
 mod schema_20;
 mod schema_21;
 mod schema_22;
+mod schema_23;
 mod segments;
 mod single_copy;
 mod tasks;
