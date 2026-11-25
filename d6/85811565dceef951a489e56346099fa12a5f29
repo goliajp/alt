@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: the counting reads of a pack are hidden from its documentation as there for tests
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/read.rs
