@@ -130,3 +130,52 @@ fn every_entry_of_a_pack_that_is_taken_is_read_whatever_it_is_a_delta_of() {
         "{taken} {again} {own}"
     );
 }
+
+/// An object X stored once, and once more as a delta of a delta of an object
+/// Y; two deltas Z of X by its id. The chain is read first, so that a read of
+/// the first Z finds X in the cache by the entry at its end and keeps that
+/// entry. Then the middle of the chain is made unreadable on the disk, and
+/// large objects read next put the chain out of the cache: the second Z,
+/// read by the entry kept, fails there, and is read again without what is
+/// kept, from the stored X.
+#[test]
+fn a_read_that_fails_by_the_entry_kept_is_made_again_without_it() {
+    let _ended = crate::held::ended_within(600);
+    let (x, y) = (object(0), object(1));
+    let first = plain_entry(&y);
+    let middle = ofs_entry(first.len(), &of(1, 1));
+    let chain_end = ofs_entry(middle.len(), &of(1, 0));
+    let mut entries = vec![first.clone(), middle.clone(), chain_end, plain_entry(&x)];
+    entries.push(ref_entry(&blob(&x), &of(0, 2)));
+    entries.push(ref_entry(&blob(&x), &of(0, 3)));
+    // more than the cache keeps, none of it more than a quarter of it
+    let large: Vec<Vec<u8>> = (0..5u8).map(|n| vec![n; 20 << 20]).collect();
+    entries.extend(large.iter().map(|data| plain_entry(data)));
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = written(&dir, &entries);
+    index_pack(&path, HashAlgo::Sha1, false).unwrap();
+    let pack = IndexedPack::open(&path, HashAlgo::Sha1).unwrap();
+    let offset = |data: &[u8]| {
+        let (oid, idx) = (blob(data), pack.idx());
+        let all = (0..idx.len()).filter(|i| idx.oid_at(*i) == oid);
+        all.map(|i| idx.offset_at(i).unwrap()).min().unwrap()
+    };
+    // the first entry of X is the end of the chain
+    assert_eq!(pack.read_at(offset(&x)).unwrap().data.as_slice(), x);
+    assert_eq!(
+        pack.read_at(offset(&object(2))).unwrap().data.as_slice(),
+        object(2)
+    );
+    // the stream of the middle of the chain, after its header and where its base is
+    let at = 12 + first.len() as u64 + 2;
+    let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    std::io::Seek::seek(&mut file, std::io::SeekFrom::Start(at)).unwrap();
+    std::io::Write::write_all(&mut file, &vec![0xff; middle.len() - 2]).unwrap();
+    drop(file);
+    for data in &large {
+        assert_eq!(pack.read_at(offset(data)).unwrap().data.len(), data.len());
+    }
+    assert!(pack.read_at(12 + first.len() as u64).is_err());
+    let read = pack.read_at(offset(&object(3))).unwrap();
+    assert_eq!(read.data.as_slice(), object(3));
+}
