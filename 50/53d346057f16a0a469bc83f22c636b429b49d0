@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: what the refs lead to is kept where a record they do not lead to is not read
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/led_unread.rs
