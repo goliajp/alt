@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: the downloads of a browser are held to the quarter of an address by its other takers, a large one being let in beside them
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/browser/downloads.rs
+touched: crates/alt-server/tests/it/database/browser/migration_room.rs
