@@ -1,0 +1,17 @@
+schema: alt-meta/1
+type: fix
+summary: a response that waits for its turn to be large gives back its worker and its connection of the database
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/http/worker.rs
+touched: crates/alt-server/tests/it/database/connections/large_turns.rs
+touched: crates/alt-shares/src/lib.rs
+touched: crates/alt-shares/src/share.rs
+touched: crates/alt-shares/src/tests.rs
+touched: crates/alt-shares/src/tests/aside.rs
