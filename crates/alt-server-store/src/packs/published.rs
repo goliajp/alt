@@ -20,15 +20,18 @@ impl Store {
     /// ([`crate::SEGMENTS_MOVED`]): the caller verifies the pack behind the
     /// segments as they are now. The file of the segment is looked for under
     /// that lock too, which a sweep holds while it removes files no row knows.
+    /// The refs the push was `read` with are held against them as they are
+    /// then ([`REFS_MOVED`](super::REFS_MOVED)).
     pub fn pack_publish(
         &mut self,
         credential: &Credential,
         publication: &Publication,
-        graph: &impl Graph,
+        graph: &SegmentGraph<'_>,
         segment: Option<NewSegment<'_>>,
-        behind: &[String],
+        (behind, read): (&[String], &crate::Refs),
     ) -> Result<Receipt> {
         let repository = &publication.key.scope.repository_instance_id;
+        super::still_led::push_verified(self.bytes.root());
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
@@ -36,6 +39,8 @@ impl Store {
         if !live.iter().map(|(id, _)| id).eq(behind) {
             return Err(Error::Precondition(crate::SEGMENTS_MOVED));
         }
+        let steps = self.limits.walk_steps;
+        super::still_led::still_led(&current, publication, read, graph.set, steps)?;
         let held = (tx, &current, self.bytes.root());
         published(
             held,
@@ -58,7 +63,7 @@ impl Store {
     pub fn pack_publish_held(
         &mut self,
         credential: &Credential,
-        repository: &str,
+        (repository, read): (&str, &crate::Refs),
         made: &mut dyn FnMut(&[String], &SegmentSet) -> Result<HeldPublication>,
     ) -> Result<Receipt> {
         let mut tx = self.client.transaction()?;
@@ -74,6 +79,8 @@ impl Store {
         if publication.key.scope.repository_instance_id != repository {
             return Err(Error::Unauthorized);
         }
+        let steps = self.limits.walk_steps;
+        super::still_led::still_led(&current, &publication, read, &set, steps)?;
         let graph = SegmentGraph {
             set: &set,
             limits: self.limits.into(),

@@ -9,6 +9,7 @@ mod many_refs;
 mod merge_gone;
 mod moved;
 mod raw_push;
+mod read_moved;
 mod reverted;
 mod said;
 mod settled_cost;

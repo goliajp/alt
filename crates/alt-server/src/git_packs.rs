@@ -5,7 +5,7 @@ use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_pack_segment::{Oid, Segment, SegmentSet};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
-use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
+use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store, ancestor};
 use alt_wire::pkt;
 use std::{
     collections::BTreeSet,
@@ -43,32 +43,6 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// whether `old` is an ancestor of `new`; generations prune everything older than `old`
-fn ancestor(set: &SegmentSet, old: &Oid, new: &Oid, remaining: &mut usize) -> Result<bool> {
-    let Some(floor) = set.commit(old).map(|commit| commit.generation) else {
-        return Ok(false);
-    };
-    let mut seen = alt_hash::KeyedIdSet::default();
-    let mut pending = vec![*new];
-    while let Some(oid) = pending.pop() {
-        *remaining = remaining
-            .checked_sub(1)
-            .ok_or(Error::Limit("Git fast-forward walk"))?;
-        if oid == *old {
-            return Ok(true);
-        }
-        if !seen.insert(oid) {
-            continue;
-        }
-        if let Some(commit) = set.commit(&oid)
-            && commit.generation > floor
-        {
-            pending.extend(commit.parents);
-        }
-    }
-    Ok(false)
 }
 
 pub(crate) fn receive(
@@ -258,7 +232,7 @@ fn refused_for(outcome: &Result<()>) -> Option<String> {
         Err(Error::Fsck(..)) => Some("unpacker error".to_owned()),
         // a ref was moved or deleted after the client read where it was
         Err(Error::Repository(alt_repository_service::Error::Precondition(_)))
-        | Err(Error::Precondition(CHANGED)) => {
+        | Err(Error::Precondition(CHANGED | alt_server_store::REFS_MOVED)) => {
             Some("a ref changed since it was read; fetch and push again".to_owned())
         }
         Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),

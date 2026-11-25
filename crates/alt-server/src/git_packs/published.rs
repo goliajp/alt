@@ -124,7 +124,8 @@ pub(super) fn publish(
         // transaction for inspection, not for replay
         let committed =
             alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-                store.pack_publish(credential, &made.publication, &graph, segment, &behind.0)
+                let read = (&behind.0[..], &view.refs);
+                store.pack_publish(credential, &made.publication, &graph, segment, read)
             });
         match committed {
             Err(Error::Precondition(alt_server_store::SEGMENTS_MOVED)) => {
@@ -138,7 +139,7 @@ pub(super) fn publish(
     let fresh = fresh(store, repository)?;
     let mut last = None;
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-        store.pack_publish_held(credential, repository, &mut |ids, set| {
+        store.pack_publish_held(credential, (repository, &view.refs), &mut |ids, set| {
             let mut made = push.made(fresh.clone(), (ids, set))?;
             let segment = made.stored.as_mut().map(|stored| HeldSegment {
                 inline: stored.0.inline.take(),
