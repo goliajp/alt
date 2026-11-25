@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: perf
+summary: what the refs lead to is kept on disk and gone on from by a server that starts again
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/led.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/pack_view/stored.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/led_stored.rs
