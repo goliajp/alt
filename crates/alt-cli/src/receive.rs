@@ -144,6 +144,16 @@ pub struct Push<'a> {
     /// takes nothing off what the account it came in by is held to.
     pub signed_in: Option<&'a Principal>,
     pub sig_label: &'a str,
+    /// set once nobody waits for the push: its objects are written no further
+    pub gone: Option<&'a std::sync::atomic::AtomicBool>,
+}
+
+/// What reading the objects of a push ends in once nobody waits for it.
+pub(crate) fn gone_on(gone: Option<&std::sync::atomic::AtomicBool>) -> Res<()> {
+    match gone.is_some_and(|gone| gone.load(std::sync::atomic::Ordering::Relaxed)) {
+        true => Err("the peer of the push is gone".into()),
+        false => Ok(()),
+    }
 }
 
 /// What became of a push.
@@ -231,7 +241,7 @@ fn attempt(
     };
     let mut batch = Batch::begin(odb)?;
     if let Some(added) = &added
-        && let Err(e) = batch.write(push.pack, added)
+        && let Err(e) = batch.write(push.pack, added, push.gone)
     {
         return Ok(Some(Landed::Unpack(format!("index-pack: {e}"))));
     }

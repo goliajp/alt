@@ -44,6 +44,7 @@ pub fn take_in<T>(
     (principal, sig_label, signed_in): &(Principal, &str, Option<Principal>),
     recorded: impl Recorded<T>,
 ) -> Res<Report<T>> {
+    let gone = pack.as_ref().and_then(|(_, limits, _)| limits.given_up);
     // a pack that fails to index is reported as the unpack error; one
     // that was not looked at for want of memory is no failed push
     let prepared = match pack.map(|(path, limits, bases)| prepare_pack(path, &limits, bases)) {
@@ -69,7 +70,7 @@ pub fn take_in<T>(
         (trust, _) => trust,
     };
     let checked = match trust {
-        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
+        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref(), gone)?),
         None => None,
     };
     let push = Push {
@@ -79,6 +80,7 @@ pub fn take_in<T>(
         principal,
         signed_in: signed_in.as_ref(),
         sig_label,
+        gone,
     };
     let mut store = store.take();
     Ok(match land(&mut store, &push)? {

@@ -38,6 +38,7 @@ fn landing<T>(
         principal: &principal,
         signed_in: None,
         sig_label: "none",
+        gone: None,
     };
     let mut store = Store::open(alt_dir.to_path_buf()).unwrap();
     let landed = landing(&mut store, &push);
@@ -163,5 +164,32 @@ fn objects_left_in_a_sealed_pack_are_looked_at_when_a_ref_comes_to_point_at_them
     assert_eq!(landed, Landed::Moved);
     drop(store);
     assert_eq!(pointed(&alt_dir), Some(oid));
+    ok(alt(origin.path(), &["fsck"]));
+}
+
+/// A push whose peer is gone by the time its objects are read: its commits
+/// are not checked, none of its objects are written, and its ref does not move.
+#[test]
+fn a_push_nobody_waits_for_any_more_reads_and_writes_none_of_its_objects() {
+    let (origin, seed) = seeded();
+    let alt_dir = origin.path().join(".alt");
+    let gone = std::sync::atomic::AtomicBool::new(true);
+    let (oid, (checked, landed)) = landing(&alt_dir, &seed, |store, push| {
+        let checked = receive::signed::check_pack(Vec::new(), push.pack, Some(&gone));
+        let push = Push {
+            gone: Some(&gone),
+            ..*push
+        };
+        let landed = receive::land_observed(store, &push, &|_| ()).unwrap();
+        (checked.map(|_| ()).map_err(|e| e.to_string()), landed)
+    });
+    let why = "the peer of the push is gone";
+    assert_eq!(checked, Err(why.to_owned()));
+    assert!(
+        matches!(&landed, Landed::Unpack(e) if e.contains(why)),
+        "{landed:?}"
+    );
+    assert_eq!(pointed(&alt_dir), None);
+    assert!(!holds(&alt_dir, &oid));
     ok(alt(origin.path(), &["fsck"]));
 }

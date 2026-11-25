@@ -75,15 +75,17 @@ pub fn trust_for(
     store.trust_keys().map(Some)
 }
 
-/// Checks the commits of `prepared` against `trust`. Nothing of the
-/// store is needed.
+/// Checks the commits of `prepared` against `trust`, while `gone` is not
+/// set. Nothing of the store is needed.
 pub fn check_pack(
     trust: Vec<(String, alt_sign::PublicKey)>,
     prepared: Option<&PreparedPack>,
+    gone: Option<&std::sync::atomic::AtomicBool>,
 ) -> Res<Checked> {
     let mut pack = KeyedIdMap::default();
     if let Some((ip, order)) = prepared {
         for &(offset, i) in order {
+            super::gone_on(gone)?;
             let obj = ip.read_at(offset)?;
             if obj.kind == ObjectKind::Commit {
                 let oid = ip.idx().oid_at(i);
