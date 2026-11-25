@@ -9,6 +9,7 @@ use crate::{
 use alt_pack_segment::SegmentSet;
 use alt_remote_protocol::Scope;
 
+mod kept;
 mod led;
 pub use led::FOUND_ALL;
 pub(crate) use led::led;

@@ -143,4 +143,14 @@ fn what_tips_lead_to_is_found_from_what_earlier_tips_led_to_by_reading_what_is_n
     // a tag is led to by no commit, nor is a tree
     assert!(!lead(&[&late[3]], &[&tag]));
     assert!(lead(&[&late[3]], &[]) && !lead(&[], &[&early[0]]));
+
+    // several asked in turn share one walk's steps; nobody waits: nothing is gone through
+    let mut steps = 40;
+    let asked = |steps: &mut usize, gone| {
+        set.lead_to_all_while(&ids(&[&late[3]]), &ids(&[&early[0]]), steps, gone)
+    };
+    assert!(asked(&mut steps, None).unwrap());
+    assert_eq!(steps, 40 - 34);
+    assert!(matches!(asked(&mut steps, None), Err(Error::Limit(_))));
+    assert!(matches!(asked(&mut 40, Some(&gone)), Err(Error::GivenUp)));
 }

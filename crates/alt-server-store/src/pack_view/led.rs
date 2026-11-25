@@ -10,82 +10,17 @@
 //! deleted or replaced, are walked from nothing again; and a walk that is
 //! given up, or runs out of steps, leaves what it came to for the next.
 
-use super::{PackView, stored};
+use super::PackView;
+use super::kept::{ASKED, keep, kept, loaded, store};
 use crate::{Error, Result, Store};
 use alt_pack_segment::{Led, Oid, SegmentSet};
-use std::collections::HashMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// what was found for the tips a repository had at one moment
-struct Kept {
-    /// the repository, as [`Store::led_under`] has it
-    repository: String,
-    /// in the order of the ids, each once
-    tips: Vec<Oid>,
-    led: Arc<Led>,
-    /// all the tips lead to, not what a walk came to before it ended
-    whole: bool,
-}
-
-/// the answers kept, the latest last, and how many of them of one repository:
-/// the tips a request read a moment before another moved them are among them
-const KEPT: usize = 16;
-const KEPT_EACH: usize = 4;
-static ASKED: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
 /// the repositories a walk is under way in, one in each
 static WALKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static ENDED: Condvar = Condvar::new();
-/// how many objects what is on disk for a repository holds, where this process
-/// read or wrote it
-static STORED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
-
-/// the directory of the stored bytes and the id of the repository, of what
-/// [`Store::led_under`] made
-fn of(repository: &str) -> (&Path, &str) {
-    let (root, id) = repository.split_once('\0').expect("as led_under has it");
-    (Path::new(root), id)
-}
-
-/// Where nothing is kept for a repository, keeps what is on disk for it.
-fn loaded(repository: &str) {
-    if ASKED
-        .lock()
-        .expect("led")
-        .iter()
-        .any(|kept| kept.repository == repository)
-    {
-        return;
-    }
-    let (root, id) = of(repository);
-    if let Some((tips, led)) = stored::read(root, id) {
-        STORED
-            .lock()
-            .expect("stored")
-            .insert(repository.to_owned(), led.len());
-        keep(repository, tips, Arc::new(led), true);
-    }
-}
-
-/// Writes what a walk found to disk where it was found from nothing, or holds
-/// an eighth more than what is there: one who starts again walks no more than
-/// that eighth. What is on disk is found anew wherever it is missing, so a
-/// write that fails fails nothing else.
-fn store(repository: &str, tips: &[Oid], led: &Led, from_nothing: bool) {
-    let stored = STORED.lock().expect("stored").get(repository).copied();
-    if from_nothing || stored.is_none_or(|n| led.len() > n + n / 8) {
-        let (root, id) = of(repository);
-        if stored::written(root, id, tips, led).is_ok() {
-            STORED
-                .lock()
-                .expect("stored")
-                .insert(repository.to_owned(), led.len());
-        }
-    }
-}
-
 /// Called with what the answers of a repository are kept under, where a walk
 /// found that its refs lead to every object its segments hold and before that
 /// is written down: a test moves the refs and the segments in between. None
@@ -120,35 +55,6 @@ impl Drop for Turn<'_> {
     }
 }
 
-/// what is kept for exactly these tips, where it is whole
-fn kept(repository: &str, tips: &[Oid]) -> Option<Arc<Led>> {
-    let asked = ASKED.lock().expect("led");
-    let found = (asked.iter())
-        .find(|kept| kept.whole && kept.repository == repository && kept.tips == tips);
-    found.map(|kept| kept.led.clone())
-}
-
-/// Keeps what was found for `tips`, in the place of what was kept for the same
-/// tips, and lets go of the oldest beyond what is kept.
-fn keep(repository: &str, tips: Vec<Oid>, led: Arc<Led>, whole: bool) {
-    let mut asked = ASKED.lock().expect("led");
-    asked.retain(|kept| kept.repository != repository || kept.tips != tips);
-    let of_this = asked.iter().filter(|kept| kept.repository == repository);
-    if of_this.count() >= KEPT_EACH {
-        let oldest = asked.iter().position(|kept| kept.repository == repository);
-        asked.remove(oldest.expect("one of them"));
-    }
-    if asked.len() >= KEPT {
-        asked.remove(0);
-    }
-    asked.push(Kept {
-        repository: repository.to_owned(),
-        tips,
-        led,
-        whole,
-    });
-}
-
 /// What a walk for `tips` goes on from: the latest kept whose tips `tips` lead
 /// to, all of them, and whether that is whole. A tip that is among `tips` no
 /// longer is led to where it is a commit one of them reaches, which the tips
@@ -159,24 +65,41 @@ fn begun(
     segments: &SegmentSet,
     tips: &[Oid],
     steps: usize,
+    gone: Option<&AtomicBool>,
+    disk: Option<(Vec<Oid>, Arc<Led>)>,
 ) -> Result<Option<(Arc<Led>, bool)>> {
-    let earlier: Vec<(Vec<Oid>, Arc<Led>, bool)> = {
+    let mut earlier: Vec<(Vec<Oid>, Arc<Led>, bool)> = {
         let asked = ASKED.lock().expect("led");
         let of_this = asked.iter().filter(|kept| kept.repository == repository);
         let all = of_this.map(|kept| (kept.tips.clone(), kept.led.clone(), kept.whole));
         all.rev().collect()
     };
+    // what was read from disk and was too large to keep
+    let disk = disk.filter(|(_, read)| !earlier.iter().any(|(_, led, _)| Arc::ptr_eq(led, read)));
+    earlier.extend(disk.map(|(tips, led)| (tips, led, true)));
     let among = |tips: &[Oid], tip: &Oid| tips.binary_search(tip).is_ok();
+    // each question of the commits takes `steps` of them at the most, and all
+    // of them together no more than the segments hold objects: as long as one
+    // walk of every commit there is
+    let mut shared = usize::try_from(segments.objects()).unwrap_or(usize::MAX);
     for (theirs, led, whole) in earlier {
         let left = |tip: &&Oid| !among(tips, tip);
         let left: Vec<Oid> = theirs.iter().filter(left).copied().collect();
         let new = |tip: &&Oid| !among(&theirs, tip);
         let new: Vec<Oid> = tips.iter().filter(new).copied().collect();
-        let lead = |from: &[Oid]| match segments.lead_to_all(from, &left, steps) {
-            Ok(all) => Ok(all),
-            // too far to tell: as if they did not
-            Err(alt_pack_segment::Error::Limit(_)) => Ok(false),
-            Err(_) => Err(Error::Integrity("objects the refs reach")),
+        let mut lead = |from: &[Oid]| {
+            let mut these = steps.min(shared);
+            let asked = segments.lead_to_all_while(from, &left, &mut these, gone);
+            shared -= steps.min(shared) - these;
+            match asked {
+                Ok(all) => Ok(all),
+                // too far to tell: as if they did not
+                Err(alt_pack_segment::Error::Limit(_)) => Ok(false),
+                Err(alt_pack_segment::Error::GivenUp) => {
+                    Err(Error::Busy("the request is waited for no longer"))
+                }
+                Err(_) => Err(Error::Integrity("objects the refs reach")),
+            }
         };
         if left.is_empty() || lead(&new)? || lead(tips)? {
             return Ok(Some((led, whole)));
@@ -201,9 +124,10 @@ pub(crate) fn led(
         return Ok((led, false));
     }
     let _turn = Turn::taken(repository, gone)?;
-    loaded(repository);
+    let disk = loaded(repository);
     // the walk waited for, or one before the process began, may have found it
-    if let Some(led) = kept(repository, &tips) {
+    let read = disk.as_ref().filter(|(read, _)| *read == tips);
+    if let Some(led) = kept(repository, &tips).or_else(|| read.map(|(_, led)| led.clone())) {
         return Ok((led, false));
     }
     let unfit = |error| match error {
@@ -211,7 +135,7 @@ pub(crate) fn led(
         alt_pack_segment::Error::GivenUp => Error::Busy("the request is waited for no longer"),
         _ => Error::Integrity("objects the refs reach"),
     };
-    let from = begun(repository, segments, &tips, steps)?;
+    let from = begun(repository, segments, &tips, steps, gone, disk)?;
     let anew = from.as_ref().is_none_or(|(_, whole)| !whole);
     let from = from.map_or_else(Led::default, |(led, _)| (*led).clone());
     let had = from.len();

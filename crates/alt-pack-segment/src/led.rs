@@ -41,6 +41,14 @@ impl Led {
         self.parts.is_empty()
     }
 
+    /// What it holds in memory: where each part is, and its bytes. A copy
+    /// holds the same parts as what it was copied from, up to those added
+    /// to it since.
+    pub fn held(&self) -> impl Iterator<Item = (usize, usize)> {
+        let held = |part: &Arc<Vec<Oid>>| (Arc::as_ptr(part) as usize, part.len() * 20);
+        self.parts.iter().map(held)
+    }
+
     /// every object, part by part
     pub fn objects(&self) -> impl Iterator<Item = &Oid> {
         self.parts.iter().flat_map(|part| part.iter())
