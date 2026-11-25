@@ -265,3 +265,5 @@ mod native;
 
 #[path = "it/change_links.rs"]
 mod change_links;
+#[path = "it/silence.rs"]
+mod silence;

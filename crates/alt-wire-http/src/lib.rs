@@ -98,9 +98,7 @@ impl GitTransport {
         Self {
             base_url: url,
             auth: None,
-            agent: ureq::AgentBuilder::new()
-                .timeout(Duration::from_secs(30))
-                .build(),
+            agent: agent(Duration::from_secs(30)),
         }
     }
 
@@ -111,9 +109,9 @@ impl GitTransport {
         self
     }
 
-    /// Override the request timeout (defaults to 30s).
+    /// Override how long the connection may stay silent (defaults to 30s).
     pub fn with_timeout(mut self, dur: Duration) -> Self {
-        self.agent = ureq::AgentBuilder::new().timeout(dur).build();
+        self.agent = agent(dur);
         self
     }
 
@@ -235,6 +233,17 @@ impl TransportError {
             ureq::Error::Transport(t) => TransportError::Other(t.to_string()),
         }
     }
+}
+
+/// An agent that gives up on a connection silent for `silence`, and puts no
+/// bound on a whole exchange: a pack takes as long as its size and the link
+/// make it, and Git's transport sets no such bound either.
+fn agent(silence: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(silence)
+        .timeout_read(silence)
+        .timeout_write(silence)
+        .build()
 }
 
 fn basic_auth_header(auth: &BasicAuth) -> String {
