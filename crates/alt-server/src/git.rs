@@ -169,7 +169,7 @@ pub(crate) fn execute_git_with_cache(
 /// what reads it from the segments without the database.
 pub(crate) enum Step {
     Done(Output),
-    Read(Reading),
+    Read(Box<Reading>),
 }
 
 /// What a read of the segments is answered from.
@@ -245,13 +245,13 @@ pub(crate) fn prepared(
         _ => view,
     };
     let limits = store.limits();
-    Ok(Step::Read(Reading {
+    Ok(Step::Read(Box::new(Reading {
         limits,
         receive,
         command,
         view,
         room,
-    }))
+    })))
 }
 
 /// What a Git request takes of what the instance has for all of them: the memory
