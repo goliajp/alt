@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: test
+summary: the least pace of a large response is read back from the room it is told to
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
+touched: crates/alt-server/src/operator/bounds.rs
+touched: crates/alt-server/src/operator/validate.rs
+touched: crates/alt-shares/src/lib.rs
+touched: crates/alt-shares/src/tests.rs
