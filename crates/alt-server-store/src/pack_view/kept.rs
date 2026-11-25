@@ -33,8 +33,9 @@ pub(super) static ASKED: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
 /// What was found for a repository beyond the bound alone, for as long as a
 /// request holds it: those at the same time share it, and the answers kept
 /// are not let go of for it.
-static BEYOND: LazyLock<Mutex<HashMap<String, (Vec<Oid>, Weak<Led>)>>> =
-    LazyLock::new(Default::default);
+static BEYOND: LazyLock<Mutex<HashMap<String, Beyond>>> = LazyLock::new(Default::default);
+/// the tips of what is held beyond the bound, and what they lead to
+type Beyond = (Vec<Oid>, Weak<Led>);
 
 /// what is held for a repository beyond the bound by a request now
 fn beyond(repository: &str) -> Option<(Vec<Oid>, Arc<Led>)> {
