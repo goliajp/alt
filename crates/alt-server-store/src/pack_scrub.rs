@@ -16,6 +16,8 @@ use crate::{
 use alt_pack_segment::{Memory, Segment, SegmentSet};
 use std::sync::Arc;
 
+mod mend;
+
 /// the objects told of by name for one segment; the rest are counted
 const NAMED: usize = 16;
 
@@ -130,6 +132,8 @@ impl Store {
             unread: Vec::new(),
         };
         let mut older: Vec<Arc<Segment>> = Vec::with_capacity(ids.len());
+        // the ids of those segments, the ones put in the place of others among them
+        let mut older_ids: Vec<(String, bool)> = Vec::with_capacity(ids.len());
         let mut read = 0;
         let mut each = || {
             read += 1;
@@ -139,24 +143,24 @@ impl Store {
             let before = SegmentSet::new(older.clone());
             let lost = alt_pack_segment::unread_telling(segment, &before, &mut each)
                 .map_err(|_| Error::Integrity("pack segment index"))?;
-            if lost.is_empty() {
-                older.push(Arc::clone(segment));
-                continue;
-            }
-            let mut unread = Unread::of(&part.0, &lost);
-            let mut stands = Arc::clone(segment);
-            if let Some(memory) = mend {
-                match self.index_anew(repository, part, segment, &before, memory) {
-                    Ok((id, anew)) => {
-                        unread.replaced_by = Some(id);
-                        stands = anew;
+            let mut stands = (part.clone(), Arc::clone(segment));
+            if !lost.is_empty() {
+                let mut unread = Unread::of(&part.0, &lost);
+                if let Some(memory) = mend {
+                    let behind = (&older_ids[..], &before);
+                    match self.index_anew(repository, (part, segment), behind, memory) {
+                        Ok(anew) => {
+                            unread.replaced_by = Some(anew.0.0.clone());
+                            stands = anew;
+                        }
+                        Err(Error::OutcomeUnknown) => return Err(Error::OutcomeUnknown),
+                        Err(error) => unread.kept_because = Some(error.to_string()),
                     }
-                    Err(Error::OutcomeUnknown) => return Err(Error::OutcomeUnknown),
-                    Err(error) => unread.kept_because = Some(error.to_string()),
                 }
+                scrubbed.unread.push(unread);
             }
-            older.push(stands);
-            scrubbed.unread.push(unread);
+            older_ids.push(stands.0);
+            older.push(stands.1);
         }
         Ok(scrubbed)
     }
@@ -270,48 +274,5 @@ impl Store {
             }
         }
         Ok(refused)
-    }
-
-    /// Puts the pack of `segment`, indexed anew behind `before`, in the place of
-    /// the live segment `part`. The id of the new segment, and the segment.
-    fn index_anew(
-        &mut self,
-        repository: &str,
-        part: &(String, bool),
-        segment: &Arc<Segment>,
-        before: &SegmentSet,
-        memory: &'static Memory,
-    ) -> Result<(String, Arc<Segment>)> {
-        let content =
-            alt_pack_segment::indexed_anew(segment, before, memory).map_err(
-                |error| match error {
-                    alt_pack_segment::Error::Limit("index memory") => Error::Limit(NO_MEMORY),
-                    _ => Error::Integrity("pack of the segment does not verify"),
-                },
-            )?;
-        let (id, path, _writing) = self.write_segment(repository, &content)?;
-        let inline = content.len() <= INLINE_SEGMENT_BYTES;
-        let anew = Segment::open(&path).map(Arc::new);
-        let whole = anew.as_ref().is_ok_and(|anew| {
-            alt_pack_segment::unread(anew, before).is_ok_and(|lost| lost.is_empty())
-        });
-        if !whole {
-            let _ = std::fs::remove_file(&path);
-            return Err(Error::Integrity("pack segment indexed anew is not read"));
-        }
-        let parts = std::slice::from_ref(part);
-        match self.publish_merge(repository, None, parts, &id, &content, &path, inline) {
-            Ok(Some(segment)) => {
-                self.adopt_segment(repository, &id, Arc::clone(&segment))?;
-                Ok((id, segment))
-            }
-            // the outcome is not known: a sweep removes the file if the row is not there
-            Err(Error::OutcomeUnknown) => Err(Error::OutcomeUnknown),
-            other => {
-                let _ = std::fs::remove_file(&path);
-                other?;
-                Err(Error::Precondition("pack segment is no longer live"))
-            }
-        }
     }
 }

@@ -187,3 +187,91 @@ fn a_segment_that_does_not_give_its_objects_back_is_told_of_and_indexed_anew() {
         ["repository"]
     );
 }
+
+/// A segment that does not give its objects back is indexed anew while a merge
+/// takes the segment before it into one of its own: the live segments no
+/// longer begin with those it was indexed behind, and it takes no place. It
+/// stays, and is told of; read again, it is put in its place.
+#[test]
+#[ignore = "requires isolated PostgreSQL via scripts/with-test-postgres.sh"]
+fn a_segment_indexed_anew_takes_no_place_where_the_segments_before_it_were_merged() {
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering::SeqCst};
+    let mut f = Fixture::new();
+    Payload::new("first", None).publish_new(&mut f.store, &f.credential);
+    let row = f
+        .client()
+        .query_one(
+            "SELECT segment_id,sequence,inline FROM alt_pack_segments WHERE state='live'",
+            &[],
+        )
+        .unwrap();
+    let (first, sequence): (String, i64) = (row.get(0), row.get(1));
+    let written: Vec<u8> = (row.get::<_, Option<Vec<u8>>>(2)).unwrap_or_else(|| {
+        std::fs::read(f.store.pack_path("repository", &first).unwrap()).unwrap()
+    });
+    let astray = "a".repeat(32);
+    let mut bytes = written.clone();
+    turned(&mut bytes);
+    planted(&f, &astray, sequence + 1, &bytes);
+
+    // once the segment indexed anew is written, the first is merged into one of its own
+    let merged = "m".repeat(32);
+    let this = f.root.path().file_name().unwrap().to_owned();
+    let mut dsn: alt_pg::Config = f.admin_dsn.parse().unwrap();
+    dsn.set_dbname(&f.database);
+    let once = AtomicBool::new(false);
+    let (first_merged, merged_id) = (first.clone(), merged.clone());
+    let merged_path = f.store.pack_path("repository", &merged).unwrap();
+    let written_merged = written.clone();
+    *alt_server_store::MERGE_WRITTEN.lock().unwrap() = Some(Arc::new(move |path| {
+        if !path.iter().any(|part| part == this) || once.swap(true, SeqCst) {
+            return;
+        }
+        std::fs::write(&merged_path, &written_merged).unwrap();
+        let mut client = alt_pg::Client::connect_with(&dsn).unwrap();
+        client
+            .execute(
+                "UPDATE alt_pack_segments SET state='retired',retired_at=0 WHERE segment_id=$1",
+                &[&first_merged],
+            )
+            .unwrap();
+        client
+            .execute(
+                "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state) SELECT repository,$2,sequence,objects,bytes,flags,'live' FROM alt_pack_segments WHERE segment_id=$1",
+                &[&first_merged, &merged_id],
+            )
+            .unwrap();
+    }));
+    let kept = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
+    *alt_server_store::MERGE_WRITTEN.lock().unwrap() = None;
+    let kept = kept.unwrap();
+    assert_eq!(kept.unread.len(), 1);
+    assert_eq!(kept.unread[0].replaced_by, None);
+    assert_eq!(
+        kept.unread[0].kept_because.as_deref(),
+        Some("precondition failed: pack segment is no longer live")
+    );
+    let live: Vec<_> = (states(&f).into_iter())
+        .filter(|(_, state)| state == "live")
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(live, [merged.clone(), astray.clone()]);
+
+    let mended = f.store.scrub_packs(
+        &f.credential,
+        "repository",
+        Some(memory()),
+        &mut |_, _, _| (),
+    );
+    let anew = mended.unwrap().unread[0].replaced_by.clone().unwrap();
+    let live: Vec<_> = (states(&f).into_iter())
+        .filter(|(_, state)| state == "live")
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(live, [merged, anew]);
+}
