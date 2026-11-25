@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: trees git fsck refuses are refused at the push as git says, and trees out of order are exported as they are
+author-type: human
+author: doracawl
+touched: crates/alt-git-codec/src/lib.rs
+touched: crates/alt-git-codec/src/tree.rs
+touched: crates/alt-pack-segment/src/build.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/object.rs
+touched: crates/alt-pack-segment/src/ordered.rs
+touched: crates/alt-pack-segment/src/told.rs
+touched: crates/alt-pack-segment/src/unsafe_names.rs
+touched: crates/alt-repository-service/README.md
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/tests/it/main.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/fsck.rs
