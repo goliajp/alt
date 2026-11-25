@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: refactor
+summary: keep the functions this work lengthened to the length they had
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/branch/moved.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/src/native/revert/state.rs
+touched: crates/alt-worktree/src/fsdir.rs
+touched: crates/alt-worktree/src/scan.rs
+touched: crates/alt-worktree/src/untracked.rs
+touched: crates/alt-worktree/src/walk/listing.rs
