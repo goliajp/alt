@@ -287,7 +287,7 @@ fn a_pack_holds_what_is_kept_of_each_of_its_entries() {
     };
     let (memory, indexed) = index(64 << 20);
     let indexed = indexed.unwrap();
-    assert!(HELD_FOR_AN_INDEXED_ENTRY >= 200);
+    const { assert!(HELD_FOR_AN_INDEXED_ENTRY >= 200) };
     assert_eq!(memory.taken().0, 2000 * HELD_FOR_AN_INDEXED_ENTRY);
     drop(indexed);
     assert_eq!(memory.taken(), (0, 0));
