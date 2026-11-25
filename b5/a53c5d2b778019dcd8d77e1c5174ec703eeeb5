@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: what an instance with an unnamed proxy in front counts by address
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
