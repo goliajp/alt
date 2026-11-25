@@ -309,6 +309,9 @@ fn a_server_that_lost_its_session_serves_nothing_until_it_has_the_lock_again() {
     );
     let served = end_rx.recv_timeout(Duration::from_secs(60));
     assert_eq!(served.unwrap(), Err(SERVED.to_owned()));
+    // a request that waits on the silent line ends with it, and the runtime of
+    // the server with that
+    drop(line);
     serving.join().unwrap();
-    drop((other, line));
+    drop(other);
 }
