@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: refused-trees makes no directory for a repository it reads
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
