@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: the session that holds the lock of the server is given up once it goes silent, and the database ends it
+author-type: human
+author: doracawl
+touched: crates/alt-pg/src/client.rs
+touched: crates/alt-pg/src/stream.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/serving.rs
+touched: crates/alt-server/src/http/serving.rs
+touched: crates/alt-server/tests/it/database/serving.rs
