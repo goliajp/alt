@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: record the help of tag -m as it reads now
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/fixtures/args/help.txt
