@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a request that was to be held and was refused for one that came before it is sent again
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections/sources.rs
