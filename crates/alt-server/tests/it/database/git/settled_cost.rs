@@ -38,6 +38,41 @@ fn instructions(pids: &[String], work: impl FnOnce()) -> Option<u64> {
     line.split(',').next()?.parse().ok()
 }
 
+/// Pushes `main` to `url` as [`ok`] runs Git, with what went over HTTP
+/// written down: a push that fails is told with the status and the body of
+/// each answer, which say which bound of the service it met.
+fn pushed(work: &Path, token: &str, url: &str) {
+    let trace = work.join("trace");
+    let auth = alt_base64::STANDARD.encode(format!("alt:{token}"));
+    let output = Command::new("git")
+        .args(["push", "-q", url, "main"])
+        .current_dir(work)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap())
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+        .env("GIT_CONFIG_VALUE_0", format!("Authorization: Basic {auth}"))
+        .env("GIT_TRACE_CURL", &trace)
+        .output()
+        .unwrap();
+    if !output.status.success() {
+        let traced = std::fs::read_to_string(&trace).unwrap_or_default();
+        let answered: Vec<&str> = (traced.lines())
+            .filter(|line| line.contains("<= Recv header: HTTP/") || line.contains("<= Recv data"))
+            .collect();
+        panic!(
+            "git push: {}\nanswers:\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            answered.join("\n")
+        );
+    }
+    std::fs::remove_file(&trace).unwrap();
+}
+
 #[test]
 #[ignore = "a measurement, for --nocapture and with ALT_MEASURE_PUSHES: counts instructions with perf; requires isolated PostgreSQL, loopback HTTP and real Git"]
 fn the_instructions_the_database_takes_for_a_push_with_and_without_the_index_of_moments() {
@@ -55,7 +90,7 @@ fn the_instructions_the_database_takes_for_a_push_with_and_without_the_index_of_
             std::fs::write(work.join("file"), n.to_string()).unwrap();
             ok(work, &f.token, &["add", "file"]);
             ok(work, &f.token, &["commit", "-qm", "more"]);
-            ok(work, &f.token, &["push", "-q", &url, "main"]);
+            pushed(work, &f.token, &url);
         };
         if !indexed {
             let drop = "DROP INDEX alt_requests_settled";
