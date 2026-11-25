@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: refused-trees is looked at on a repository whose directory is not there
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
