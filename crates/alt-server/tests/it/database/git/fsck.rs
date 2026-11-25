@@ -20,11 +20,11 @@ fn tree(entries: &[(&str, &[u8], &str)]) -> Vec<u8> {
 }
 
 /// Each of these trees, alone or below a directory, is refused with what Git
-/// says of it, and no ref moves: `.git` as Git, NTFS and HFS+ read it, `..`,
-/// `.alt` as `.git` is, and a name twice (Git itself sends no tree with an empty name). A tree out
-/// of order, and modes with zeros before them, are taken: a clone has the bytes
-/// that were pushed, and a portable export of the repository holds them as
-/// they are.
+/// says of it, and no ref moves: `.git` as Git, NTFS and HFS+ read it, also
+/// after a backslash, `..`, `.alt` as `.git` is, and a name twice (Git itself
+/// sends no tree with an empty name). A tree out of order, and modes with
+/// zeros before them, are taken: a clone has the bytes that were pushed, and a
+/// portable export of the repository holds them as they are.
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn trees_git_fsck_refuses_are_refused_and_trees_out_of_order_are_kept_as_they_are() {
@@ -64,6 +64,10 @@ fn trees_git_fsck_refuses_are_refused_and_trees_out_of_order_are_kept_as_they_ar
         (b".alt", "hasDotalt: contains '.alt'"),
         (b"ALT~1", "hasDotalt: contains '.alt'"),
         (".A\u{feff}lt".as_bytes(), "hasDotalt: contains '.alt'"),
+        // NTFS reads what follows a backslash as a name of its own
+        (b"a\\.git", "hasDotgit: contains '.git'"),
+        (b"x\\.GIT.", "hasDotgit: contains '.git'"),
+        (b"a\\alt~1", "hasDotalt: contains '.alt'"),
     ];
     for (at, (name, said)) in refused.iter().enumerate() {
         let bad = written(&format!("bad{at}"), &tree(&[("100644", name, &blob)]));

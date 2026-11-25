@@ -16,10 +16,15 @@ pub fn unsafe_name(name: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// `.` and `word` as Git, NTFS or HFS+ reads the name
+/// `.` and `word` as Git, NTFS or HFS+ reads the name; NTFS reads what
+/// follows each backslash as a name of its own
 fn read_as(name: &[u8], word: &[u8; 3]) -> bool {
     let dotted = [&b"."[..], word].concat();
-    name.eq_ignore_ascii_case(&dotted) || ntfs(name, word) || hfs(name, &dotted)
+    let mut parts = (name.iter().enumerate()).filter(|(_, byte)| **byte == b'\\');
+    name.eq_ignore_ascii_case(&dotted)
+        || ntfs(name, word)
+        || hfs(name, &dotted)
+        || parts.any(|(at, _)| ntfs(&name[at + 1..], word))
 }
 
 /// NTFS drops dots and spaces at the end of a name and reads what follows a
@@ -76,6 +81,11 @@ mod tests {
                 format!(".{word}::$INDEX_ALLOCATION"),
                 format!(".{a}\u{200c}{rest}"),
                 format!("\u{feff}.{upper}"),
+                format!("a\\.{word}"),
+                format!("a\\{word}~1"),
+                format!("x\\.{upper}."),
+                format!("a\\.{word}\\b"),
+                format!("a\\b\\.{word}:x"),
             ];
             for name in unsafe_names {
                 assert_eq!(unsafe_name(name.as_bytes()), Some(said), "{name:?}");
@@ -88,6 +98,9 @@ mod tests {
                 format!(".{a}"),
                 format!("x.{word}"),
                 format!(".{a}\u{200b}{rest}"),
+                format!("a\\.{word}x"),
+                format!("a\\x.{word}"),
+                format!("a\\.{a}\u{200c}{rest}"),
             ];
             for name in taken {
                 assert_eq!(unsafe_name(name.as_bytes()), None, "{name:?}");
