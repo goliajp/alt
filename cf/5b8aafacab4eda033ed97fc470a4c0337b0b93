@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say how the table of composed pairs is made
+author-type: human
+author: doracawl
+touched: crates/alt-precompose/src/pairs.rs
