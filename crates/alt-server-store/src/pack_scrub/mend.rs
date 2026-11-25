@@ -6,6 +6,10 @@ use crate::{Error, Result, Store, packs::INLINE_SEGMENT_BYTES};
 use alt_pack_segment::{Memory, Segment, SegmentSet};
 use std::sync::Arc;
 
+/// A segment that stands among the live ones: its id, whether its row holds
+/// it, and the segment.
+type Stands = ((String, bool), Arc<Segment>);
+
 impl Store {
     /// Where `mend` gives memory, `segment` put out of the way by its pack
     /// indexed anew, as [`Self::index_anew`] does; `unread` is told what took
@@ -16,7 +20,7 @@ impl Store {
         (part, segment, unread): (&(String, bool), &Arc<Segment>, &mut Unread),
         behind: (&[(String, bool)], &SegmentSet),
         mend: Option<&'static Memory>,
-    ) -> Result<Option<((String, bool), Arc<Segment>)>> {
+    ) -> Result<Option<Stands>> {
         let Some(memory) = mend else {
             return Ok(None);
         };
@@ -44,7 +48,7 @@ impl Store {
         (part, segment): (&(String, bool), &Arc<Segment>),
         (before_ids, before): (&[(String, bool)], &SegmentSet),
         memory: &'static Memory,
-    ) -> Result<((String, bool), Arc<Segment>)> {
+    ) -> Result<Stands> {
         let content =
             alt_pack_segment::indexed_anew(segment, before, memory).map_err(
                 |error| match error {
