@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a pack nobody waits for is scanned and made whole no further
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack/limits.rs
+touched: crates/alt-git-pack/src/index_pack/scan.rs
+touched: crates/alt-git-pack/src/index_pack/thin.rs
+touched: crates/alt-git-pack/tests/it/thin_pack.rs
