@@ -121,12 +121,22 @@ fn extras(rng: &mut Rng, here: &Tree, there: &Tree) -> Extras {
         !here.contains_key(*path) && here.keys().all(clear)
     };
     let coming: Vec<&String> = there.keys().filter(free).collect();
-    if rng.below(3) == 0 && !coming.is_empty() && !sources.is_empty() {
-        let at = coming[rng.below(coming.len())].clone();
-        linked.push((at, sources[rng.below(sources.len())].clone()));
+    if !sources.is_empty() {
+        let source = |rng: &mut Rng| sources[rng.below(sources.len())].clone();
+        // one where the switch writes nothing, at a name no tree has
+        linked.push((LINKED.to_owned(), source(rng)));
+        // and on one round in three one where it writes: it is refused
+        if !coming.is_empty() && rng.below(3) == 0 {
+            let at = coming[rng.below(coming.len())].clone();
+            linked.push((at, source(rng)));
+        }
     }
     Extras { put, linked }
 }
+
+/// A name no tree made here has: the paths of a tree are of the letters
+/// `a` to `d`.
+const LINKED: &str = "second-link";
 
 fn plant(work: &Path, extras: &Extras) {
     for (path, leaf) in &extras.put {
@@ -139,9 +149,26 @@ fn plant(work: &Path, extras: &Extras) {
     }
     for (at, source) in &extras.linked {
         let at = work.join(at);
-        if std::fs::create_dir_all(at.parent().unwrap()).is_ok() {
-            let _ = std::fs::hard_link(work.join(source), at);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        // the one a switch before this left where it wrote nothing
+        if at.symlink_metadata().is_ok() {
+            std::fs::remove_file(&at).unwrap();
         }
+        std::fs::hard_link(work.join(source), at).unwrap();
+    }
+}
+
+/// Takes out of `work` what [`plant`] put there, after a switch that was
+/// refused and so left it all: the next switch is not refused for it.
+fn uproot(work: &Path, extras: &Extras) {
+    for (path, leaf) in &extras.put {
+        match leaf {
+            Leaf::Empty => std::fs::remove_dir(work.join(path)).unwrap(),
+            _ => std::fs::remove_file(work.join(path)).unwrap(),
+        }
+    }
+    for (at, _) in &extras.linked {
+        std::fs::remove_file(work.join(at)).unwrap();
     }
 }
 
@@ -161,10 +188,17 @@ fn same_switch(works: &[PathBuf; 2], branch: &str, when: &str) -> bool {
         listing(&works[0]),
         "{when}: after switch {branch}"
     );
+    assert_eq!(
+        crate::like_git::index(&works[1]),
+        ok(git(&works[0], &["ls-files", "-s"])),
+        "{when}: the index after switch {branch}"
+    );
     ours.status.success()
 }
 
 fn checked_out_alike(place: &Path, seeds: std::ops::RangeInclusive<u64>) {
+    // the switches made, and those refused
+    let mut ended = [0usize; 2];
     for seed in seeds {
         let (one, two, mut rng) = trees(seed);
         let dir = alt_os::temp::tempdir_in(place).unwrap();
@@ -172,17 +206,27 @@ fn checked_out_alike(place: &Path, seeds: std::ops::RangeInclusive<u64>) {
             let made = |run: Run, name: &str| made(run, &dir.path().join(name), &one, &two);
             let works = [made(git, "git"), made(alt, "alt")];
             let (mut here, mut there) = (("main", &one), ("two", &two));
+            let mut ended = [0usize; 2];
             for round in 0..3 {
                 let extras = extras(&mut rng, here.1, there.1);
                 works.iter().for_each(|work| plant(work, &extras));
                 let when = format!("round {round} from {}", here.0);
-                if same_switch(&works, there.0, &when) {
-                    std::mem::swap(&mut here, &mut there);
+                let switched = same_switch(&works, there.0, &when);
+                ended[usize::from(!switched)] += 1;
+                match switched {
+                    true => std::mem::swap(&mut here, &mut there),
+                    false => works.iter().for_each(|work| uproot(work, &extras)),
                 }
             }
+            ended
         });
-        assert!(run.is_ok(), "seed {seed}");
+        let Ok(of_seed) = run else {
+            panic!("seed {seed}");
+        };
+        ended = [ended[0] + of_seed[0], ended[1] + of_seed[1]];
     }
+    // both ends are met: a run of refusals alone would compare nothing
+    assert!(ended[0] > 0 && ended[1] > 0, "{ended:?}");
 }
 
 #[test]
