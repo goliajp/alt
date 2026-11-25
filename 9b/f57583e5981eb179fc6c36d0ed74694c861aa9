@@ -1,0 +1,18 @@
+schema: alt-meta/1
+type: fix
+summary: a server that may have lost its lock of the database serves nothing until it has it again
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server/src/compaction.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/gate.rs
+touched: crates/alt-server/src/http/pool.rs
+touched: crates/alt-server/src/http/respond.rs
+touched: crates/alt-server/src/http/serving.rs
+touched: crates/alt-server/src/operator.rs
+touched: crates/alt-server/tests/it/database/running.rs
+touched: crates/alt-server/tests/it/database/serving.rs
