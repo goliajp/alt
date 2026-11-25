@@ -42,7 +42,7 @@ as_owner "$bin/initdb" -D "$run/data" -U alt_test --auth=trust --no-locale > "$r
 # background work have up to seven connections at once between them. A
 # connection past the limit fails whichever test opens it, so there are twelve
 # for each thread.
-threads=${RUST_TEST_THREADS:-$(python3 -c 'import os; print(len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count())')}
+. "$(dirname "$0")/test-postgres-threads.sh"
 connections=$((threads * 12 + 20))
 as_owner "$bin/pg_ctl" -D "$run/data" -l "$run/server.log" -o "-h '' -k $run -c max_connections=$connections -c max_locks_per_transaction=512" -w start
 started=1
