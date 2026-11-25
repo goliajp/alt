@@ -15,12 +15,14 @@
 //!
 //! Each base in a file is a file and a mapping of the process, and a process
 //! has so many of either. The bases of all the packs are in no more files at
-//! once than [`FILES`], whatever their bytes; one there is no file for is
-//! made again like one there is no room for.
+//! once than [`FILES`], whatever their bytes. A file there is none left of is
+//! waited for as room is, by a pack that has no base in files yet; one that
+//! has some makes the base again.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::time::Instant;
 
 use super::memory::{Memory, Taken, Wait};
 use crate::PackError;
@@ -33,7 +35,8 @@ pub struct BaseFiles {
     directory: PathBuf,
     room: Memory,
     most_taken: AtomicU64,
-    files: AtomicUsize,
+    /// the files there may be, one taken for each
+    files: Memory,
     most_files: AtomicUsize,
     failed: AtomicU64,
 }
@@ -43,13 +46,7 @@ pub struct BaseFiles {
 #[derive(Debug)]
 pub struct Place<'a> {
     _room: Taken<'a>,
-    files: &'a AtomicUsize,
-}
-
-impl Drop for Place<'_> {
-    fn drop(&mut self) {
-        self.files.fetch_sub(1, Relaxed);
-    }
+    _file: Taken<'a>,
 }
 
 impl BaseFiles {
@@ -62,7 +59,7 @@ impl BaseFiles {
             directory: directory.to_owned(),
             room: Memory::new(most),
             most_taken: AtomicU64::new(0),
-            files: AtomicUsize::new(0),
+            files: Memory::new(FILES as u64),
             most_files: AtomicUsize::new(0),
             failed: AtomicU64::new(0),
         })
@@ -76,21 +73,19 @@ impl BaseFiles {
     /// told, once those before in line have theirs and there is room. A
     /// file more than there may be is not waited for.
     pub(super) fn take(&self, bytes: u64, wait: Option<Wait<'_>>) -> Option<Place<'_>> {
-        let one_more = |files: usize| (files < FILES).then_some(files + 1);
-        let files = self.files.try_update(Relaxed, Relaxed, one_more).ok()? + 1;
         let now = Wait {
-            by: Some(std::time::Instant::now()),
+            by: Some(Instant::now()),
             gone: None,
         };
-        let Ok(taken) = self.room.let_in(bytes, 0, wait.unwrap_or(now)) else {
-            self.files.fetch_sub(1, Relaxed);
-            return None;
-        };
+        let wait = wait.unwrap_or(now);
+        let file = self.files.let_in(1, 0, wait).ok()?;
+        let taken = self.room.let_in(bytes, 0, wait).ok()?;
         self.most_taken.fetch_max(self.room.taken().0, Relaxed);
+        let files = self.files.taken().0 as usize;
         self.most_files.fetch_max(files, Relaxed);
         Some(Place {
             _room: taken,
-            files: &self.files,
+            _file: file,
         })
     }
 
@@ -104,7 +99,7 @@ impl BaseFiles {
         wait: Option<Wait<'_>>,
     ) -> Result<Taken<'_>, PackError> {
         let now = Wait {
-            by: Some(std::time::Instant::now()),
+            by: Some(Instant::now()),
             gone: None,
         };
         let taken = self.room.let_in(bytes, 0, wait.unwrap_or(now));
@@ -134,12 +129,12 @@ impl BaseFiles {
 
     /// The bases in files now, and the most there were at once.
     pub fn files(&self) -> (usize, usize) {
-        (self.files.load(Relaxed), self.most_files.load(Relaxed))
+        (self.files.taken().0 as usize, self.most_files.load(Relaxed))
     }
 
-    /// How many packs wait for room to write a base in.
+    /// How many packs wait for room to write a base in, or for a file.
     pub fn waiting(&self) -> usize {
-        self.room.waiting().0
+        self.room.waiting().0 + self.files.waiting().0
     }
 
     /// How many bases could not be written, and were made again instead.

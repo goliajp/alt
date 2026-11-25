@@ -192,3 +192,27 @@ fn a_pack_has_so_many_bases_in_files_at_once_and_all_the_packs_so_many() {
     drop(others);
     assert_eq!(files.files().0, 0);
 }
+
+/// Where the packs between them have every file there may be, a pack with no
+/// base in files yet waits for one, as for room there, and takes it once it is
+/// given back.
+#[test]
+fn a_pack_with_no_base_in_files_waits_for_a_file_when_there_is_none_left() {
+    use alt_pack_segment::BASE_FILES;
+    let work = alt_os::temp::tempdir().unwrap();
+    let files = files(&work.path().join("bases"), 1 << 20);
+    let expected = indexed(None).0;
+    let others: Vec<_> = (0..BASE_FILES).map(|_| files.occupy(1).unwrap()).collect();
+    let long = Instant::now() + Duration::from_secs(60);
+    let (index, took) = std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| indexed_by(Some(files), Some(long)));
+        while files.waiting() == 0 {
+            assert!(!waiting.is_finished(), "the pack did not wait for a file");
+            std::thread::yield_now();
+        }
+        drop(others);
+        waiting.join().unwrap()
+    });
+    assert_eq!(index, expected);
+    assert!(took.spilled > 0, "{took:?}");
+}
