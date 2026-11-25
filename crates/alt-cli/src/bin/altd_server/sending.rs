@@ -27,9 +27,10 @@ pub(super) struct Room(Arc<Shares>);
 
 impl Room {
     /// `most` bytes, of which `large` responses at once may have more than the
-    /// part of their address.
-    pub(super) fn of(most: u64, large: usize) -> Self {
-        Room(Shares::passed_by_one_alone(most, large))
+    /// part of their address, taken at `rate` at the least while another waits.
+    pub(super) fn of(most: u64, large: usize, rate: u64) -> Self {
+        let window = alt_shares::LARGE_WINDOW;
+        Room(Shares::passed_by_one_alone(most, large).paced(rate, window))
     }
 
     /// The room all the responses of this server have.
@@ -37,8 +38,7 @@ impl Room {
         static ROOM: std::sync::OnceLock<Room> = std::sync::OnceLock::new();
         let told = super::told::told();
         let (most, large, rate) = (told.sending_bytes, told.workers / 2, told.large_rate);
-        let window = alt_shares::LARGE_WINDOW;
-        ROOM.get_or_init(|| Room(Shares::passed_by_one_alone(most, large).paced(rate, window)))
+        ROOM.get_or_init(|| Room::of(most, large, rate))
     }
 
     /// Has `file` written within the room, for a peer counted under `from`
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn the_responses_there_are_take_no_more_than_their_room_and_one_alone_whatever_it_is() {
-        let room = Room::of(1000, 1);
+        let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
         let first = written(&room, 600).unwrap();
         let second = written(&room, 400).unwrap();
         assert_eq!(room.held(), 1000);
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn the_responses_to_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
-        let room = Room::of(1000, 1);
+        let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
         let slow: Vec<Written> = (0..5)
             .map(|_| written_from(&room, Some(1), 50).unwrap())
             .collect();
