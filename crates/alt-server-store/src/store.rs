@@ -25,7 +25,7 @@ pub struct InstanceSpec {
     pub runtime_generation: u64,
 }
 impl InstanceSpec {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         Scope {
             installation_id: self.installation_id.clone(),
             repository_instance_id: self.workspace_id.clone(),

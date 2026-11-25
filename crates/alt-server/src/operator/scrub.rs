@@ -70,6 +70,17 @@ pub fn refused_trees(store: &mut Store, repository: Option<&str>) -> Result<Valu
     Err(Error::Partly(told, false))
 }
 
+/// A store of the instance of `config` as its schema is, where that is one this
+/// release upgrades from: for [`refused_trees`] before the instance is upgraded.
+pub fn opened_as_it_is(config: &super::Config) -> Result<Store> {
+    let factory = config.factory()?;
+    let mut database = factory.database.clone();
+    database.set_connect_timeout(factory.connect_timeout);
+    let client = database.connect().map_err(|_| Error::Database)?;
+    let (bytes, spec, key) = (factory.bytes, factory.instance, factory.signing_key);
+    Ok(Store::open_older(client, bytes, spec, key, factory.limits)?)
+}
+
 /// The memory the packs of segments are indexed anew in: what the service
 /// verifies the packs of pushes in, all of it for one pack at a time.
 pub fn memory(bytes: u64) -> &'static Memory {

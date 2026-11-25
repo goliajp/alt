@@ -195,6 +195,40 @@ impl Store {
         Ok(unread)
     }
 
+    /// A store of an instance at a schema this release upgrades from, or at
+    /// the current one, for what is read of it before it is upgraded: every
+    /// such schema has what [`Self::repositories`] and [`Self::refused_trees`]
+    /// read, and nothing else is to be asked of the store.
+    pub fn open_older(
+        mut client: alt_pg::Client,
+        bytes: crate::ByteStore,
+        spec: crate::InstanceSpec,
+        signing_key: alt_crypto::ed25519::SigningKey,
+        limits: alt_remote_protocol::Limits,
+    ) -> Result<Self> {
+        spec.validate()?;
+        limits.validate()?;
+        let rows = client.query(
+            "SELECT version,checksum FROM alt_schema ORDER BY version",
+            &[],
+        )?;
+        let supported = crate::OLDEST_SCHEMA as usize..=crate::SCHEMA_VERSION as usize;
+        if !supported.contains(&rows.len()) {
+            return Err(Error::Precondition(crate::UNSUPPORTED_SOURCE_SCHEMA));
+        }
+        crate::schema::check_rows(&rows, rows.len())?;
+        let client = crate::database::Connection::new(client);
+        let waited = None;
+        Ok(Store {
+            client,
+            bytes,
+            spec,
+            signing_key,
+            limits,
+            waited,
+        })
+    }
+
     /// The repositories of the instance, in the order of their names, for one
     /// who has the configuration and the database of the instance in hand.
     pub fn repositories(&mut self) -> Result<Vec<String>> {

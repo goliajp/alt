@@ -118,6 +118,12 @@ fn execute(args: &Args) -> Result<Value> {
                 json!({"restored":true,"manifest_digest":digest,"catalog":catalog,"old_credentials_revoked":true,"unread":unread}),
             );
         }
+        // read alone, with no credential: it is run with this version against
+        // an instance of an older schema, before that is upgraded
+        Action::RefusedTrees { repository } => {
+            let mut store = operator::scrub::opened_as_it_is(&config)?;
+            return operator::scrub::refused_trees(&mut store, repository.as_deref());
+        }
         _ => (),
     }
     if let Action::Initialize { resume } = &args.command {
@@ -133,11 +139,6 @@ fn execute(args: &Args) -> Result<Value> {
         Action::Serve => {
             drop(store);
             return serve(&config);
-        }
-        // read alone, with no credential: it is run with this version against
-        // an instance of an older schema, before that is upgraded
-        Action::RefusedTrees { repository } => {
-            return operator::scrub::refused_trees(&mut store, repository.as_deref());
         }
         Action::Health => {
             return Ok(
