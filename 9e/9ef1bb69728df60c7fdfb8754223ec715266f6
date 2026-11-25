@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the memory of the server is the least limit of its control group and of those above it, of either version
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/operator/bounds/memory.rs
