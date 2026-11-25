@@ -149,7 +149,7 @@ impl NativeRepo<'_> {
             (_, Entry::Skip) if !open => {
                 let said = format!(
                     "error: there is nothing to skip\nhint: have you committed already?\n\
-                     fatal: {name} failed\n"
+                     hint: try \"alt {name} --continue\"\nfatal: {name} failed\n"
                 );
                 return Err(said::refused(&said, 128));
             }

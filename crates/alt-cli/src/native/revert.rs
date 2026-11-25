@@ -90,6 +90,7 @@ impl NativeRepo<'_> {
                     // git forgets the revert it refused; it waits here
                     let todo = rest_of(&todo, i);
                     self.save_revert_state(&RevertState { todo, ..left })?;
+                    self.note_revert_refused(self.branch_tip("revert")?)?;
                     self.settle_state()?;
                     return Err(why);
                 }

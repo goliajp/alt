@@ -86,7 +86,38 @@ impl NativeRepo<'_> {
     }
 
     pub(super) fn clear_revert_state(&self) -> Res<()> {
+        match std::fs::remove_file(self.revert_refused_path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
         self.plan_state("REVERT_STATE", None)
+    }
+
+    fn revert_refused_path(&self) -> PathBuf {
+        self.index_path.with_file_name("REVERT_REFUSED")
+    }
+
+    /// Keeps that the sequence refused the revert that waits first, with
+    /// the branch at `head`. It is kept apart from the state, which an
+    /// older alt reads and takes no line it does not know in.
+    pub(super) fn note_revert_refused(&self, head: ObjectId) -> Res<()> {
+        let noted = format!("{head}\n");
+        Ok(recovery::durable_write(
+            &self.revert_refused_path(),
+            noted.as_bytes(),
+        )?)
+    }
+
+    /// Whether the revert that waits first is one the sequence refused,
+    /// and the branch has not moved since: git then skips that one, and
+    /// gives up from where the sequence began.
+    pub(super) fn revert_refused_here(&self) -> Res<bool> {
+        let noted = match std::fs::read_to_string(self.revert_refused_path()) {
+            Ok(noted) => noted,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e.into()),
+        };
+        Ok(noted.trim() == self.branch_tip("revert")?.to_string())
     }
 
     /// An `alt commit` in the middle of a stopped revert concludes that one

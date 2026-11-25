@@ -102,7 +102,8 @@ impl NativeRepo<'_> {
         self.run_reverts(state.todo, state.mainline, state.orig, dirty, json, out)
     }
 
-    /// `alt revert --skip`: the revert that stopped is not made; the
+    /// `alt revert --skip`: the revert that stopped is not made, nor one
+    /// that was refused; the
     /// index and the files go back to the commit the branch is at, as by
     /// git's `reset --merge`, and the rest of the sequence goes on.
     pub fn revert_skip(&mut self, json: bool, out: &mut impl Write) -> Res<bool> {
@@ -110,6 +111,9 @@ impl NativeRepo<'_> {
         if state.is_some() {
             self.ensure_signing()?;
         }
+        // a revert the sequence refused waits to be skipped as one that stopped
+        let refused = stands == Stands::Concluded && self.revert_refused_here()?;
+        let stands = if refused { Stands::Open } else { stands };
         let waiting = self.enter(Sequence::Revert, Entry::Skip, stands, out)?;
         let (Some(_), Some(state)) = (waiting, state) else {
             return Ok(false);
@@ -117,7 +121,7 @@ impl NativeRepo<'_> {
         let head = self.branch_tip("revert --skip")?;
         let rest = RevertState {
             current: None,
-            todo: state.todo.clone(),
+            todo: state.todo[usize::from(refused).min(state.todo.len())..].to_vec(),
             ..state
         };
         self.save_revert_state(&rest)?;
@@ -153,7 +157,9 @@ impl NativeRepo<'_> {
         let branch = self.head_branch()?;
         let head = self.branch_tip("revert --abort")?;
         // a revert that waits for its commit stopped with the branch here
-        let left = state.current.is_some() || self.left_by_revert(&branch, head)?;
+        let left = state.current.is_some()
+            || self.left_by_revert(&branch, head)?
+            || self.revert_refused_here()?;
         if head != state.orig && !left {
             // as git: the branch is the user's by now, and so is the tree
             self.clear_revert_state()?;

@@ -4,6 +4,7 @@
 //! and leaves the branch, the index and the files as git leaves them.
 
 mod quit;
+mod refused;
 
 use std::process::Output;
 
