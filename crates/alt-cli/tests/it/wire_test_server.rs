@@ -8,33 +8,44 @@
 //! header is propagated to the subprocess as the `GIT_PROTOCOL` env var
 //! (the same path `git http-backend` itself uses). That's enough for ureq
 //! (alt-wire-http's client) and for switching `upload-pack` into v2.
+//!
+//! Like `git http-backend`, it sends the status line and the headers before
+//! it runs the service, and passes the service's output on as it comes: the
+//! body ends where the connection closes.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
+
+mod held;
 
 /// Spawn the test HTTP server bound to a free port on 127.0.0.1, returning
 /// the URL prefix. The listener thread is leaked; the OS cleans it up when
 /// the test process exits.
 pub fn spawn(repo_dir: PathBuf) -> String {
+    spawn_with_env(repo_dir, Vec::new())
+}
+
+/// [`spawn`], with `env` set on every git process the server runs.
+pub fn spawn_with_env(repo_dir: PathBuf, env: Vec<(String, String)>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let url = format!("http://127.0.0.1:{port}");
     thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
-            let repo_dir = repo_dir.clone();
+            let (repo_dir, env) = (repo_dir.clone(), env.clone());
             thread::spawn(move || {
-                let _ = handle_one(stream, &repo_dir);
+                let _ = handle_one(stream, &repo_dir, &env);
             });
         }
     });
     url
 }
 
-fn handle_one(mut stream: std::net::TcpStream, repo: &Path) -> std::io::Result<()> {
+fn handle_one(mut stream: TcpStream, repo: &Path, env: &[(String, String)]) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
 
     let mut line = String::new();
@@ -67,95 +78,88 @@ fn handle_one(mut stream: std::net::TcpStream, repo: &Path) -> std::io::Result<(
     let mut body = vec![0u8; content_length];
     reader.read_exact(&mut body)?;
 
-    let (status, payload, ct) = dispatch(&method, &url, repo, &git_protocol, &body)?;
-
-    let resp_head = format!(
-        "HTTP/1.0 {status}\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        payload.len()
-    );
-    stream.write_all(resp_head.as_bytes())?;
-    stream.write_all(&payload)?;
-    stream.flush()?;
-    Ok(())
-}
-
-fn dispatch(
-    method: &str,
-    url: &str,
-    repo: &Path,
-    git_protocol: &Option<String>,
-    body: &[u8],
-) -> std::io::Result<(&'static str, Vec<u8>, &'static str)> {
+    let push = url.contains("git-receive-pack");
+    let (service, subcommand) = if push {
+        ("git-receive-pack", "receive-pack")
+    } else {
+        ("git-upload-pack", "upload-pack")
+    };
+    let mut cmd = Command::new("git");
+    cmd.envs(env.iter().map(|(k, v)| (k, v)));
+    if let Some(p) = &git_protocol {
+        cmd.env("GIT_PROTOCOL", p);
+    }
     // `/info/refs?service=git-upload-pack` and `/git-upload-pack` for fetch;
     // `/info/refs?service=git-receive-pack` and `/git-receive-pack` for
     // push. Both endpoints proxy to the matching git subprocess.
     if method == "GET" && url.starts_with("/info/refs") {
-        let (service, subcommand) = if url.contains("git-receive-pack") {
-            ("git-receive-pack", "receive-pack")
+        let ct = if push {
+            "application/x-git-receive-pack-advertisement"
         } else {
-            ("git-upload-pack", "upload-pack")
+            "application/x-git-upload-pack-advertisement"
         };
-        let mut cmd = Command::new("git");
-        cmd.args([subcommand, "--http-backend-info-refs"]);
-        cmd.arg(repo);
-        if let Some(p) = git_protocol {
-            cmd.env("GIT_PROTOCOL", p);
-        }
-        let out = cmd.output()?;
-        assert!(
-            out.status.success(),
-            "{service} info-refs failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let mut body_out = Vec::new();
-        write_pkt(&mut body_out, format!("# service={service}\n").as_bytes());
-        body_out.extend_from_slice(b"0000");
-        body_out.extend_from_slice(&out.stdout);
-        Ok((
-            "200 OK",
-            body_out,
-            // a small leak in &'static str gymnastics: the two
-            // advertisement Content-Types only differ in their middle
-            // segment, so we match on `service` to pick one
-            if service == "git-receive-pack" {
-                "application/x-git-receive-pack-advertisement"
-            } else {
-                "application/x-git-upload-pack-advertisement"
-            },
-        ))
+        head(&mut stream, ct)?;
+        let mut announced = Vec::new();
+        write_pkt(&mut announced, format!("# service={service}\n").as_bytes());
+        announced.extend_from_slice(b"0000");
+        stream.write_all(&announced)?;
+        cmd.args([subcommand, "--http-backend-info-refs"]).arg(repo);
+        relay(cmd, &[], &mut stream, service)
     } else if method == "POST" && (url == "/git-upload-pack" || url == "/git-receive-pack") {
-        let (service, subcommand) = if url == "/git-receive-pack" {
-            ("git-receive-pack", "receive-pack")
-        } else {
-            ("git-upload-pack", "upload-pack")
-        };
-        let mut cmd = Command::new("git");
-        cmd.args([subcommand, "--stateless-rpc"]);
-        cmd.arg(repo);
-        if let Some(p) = git_protocol {
-            cmd.env("GIT_PROTOCOL", p);
-        }
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-        let mut child = cmd.spawn()?;
-        child.stdin.as_mut().unwrap().write_all(body)?;
-        drop(child.stdin.take());
-        let out = child.wait_with_output()?;
-        assert!(
-            out.status.success(),
-            "{service} stateless-rpc failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let ct = if service == "git-receive-pack" {
+        let ct = if push {
             "application/x-git-receive-pack-result"
         } else {
             "application/x-git-upload-pack-result"
         };
-        Ok(("200 OK", out.stdout, ct))
+        head(&mut stream, ct)?;
+        cmd.args([subcommand, "--stateless-rpc"]).arg(repo);
+        relay(cmd, &body, &mut stream, service)
     } else {
-        Ok(("404 Not Found", Vec::new(), "text/plain"))
+        stream.write_all(
+            b"HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
     }
+}
+
+fn head(stream: &mut TcpStream, ct: &str) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.0 200 OK\r\nContent-Type: {ct}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.flush()
+}
+
+/// Run `cmd` with `input` on its stdin and pass its stdout on to `stream`
+/// as it is written.
+fn relay(
+    mut cmd: Command,
+    input: &[u8],
+    stream: &mut TcpStream,
+    service: &str,
+) -> std::io::Result<()> {
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    // read beside the relay: a full stderr pipe would stop the service
+    let mut stderr = child.stderr.take().unwrap();
+    let said = thread::spawn(move || {
+        let mut said = Vec::new();
+        let _ = stderr.read_to_end(&mut said);
+        said
+    });
+    child.stdin.as_mut().unwrap().write_all(input)?;
+    drop(child.stdin.take());
+    let relayed = std::io::copy(child.stdout.as_mut().unwrap(), stream);
+    let status = child.wait()?;
+    let said = said.join().unwrap();
+    assert!(
+        status.success(),
+        "{service} failed: {}",
+        String::from_utf8_lossy(&said)
+    );
+    relayed?;
+    stream.flush()
 }
 
 fn write_pkt(out: &mut Vec<u8>, payload: &[u8]) {
