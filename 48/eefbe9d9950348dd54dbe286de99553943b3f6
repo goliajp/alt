@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: manage.py start finds the network it writes down among those docker has, and stops before taking down one others are on
+author-type: human
+author: doracawl
+touched: self-hosted/manage.py
