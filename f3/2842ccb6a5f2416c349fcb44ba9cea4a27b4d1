@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: refactor
+summary: a backup archives its files by a module of their own, and the store reads the live segments besides those read already
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/archive.rs
