@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the bounds of the closures kept are those of one directory of stored bytes
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/kept.rs
