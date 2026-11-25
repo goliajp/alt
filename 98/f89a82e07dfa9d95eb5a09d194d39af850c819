@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a portable download lets go of its database connection before it waits for its turn
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/portable/download.rs
+touched: crates/alt-server/src/portable/mod.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/migration_turns.rs
