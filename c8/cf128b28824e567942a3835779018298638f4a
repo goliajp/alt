@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a repository is written down as holding nothing beyond its refs only where its segments are those walked
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server-store/src/publication/reached.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/led.rs
+touched: crates/alt-server/tests/it/database/git/led_raced.rs
