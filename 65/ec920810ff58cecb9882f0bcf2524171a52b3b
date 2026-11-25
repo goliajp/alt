@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: a small push that fails says what the service answered
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/settled_cost.rs
