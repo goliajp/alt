@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: every record of the objects of the deleted branch is damaged, whatever order they are read in
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/led_unread.rs
