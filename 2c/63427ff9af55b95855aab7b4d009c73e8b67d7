@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a backup and a restore write what is on its way beside where it goes, not among the temporary files of the host
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/verify.rs
+touched: crates/alt-server/src/unconfigured.rs
+touched: crates/alt-server/tests/it/database/operator/maintenance/executor.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
