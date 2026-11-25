@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: the objects of a push are read and written no further once nobody waits for it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/receive.rs
+touched: crates/alt-cli/src/receive/batch.rs
+touched: crates/alt-cli/src/receive/signed.rs
+touched: crates/alt-cli/src/receive/taken.rs
+touched: crates/alt-cli/tests/it/altd_server_landing.rs
+touched: crates/alt-cli/tests/it/altd_server_reads.rs
+touched: crates/alt-cli/tests/it/altd_server_recorded.rs
+touched: crates/alt-cli/tests/it/altd_server_unsynced_objects.rs
