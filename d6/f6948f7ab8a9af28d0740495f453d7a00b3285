@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the session of the lock of the server waits for no answer without end, before the lock as after it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/serving.rs
+touched: crates/alt-server/tests/it/database/serving.rs
