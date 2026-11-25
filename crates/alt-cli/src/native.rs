@@ -1146,7 +1146,7 @@ impl<'a> NativeRepo<'a> {
     }
 
     fn create_tag(&mut self, name: &str, rev: Option<&str>, out: &mut impl Write) -> Res<()> {
-        check_tag_name(name)?;
+        self.ensure_tag_name(name)?;
         let full = format!("refs/tags/{name}");
         if self.store.refs.get(&full).is_some() {
             return Err(format!("tag '{name}' already exists").into());
@@ -1208,7 +1208,7 @@ impl<'a> NativeRepo<'a> {
         message: &str,
         out: &mut impl Write,
     ) -> Res<()> {
-        check_tag_name(name)?;
+        self.ensure_tag_name(name)?;
         let full = format!("refs/tags/{name}");
         if self.store.refs.get(&full).is_some() {
             return Err(format!("tag '{name}' already exists").into());

@@ -75,6 +75,13 @@ impl NativeRepo<'_> {
         Ok(Some(FinishTag { name, message }))
     }
 
+    /// Refuses a name no tag can have, and one git has no place for
+    /// beside the tags there are.
+    pub(in crate::native) fn ensure_tag_name(&self, name: &str) -> Res<()> {
+        check_tag_name(name)?;
+        self.ensure_no_ref_in_the_way(&format!("refs/tags/{name}"))
+    }
+
     /// Stores the tag object of `tag` on `commit`; the change of refs that
     /// names it, for the transaction of the finish.
     pub(in crate::native) fn finish_tagged(

@@ -107,23 +107,54 @@ impl NativeRepo<'_> {
         Ok(())
     }
 
+    /// A ref that keeps git from having the ref `full`: git keeps a ref
+    /// in a file of its name, so none lies beneath another, and an
+    /// export has no place for two that do. `but` is one that goes away
+    /// as `full` comes.
+    pub(in crate::native) fn ref_in_the_way(
+        &self,
+        full: &str,
+        but: Option<&str>,
+    ) -> Option<String> {
+        let above = full.match_indices('/').map(|(at, _)| &full[..at]);
+        let above = above.filter(|above| self.store.refs.get(above).is_some());
+        let within = format!("{full}/");
+        let beneath = self.store.refs.iter().map(|(other, _)| other);
+        let beneath = beneath.filter(|other| other.starts_with(&within));
+        let mut found = above.chain(beneath).filter(|other| Some(*other) != but);
+        found.next().map(str::to_owned)
+    }
+
+    /// Refuses, in git's words, a new ref `full` that [`Self::ref_in_the_way`]
+    /// finds a ref in the way of.
+    pub(in crate::native) fn ensure_no_ref_in_the_way(&self, full: &str) -> Res<()> {
+        match self.ref_in_the_way(full, None) {
+            None => Ok(()),
+            Some(other) => Err(settings::fatal(format!(
+                "cannot lock ref '{full}': '{other}' exists; cannot create '{full}'"
+            ))),
+        }
+    }
+
+    /// Refuses the branch a flow starts where one has its name, or git
+    /// has no place for it beside those there are.
+    pub(in crate::native) fn ensure_flow_branch_free(&self, name: &str) -> Res<()> {
+        let full = format!("refs/heads/{name}");
+        if self.store.refs.get(&full).is_some() {
+            return Err(crate::machine::Failure::refusal(
+                "precondition_failed",
+                format!("a branch named '{name}' already exists"),
+            )
+            .into());
+        }
+        self.ensure_no_ref_in_the_way(&full)
+    }
+
     /// Refuses, in git's words, a new branch by a `name` one has.
     pub(super) fn ensure_no_branch(&self, name: &str) -> Res<()> {
         let full = format!("refs/heads/{name}");
         if self.store.refs.get(&full).is_none() {
-            // git keeps a ref in a file of its name: none lies beneath
-            // another, and an export has no place for two that do
-            let above = full.match_indices('/').map(|(at, _)| &full[..at]);
-            let above = above.filter(|above| self.store.refs.get(above).is_some());
-            let within = format!("{full}/");
-            let beneath = self.store.refs.iter().map(|(other, _)| other);
-            let beneath = beneath.filter(|other| other.starts_with(&within));
-            return match above.chain(beneath).next() {
-                None => Ok(()),
-                Some(other) => Err(settings::fatal(format!(
-                    "cannot lock ref '{full}': '{other}' exists; cannot create '{full}'"
-                ))),
-            };
+            return self.ensure_no_ref_in_the_way(&full);
         }
         let said = format!("a branch named '{name}' already exists");
         let refusal = crate::machine::Failure::refusal("precondition_failed", said);

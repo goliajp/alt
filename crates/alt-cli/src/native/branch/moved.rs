@@ -193,6 +193,14 @@ impl NativeRepo<'_> {
             }
             self.ensure_may_move(new)?;
         }
+        if taken.is_none()
+            && let Some(other) = self.ref_in_the_way(&to, Some(&from))
+        {
+            let said = format!(
+                "error: '{other}' exists; cannot create '{to}'\nfatal: branch rename failed\n"
+            );
+            return Err(said::refused(&said, 128));
+        }
         self.ensure_may_move(&old)?;
         // a branch without a commit is a name its heads have, and no ref
         let mut changes = Vec::new();

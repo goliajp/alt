@@ -173,13 +173,7 @@ impl NativeRepo<'_> {
     ) -> Res<()> {
         let topic_ref = format!("refs/heads/{}", flow.branch);
         let base_ref = format!("refs/heads/{}", flow.base);
-        if self.store.refs.get(&topic_ref).is_some() {
-            return Err(crate::machine::Failure::refusal(
-                "precondition_failed",
-                format!("a branch named '{}' already exists", flow.branch),
-            )
-            .into());
-        }
+        self.ensure_flow_branch_free(&flow.branch)?;
         let base = self.store.refs.resolve(&base_ref)?.ok_or(missing)?;
         self.ensure_clean("flow start")?;
 
