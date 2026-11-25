@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: what the refs lead to is kept within a bound of bytes, and proving it may be gone on from is bounded and given up
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/led.rs
+touched: crates/alt-pack-segment/src/reach.rs
+touched: crates/alt-pack-segment/tests/it/led.rs
+touched: crates/alt-server-store/src/pack_view.rs
+touched: crates/alt-server-store/src/pack_view/kept.rs
+touched: crates/alt-server-store/src/pack_view/led.rs
