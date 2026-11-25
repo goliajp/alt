@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: refactor
+summary: the functions this work made longer are no longer than they were
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/pack_scrub/mend.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/src/operator/backup.rs
+touched: crates/alt-server/src/operator/backup/archive.rs
+touched: crates/alt-server/src/operator/backup/unread.rs
