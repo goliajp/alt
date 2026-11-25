@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: refused-trees needs no credential and reads only what schema 21 has, so that it runs before the upgrade
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server/README.md
+touched: crates/alt-server/src/action.rs
+touched: crates/alt-server/src/administered.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator/scrub.rs
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
