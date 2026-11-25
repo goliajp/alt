@@ -1,5 +1,6 @@
 //! Single integration-test binary for alt-git-pack.
 
+mod copies;
 mod corpus_pack;
 mod delta_write;
 mod held;

@@ -5,11 +5,13 @@ use alt_git_codec::ObjectId;
 use super::{BaseFiles, Memory, scan::Entry};
 
 /// What indexing keeps of each entry until the index is written: where it
-/// is, the id it has twice over, how it is found among the deltas, and its
-/// line of the index as it is put in order.
+/// is, the id it has twice over, how it is found among the deltas and
+/// whether the deltas of its id are being resolved, and its line of the
+/// index as it is put in order.
 pub const HELD_FOR_AN_INDEXED_ENTRY: u64 = (size_of::<Entry>()
     + 2 * size_of::<Option<ObjectId>>()
     + size_of::<(ObjectId, u32)>()
+    + size_of::<bool>()
     + size_of::<u32>()
     + size_of::<(ObjectId, u64, u32)>()) as u64;
 

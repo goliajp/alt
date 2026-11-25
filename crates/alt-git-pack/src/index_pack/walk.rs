@@ -46,6 +46,8 @@ pub(super) struct Frame {
     /// places in the sorted lists
     pub(super) ofs: std::ops::Range<usize>,
     pub(super) refs: std::ops::Range<usize>,
+    /// whether its deltas by id are those of an id no frame below has
+    named: bool,
 }
 
 pub struct Walk<'a, O: Objects> {
@@ -60,6 +62,9 @@ pub struct Walk<'a, O: Objects> {
     /// no frame below this one holds its base
     pub(super) lowest: usize,
     scratch: Vec<u8>,
+    /// by where the deltas of an id end among those by id: whether a frame
+    /// of the stack has them
+    named: Vec<bool>,
 }
 
 impl<'a, O: Objects> Walk<'a, O> {
@@ -73,21 +78,37 @@ impl<'a, O: Objects> Walk<'a, O> {
             stack: Vec::new(),
             lowest: 0,
             scratch: Vec::new(),
+            named: vec![false; deltas.by_id.len() + 1],
         }
     }
 
     /// A frame for the entry `index`, which is the object `id`, when any
-    /// delta is made of it.
+    /// delta is made of it. The deltas by id of an object a frame below has
+    /// already are that frame's: a pack may hold an object many times over,
+    /// each a delta of the one before by its id, and every one of them would
+    /// lie a delta deeper than the last.
     fn frame(&self, index: u32, id: &O::Id) -> Option<Frame> {
-        let (ofs, refs) = self.deltas.of(index, id);
+        let (ofs, mut refs) = self.deltas.of(index, id);
+        if self.named[refs.end] {
+            refs = refs.end..refs.end;
+        }
         (!ofs.is_empty() || !refs.is_empty()).then_some(Frame {
             entry: index,
             data: None,
             made: false,
             same: false,
+            named: false,
             ofs,
             refs,
         })
+    }
+
+    fn push(&mut self, mut frame: Frame) {
+        if !frame.refs.is_empty() {
+            self.named[frame.refs.end] = true;
+            frame.named = true;
+        }
+        self.stack.push(frame);
     }
 
     fn apply(&mut self, base: &[u8], index: u32) -> Result<Vec<u8>, O::Error> {
@@ -130,24 +151,7 @@ impl<'a, O: Objects> Walk<'a, O> {
         let Some(frame) = self.frame(of, id) else {
             return Ok(());
         };
-        self.stack.extend(way.iter().map(|entry| Frame {
-            entry: *entry,
-            data: None,
-            made: way.len() > 1,
-            same: false,
-            ofs: 0..0,
-            refs: 0..0,
-        }));
-        match way.last() == Some(&of) {
-            true => {
-                let last = self.stack.last_mut().expect("the way");
-                (last.ofs, last.refs) = (frame.ofs, frame.refs);
-            }
-            false => self.stack.push(Frame {
-                same: true,
-                ..frame
-            }),
-        }
+        self.start(way, of, frame);
         self.lowest = 0;
         let above = self.stack.len() - 1;
         while let Some(top) = self.stack.last_mut() {
@@ -159,9 +163,7 @@ impl<'a, O: Objects> Walk<'a, O> {
             let next = (top.refs.next().map(|at| self.deltas.by_id[at].1))
                 .or_else(|| top.ofs.next().map(|at| self.deltas.by_offset[at].1));
             let Some(child) = next else {
-                let done = self.stack.pop().expect("the top");
-                self.gone(done.data);
-                self.lowest = self.lowest.min(self.stack.len());
+                self.pop();
                 continue;
             };
             if self.objects.reached(child) {
@@ -192,12 +194,48 @@ impl<'a, O: Objects> Walk<'a, O> {
                 self.hold(data.len());
                 frame.data = Some(Arc::new(Base::Held(data)));
                 frame.made = true;
-                self.stack.push(frame);
+                self.push(frame);
                 self.let_go()?;
             }
         }
         self.object = None;
         Ok(())
+    }
+
+    /// Puts the frames of `way` on the stack, the last with `frame` of the
+    /// entry `of` on it.
+    fn start(&mut self, way: &[u32], of: u32, frame: Frame) {
+        self.stack.extend(way.iter().map(|entry| Frame {
+            entry: *entry,
+            data: None,
+            made: way.len() > 1,
+            same: false,
+            named: false,
+            ofs: 0..0,
+            refs: 0..0,
+        }));
+        match way.last() == Some(&of) {
+            true => {
+                let last = self.stack.pop().expect("the way");
+                self.push(Frame {
+                    made: last.made,
+                    ..frame
+                });
+            }
+            false => self.push(Frame {
+                same: true,
+                ..frame
+            }),
+        }
+    }
+
+    fn pop(&mut self) {
+        let done = self.stack.pop().expect("the top");
+        if done.named {
+            self.named[done.refs.end] = false;
+        }
+        self.gone(done.data);
+        self.lowest = self.lowest.min(self.stack.len());
     }
 
     /// The object of the top frame. Where it was let go of it is made
