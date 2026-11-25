@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: prepare refuses a front proxy for an edge that any host connects to
+author-type: human
+author: doracawl
+touched: self-hosted/manage.py
+touched: self-hosted/tests/install_smoke.py
