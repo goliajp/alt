@@ -163,7 +163,7 @@ fn changed<'a>(
         if update.old != update.new {
             changes.push(update);
         } else if view.refs.get(&update.name) != update.old {
-            return Err(Error::Precondition("reference changed since it was read"));
+            return Err(Error::Precondition(super::CHANGED));
         }
     }
     Ok(changes)

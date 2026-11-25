@@ -220,3 +220,38 @@ fn a_push_that_inflates_to_more_than_a_pack_may_weigh_is_taken() {
         "{listed}"
     );
 }
+
+/// A push that read where a branch was and is sent once the branch is deleted:
+/// the client is told that a ref changed since it read the refs.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_to_a_branch_deleted_after_the_refs_were_read_is_told_so() {
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let (work, token) = (temp.path(), f.token.as_str());
+    let url = format!("{}/git/repository", server.url);
+    let commit = |n: usize| {
+        std::fs::write(work.join("file"), format!("{n}\n")).unwrap();
+        ok(work, token, &["add", "file"]);
+        ok(work, token, &["commit", "-qm", &format!("revision {n}")]);
+        text(ok(work, token, &["rev-parse", "HEAD"]))
+    };
+    ok(work, token, &["init", "-q", "--initial-branch=main"]);
+    identity(work, token);
+    let one = commit(1);
+    let both = ["push", "-q", &url, "main", "main:refs/heads/side"];
+    ok(work, token, &both);
+    ok(work, token, &["push", "-q", &url, ":refs/heads/side"]);
+    let two = commit(2);
+    let mut body = Vec::new();
+    let line = format!("{one} {two} refs/heads/side\0report-status\n");
+    alt_wire::pkt::write_data(&mut body, line.as_bytes()).unwrap();
+    alt_wire::pkt::write_flush(&mut body).unwrap();
+    let objects = ["HEAD", "HEAD^{tree}", "HEAD:file"];
+    body.extend(super::led::packed(work, token, &objects));
+    let (status, report) = receive(&url, token, &body);
+    assert_eq!(status, 200, "{report}");
+    let told = "ng refs/heads/side a ref changed since it was read";
+    assert!(report.contains(told), "{report}");
+}

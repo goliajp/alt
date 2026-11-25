@@ -182,21 +182,7 @@ pub(crate) fn receive(
         Ok(request) => (request, Ok(())),
         Err(error) => (None, Err(error)),
     };
-    let message = match &outcome {
-        Ok(()) => None,
-        Err(Error::OutcomeUnknown) => {
-            Some("outcome unknown; inspect remote refs and the server request".to_owned())
-        }
-        Err(Error::Unauthorized) => Some("access revoked".to_owned()),
-        // the operator can raise a limit; the pusher has to know which one it was
-        Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
-        Err(Error::Busy(_)) => {
-            Some("the packs of other pushes are being verified; push again".to_owned())
-        }
-        // as Git answers a pack its fsck refuses
-        Err(Error::Fsck(..)) => Some("unpacker error".to_owned()),
-        Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
-    };
+    let message = refused_for(&outcome);
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
         outcome?;
         return Ok(Output::Bytes {
@@ -254,3 +240,30 @@ pub(crate) fn receive(
         }),
     }
 }
+
+/// What a Git client is told a push was refused for, where it was.
+fn refused_for(outcome: &Result<()>) -> Option<String> {
+    match outcome {
+        Ok(()) => None,
+        Err(Error::OutcomeUnknown) => {
+            Some("outcome unknown; inspect remote refs and the server request".to_owned())
+        }
+        Err(Error::Unauthorized) => Some("access revoked".to_owned()),
+        // the operator can raise a limit; the pusher has to know which one it was
+        Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
+        Err(Error::Busy(_)) => {
+            Some("the packs of other pushes are being verified; push again".to_owned())
+        }
+        // as Git answers a pack its fsck refuses
+        Err(Error::Fsck(..)) => Some("unpacker error".to_owned()),
+        // a ref was moved or deleted after the client read where it was
+        Err(Error::Repository(alt_repository_service::Error::Precondition(_)))
+        | Err(Error::Precondition(CHANGED)) => {
+            Some("a ref changed since it was read; fetch and push again".to_owned())
+        }
+        Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
+    }
+}
+
+/// what a push is refused with where a ref it updates moved after it was read
+const CHANGED: &str = "reference changed since it was read";
