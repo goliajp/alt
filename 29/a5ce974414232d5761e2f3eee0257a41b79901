@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: what stands in the place of a segment a scrub mends has a name
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub/mend.rs
