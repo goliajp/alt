@@ -8,6 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
+/// The hook of the store is one for the process: the tests that set it take
+/// turns.
+static HOOKED: Mutex<()> = Mutex::new(());
+
 /// A branch `back` is pushed to the commit only the branch `side` holds, with
 /// a pack of nothing. While it is between its verification and its
 /// publication, `side` is deleted: it is told that a ref changed and nothing
@@ -16,6 +20,9 @@ use std::time::Duration;
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn a_push_whose_refs_were_deleted_after_it_was_verified_is_told_so_and_not_published() {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut f = Fixture::new();
     let server = Running::start(&f);
     let temp = alt_os::temp::tempdir().unwrap();
@@ -210,6 +217,9 @@ fn held_while(
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
 fn a_push_is_told_a_ref_changed_only_where_it_leans_on_what_the_ref_led_to() {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let f = Fixture::new();
     let server = Running::start(&f);
     let temp = alt_os::temp::tempdir().unwrap();

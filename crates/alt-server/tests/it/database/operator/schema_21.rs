@@ -81,6 +81,12 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     let p = publish(&mut store, &token);
     let key = p.publication.key.clone();
     drop(store);
+    // a repository nothing was pushed to: no directory is made for it
+    let empty = ["repository-create", "empty", "--quota-bytes", "100000000"];
+    source.ok(&[&["--credential", &admin][..], &empty].concat());
+    let name = alt_hash::blake3::hash(b"empty").to_hex();
+    let segments_of_empty = source.root.path().join("bytes/packs").join(&name[..32]);
+    assert!(!segments_of_empty.exists());
     let config = source.config.to_str().unwrap().to_owned();
     let (before, receipt) = observed(&source, &config, &admin, &key);
     let trust = source.ok(&["health"])["receipt_public_key"]
@@ -92,20 +98,12 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(moments(&source.dsn), None);
     assert!(!source.run(&["health"]).status.success());
     // the trees a push of this version refuses are listed before the upgrade,
-    // with no credential, and nothing is changed: no directory is made for a
-    // repository whose segments its rows hold
-    let packs = source.root.path().join("bytes").join("packs");
-    let aside = source.root.path().join("packs-aside");
-    std::fs::rename(&packs, &aside).unwrap();
-    std::fs::create_dir(&packs).unwrap();
+    // with no credential, and nothing is changed
     let refused = source.ok(&["refused-trees"]);
     assert_eq!(refused["refused_trees"], 0, "{refused}");
-    assert!(refused["repositories"].as_u64() >= Some(1), "{refused}");
+    assert_eq!(refused["repositories"], 2, "{refused}");
     assert_eq!(copies(&source.dsn), (21, 0, 0));
-    let made: Vec<_> = std::fs::read_dir(&packs).unwrap().collect();
-    assert!(made.is_empty(), "{made:?}");
-    std::fs::remove_dir(&packs).unwrap();
-    std::fs::rename(&aside, &packs).unwrap();
+    assert!(!segments_of_empty.exists());
 
     let offsite = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(offsite.path());
