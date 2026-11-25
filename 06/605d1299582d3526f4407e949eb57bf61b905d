@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a read that fails by the entry kept is made again without it
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/tests/it/read_again.rs
