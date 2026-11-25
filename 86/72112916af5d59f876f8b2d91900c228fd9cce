@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the addresses an old server is told it is reached at are written as a client writes them, or refused
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-wire/src/certificate.rs
