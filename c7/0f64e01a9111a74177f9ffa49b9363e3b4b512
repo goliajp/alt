@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a process group of a test is ended once
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/verifying.rs
