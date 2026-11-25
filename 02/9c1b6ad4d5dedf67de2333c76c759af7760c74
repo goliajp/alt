@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: the commits a fetch goes through are steps of its walk, and a walk nobody waits for ends among them
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/select.rs
+touched: crates/alt-pack-segment/src/steps.rs
+touched: crates/alt-pack-segment/src/trees.rs
+touched: crates/alt-server/tests/it/database/git/given_up.rs
