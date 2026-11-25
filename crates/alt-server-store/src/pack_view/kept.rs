@@ -127,12 +127,30 @@ pub(super) fn keep(repository: &str, tips: Vec<Oid>, led: Arc<Led>, whole: bool)
     }
 }
 
+/// the directory of the stored bytes a repository of [`Store::led_under`] is of
+fn root(repository: &str) -> &str {
+    repository.split_once('\0').map_or("", |(root, _)| root)
+}
+
 /// [`keep`] among `asked` within `bytes`: the answer back where it alone is
-/// beyond them.
+/// beyond them. The bounds are those of the answers of one directory of
+/// stored bytes, which a serving process has one of: the stores of another,
+/// as the tests of a process have, let go of none of them.
 fn kept_within(asked: &mut Vec<Kept>, kept: Kept, bytes: usize) -> Option<Kept> {
     if held(std::slice::from_ref(&kept)) > bytes {
         return Some(kept);
     }
+    let mine = root(&kept.repository).to_owned();
+    let (mut same, others): (Vec<Kept>, Vec<Kept>) = asked
+        .drain(..)
+        .partition(|other| root(&other.repository) == mine);
+    let alone = kept_among(&mut same, kept, bytes);
+    *asked = others;
+    asked.extend(same);
+    alone
+}
+
+fn kept_among(asked: &mut Vec<Kept>, kept: Kept, bytes: usize) -> Option<Kept> {
     let (repository, tips) = (kept.repository.as_str(), &kept.tips);
     asked.retain(|other| other.repository != repository || other.tips != *tips);
     let of_this = asked.iter().filter(|kept| kept.repository == repository);
@@ -195,6 +213,28 @@ mod tests {
         assert!(Arc::ptr_eq(&asked[0].led, &other));
         bounded(&mut asked, 219);
         assert!(asked.is_empty());
+    }
+
+    #[test]
+    fn the_answers_of_one_directory_of_bytes_let_go_of_none_of_another() {
+        let answer = |repository: &str, n: u8| Kept {
+            repository: repository.into(),
+            tips: vec![],
+            led: Arc::new(Led::again((0..n).map(|b| [b; 20]).collect()).unwrap()),
+            whole: true,
+        };
+        let mut asked = Vec::new();
+        assert!(kept_within(&mut asked, answer("/a\0one", 10), 300).is_none());
+        for n in 0..20 {
+            let other = format!("/b\0r{n}");
+            assert!(kept_within(&mut asked, answer(&other, 10), 300).is_none());
+        }
+        assert!(asked.iter().any(|kept| kept.repository == "/a\0one"));
+        let of_b = asked
+            .iter()
+            .filter(|kept| root(&kept.repository) == "/b")
+            .count();
+        assert_eq!(of_b, 1);
     }
 
     #[test]
