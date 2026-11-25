@@ -36,7 +36,9 @@ impl Room {
     pub(super) fn shared() -> &'static Room {
         static ROOM: std::sync::OnceLock<Room> = std::sync::OnceLock::new();
         let told = super::told::told();
-        ROOM.get_or_init(|| Room::of(told.sending_bytes, told.workers / 2))
+        let (most, large, rate) = (told.sending_bytes, told.workers / 2, told.large_rate);
+        let window = alt_shares::LARGE_WINDOW;
+        ROOM.get_or_init(|| Room(Shares::passed_by_one_alone(most, large).paced(rate, window)))
     }
 
     /// Has `file` written within the room, for a peer counted under `from`

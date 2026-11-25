@@ -46,6 +46,7 @@ ALT_SERVER_TEMP_DIR                     a directory on a disk for what is writte
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
   ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
   ALT_SERVER_IO_MIN_BYTES_PER_SEC         by this much on average (1024)
+  ALT_SERVER_LARGE_MIN_BYTES_PER_SEC      a response larger than the quarter of an address, by this much in each 30 seconds while another waits for its turn (1048576)
   ALT_SERVER_SHUTDOWN_DEADLINE_MS         for requests under way when the server is stopped (30000)";
 
 pub(super) struct Told {
@@ -105,6 +106,9 @@ pub(super) struct Told {
     pub(super) origins: Vec<String>,
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
     pub(super) shutdown: Duration,
+    /// `ALT_SERVER_LARGE_MIN_BYTES_PER_SEC`: what a large response another
+    /// waits for is taken at, at the least
+    pub(super) large_rate: u64,
 }
 
 /// The number `name` is set to, above zero; `otherwise` where it is not
@@ -139,6 +143,7 @@ impl Told {
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
         let fetch = number(lookup, "ALT_SERVER_MAX_FETCH_MS", 600_000u64)?;
+        let large_rate = number(lookup, "ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", 1u64 << 20)?;
         let networks = |name: &str| match lookup(name) {
             None => Ok(super::http::LOOPBACK.to_vec()),
             Some(told) => {
@@ -187,6 +192,7 @@ impl Told {
             proxies: Vec::leak(proxies),
             origins,
             shutdown: Duration::from_millis(shutdown),
+            large_rate,
         })
     }
 }
@@ -331,6 +337,11 @@ mod tests {
             let named = format!("ALT_SERVER_ORIGINS={value:?}: ");
             assert!(why.starts_with(&named), "{why}");
         }
+        // a large response another waits for is taken at a mebibyte a second, or as told
+        assert_eq!(unset.large_rate, 1 << 20);
+        let told = with(&[("ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", "262144")]);
+        assert_eq!(told.unwrap().large_rate, 256 << 10);
+        assert!(with(&[("ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", "0")]).is_err());
         // the largest number there is counts on without wrapping
         let most = with(&[("ALT_SERVER_MAX_PUSH_BYTES", "18446744073709551615")]).unwrap();
         assert_eq!((most.push_bytes, most.inflated_bytes), (u64::MAX, u64::MAX));

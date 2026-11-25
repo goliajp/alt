@@ -141,8 +141,8 @@ impl Config {
             || h.worker_lease_ms < h.work_timeout_ms
             || h.connections_each == Some(0)
             || h.receiving_each == Some(0)
-            || h.receiving_megabytes == Some(0)
-            || h.sending_megabytes == Some(0)
+            || [h.receiving_megabytes, h.sending_megabytes].contains(&Some(0))
+            || h.large_sending_kib == Some(0)
             || h.indexing_megabytes.is_some_and(|megabytes| {
                 megabytes.saturating_mul(1 << 20) < crate::git::least_verifying_bytes(self.limits)
             })
@@ -199,7 +199,8 @@ impl Config {
         let bases = directory.join("bases");
         let files = alt_pack_segment::BaseFiles::open(&bases, options.verifying.all());
         options.base_files = Some(Box::leak(Box::new(files.map_err(|_| Error::File)?)));
-        options.sending = sending(self.http.sending_megabytes, self.http.workers, &directory)?;
+        let sending = sending(self.http.sending_megabytes, self.http.workers, &directory)?;
+        options.sending = sending.paced(self.http.large_pace(), alt_shares::LARGE_WINDOW);
         Ok(options)
     }
     pub fn http_options(&self) -> HttpOptions {
@@ -238,7 +239,8 @@ impl Config {
                 (h.sending_megabytes)
                     .map_or(u64::MAX, |megabytes| megabytes.saturating_mul(1 << 20)),
                 h.workers / 2,
-            ),
+            )
+            .paced(h.large_pace(), alt_shares::LARGE_WINDOW),
             native: NativeOptions {
                 portable: self.portable,
                 task_limits: self.tasks,

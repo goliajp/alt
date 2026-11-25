@@ -179,9 +179,14 @@ repository as it is stored) take no more than `http.sending_megabytes` between
 them until they are sent: half of what is free on that disk when the server
 starts where the key is absent. The responses to one address have a quarter of
 that; a single response of an address may pass the quarter as far as half of
-the room, one such response at a time, and one that is alone on the server is
-written whatever its size. A fetch
-whose response has no room is answered `503` with `Retry-After`. The files of bases of
+the room, one such response for each address and as many on the server as half
+of `http.workers`, and one that is alone on the server is written whatever its
+size. A response that would pass the quarter while those are taken waits for
+its turn until its request's time is over, the addresses that wait taking turns.
+While another waits, such a response is taken at
+`http.large_sending_kib` KiB a second at the least (1024 where the key is
+absent), counted over 30 seconds, and is let go of where it is taken slower. A
+fetch whose response has no room is answered `503` with `Retry-After`. The files of bases of
 all the packs verified at once take no more than `http.indexing_megabytes`
 between them; a base that has no room there, or cannot be written, is made
 again instead, which counts against what its pack may inflate to. A pack that

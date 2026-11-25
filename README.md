@@ -331,7 +331,12 @@ ended where it stood leaves its directory behind, and the next one to start
 under the same parent removes it. Of that room, and of the room for request bodies being
 received, the peers of one address that is not the host itself have a
 quarter between them; a single response or body of an address may pass the
-quarter as far as the room goes. These numbers, and those for the size of a push and the
+quarter as far as the room goes. A response does so one at a time for each
+address and as many at once as half the workers; one that would while those
+are taken waits for its turn as long as its fetch may take, and while one
+waits a response that passed the quarter is taken at
+`ALT_SERVER_LARGE_MIN_BYTES_PER_SEC` (a mebibyte a second) at the least in each
+30 seconds, or is let go of. These numbers, and those for the size of a push and the
 memory and disk requests may take, are set through the environment;
 `altd-server --help` lists them with their defaults. Two more that it lists
 bound what the server holds at once: `ALT_SERVER_MAX_OPEN_REPOS`, the
