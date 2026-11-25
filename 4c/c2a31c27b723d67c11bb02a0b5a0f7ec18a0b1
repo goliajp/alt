@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: send the status line of the wire shim before the service runs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/wire_test_server.rs
+touched: crates/alt-cli/tests/it/wire_test_server/held.rs
