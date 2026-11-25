@@ -87,7 +87,7 @@ fn a_push_whose_refs_were_deleted_after_it_was_verified_is_told_so_and_not_publi
 
 /// A thin pack of the commits `new` leads to beyond those `bases` lead to:
 /// its deltas may be made of the objects of `bases`.
-fn thin(directory: &Path, token: &str, new: &str, bases: &[&str]) -> Vec<u8> {
+fn thin(directory: &Path, new: &str, bases: &[&str]) -> Vec<u8> {
     use std::io::Write;
     let mut revs = format!("{new}\n");
     for base in bases {
@@ -196,7 +196,7 @@ fn a_push_is_told_a_ref_changed_only_where_it_leans_on_what_the_ref_led_to() {
     let mut body = Vec::new();
     alt_wire::pkt::write_data(&mut body, command.as_bytes()).unwrap();
     alt_wire::pkt::write_flush(&mut body).unwrap();
-    body.extend_from_slice(&thin(work, &token, "main", &[&main]));
+    body.extend_from_slice(&thin(work, "main", &[&main]));
     let (status, report) = held_while(&f, &url, &token, body, || {
         git(&["push", "-q", &url, ":other"]);
     });
@@ -209,7 +209,7 @@ fn a_push_is_told_a_ref_changed_only_where_it_leans_on_what_the_ref_led_to() {
     let mut body = Vec::new();
     alt_wire::pkt::write_data(&mut body, command.as_bytes()).unwrap();
     alt_wire::pkt::write_flush(&mut body).unwrap();
-    body.extend_from_slice(&thin(work, &token, "main", &[&next, "gone"]));
+    body.extend_from_slice(&thin(work, "main", &[&next, "gone"]));
     let (status, report) = held_while(&f, &url, &token, body, || {
         git(&["push", "-q", &url, ":gone"]);
     });
