@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: a push is refused only for the unsafe trees it brings anew
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
