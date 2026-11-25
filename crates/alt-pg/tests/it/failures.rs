@@ -124,3 +124,22 @@ fn connecting_fails_cleanly() {
         Err(Error::Config(_))
     ));
 }
+
+/// A server that takes the connection and never answers: the session is not
+/// begun, and the connection fails once the time to begin it is over.
+#[test]
+fn a_server_that_never_answers_is_waited_for_as_long_as_the_connect_timeout() {
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = silent.local_addr().unwrap().port();
+    let config: alt_pg::Config =
+        format!("host=127.0.0.1 port={port} user=nobody connect_timeout=1")
+            .parse()
+            .unwrap();
+    let began = std::time::Instant::now();
+    let connected = config.connect();
+    let took = began.elapsed();
+    assert!(connected.is_err());
+    assert!(took >= std::time::Duration::from_secs(1), "{took:?}");
+    assert!(took < std::time::Duration::from_secs(10), "{took:?}");
+    drop(silent);
+}
