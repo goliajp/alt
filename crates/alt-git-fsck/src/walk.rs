@@ -9,6 +9,11 @@ pub struct Commit<O> {
     pub parents: Vec<O>,
 }
 
+/// what gives the entries of a tree
+pub type Trees<'a, O, E> = dyn FnMut(&O) -> Result<Vec<Entry<Vec<u8>, O>>, E> + 'a;
+/// what tells the fault of the object a tree names as a special file
+pub type Files<'a, O, E> = dyn FnMut(&O, Special) -> Result<Option<&'static str>, E> + 'a;
+
 /// what of a flagged tree is refused unless the tree before it had it
 struct Pending<'a, O> {
     faults: Vec<&'a Fault>,
@@ -28,8 +33,8 @@ struct Pending<'a, O> {
 pub fn first_new<O: Copy + Ord, E>(
     commits: &[Commit<O>],
     flagged: &BTreeMap<O, Flagged<O>>,
-    read: &mut dyn FnMut(&O) -> Result<Vec<Entry<Vec<u8>, O>>, E>,
-    file: &mut dyn FnMut(&O, Special) -> Result<Option<&'static str>, E>,
+    read: &mut Trees<'_, O, E>,
+    file: &mut Files<'_, O, E>,
 ) -> Result<Option<(O, &'static str)>, E> {
     // a file is read once, and only a fault is looked for where it is
     let mut told = BTreeMap::new();

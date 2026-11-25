@@ -20,7 +20,7 @@ mod walk;
 
 pub use blob::{ATTRIBUTES_LARGEST, Blob, MODULES_LARGEST, blob_fault};
 pub use tree::{Entry, Fault, File, Flagged, Special, flagged};
-pub use walk::{Commit, first_new};
+pub use walk::{Commit, Files, Trees, first_new};
 
 /// the mode of an entry that names a tree
 pub const TREE: u32 = 0o040000;
