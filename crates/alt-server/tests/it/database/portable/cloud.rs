@@ -471,7 +471,7 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
                 // an export reads Git objects from the mapped pack segments; the read
                 // to pause on is the task record, which the content store holds
                 let mut task = super::super::change_links::task_payload_with_source(
-                    "cloud-validation-task",
+                    ("cloud-validation-task", "publish selected task"),
                     None,
                 );
                 task.publication.key.scope = intent.key.scope.clone();

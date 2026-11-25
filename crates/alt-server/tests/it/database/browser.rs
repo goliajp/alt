@@ -1,11 +1,11 @@
 use super::*;
 use alt_browser_auth::PublicOrigin;
 use alt_json::{Value, json};
-
 mod downloads;
 mod led_to;
 mod migration;
 mod migration_room;
+mod records_page;
 mod reviews;
 mod tree_pages;
 mod unwaited;

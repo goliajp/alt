@@ -1,7 +1,10 @@
 use alt_remote_protocol::{ContentKind, RecordKind, RecordRoot, Scope};
-use alt_server_store::{Credential, Error, Page, PublishedRecord, Result, Store};
+use alt_server_store::{Credential, Error, PublishedRecord, Result, Store};
 use alt_task_service::{RecordKind as TaskKind, TaskBundle, TaskLimits, TaskRecord};
 use std::io::Read;
+
+mod page;
+pub use page::list;
 
 #[derive(alt_json::ToJson)]
 pub struct RecordSummary {
@@ -83,42 +86,6 @@ fn summary(root: &RecordRoot, record: &PublishedRecord) -> RecordSummary {
 }
 fn scope(store: &mut Store, credential: &Credential, repository: &str) -> Result<Scope> {
     Ok(store.repository_info(credential, repository)?.scope)
-}
-pub fn list(
-    store: &mut Store,
-    credential: &Credential,
-    repository: &str,
-    kind: RecordKind,
-    after: &str,
-    limit: usize,
-) -> Result<Page<RecordSummary>> {
-    if limit == 0 || limit >= 100 {
-        return Err(Error::Limit("record page size"));
-    }
-    let scope = scope(store, credential, repository)?;
-    let roots = store.published_records(
-        credential,
-        &scope,
-        kind,
-        if after.is_empty() { None } else { Some(after) },
-        limit + 1,
-    )?;
-    let more = roots.len() > limit;
-    let mut items = Vec::new();
-    let mut remaining = 16 * 1024 * 1024;
-    for root in roots.into_iter().take(limit) {
-        let record = store.published_record(credential, &scope, &root, remaining)?;
-        remaining = remaining
-            .checked_sub(record.payload.bytes as usize)
-            .ok_or(Error::Limit("record page work"))?;
-        items.push(summary(&root, &record));
-    }
-    let next = if more {
-        items.last().map(|v| v.id.clone())
-    } else {
-        None
-    };
-    Ok(Page { items, next })
 }
 pub fn detail(
     store: &mut Store,
@@ -311,6 +278,7 @@ mod json_tests {
     use alt_json_testkit::support::Arbitrary;
 
     use super::*;
+    use alt_server_store::Page;
 
     fn any<T: Arbitrary>(rng: &mut Rng) -> T {
         T::arbitrary(rng)
