@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: refactor
+summary: what is held beyond the bound of kept closures has a name
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/kept.rs
