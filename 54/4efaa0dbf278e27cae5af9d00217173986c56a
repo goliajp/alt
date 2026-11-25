@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: what a fetch keeps of the trees it read counts what each takes beside its bytes
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/trees.rs
