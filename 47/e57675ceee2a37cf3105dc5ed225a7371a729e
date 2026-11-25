@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a body that passes the quarter of its caller beside others is turned away only where it came after them
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/receiving.rs
+touched: crates/alt-server/tests/it/database/connections/caller_bytes.rs
