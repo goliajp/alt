@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: a pack written to its segment file as it arrives is synced then, not with the row of its repository held
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs/published.rs
