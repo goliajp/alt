@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a pushed ref name with a control character is refused, as its certificate line would read as two
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_untrusted.rs
+touched: crates/alt-wire/src/push/served.rs
