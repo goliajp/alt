@@ -234,6 +234,16 @@ impl Store {
         ids: &[(String, bool)],
     ) -> Result<SegmentSet> {
         self.pack_directory(repository)?;
+        self.segments_as_they_are(repository, ids)
+    }
+
+    /// [`Self::open_segments`] with no directory made where there is none:
+    /// for one who only reads.
+    pub(crate) fn segments_as_they_are(
+        &mut self,
+        repository: &str,
+        ids: &[(String, bool)],
+    ) -> Result<SegmentSet> {
         let client = &mut self.client;
         opened(self.bytes.root(), repository, ids, &mut |id| {
             Ok(client.query_one(INLINE, &[&repository, &id])?.get(0))

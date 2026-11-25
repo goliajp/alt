@@ -274,7 +274,7 @@ impl Store {
         }
         let ids = Self::live_segment_ids(&mut tx, repository)?;
         tx.commit()?;
-        let set = self.open_segments(repository, &ids)?;
+        let set = self.segments_as_they_are(repository, &ids)?;
         let (mut read, all, mut refused) = (0, set.objects(), Vec::new());
         let mut each = || {
             read += 1;
