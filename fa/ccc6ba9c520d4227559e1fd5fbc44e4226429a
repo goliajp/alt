@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: test
+summary: the processes the tests start are waited for before what went wrong with them is told
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server_told.rs
+touched: crates/alt-server/tests/it/database/connections/listed_refs.rs
+touched: crates/alt-server/tests/it/database/git/given_up.rs
+touched: crates/alt-server/tests/it/database/git/led.rs
+touched: crates/alt-server/tests/it/database/git/raw_push.rs
+touched: crates/alt-server/tests/it/database/git/settled_cost.rs
