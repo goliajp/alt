@@ -197,6 +197,8 @@ mod tests {
             "host:a",
             "../%250a",
             "file:///a",
+            // a URL no transport of curl takes is not normalized
+            "file://:80/a",
         ];
         for url in taken {
             assert!(submodule_url_is_safe(url.as_bytes()), "{url}");
@@ -220,7 +222,6 @@ mod tests {
             "https://host/%2e%2e",
             "https://host/a%zz",
             "ftp://host/a%",
-            "file://:80/a",
         ];
         for url in refused {
             assert!(!submodule_url_is_safe(url.as_bytes()), "{url}");
