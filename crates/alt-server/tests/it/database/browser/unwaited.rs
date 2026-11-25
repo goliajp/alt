@@ -1,7 +1,7 @@
 //! What the refs lead to, looked for on behalf of a request nobody waits for
 //! any more.
 use super::*;
-use crate::database::native_led::{client, sent, without_content};
+use crate::database::native_led::{begun, brought, client, sent, without_content};
 use crate::database::sign_in_deadline::{served, start};
 use std::sync::atomic::AtomicBool;
 
@@ -12,7 +12,8 @@ use std::sync::atomic::AtomicBool;
 /// a reading for the next that asks: after a request that ran out of time
 /// before its worker came to it, nothing is kept; after one that was answered,
 /// it is. The same of the page of a browser and of the native route, and of
-/// the page of a tree at a commit, which the refs have to lead to.
+/// the page of a tree at a commit, which the refs have to lead to, and of a
+/// native publication that is prepared, whose objects the refs are asked for.
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
 fn what_the_refs_lead_to_is_not_read_for_a_request_that_is_waited_for_no_longer() {
@@ -82,6 +83,23 @@ fn what_the_refs_lead_to_is_not_read_for_a_request_that_is_waited_for_no_longer(
         }
         assert!(!kept_for_the_next(&mut f), "{}", page.0);
     }
+    // naming no content, whose beginning asks nothing of the refs
+    let late = without_content(Payload::new("prepared-late", Some(kept.commit)));
+    let native = client(&server, &token);
+    begun(&native, &late);
+    brought(&native, &late);
+    let mut holding = f.client();
+    holding
+        .batch_execute("BEGIN; LOCK TABLE alt_refs IN ACCESS EXCLUSIVE MODE")
+        .unwrap();
+    assert!(native.prepare(&late.publication.key).is_err());
+    holding.batch_execute("ROLLBACK").unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(60);
+    while server.command("GET", "/v1/capabilities", &token).0 != 200 {
+        assert!(std::time::Instant::now() < until, "the worker is not free");
+    }
+    assert!(!kept_for_the_next(&mut f), "prepared");
+
     // waited for, it is read and kept
     assert_eq!(asked(&pages[0]), 200);
     assert!(kept_for_the_next(&mut f));

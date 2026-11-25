@@ -162,7 +162,11 @@ impl Work {
             Route::Request(key, _) => Some(key.scope.repository_instance_id.clone()),
             _ => None,
         };
-        let output = execute_native(store, &self.credential, &self.options, route, source)?;
+        // what the refs lead to, read for a publication, is left once nobody waits
+        store.waited_for(Some(self.verifying.given_up.clone()));
+        let output = execute_native(store, &self.credential, &self.options, route, source);
+        store.waited_for(None);
+        let output = output?;
         if let Some(repository) = published {
             self.compaction.published(&repository);
         }

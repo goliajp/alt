@@ -60,6 +60,9 @@ pub struct Store {
     pub(crate) spec: InstanceSpec,
     pub(crate) signing_key: SigningKey,
     pub(crate) limits: Limits,
+    /// set while a request that may stop being waited for is served, for the
+    /// walks it asks of the refs
+    pub(crate) waited: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 impl Store {
     /// Explicit first initialization, never invoked as a fallback from open.
@@ -126,7 +129,14 @@ impl Store {
             spec,
             signing_key,
             limits,
+            waited: None,
         })
+    }
+    /// What the walks of the refs this store is asked for look at to end
+    /// early, until it is told none again: a request that is waited for no
+    /// longer.
+    pub fn waited_for(&mut self, gone: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) {
+        self.waited = gone;
     }
     pub fn spec(&self) -> &InstanceSpec {
         &self.spec

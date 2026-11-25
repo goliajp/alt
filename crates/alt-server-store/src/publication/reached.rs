@@ -8,6 +8,7 @@ use crate::database::Transaction;
 use crate::{Error, Result, Store};
 use alt_pack_segment::{Led, Oid, SegmentSet};
 use alt_remote_protocol::ContentEntry;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 
 pub(crate) struct Reached {
@@ -16,6 +17,8 @@ pub(crate) struct Reached {
     /// none where every object of the segments is led to
     tips: Option<Vec<Oid>>,
     steps: usize,
+    /// set once the request this is read for is waited for no longer
+    gone: Option<Arc<AtomicBool>>,
     /// with whether it was found to be every object of the segments
     led: OnceLock<(Arc<Led>, bool)>,
 }
@@ -27,7 +30,8 @@ impl Reached {
         };
         if self.led.get().is_none() {
             let repository = self.repository.as_str();
-            let led = crate::pack_view::led(repository, segments, tips.clone(), self.steps, None)?;
+            let gone = self.gone.as_deref();
+            let led = crate::pack_view::led(repository, segments, tips.clone(), self.steps, gone)?;
             let _ = self.led.set(led);
         }
         Ok(self.led.get().map(|(led, _)| &**led))
@@ -138,6 +142,7 @@ impl Store {
                 repository: self.led_under(repository),
                 tips: listed.tips,
                 steps: self.limits.walk_steps,
+                gone: self.waited.clone(),
                 led: OnceLock::new(),
             },
         })

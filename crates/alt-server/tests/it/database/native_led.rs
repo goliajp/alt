@@ -22,7 +22,7 @@ pub(in crate::database) fn without_content(mut payload: Payload) -> Payload {
     payload
 }
 
-fn begun(client: &Transport, payload: &Payload) {
+pub(in crate::database) fn begun(client: &Transport, payload: &Payload) {
     let request = BeginRequest {
         publication: payload.publication.clone(),
         manifest: payload.manifest.clone(),
@@ -31,7 +31,7 @@ fn begun(client: &Transport, payload: &Payload) {
     assert!(matches!(state, RequestState::Receiving { .. }));
 }
 
-fn brought(client: &Transport, payload: &Payload) {
+pub(in crate::database) fn brought(client: &Transport, payload: &Payload) {
     let key = &payload.publication.key;
     for (entry, bytes) in payload.manifest.entries.iter().zip(&payload.contents) {
         for chunk in &entry.chunks {
