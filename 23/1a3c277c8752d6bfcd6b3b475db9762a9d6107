@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a merge looks for its file under the lock a sweep removes files with, and is not published where it is gone
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/lib.rs
+touched: crates/alt-server-store/src/pack_compaction.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/merge_gone.rs
