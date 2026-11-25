@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: keep the empty directories a move takes along out of the log, where an older alt reads them as files
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_recovery.rs
+touched: crates/alt-cli/src/native/checkout_recovery/hollow.rs
+touched: crates/alt-cli/src/native/operation.rs
+touched: crates/alt-cli/src/native/recovery/undo.rs
+touched: crates/alt-cli/tests/it/mixed_versions.rs
+touched: crates/alt-cli/tests/it/mixed_versions/hollow.rs
