@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: what backup, backup-verify and restore write on their way is beside their output, input and data, not in the temp mount
+author-type: human
+author: doracawl
+touched: self-hosted/README.md
