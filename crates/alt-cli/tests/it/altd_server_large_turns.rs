@@ -19,13 +19,8 @@ const LARGE_WINDOW: Duration = Duration::from_secs(30);
 
 /// A server of a repository of [`BYTES`] of noise, with `env`, and its head.
 fn served(origin: &std::path::Path, env: &[(&str, &str)]) -> (Server, String) {
-    served_of(origin, env, BYTES)
-}
-
-/// [`served`] with `bytes` of noise; `env` comes after the room of sixty megabytes
-fn served_of(origin: &std::path::Path, env: &[(&str, &str)], bytes: usize) -> (Server, String) {
     repository(origin);
-    std::fs::write(origin.join("noise"), noise(bytes)).unwrap();
+    std::fs::write(origin.join("noise"), noise(BYTES)).unwrap();
     let alt = crate::altd_server::alt;
     crate::altd_server::ok(alt(origin, &["add", "."]));
     crate::altd_server::ok(alt(origin, &["commit", "-m", "noise"]));
@@ -98,19 +93,18 @@ fn a_large_response_waits_for_its_turn_while_another_address_is_answered() {
 }
 
 /// Two turns, both kept: a fetch that waits for one is told to come again
-/// when the time a fetch may take is over, and not before. The responses are
-/// two megabytes, of a room of six: large ones are written within the six
-/// seconds a fetch may take here on a busy host too.
+/// when the time a fetch may take is over, and not before. The responses that
+/// keep the turns are larger than what the sockets hold, so that they keep
+/// them; the time is long enough for them to be written on a busy host first.
 #[test]
 fn a_large_response_that_waits_while_every_turn_is_kept_is_told_to_come_again_when_its_time_is_over()
  {
     let tmp = alt_os::temp::tempdir().unwrap();
     let env = [
         ("ALT_SERVER_WORKERS", "4"),
-        ("ALT_SERVER_MAX_FETCH_MS", "6000"),
-        ("ALT_SERVER_MAX_SENDING_BYTES", "6000000"),
+        ("ALT_SERVER_MAX_FETCH_MS", "20000"),
     ];
-    let (server, head) = served_of(&tmp.path().join("origin"), &env, 2 << 20);
+    let (server, head) = served(&tmp.path().join("origin"), &env);
     let (one, other, third) = ("203.0.113.9", "203.0.113.10", "203.0.113.11");
     let (_first, _beside) = (kept(&server, &head, one), kept(&server, &head, other));
     let began = Instant::now();
@@ -121,7 +115,7 @@ fn a_large_response_that_waits_while_every_turn_is_kept_is_told_to_come_again_wh
         String::from_utf8_lossy(&late)
     );
     assert!(
-        began.elapsed() >= Duration::from_secs(5),
+        began.elapsed() >= Duration::from_secs(19),
         "{:?}",
         began.elapsed()
     );
