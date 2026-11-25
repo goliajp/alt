@@ -52,17 +52,18 @@ fn waiting(server: &Server, head: &str, from: &'static str) -> std::thread::Join
 
 /// Four workers, so two turns. A second fetch of an address waits while the
 /// first is kept, though a turn is free, and one of another address is
-/// answered meanwhile; one that waits while both turns are kept is told to
-/// come again when its time is over and not before.
+/// answered meanwhile. The fetches may take as long as the answer to another
+/// does on a busy host: that the one that waits is still waiting is what is
+/// looked at, not how long it may.
 #[test]
-fn a_large_response_waits_for_its_turn_while_its_fetch_may_take() {
+fn a_large_response_waits_for_its_turn_while_another_address_is_answered() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let env = [
         ("ALT_SERVER_WORKERS", "4"),
-        ("ALT_SERVER_MAX_FETCH_MS", "6000"),
+        ("ALT_SERVER_MAX_FETCH_MS", "120000"),
     ];
     let (server, head) = served(&tmp.path().join("origin"), &env);
-    let (one, other, third) = ("203.0.113.9", "203.0.113.10", "203.0.113.11");
+    let (one, other) = ("203.0.113.9", "203.0.113.10");
 
     let first = kept(&server, &head, one);
     let second = waiting(&server, &head, one);
@@ -76,7 +77,11 @@ fn a_large_response_waits_for_its_turn_while_its_fetch_may_take() {
         began.elapsed(),
         String::from_utf8_lossy(&beside)
     );
-    assert!(!second.is_finished());
+    assert!(
+        !second.is_finished(),
+        "answered after {:?}",
+        began.elapsed()
+    );
     drop(first);
     let second = second.join().unwrap();
     assert!(
@@ -85,7 +90,20 @@ fn a_large_response_waits_for_its_turn_while_its_fetch_may_take() {
         String::from_utf8_lossy(&second)
     );
     assert_eq!(second.len(), beside.len());
+}
 
+/// Two turns, both kept: a fetch that waits for one is told to come again
+/// when the time a fetch may take is over, and not before.
+#[test]
+fn a_large_response_that_waits_while_every_turn_is_kept_is_told_to_come_again_when_its_time_is_over()
+ {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let env = [
+        ("ALT_SERVER_WORKERS", "4"),
+        ("ALT_SERVER_MAX_FETCH_MS", "6000"),
+    ];
+    let (server, head) = served(&tmp.path().join("origin"), &env);
+    let (one, other, third) = ("203.0.113.9", "203.0.113.10", "203.0.113.11");
     let (_first, _beside) = (kept(&server, &head, one), kept(&server, &head, other));
     let began = Instant::now();
     let late = answer(asked_for(&server.addr, &head, Some(third)));
