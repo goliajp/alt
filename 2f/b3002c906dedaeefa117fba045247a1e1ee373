@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: what the refs lead to, read for a native publication, is left once the request is waited for no longer
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/publication/reached.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/tests/it/database/browser/unwaited.rs
+touched: crates/alt-server/tests/it/database/native_led.rs
