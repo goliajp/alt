@@ -16,6 +16,7 @@ pub(crate) use led::led;
 mod statements;
 mod stored;
 use statements::{VIEW_ALL, VIEW_BOUNDED, VIEW_MANY_TIPS, VIEW_NOTHING, VIEW_PREFIXES, VIEW_TIPS};
+pub use stored::left_behind_removed as led_left_behind_removed;
 
 /// more wanted object ids than this are given to the view as a subquery
 pub const ARRAY_TIPS: usize = 2000;

@@ -191,6 +191,9 @@ impl Config {
         self.within(super::bounds::memory::of_the_container())?;
         let directory = self.bytes_directory.join(TEMPORARY);
         temporary(&directory)?;
+        // only the process that serves the bytes removes what one before it left
+        alt_server_store::led_left_behind_removed(&self.bytes_directory)
+            .map_err(|_| Error::File)?;
         // SAFETY: the caller is the one thread there is: nothing else reads or
         // writes the environment
         unsafe { std::env::set_var("TMPDIR", &directory) };

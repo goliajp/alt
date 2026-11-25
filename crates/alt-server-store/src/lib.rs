@@ -19,7 +19,9 @@ pub use pack_compaction::{MERGE_WRITTEN, MergeWritten, PACK_RETIRED_GRACE_MS};
 pub use pack_scrub::{NO_REPOSITORY, Read, Reading, Scrubbed, Unread};
 pub use pack_sweep::{Writing, writing};
 mod pack_view;
-pub use pack_view::{ARRAY_TIPS, DEFERRED_REFS, FOUND_ALL, PackView, RefFilter, RefScope};
+pub use pack_view::{
+    ARRAY_TIPS, DEFERRED_REFS, FOUND_ALL, PackView, RefFilter, RefScope, led_left_behind_removed,
+};
 mod packs;
 pub use packs::*;
 mod provenance;
