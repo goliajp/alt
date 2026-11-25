@@ -130,14 +130,28 @@ fn mark(of: Option<String>, mark: &str) -> String {
     of.map(|of| format!("@{of} {mark}\n")).unwrap_or_default()
 }
 
+/// The repository the part `refs` is of, as [`git_named`] has it.
+fn marked(refs: &str) -> Option<String> {
+    let of = |line: &str| {
+        Some(
+            line.strip_prefix('@')?
+                .strip_suffix(GIT)?
+                .trim_end()
+                .to_owned(),
+        )
+    };
+    refs.lines().find_map(of)
+}
+
 /// What the repository at `git_dir` had when the store under `alt_dir`
 /// last met it; `None` where nothing tells.
 pub fn read(alt_dir: &Path, git_dir: &Path) -> Result<Option<Side>, RepoError> {
-    let Some(at) = named(git_dir)? else {
-        return Ok(None);
-    };
-    if let Some((_, refs)) = parts(alt_dir)?.into_iter().find(|part| part.0 == at) {
-        return Ok(of_named(parsed(&refs, MET)?, GIT, git_named(git_dir)?));
+    // the part of this very repository, wherever it was when it was met:
+    // one at its path that is of another tells nothing of this one
+    let itself = git_named(git_dir)?;
+    let of_itself = |part: &(String, String)| itself.is_some() && marked(&part.1) == itself;
+    if let Some((_, refs)) = parts(alt_dir)?.into_iter().find(of_itself) {
+        return Ok(of_named(parsed(&refs, MET)?, GIT, itself));
     }
     let left = match fs::read_to_string(git_dir.join(LEFT)) {
         Ok(left) => left,
@@ -170,11 +184,15 @@ pub fn write<'r>(
         return Ok(());
     };
     let mut text = String::new();
-    let others = parts(alt_dir)?.into_iter();
-    for (other, refs) in others.filter(|part| part.0 != at && Path::new(&part.0).is_dir()) {
+    let itself = git_named(git_dir)?;
+    // neither what was at this path nor this repository where it was before
+    let other =
+        |part: &(String, String)| part.0 != at && !(itself.is_some() && marked(&part.1) == itself);
+    let others = parts(alt_dir)?.into_iter().filter(other);
+    for (other, refs) in others.filter(|part| Path::new(&part.0).is_dir()) {
         text.push_str(&format!("git {other}\n{refs}"));
     }
-    text.push_str(&format!("git {at}\n{}", mark(git_named(git_dir)?, GIT)));
+    text.push_str(&format!("git {at}\n{}", mark(itself, GIT)));
     text.push_str(&written(refs));
     let (kept, fresh) = (alt_dir.join(MET), alt_dir.join("git-import/met.new"));
     fs::create_dir_all(alt_dir.join("git-import"))?;

@@ -2,6 +2,8 @@
 //! records their operations as synced when it moves a ref: it syncs what
 //! those adds wrote first, the index and its snapshots among it.
 
+mod moved;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
