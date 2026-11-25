@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: size the connections of the test postgresql to the tests of every thread
+author-type: human
+author: doracawl
+touched: scripts/with-test-postgres-native.sh
+touched: scripts/with-test-postgres.sh
