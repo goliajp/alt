@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: a push to a ref that moved after it was read is told so
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git/raw_push.rs
