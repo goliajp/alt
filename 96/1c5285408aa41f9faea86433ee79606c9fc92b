@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: know a repository imported before by what it is, and one exported anew by what the export left
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/import_again.rs
+touched: crates/alt-cli/tests/it/import_again/moved.rs
+touched: crates/alt-repo/src/met.rs
