@@ -4,6 +4,7 @@ mod given_up;
 mod led;
 mod led_raced;
 mod led_stored;
+mod led_unread;
 mod many_refs;
 mod moved;
 mod raw_push;
