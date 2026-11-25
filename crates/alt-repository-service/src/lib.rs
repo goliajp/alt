@@ -3,9 +3,11 @@
 //! This crate validates a snapshot. The transaction adapter must lock and recheck
 //! scope, authorization, policy, refs and object pins before committing it.
 mod graph;
+mod object;
 mod publication;
 
 pub use graph::*;
+pub use object::{parse_node, verify_object};
 pub use publication::*;
 
 #[derive(Debug)]
