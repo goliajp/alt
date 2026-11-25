@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: an old server says so where a signed push is refused for the nonces of a day being all kept
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/nonces.rs
