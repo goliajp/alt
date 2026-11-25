@@ -36,13 +36,14 @@ impl Store {
     /// no longer, whether the database still has it or not: it ends it, and
     /// begins another.
     pub fn serve_alone(mut self, wait: Duration) -> Result<Serving> {
-        let wait = wait.as_millis();
-        let most = wait + 1000;
-        let timeouts = format!("SET lock_timeout={wait}; SET statement_timeout={most}");
-        self.client.batch_execute(&timeouts)?;
+        // every answer is waited for no longer than the lock and the time to
+        // answer: once the lock is had nothing more is asked
+        self.client.set_read_timeout(wait.saturating_add(ANSWER))?;
+        let (wait, most) = (wait.as_millis(), wait.as_millis() + 1000);
+        let set = format!("SET lock_timeout={wait}; SET statement_timeout={most}; {KEEPALIVES}");
+        self.client.batch_execute(&set)?;
         match (self.client).query_one("SELECT pg_advisory_lock($1)", &[&SERVES]) {
             Ok(_) => {
-                self.client.batch_execute(KEEPALIVES)?;
                 self.client.set_read_timeout(ANSWER)?;
                 Ok(Serving(self.client))
             }

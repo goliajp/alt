@@ -201,6 +201,10 @@ fn a_server_whose_session_goes_silent_takes_the_lock_again_with_another() {
         let reached = format!("host=127.0.0.1 port={port} user={user} dbname={database}");
         factory.database = reached.parse().unwrap();
     });
+    // the server has begun: it answers once it holds the lock and is done with its session
+    let token = f.token.clone();
+    let answered = server.send("GET", "/v1/capabilities", Some(&token), b"");
+    assert_eq!(answered.status(), 200);
     let before = held_until(&f, "the lock of the server", |held| held.len() == 1);
     line.silent();
     ended(&f, before[0]);
