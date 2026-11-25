@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: chore
+summary: the lone line comments of the files this work touched begin in lower case and end without a period
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/tests/it/altd_server.rs
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/tests/it/database.rs
+touched: crates/alt-server/src/cloud.rs
+touched: crates/alt-server/src/http/file_body.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/portable/cloud.rs
+touched: crates/alt-wire/src/push/served.rs
