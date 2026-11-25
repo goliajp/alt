@@ -1,0 +1,20 @@
+schema: alt-meta/1
+type: fix
+summary: an object stored as a delta that is read whole is restored within the memory of the server
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/stream.rs
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/review.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server-store/src/store/numbers.rs
+touched: crates/alt-server-store/src/transport.rs
+touched: crates/alt-server-store/src/transport/git_content.rs
+touched: crates/alt-server/src/http.rs
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/pool.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/restored.rs
