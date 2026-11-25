@@ -10,11 +10,13 @@
 //! deleted or replaced, are walked from nothing again; and a walk that is
 //! given up, or runs out of steps, leaves what it came to for the next.
 
-use super::PackView;
+use super::{PackView, stored};
 use crate::{Error, Result, Store};
 use alt_pack_segment::{Led, Oid, SegmentSet};
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
 use std::time::Duration;
 
 /// what was found for the tips a repository had at one moment
@@ -32,11 +34,57 @@ struct Kept {
 /// the tips a request read a moment before another moved them are among them
 const KEPT: usize = 16;
 const KEPT_EACH: usize = 4;
-
 static ASKED: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
 /// the repositories a walk is under way in, one in each
 static WALKED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static ENDED: Condvar = Condvar::new();
+/// how many objects what is on disk for a repository holds, where this process
+/// read or wrote it
+static STORED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
+
+/// the directory of the stored bytes and the id of the repository, of what
+/// [`Store::led_under`] made
+fn of(repository: &str) -> (&Path, &str) {
+    let (root, id) = repository.split_once('\0').expect("as led_under has it");
+    (Path::new(root), id)
+}
+
+/// Where nothing is kept for a repository, keeps what is on disk for it.
+fn loaded(repository: &str) {
+    if ASKED
+        .lock()
+        .expect("led")
+        .iter()
+        .any(|kept| kept.repository == repository)
+    {
+        return;
+    }
+    let (root, id) = of(repository);
+    if let Some((tips, led)) = stored::read(root, id) {
+        STORED
+            .lock()
+            .expect("stored")
+            .insert(repository.to_owned(), led.len());
+        keep(repository, tips, Arc::new(led), true);
+    }
+}
+
+/// Writes what a walk found to disk where it was found from nothing, or holds
+/// an eighth more than what is there: one who starts again walks no more than
+/// that eighth. What is on disk is found anew wherever it is missing, so a
+/// write that fails fails nothing else.
+fn store(repository: &str, tips: &[Oid], led: &Led, from_nothing: bool) {
+    let stored = STORED.lock().expect("stored").get(repository).copied();
+    if from_nothing || stored.is_none_or(|n| led.len() > n + n / 8) {
+        let (root, id) = of(repository);
+        if stored::written(root, id, tips, led).is_ok() {
+            STORED
+                .lock()
+                .expect("stored")
+                .insert(repository.to_owned(), led.len());
+        }
+    }
+}
 
 /// Called with what the answers of a repository are kept under, where a walk
 /// found that its refs lead to every object its segments hold and before that
@@ -44,6 +92,7 @@ static ENDED: Condvar = Condvar::new();
 /// is set outside tests.
 #[doc(hidden)]
 pub static FOUND_ALL: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
+
 /// The one walk a repository has at a time: the others that ask wait for it
 /// and go on from what it found.
 struct Turn<'a>(&'a str);
@@ -152,7 +201,8 @@ pub(crate) fn led(
         return Ok((led, false));
     }
     let _turn = Turn::taken(repository, gone)?;
-    // the walk waited for may have found it
+    loaded(repository);
+    // the walk waited for, or one before the process began, may have found it
     if let Some(led) = kept(repository, &tips) {
         return Ok((led, false));
     }
@@ -170,6 +220,7 @@ pub(crate) fn led(
     match ended {
         Ok(()) => {
             let all = anew && segments.all_led(&led).map_err(unfit)?;
+            store(repository, &tips, &led, had == 0);
             keep(repository, tips, led.clone(), true);
             Ok((led, all))
         }

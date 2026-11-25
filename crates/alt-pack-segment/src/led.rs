@@ -41,6 +41,23 @@ impl Led {
         self.parts.is_empty()
     }
 
+    /// every object, part by part
+    pub fn objects(&self) -> impl Iterator<Item = &Oid> {
+        self.parts.iter().flat_map(|part| part.iter())
+    }
+
+    /// The objects of a walk of tips that went before: `objects` as an earlier
+    /// [`Self::objects`] gave them. None where an object is in it twice.
+    pub fn again(mut objects: Vec<Oid>) -> Option<Self> {
+        objects.sort_unstable();
+        if objects.windows(2).any(|two| two[0] == two[1]) {
+            return None;
+        }
+        let mut led = Self::default();
+        led.add(objects);
+        Some(led)
+    }
+
     /// Adds `more`, none of which it has. The parts it shares with a copy of
     /// it are left as they are.
     fn add(&mut self, mut more: Vec<Oid>) {
