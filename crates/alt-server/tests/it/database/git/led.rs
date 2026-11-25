@@ -17,9 +17,11 @@ pub(super) fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
         .spawn()
         .unwrap();
     let mut input = packing.stdin.take().unwrap();
-    input.write_all(ids.as_bytes()).unwrap();
+    let written = input.write_all(ids.as_bytes());
     drop(input);
-    packing.wait_with_output().unwrap().stdout
+    let packed = packing.wait_with_output().unwrap().stdout;
+    written.unwrap();
+    packed
 }
 
 /// A branch is pushed and deleted: the segments keep its commit, its tree and

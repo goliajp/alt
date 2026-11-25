@@ -26,14 +26,14 @@ fn instructions(pids: &[String], work: impl FnOnce()) -> Option<u64> {
     let mut counting = counting.ok()?;
     let mut interrupt = Command::new("kill");
     interrupt.args(["-INT", &counting.id().to_string()]);
-    assert!(interrupt.status().unwrap().success());
+    let interrupted = interrupt.status();
     let mut counted = String::new();
-    counting
-        .stderr
-        .take()?
-        .read_to_string(&mut counted)
-        .unwrap();
+    let mut stderr = counting.stderr.take().expect("piped");
+    let read = stderr.read_to_string(&mut counted);
+    // waited for before anything that went wrong is told
     counting.wait().unwrap();
+    assert!(interrupted.unwrap().success());
+    read.unwrap();
     let line = counted.lines().find(|line| line.contains("instructions"))?;
     line.split(',').next()?.parse().ok()
 }

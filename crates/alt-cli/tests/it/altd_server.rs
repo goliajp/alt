@@ -2587,16 +2587,15 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let started = loop {
         line.clear();
-        let read = reader.read_line(&mut line).unwrap();
-        if line.contains("listening on ") {
-            break true;
-        }
-        if read == 0 || Instant::now() > deadline {
-            break false;
+        let read = reader.read_line(&mut line);
+        let listening = line.contains("listening on ");
+        if listening || !matches!(read, Ok(1..)) || Instant::now() > deadline {
+            break read.map(|_| listening);
         }
     };
     let _ = child.kill();
     let _ = child.wait();
+    let started = started.unwrap();
     assert!(
         started,
         "REQUIRE_AUTH=1 with users file present must start; tail of stderr line={line}"

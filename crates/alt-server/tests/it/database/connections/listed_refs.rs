@@ -28,12 +28,15 @@ fn pushed(f: &Fixture, server: &Running) {
         .spawn()
         .unwrap();
     let mut lines = updating.stdin.take().unwrap();
-    for at in 0..REFS {
+    // the process is waited for before what was written is looked at
+    let written = (0..REFS).try_for_each(|at| {
         let name = format!("refs/heads/{at:05}/{part}/{part}/{part}/{part}");
-        writeln!(lines, "create {name} HEAD").unwrap();
-    }
+        writeln!(lines, "create {name} HEAD")
+    });
     drop(lines);
-    assert!(updating.wait().unwrap().success());
+    let updated = updating.wait().unwrap();
+    written.unwrap();
+    assert!(updated.success());
     let url = format!("{}/git/repository", server.url);
     ok(work, &f.token, &["push", "-q", "--mirror", &url]);
 }

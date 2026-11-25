@@ -63,13 +63,14 @@ fn a_server_told_its_local_peers_and_not_its_proxies_says_so_as_it_starts() {
             .spawn()
             .unwrap();
         let lines = BufReader::new(child.stderr.take().unwrap()).lines();
-        let said: Vec<String> = lines
-            .map(Result::unwrap)
-            .take_while(|line| !line.contains("listening on"))
-            .collect();
+        let listening = |line: &std::io::Result<String>| match line {
+            Ok(line) => line.contains("listening on"),
+            Err(_) => false,
+        };
+        let said: std::io::Result<Vec<_>> = lines.take_while(|line| !listening(line)).collect();
         child.kill().unwrap();
         child.wait().unwrap();
-        said.join("\n")
+        said.unwrap().join("\n")
     };
     let peers = ("ALT_SERVER_LOCAL_PEERS", "127.0.0.0/8,172.30.90.1");
     let unproxied = "ALT_SERVER_LOCAL_PEERS is set and ALT_SERVER_TRUSTED_PROXIES is not";

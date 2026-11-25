@@ -49,13 +49,9 @@ fn real_git_push_with_unknown_capabilities_and_unchanged_refs() {
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    packing
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(format!("{two}\n^{one}\n").as_bytes())
-        .unwrap();
+    let written = (packing.stdin.take().unwrap()).write_all(format!("{two}\n^{one}\n").as_bytes());
     let pack = packing.wait_with_output().unwrap().stdout;
+    written.unwrap();
 
     // what a client newer than this server may send: capabilities the server has
     // never heard of, and refs listed although they do not change

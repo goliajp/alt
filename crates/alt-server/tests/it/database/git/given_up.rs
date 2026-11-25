@@ -102,9 +102,11 @@ fn a_fetch_whose_time_is_over_chooses_no_further_and_gives_its_worker_back() {
         .spawn()
         .unwrap();
     let mut stream = importing.stdin.take().unwrap();
-    stream.write_all(&history(8000, 3000)).unwrap();
+    let written = stream.write_all(&history(8000, 3000));
     drop(stream);
-    assert!(importing.wait().unwrap().success());
+    let imported = importing.wait().unwrap();
+    written.unwrap();
+    assert!(imported.success());
     // a branch beside the one that is asked for: the fetch is not of all there is
     ok(work, &f.token, &["branch", "older", "main~1"]);
     let older = text(ok(work, &f.token, &["rev-parse", "older"]));
@@ -172,8 +174,10 @@ fn the_commits_a_fetch_goes_through_are_steps_of_its_walk() {
         .stdin(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    importing.stdin.take().unwrap().write_all(&stream).unwrap();
-    assert!(importing.wait().unwrap().success());
+    let written = importing.stdin.take().unwrap().write_all(&stream);
+    let imported = importing.wait().unwrap();
+    written.unwrap();
+    assert!(imported.success());
     // a branch beside the one that is asked for: a fetch of every tip is sent with no walk
     ok(work, &f.token, &["branch", "older", "main~1"]);
     let tip = text(ok(work, &f.token, &["rev-parse", "older"]));
