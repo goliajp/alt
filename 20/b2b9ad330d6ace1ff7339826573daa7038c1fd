@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a walk that went on from one that found all is asked whether it found all, and what it found is kept first
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/led.rs
+touched: crates/alt-server/tests/it/database/git/led.rs
