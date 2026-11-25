@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a users file that is there as a link to nothing or a directory ends the start of the old server
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/mode.rs
+touched: crates/alt-cli/tests/it/altd_server_users.rs
