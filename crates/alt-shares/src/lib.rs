@@ -19,12 +19,14 @@
 //! given whatever it needs: a repository larger than the amount can still be
 //! cloned.
 //!
-//! A large taker that another waits for has to go on faster than a peer has
-//! to in general: what it holds is sent at no less than [`LARGE_RATE`] in each
-//! [`LARGE_WINDOW`] while another waits ([`Share::sent`]). A peer on a slow
-//! line that is alone in a turn has it for as long as it takes; one that would
-//! keep a turn by taking a kilobyte a second, the least a peer takes before
-//! it is let go of, is let go of once another wants the turn.
+//! A large taker that one of another address waits for has to go on faster
+//! than a peer has to in general: what it holds is sent at no less than
+//! [`LARGE_RATE`] in each [`LARGE_WINDOW`] while that one waits
+//! ([`Share::sent`]). A peer on a slow line that is alone in a turn has it for
+//! as long as it takes, and so has one whose own address alone waits after
+//! it; one that would keep a turn by taking a kilobyte a second, the least a
+//! peer takes before it is let go of, is let go of once another address wants
+//! the turn.
 
 mod disk;
 mod held;

@@ -75,15 +75,16 @@ impl Share {
         self
     }
 
-    /// Whether the taker is a large one that another waits for: one that would
-    /// be let in once it is gone, being of its address or of one that has no
-    /// large taker.
+    /// Whether the taker is a large one that a taker of another address waits
+    /// for: one that would be let in once it is gone, its address having no
+    /// large taker. One of its own address that waits does not hurry it: the
+    /// two would only take turns at being let go of.
     pub fn waited_for(&self) -> bool {
         let (Some(from), true) = (self.from, self.large) else {
             return false;
         };
         let held = self.of.lock();
-        (held.waiting.keys()).any(|waiting| *waiting == from || !held.large.contains(waiting))
+        (held.waiting.keys()).any(|waiting| *waiting != from && !held.large.contains(waiting))
     }
 
     /// The peer took `bytes` more of what the taker holds. Where a window is

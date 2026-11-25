@@ -165,10 +165,10 @@ fn a_taker_waits_while_it_is_waited_for_and_one_let_in_in_vain_gives_its_turn_on
     // another address does not wait while there is a turn free
     let other = waiter(&shares, 2, 300, &gone).join().unwrap().unwrap();
     assert!(!first.waited_for());
-    // one of the same address does
+    // one of the same address does, and does not hurry the first
     let second = waiter(&shares, 1, 300, &gone);
     until_waiting(&shares, 1);
-    assert!(first.waited_for() && !other.waited_for());
+    assert!(!first.waited_for() && !other.waited_for());
     gone.store(true, Ordering::Relaxed);
     assert!(second.join().unwrap().is_err());
     assert_eq!(shares.waiting(), 0);
@@ -223,6 +223,28 @@ fn a_large_taker_another_waits_for_is_slow_below_its_pace_and_one_alone_is_not()
     drop(large);
     let waiting = waiting.join().unwrap().unwrap();
     drop((waiting, small));
+    assert_eq!(shares.held(), 0);
+
+    // one of its own address that waits does not make it slow
+    let mut large = taker(&shares, 1, 300).unwrap();
+    let small = taker(&shares, 2, 100).unwrap();
+    let began = Instant::now();
+    let at = |seconds: u64| began + Duration::from_secs(seconds);
+    let waiting = waiter(&shares, 1, 300, &gone);
+    until_waiting(&shares, 1);
+    large.sent_at(1, began).unwrap();
+    large.sent_at(1, at(20)).unwrap();
+    assert_eq!(large.sent_at(1, at(40)), Ok(()));
+    // and one of another address that comes then does
+    let other = waiter(&shares, 3, 300, &gone);
+    until_waiting(&shares, 2);
+    assert_eq!(large.sent_at(1, at(80)), Err(Slow));
+    drop(large);
+    // the turns go round the addresses: the one of its own address first
+    let waiting = waiting.join().unwrap().unwrap();
+    drop(waiting);
+    let other = other.join().unwrap().unwrap();
+    drop((other, small));
     assert_eq!(shares.held(), 0);
 }
 
