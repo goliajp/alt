@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: a tree that names .alt is refused at the push as one that names .git is, and the export refuses what the push does
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-git-codec/src/lib.rs
+touched: crates/alt-git-codec/src/names.rs
+touched: crates/alt-pack-segment/Cargo.toml
+touched: crates/alt-pack-segment/src/unsafe_names.rs
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/tests/it/main.rs
+touched: crates/alt-server/tests/it/database/git/fsck.rs
