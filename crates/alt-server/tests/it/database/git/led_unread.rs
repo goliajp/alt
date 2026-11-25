@@ -49,17 +49,28 @@ fn what_the_refs_lead_to_is_kept_where_a_record_they_do_not_lead_to_is_not_read(
     git(&["checkout", "-q", "main"]);
     assert!(pushed(&[":gone"]).0);
 
-    // the record of the commit of the deleted branch, in the segment its push made
-    let id: Vec<u8> = (0..20)
-        .map(|at| u8::from_str_radix(&gone[at * 2..at * 2 + 2], 16).unwrap())
-        .collect();
+    // The records of the objects of the deleted branch, in the segment its
+    // push made: all of them, as the records are read in the order of the
+    // ids and the first one the refs do not lead to ends the reading.
+    let ids: Vec<Vec<u8>> = [
+        gone.clone(),
+        git(&["rev-parse", "gone^{tree}"]),
+        git(&["rev-parse", "gone:file"]),
+    ]
+    .iter()
+    .map(|id| {
+        (0..20)
+            .map(|at| u8::from_str_radix(&id[at * 2..at * 2 + 2], 16).unwrap())
+            .collect()
+    })
+    .collect();
     let mut segments = Vec::new();
     files(&f.root.path().join("bytes"), &mut segments);
     let mut changed = 0;
     for path in segments {
         let mut bytes = std::fs::read(&path).unwrap();
         let places: Vec<usize> = (0..bytes.len().saturating_sub(88))
-            .filter(|at| bytes[*at..*at + 20] == id[..])
+            .filter(|at| ids.iter().any(|id| bytes[*at..*at + 20] == id[..]))
             .filter(|at| (1..=4).contains(&bytes[at + 80]) && bytes[at + 81] <= 2)
             .collect();
         for at in places {
