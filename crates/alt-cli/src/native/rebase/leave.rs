@@ -134,6 +134,26 @@ impl NativeRepo<'_> {
              index and the files are as the rebase left them.\nThe commits it made end at \
              {made}; `alt branch <name> {made}` keeps them on a branch."
         )?;
+        if self.index_apart_from(state.orig)? {
+            writeln!(
+                out,
+                "The index is not that of {short}: it holds what the rebase made of the commits \
+                 it went through and nothing of those it had yet to make, so a commit made now \
+                 takes what they changed out of {short} again.\n`alt reset` puts the index back \
+                 to {short} and leaves the files; `alt reset --hard` puts back the files as well."
+            )?;
+        }
         Ok(())
+    }
+
+    /// Whether the index holds anything but the files of `commit`.
+    fn index_apart_from(&self, commit: ObjectId) -> Res<bool> {
+        let held = self.commit_entries(commit)?;
+        let index = self.index()?;
+        let same = |(staged, held): (&IndexEntry, &WorkEntry)| {
+            staged.stage() == 0
+                && (&staged.path, staged.oid, staged.mode) == (&held.path, held.oid, held.mode)
+        };
+        Ok(index.entries.len() != held.len() || !index.entries.iter().zip(&held).all(same))
     }
 }

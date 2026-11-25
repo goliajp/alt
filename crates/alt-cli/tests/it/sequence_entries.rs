@@ -3,6 +3,8 @@
 //! index and in the files, beside git: the command ends as git's ends,
 //! and leaves the branch, the index and the files as git leaves them.
 
+mod quit;
+
 use std::process::Output;
 
 use crate::like_git::{Pair, alt, files, git, heads, index, ok};
