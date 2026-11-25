@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: give up on a git http connection that goes silent, not on a long answer
+author-type: human
+author: doracawl
+touched: crates/alt-wire-http/src/lib.rs
+touched: crates/alt-wire-http/tests/it/silence.rs
+touched: crates/alt-wire-http/tests/transport.rs
