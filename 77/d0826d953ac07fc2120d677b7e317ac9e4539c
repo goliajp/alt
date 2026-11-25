@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: a push is published only where the refs it was read with still lead to what they led to
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/read_moved.rs
