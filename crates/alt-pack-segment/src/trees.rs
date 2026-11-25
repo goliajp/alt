@@ -25,6 +25,10 @@ pub(crate) struct Below(pub HashMap<Vec<u8>, Rc<[Oid]>>);
 /// tables of what it found.
 const KEPT: usize = 16 << 20;
 
+/// what a tree that is kept takes beside its bytes: its place and itself among
+/// those kept, and the counts of who has it
+const EACH: usize = size_of::<(Place, Rc<Vec<u8>>)>() + size_of::<(usize, usize, Vec<u8>)>();
+
 /// an entry of a tree that names an object of this repository
 pub(crate) struct Entry<'a> {
     pub name: &'a [u8],
@@ -160,10 +164,8 @@ impl<'a> Trees<'a> {
             for entry in entries(&data)? {
                 known.insert(entry.oid);
                 if entry.tree {
-                    trees
-                        .entry(entry.name.to_vec())
-                        .or_default()
-                        .push(entry.oid);
+                    let name = entry.name.to_vec();
+                    trees.entry(name).or_default().push(entry.oid);
                 }
             }
         }
@@ -190,15 +192,16 @@ impl<'a> Trees<'a> {
     }
 
     fn keep(&mut self, at: Place, data: Rc<Vec<u8>>) {
+        let bytes = data.len() + EACH;
         // one tree is not to be most of what is kept
-        if data.len() > KEPT / 8 {
+        if bytes > KEPT / 8 {
             return;
         }
-        if self.late_bytes + data.len() > KEPT / 2 {
+        if self.late_bytes + bytes > KEPT / 2 {
             self.before = std::mem::take(&mut self.late);
             self.late_bytes = 0;
         }
-        self.late_bytes += data.len();
+        self.late_bytes += bytes;
         self.late.insert(at, data);
     }
 
@@ -258,6 +261,20 @@ mod tests {
             oid: [oid; 20],
             tree,
         }
+    }
+
+    /// Trees of few bytes, or none, are kept as many as what each takes beside
+    /// its bytes allows, and no more.
+    #[test]
+    fn what_is_kept_of_trees_counts_what_each_takes_beside_its_bytes() {
+        let set = SegmentSet::default();
+        let mut trees = Trees::new(&set, usize::MAX, None);
+        let empty = Rc::new(Vec::new());
+        for at in 0..1_000_000 {
+            trees.keep((0, at), empty.clone());
+        }
+        assert!(trees.late.len() <= KEPT / 2 / EACH, "{}", trees.late.len());
+        assert!(trees.late.len() + trees.before.len() <= KEPT / EACH);
     }
 
     #[test]
