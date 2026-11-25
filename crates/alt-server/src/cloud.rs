@@ -156,16 +156,13 @@ impl Runtime {
             }
             let digest = &descriptor.credential_digest;
             // whoever has no turn to ask goes on as one whose asking failed
-            let asked = match self.asking.turn(Some(digest), !descriptor.serves) {
-                Asked::Look if !waited => {
+            let turn = (self.asking).turn_after(Some(digest), !descriptor.serves, waited);
+            let asked = match turn {
+                Asked::Look => {
                     waited = true;
                     continue;
                 }
-                Asked::Look | Asked::No => None,
-                Asked::Turn(turn) if waited => {
-                    turn.unasked();
-                    None
-                }
+                Asked::No => None,
                 Asked::Turn(turn) => {
                     let Ok(grant) = self.sealer.open(&descriptor.sealed_grant, digest) else {
                         // a grant that does not open is no silence of the platform

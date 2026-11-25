@@ -72,6 +72,15 @@ impl Asking {
         self.turn_at(credential, over, Instant::now())
     }
 
+    /// [`Self::turn`] for a request that `looked` at what another was told
+    /// already: it asks no more, and takes no turn another would wait for.
+    pub(crate) fn turn_after(&self, of: Option<&str>, over: bool, looked: bool) -> Asked<'_> {
+        match looked {
+            true => Asked::No,
+            false => self.turn(of, over),
+        }
+    }
+
     fn turn_at(&self, credential: Option<&str>, over: bool, now: Instant) -> Asked<'_> {
         let mut state = self.state.lock().unwrap();
         let of = credential.map(str::to_owned);
@@ -319,5 +328,19 @@ mod tests {
         turn(&asking, Some("a"), true, now).unwrap().unasked();
         let state = asking.state.lock().unwrap();
         assert_eq!((state.unanswered, state.again), (1, again));
+    }
+
+    /// One that looked at what another was told takes no turn: one that comes
+    /// meanwhile for the same lease, which is over, asks at once and does not
+    /// wait for it.
+    #[test]
+    fn one_that_looked_takes_no_turn_another_would_wait_for() {
+        let asking = Asking::default();
+        let looked = asking.turn_after(Some("a"), true, true);
+        assert!(matches!(looked, Asked::No));
+        assert!(asking.state.lock().unwrap().under_way.is_empty());
+        let next = turn(&asking, Some("a"), true, Instant::now()).unwrap();
+        next.answered();
+        drop(looked);
     }
 }
