@@ -160,3 +160,24 @@ fn tag_list_json_emits_sorted_array() {
     let p2 = json.find("\"v0.2\"").expect("v0.2 present");
     assert!(p1 < p2, "expected v0.1 before v0.2 in: {json}");
 }
+
+#[test]
+fn a_tag_given_two_messages_holds_them_as_two_paragraphs_as_with_git() {
+    let pair = crate::like_git::Pair::new();
+    pair.write("f", "f\n");
+    pair.commit_all("base");
+    pair.both(&["tag", "-a", "-m", "one", "-m", "two", "noted"]);
+    let message = |shown: String| shown.split_once("\n\n").unwrap().1.to_owned();
+    let ours = message(ok(crate::like_git::alt(
+        &pair.alt,
+        &["cat-file", "-p", "noted"],
+    )));
+    assert_eq!(
+        ours,
+        message(ok(crate::like_git::git(
+            &pair.git,
+            &["cat-file", "-p", "noted"]
+        )))
+    );
+    assert_eq!(ours, "one\n\ntwo\n");
+}

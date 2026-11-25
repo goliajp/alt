@@ -118,9 +118,10 @@ pub struct Tag {
     /// message + tagger ident, instead of a bare ref).
     #[arg(short = 'a', long)]
     pub annotate: bool,
-    /// Annotated-tag message. Required when `-a` is set.
+    /// Annotated-tag message. Required when `-a` is set. Given more
+    /// than once, each is a paragraph of its own.
     #[arg(short = 'm', long, hint = none)]
-    pub message: Option<String>,
+    pub message: Vec<String>,
     /// JSON output for list mode (ignored otherwise).
     #[arg(long)]
     pub json: bool,

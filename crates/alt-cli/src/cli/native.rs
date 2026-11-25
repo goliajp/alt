@@ -64,7 +64,7 @@ fn dispatch<W: Write>(repo: &mut NativeRepo, cmd: &Command, out: &mut W) -> Res<
             tag.rev.clone(),
             tag.delete.clone(),
             tag.annotate,
-            tag.message.clone(),
+            (!tag.message.is_empty()).then(|| tag.message.join("\n\n")),
             tag.json,
             out,
         )?,
