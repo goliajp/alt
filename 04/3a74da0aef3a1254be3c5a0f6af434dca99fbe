@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the beginning of a session of the database is waited for as long as its connect timeout
+author-type: human
+author: doracawl
+touched: crates/alt-pg/src/connect.rs
+touched: crates/alt-pg/tests/it/failures.rs
