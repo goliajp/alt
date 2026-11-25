@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: skip a revert that was refused and give up from where the sequence began, as git does
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/in_progress/entry.rs
+touched: crates/alt-cli/src/native/revert.rs
+touched: crates/alt-cli/src/native/revert/resume.rs
+touched: crates/alt-cli/src/native/revert/state.rs
+touched: crates/alt-cli/tests/it/sequence_entries.rs
+touched: crates/alt-cli/tests/it/sequence_entries/refused.rs
