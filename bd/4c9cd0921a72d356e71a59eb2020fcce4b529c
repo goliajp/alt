@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the catalog of the restored instance has the empty repository first
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator/schema_21.rs
