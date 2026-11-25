@@ -3,7 +3,6 @@
 
 use crate::{Error, GraphLimits, Node, ObjectReader, Result, TreeLink};
 use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
-use std::collections::BTreeSet;
 use std::io::Read;
 
 pub(crate) fn check_oid(oid: ObjectId, algo: HashAlgo) -> Result<()> {
@@ -110,14 +109,9 @@ pub fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node>
         }
         ObjectKind::Tree => {
             let tree = Tree::parse(data, algo).map_err(|_| Error::Integrity("tree encoding"))?;
-            let mut names = BTreeSet::new();
             let mut entries = Vec::new();
             for entry in tree.entries {
                 let name = entry.name.to_vec();
-                // the names a push is refused for
-                if alt_git_codec::unsafe_name(&name).is_some() || !names.insert(name.clone()) {
-                    return Err(Error::Integrity("unsafe or duplicate tree name"));
-                }
                 let mode = entry.mode.value();
                 if !matches!(mode, 0o040000 | 0o100644 | 0o100755 | 0o120000 | 0o160000) {
                     return Err(Error::Integrity("unsupported tree mode"));

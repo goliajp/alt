@@ -237,6 +237,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alt-git-fsck"
+version = "0.1.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-config",
+]
+
+[[package]]
 name = "alt-git-index"
 version = "0.1.0"
 dependencies = [
@@ -406,6 +414,7 @@ version = "0.1.0"
 dependencies = [
  "alt-deflate",
  "alt-git-codec",
+ "alt-git-fsck",
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
@@ -545,6 +554,7 @@ version = "0.1.0"
 dependencies = [
  "alt-bytes",
  "alt-git-codec",
+ "alt-git-fsck",
  "alt-hash",
  "alt-json",
  "alt-json-testkit",

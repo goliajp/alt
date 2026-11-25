@@ -32,7 +32,9 @@ pub(crate) const HELD: u64 = 256 << 20;
 
 pub struct Ingested {
     records: Vec<Record>,
-    commits: Vec<CommitRow>,
+    pub(crate) commits: Vec<CommitRow>,
+    /// the trees `git fsck` looks at again, each once, in the order of the ids
+    pub(crate) flagged: Vec<(Oid, alt_git_fsck::Flagged<Oid>)>,
     flags: u32,
     pack_len: u64,
     work: IndexWork,
@@ -279,6 +281,9 @@ fn verified(
         commits,
         depth: limits.delta_depth,
     };
+    let mut flagged = std::mem::take(&mut *told.flagged.lock().expect("flagged"));
+    flagged.sort_unstable_by_key(|(tree, _)| *tree);
+    flagged.dedup_by_key(|(tree, _)| *tree);
     // every reference resolves inside the pack or in the segments already present
     let settled = resolved.settle(existing, |carried| {
         told.wanted
@@ -287,6 +292,7 @@ fn verified(
     Ok(Ingested {
         records: settled.records,
         commits: settled.commits,
+        flagged,
         flags: settled.flags,
         pack_len: pack.len() as u64,
         work,

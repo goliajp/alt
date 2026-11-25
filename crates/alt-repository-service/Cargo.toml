@@ -9,6 +9,7 @@ publish = false
 alt-hash.workspace = true
 alt-json.workspace = true
 alt-git-codec.workspace = true
+alt-git-fsck.workspace = true
 alt-remote-protocol.workspace = true
 alt-bytes.workspace = true
 

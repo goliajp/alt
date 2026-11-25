@@ -401,6 +401,7 @@ fn verify(
             }
         }
     }
+    crate::fsck::refused_anew(source, &nodes, limits)?;
     Ok(VerifiedGraph {
         nodes,
         settled,

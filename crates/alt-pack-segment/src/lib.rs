@@ -53,6 +53,7 @@ pub use select::Selection;
 pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
 pub use stream::{ObjectStream, Restoring};
+pub use unsafe_names::refused_anew;
 
 pub type Oid = [u8; 20];
 /// Tables keyed by ids a peer chooses.

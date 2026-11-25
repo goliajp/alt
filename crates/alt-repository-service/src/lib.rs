@@ -2,6 +2,7 @@
 //!
 //! This crate validates a snapshot. The transaction adapter must lock and recheck
 //! scope, authorization, policy, refs and object pins before committing it.
+mod fsck;
 mod graph;
 mod object;
 mod publication;

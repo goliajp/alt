@@ -161,9 +161,6 @@ impl<'a, W: Read + Write + Seek> Builder<'a, W> {
                 });
             }
             Parsed::Tree(entries) => {
-                if let Some(wrong) = crate::unsafe_names::found(data) {
-                    return Err(Error::Unsafe(oid, wrong));
-                }
                 for (to, kind) in entries {
                     self.refer(&oid, to, kind)?;
                 }
