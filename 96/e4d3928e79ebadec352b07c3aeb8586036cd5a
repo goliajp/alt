@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the reading of one object is a module of its own beside the graph
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/src/lib.rs
+touched: crates/alt-repository-service/src/object.rs
