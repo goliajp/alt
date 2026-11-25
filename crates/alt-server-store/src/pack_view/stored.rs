@@ -158,7 +158,7 @@ mod tests {
             names
         };
         let led_name = file.file_name().unwrap().to_str().unwrap().to_owned();
-        assert_eq!(names(root), [led_name.clone()]);
+        assert_eq!(names(root), std::slice::from_ref(&led_name));
         // what a process that ended left beside the files is removed, and
         // nothing else is
         std::fs::remove_dir_all(&file).unwrap();
