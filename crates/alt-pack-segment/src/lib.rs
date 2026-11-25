@@ -31,6 +31,7 @@ mod select;
 mod send;
 mod set;
 mod settled;
+mod steps;
 mod stream;
 mod told;
 mod trees;

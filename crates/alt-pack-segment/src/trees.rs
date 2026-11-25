@@ -10,7 +10,7 @@ use crate::{
     format::Delta,
     scan::{self, Form},
 };
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::AtomicBool;
 use std::{cmp::Ordering, collections::HashMap, rc::Rc};
 
 /// how many sets of trees the client has are remembered with what they hold
@@ -128,8 +128,8 @@ pub(crate) struct Trees<'a> {
     /// what was worked out of sets of trees the client has
     held: HashMap<Rc<[Oid]>, Rc<Below>>,
     /// the trees that may still be read, and the mark that nobody waits for them
-    left: usize,
-    gone: Option<&'a AtomicBool>,
+    pub(crate) left: usize,
+    pub(crate) gone: Option<&'a AtomicBool>,
 }
 
 impl<'a> Trees<'a> {
@@ -204,10 +204,7 @@ impl<'a> Trees<'a> {
 
     /// the canonical bytes of the tree `oid`
     pub fn read(&mut self, oid: &Oid) -> Result<Rc<Vec<u8>>, Error> {
-        self.left = (self.left.checked_sub(1)).ok_or(Error::Limit("trees of a fetch"))?;
-        if self.gone.is_some_and(|gone| gone.load(Relaxed)) {
-            return Err(Error::GivenUp);
-        }
+        self.step()?;
         let mut at = self.set.place(oid).ok_or(Error::NotFound(*oid))?;
         let mut deltas = Vec::new();
         let mut data = loop {
