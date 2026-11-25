@@ -26,7 +26,9 @@ static ENDED: Condvar = Condvar::new();
 /// is written down: a test moves the refs and the segments in between. None
 /// is set outside tests.
 #[doc(hidden)]
-pub static FOUND_ALL: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
+pub static FOUND_ALL: Mutex<Option<FoundAll>> = Mutex::new(None);
+#[doc(hidden)]
+pub type FoundAll = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// The one walk a repository has at a time: the others that ask wait for it
 /// and go on from what it found.

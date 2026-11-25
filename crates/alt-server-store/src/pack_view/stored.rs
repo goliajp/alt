@@ -42,8 +42,8 @@ pub(super) fn read(root: &Path, repository: &str) -> Option<(Vec<Oid>, Led)> {
     let tips = usize::try_from(number(take(8)?)).ok()?;
     let objects = usize::try_from(number(take(8)?)).ok()?;
     let ids = |n: usize, bytes: &[u8]| -> Vec<Oid> {
-        let id = |chunk: &[u8]| chunk.try_into().expect("twenty bytes");
-        bytes.chunks_exact(20).take(n).map(id).collect()
+        let (ids, _) = bytes.as_chunks::<20>();
+        ids.iter().take(n).copied().collect()
     };
     let tips = ids(tips, take(tips.checked_mul(20)?)?);
     let objects = ids(objects, take(objects.checked_mul(20)?)?);
