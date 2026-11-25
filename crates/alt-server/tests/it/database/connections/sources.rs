@@ -48,6 +48,14 @@ fn head_of(reader: &mut std::io::BufReader<std::net::TcpStream>) -> (String, Str
     (status, headers)
 }
 
+/// Whether a request that was to stay unanswered was answered, or let go of.
+fn answered_already(socket: &std::net::TcpStream) -> bool {
+    socket.set_nonblocking(true).unwrap();
+    let come = socket.peek(&mut [0]);
+    socket.set_nonblocking(false).unwrap();
+    !matches!(come, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+}
+
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
 fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
@@ -59,19 +67,25 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
         options.body_timeout = Duration::from_secs(600);
     });
     let head = "POST /web/login HTTP/1.1\r\nHost: alt\r\nX-Forwarded-For: 203.0.113.9\r\nOrigin: https://workbench.example.test\r\nContent-Type: application/json\r\nContent-Length: 30\r\n\r\n";
-    let under_way: Vec<_> = (0..2)
-        .map(|_| {
-            let (mut socket, reader) = connect(&server);
-            socket.write_all(head.as_bytes()).unwrap();
-            (socket, reader)
-        })
-        .collect();
+    let held = || {
+        let (mut socket, reader) = connect(&server);
+        socket.write_all(head.as_bytes()).unwrap();
+        (socket, reader)
+    };
+    let mut under_way: Vec<_> = (0..2).map(|_| held()).collect();
     // a third is answered for as long as the two are not both under way, and
-    // is itself done with once it is: it is refused from when they are
+    // is itself done with once it is: it is refused from when they are. the
+    // service may come to a third before one of the two, which then finds
+    // its place taken and is refused: that one is sent again
     let crowded = Some("HTTP/1.1 429 Too Many Requests".to_owned());
     let until = std::time::Instant::now() + Duration::from_secs(120);
     while alive(&server, Some("203.0.113.9")) != crowded {
         assert!(std::time::Instant::now() < until, "a third is answered");
+        for one in &mut under_way {
+            if answered_already(&one.0) {
+                *one = held();
+            }
+        }
     }
     // and is told when to come again
     let told = answered(&server, Some("203.0.113.9"))
