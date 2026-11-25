@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the push that leans on a deleted branch is made of a pack that names its base
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/read_moved.rs
