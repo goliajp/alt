@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a base a thin pack leaves out has its memory taken before it is read, as large as its deltas say
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/delta.rs
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/resolve.rs
+touched: crates/alt-git-pack/src/index_pack/scan.rs
+touched: crates/alt-git-pack/src/index_pack/thin.rs
+touched: crates/alt-git-pack/tests/it/thin_pack.rs
