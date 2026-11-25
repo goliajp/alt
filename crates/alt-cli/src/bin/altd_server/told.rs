@@ -303,15 +303,29 @@ mod tests {
         assert!(unset.origins.is_empty());
         let told = with(&[(
             "ALT_SERVER_ORIGINS",
-            "https://Alt.Example/, http://10.0.0.5:8090",
+            "https://Alt.Example/, http://10.0.0.5:8090,https://[::1]:443,http://[fe80::1]:81",
         )]);
-        let read = ["https://alt.example", "http://10.0.0.5:8090"];
+        let read = [
+            "https://alt.example",
+            "http://10.0.0.5:8090",
+            "https://[::1]",
+            "http://[fe80::1]:81",
+        ];
         assert_eq!(told.unwrap().origins, read);
         for value in [
             "",
             "alt.example",
             "https://a.example/alt",
             "https://a.example,",
+            // no client writes the host of an address so
+            "https://[0:0:0:0:0:0:0:1]",
+            "https://127.1",
+            "https://010.0.0.1",
+            "https://alt.example.",
+            "http://alt.example:0",
+            "http://alt.example:08090",
+            "http://alt.example:65536",
+            "http://alt..example",
         ] {
             let why = with(&[("ALT_SERVER_ORIGINS", value)]).err().expect(value);
             let named = format!("ALT_SERVER_ORIGINS={value:?}: ");
