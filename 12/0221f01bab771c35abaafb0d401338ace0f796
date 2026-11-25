@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: say after rebase --quit that the index is not the branch, and how to put it back
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/rebase/leave.rs
+touched: crates/alt-cli/tests/it/sequence_entries.rs
+touched: crates/alt-cli/tests/it/sequence_entries/quit.rs
