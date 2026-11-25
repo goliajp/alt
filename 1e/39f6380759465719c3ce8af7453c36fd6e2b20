@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: an old server told the peers of its host and not its proxies says so as it starts
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/tests/it/altd_server_told.rs
