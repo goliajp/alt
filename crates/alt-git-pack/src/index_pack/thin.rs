@@ -96,7 +96,7 @@ pub(super) fn made_whole(
     limits: &IndexLimits<'_>,
     (memory, mut now): (&mut Option<Taken<'static>>, (u64, u64)),
     work: &mut IndexWork,
-) -> Result<Option<Vec<u8>>, PackError> {
+) -> Result<Option<Whole>, PackError> {
     let came = oids.len();
     let wanted = wanted(scanned, oids);
     // the bases are read whole: room for the largest is made before any is
@@ -106,7 +106,7 @@ pub(super) fn made_whole(
     let objects = limits.objects(memory);
     let (file, wanted) = ((path, algo), (&wanted[..], bases));
     let made = complete(file, scanned, oids, wanted, limits, objects)?;
-    let Some(trailer) = made else {
+    let Some(whole) = made else {
         return Ok(None);
     };
     // what the bases inflate to is among what may be held of them
@@ -114,7 +114,7 @@ pub(super) fn made_whole(
     let pack = Pack::open(path, algo)?;
     let room = limits.objects(memory);
     resolve::resolve(&pack, scanned, oids, came, limits, room, work)?;
-    Ok(Some(trailer))
+    Ok(Some(whole))
 }
 
 /// Lets the pack in again with what it has throughout and what its largest
@@ -134,12 +134,19 @@ fn again(
     Ok(())
 }
 
+/// What making a pack whole wrote: the new trailer, and the room on the disk
+/// the bases appended to it take.
+pub(super) struct Whole {
+    pub trailer: Vec<u8>,
+    pub appended: Vec<Taken<'static>>,
+}
+
 /// Appends to the pack at `path` those of the bases `wanted` that `bases`
 /// has, and adds them to `scanned` as the plain entries they are; nothing
 /// where no base was found. What the bases inflate to counts against the
 /// limit like the entries the pack came with. A base is read where `objects`
-/// has room for it, as large as its deltas say it is, and is no other size.
-/// The new trailer, or nothing where no base was found.
+/// has room for it, as large as its deltas say it is, and is no other size;
+/// it is written where the files of bases have room for it.
 fn complete(
     (path, algo): (&Path, HashAlgo),
     scanned: &mut Scanned,
@@ -147,13 +154,13 @@ fn complete(
     (wanted, bases): (&[(ObjectId, u64)], Bases<'_>),
     limits: &IndexLimits,
     objects: Option<ObjectMemory<'_>>,
-) -> Result<Option<Vec<u8>>, PackError> {
+) -> Result<Option<Whole>, PackError> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let mut at = scanned.body_end as u64;
     file.set_len(at)?;
     file.seek(SeekFrom::Start(at))?;
     let came = scanned.entries.len();
-    let mut room = None;
+    let (mut room, mut appended) = (None, Vec::new());
     for (oid, size) in wanted {
         limits.going_on()?;
         if let Some(objects) = &objects {
@@ -172,6 +179,11 @@ fn complete(
         let data_at = at + raw.len() as u64;
         raw.extend(alt_deflate::compress(&data, 1, alt_deflate::Format::Zlib));
         drop(data);
+        if let Some(files) = limits.files {
+            // one that has room already does not wait for what others have
+            let wait = appended.is_empty().then(|| limits.wait());
+            appended.push(files.append(raw.len() as u64, wait)?);
+        }
         file.write_all(&raw)?;
         scanned.entries.push(Entry {
             offset: at,
@@ -193,5 +205,5 @@ fn complete(
     file.seek(SeekFrom::Start(at))?;
     file.write_all(&trailer)?;
     scanned.body_end = at as usize;
-    Ok(Some(trailer))
+    Ok(Some(Whole { trailer, appended }))
 }

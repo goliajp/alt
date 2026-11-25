@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 use super::memory::{Memory, Taken, Wait};
+use crate::PackError;
 
 /// the bases all the packs have in files at once
 pub const FILES: usize = 4096;
@@ -91,6 +92,29 @@ impl BaseFiles {
             _room: taken,
             files: &self.files,
         })
+    }
+
+    /// Takes `bytes` for a base appended to a thin pack to make it whole,
+    /// waiting as [`Self::take`] does. It is in the file of the pack, not in
+    /// one of its own: nothing is counted among the files, and a base there
+    /// is no room for at all refuses the pack.
+    pub(super) fn append(
+        &self,
+        bytes: u64,
+        wait: Option<Wait<'_>>,
+    ) -> Result<Taken<'_>, PackError> {
+        let now = Wait {
+            by: Some(std::time::Instant::now()),
+            gone: None,
+        };
+        let taken = self.room.let_in(bytes, 0, wait.unwrap_or(now));
+        let taken = taken.map_err(|refused| match refused {
+            PackError::Limit(_) => PackError::Limit("index disk"),
+            PackError::Busy(_) => PackError::Busy("index disk"),
+            other => other,
+        })?;
+        self.most_taken.fetch_max(self.room.taken().0, Relaxed);
+        Ok(taken)
     }
 
     /// room taken as a base in a file takes it, for a test to keep

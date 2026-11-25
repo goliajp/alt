@@ -189,3 +189,61 @@ fn a_base_appended_has_its_memory_taken_before_it_is_read() {
         "{made:?}"
     );
 }
+
+/// The bases appended to a pack take of the room on the disk the files of
+/// bases have, from before they are written for as long as the pack is held.
+#[test]
+fn a_base_appended_takes_of_the_room_on_the_disk_and_one_there_is_none_for_is_not_written() {
+    use std::time::{Duration, Instant};
+    let dir = TempDir::new().unwrap();
+    let files: &'static alt_git_pack::BaseFiles = Box::leak(Box::new(
+        alt_git_pack::BaseFiles::open(&dir.path().join("bases"), 4096).unwrap(),
+    ));
+    let limits = |by| IndexLimits {
+        files: Some(files),
+        memory_by: Some(by),
+        ..IndexLimits::default()
+    };
+    let asked = Cell::new(0);
+    let (pack, base) = of_a_base(&dir, 2000);
+    let held = [base];
+    let bases = store(&held, &asked);
+    // others have all but ten bytes of it
+    let others = files.occupy(4086).unwrap();
+    let soon = Instant::now() + Duration::from_millis(300);
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits(soon), Some(&bases));
+    assert!(
+        matches!(made, Err(PackError::Busy("index disk"))),
+        "{made:?}"
+    );
+    drop(others);
+
+    let (pack, base) = of_a_base(&dir, 2000);
+    let came = std::fs::metadata(&pack).unwrap().len();
+    let held = [base];
+    let bases = store(&held, &asked);
+    let soon = Instant::now() + Duration::from_millis(300);
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits(soon), Some(&bases)).unwrap();
+    let appended = std::fs::metadata(&pack).unwrap().len() - came;
+    assert!(appended > 0);
+    assert_eq!(files.taken().0, appended);
+    drop(made);
+    assert_eq!(files.taken().0, 0);
+
+    // one there is no room for at all refuses the pack
+    let small: &'static alt_git_pack::BaseFiles = Box::leak(Box::new(
+        alt_git_pack::BaseFiles::open(&dir.path().join("small"), 10).unwrap(),
+    ));
+    let (pack, base) = of_a_base(&dir, 2000);
+    let held = [base];
+    let bases = store(&held, &asked);
+    let limits = IndexLimits {
+        files: Some(small),
+        ..IndexLimits::default()
+    };
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&bases));
+    assert!(
+        matches!(made, Err(PackError::Limit("index disk"))),
+        "{made:?}"
+    );
+}

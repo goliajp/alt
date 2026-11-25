@@ -56,7 +56,8 @@ pub fn take_in<T>(
         Some(Ok(prepared)) => Some(prepared),
         None => None,
     };
-    // the memory of the pack is kept until its objects are written
+    // the memory of the pack, and the room of what was appended to it, are
+    // kept until its objects are written
     let (prepared, _memory) = prepared.unzip();
     // nothing would name the objects
     if updates.is_empty() {

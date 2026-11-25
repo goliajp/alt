@@ -97,6 +97,9 @@ pub struct IndexedPackOnDisk {
     pub work: IndexWork,
     /// the memory the pack took, held for as long as its objects are read
     pub memory: Option<Taken<'static>>,
+    /// the room on the disk of the bases appended to make the pack whole, held
+    /// for as long as the pack is
+    pub appended: Vec<Taken<'static>>,
 }
 
 /// Build a `.idx` for an existing `.pack` file. The idx is written next
@@ -158,6 +161,7 @@ pub fn index_pack_thin(
     let room = limits.objects(&memory);
     resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, room, &mut work)?;
     drop(pack);
+    let mut appended = Vec::new();
     if let Some(bases) = bases
         && oids.contains(&None)
     {
@@ -165,7 +169,7 @@ pub fn index_pack_thin(
         let held = (&mut memory, before);
         let made = thin::made_whole((pack_path, algo), pieces, bases, limits, held, &mut work)?;
         if let Some(whole) = made {
-            trailer = whole;
+            (trailer, appended) = (whole.trailer, whole.appended);
         }
     }
     let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
@@ -214,6 +218,7 @@ pub fn index_pack_thin(
         objects: count,
         work,
         memory,
+        appended,
     })
 }
 
