@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: what the old server says before it listens is read a bounded line at a time
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server.rs
