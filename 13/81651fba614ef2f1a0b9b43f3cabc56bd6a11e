@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the one name left is compared as a slice of it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_view/stored.rs
