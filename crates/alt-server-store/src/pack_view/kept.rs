@@ -5,7 +5,7 @@ use super::stored;
 use alt_pack_segment::{Led, Oid};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 /// what was found for the tips a repository had at one moment
 pub(super) struct Kept {
@@ -30,6 +30,18 @@ const KEPT_EACH: usize = 4;
 const KEPT_BYTES: usize = 128 << 20;
 
 pub(super) static ASKED: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
+/// What was found for a repository beyond the bound alone, for as long as a
+/// request holds it: those at the same time share it, and the answers kept
+/// are not let go of for it.
+static BEYOND: LazyLock<Mutex<HashMap<String, (Vec<Oid>, Weak<Led>)>>> =
+    LazyLock::new(Default::default);
+
+/// what is held for a repository beyond the bound by a request now
+fn beyond(repository: &str) -> Option<(Vec<Oid>, Arc<Led>)> {
+    let beyond = BEYOND.lock().expect("beyond");
+    let (tips, led) = beyond.get(repository)?;
+    Some((tips.clone(), led.upgrade()?))
+}
 /// how many objects what is on disk for a repository holds, where this process
 /// read or wrote it
 static STORED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
@@ -49,6 +61,9 @@ pub(super) fn loaded(repository: &str) -> Option<(Vec<Oid>, Arc<Led>)> {
         return None;
     }
     drop(asked);
+    if let Some(held) = beyond(repository) {
+        return Some(held);
+    }
     let (root, id) = of(repository);
     let (tips, led) = stored::read(root, id)?;
     let mut stored = STORED.lock().expect("stored");
@@ -81,14 +96,44 @@ pub(super) fn kept(repository: &str, tips: &[Oid]) -> Option<Arc<Led>> {
     let asked = ASKED.lock().expect("led");
     let found = (asked.iter())
         .find(|kept| kept.whole && kept.repository == repository && kept.tips == tips);
-    found.map(|kept| kept.led.clone())
+    let found = found.map(|kept| kept.led.clone());
+    drop(asked);
+    found.or_else(|| {
+        beyond(repository)
+            .filter(|(held, _)| held == tips)
+            .map(|(_, led)| led)
+    })
 }
 
 /// Keeps what was found for `tips`, in the place of what was kept for the same
-/// tips, and lets go of the oldest beyond what is kept.
+/// tips, and lets go of the oldest beyond what is kept. One that alone is
+/// beyond the bound is not kept, and nothing is let go of for it: it is held
+/// for the requests that hold it.
 pub(super) fn keep(repository: &str, tips: Vec<Oid>, led: Arc<Led>, whole: bool) {
-    let mut asked = ASKED.lock().expect("led");
-    asked.retain(|kept| kept.repository != repository || kept.tips != tips);
+    let kept = Kept {
+        repository: repository.to_owned(),
+        tips,
+        led,
+        whole,
+    };
+    if let Some(alone) = kept_within(&mut ASKED.lock().expect("led"), kept, KEPT_BYTES)
+        && alone.whole
+    {
+        let held = (alone.tips, Arc::downgrade(&alone.led));
+        let mut beyond = BEYOND.lock().expect("beyond");
+        beyond.retain(|_, (_, led)| led.strong_count() > 0);
+        beyond.insert(repository.to_owned(), held);
+    }
+}
+
+/// [`keep`] among `asked` within `bytes`: the answer back where it alone is
+/// beyond them.
+fn kept_within(asked: &mut Vec<Kept>, kept: Kept, bytes: usize) -> Option<Kept> {
+    if held(std::slice::from_ref(&kept)) > bytes {
+        return Some(kept);
+    }
+    let (repository, tips) = (kept.repository.as_str(), &kept.tips);
+    asked.retain(|other| other.repository != repository || other.tips != *tips);
     let of_this = asked.iter().filter(|kept| kept.repository == repository);
     if of_this.count() >= KEPT_EACH {
         let oldest = asked.iter().position(|kept| kept.repository == repository);
@@ -97,13 +142,9 @@ pub(super) fn keep(repository: &str, tips: Vec<Oid>, led: Arc<Led>, whole: bool)
     if asked.len() >= KEPT {
         asked.remove(0);
     }
-    asked.push(Kept {
-        repository: repository.to_owned(),
-        tips,
-        led,
-        whole,
-    });
-    bounded(&mut asked, KEPT_BYTES);
+    asked.push(kept);
+    bounded(asked, bytes);
+    None
 }
 
 /// Lets go of the oldest answers until those left hold `bytes` at the most:
@@ -153,5 +194,28 @@ mod tests {
         assert!(Arc::ptr_eq(&asked[0].led, &other));
         bounded(&mut asked, 219);
         assert!(asked.is_empty());
+    }
+
+    #[test]
+    fn an_answer_beyond_the_bound_alone_is_not_kept_and_lets_go_of_nothing() {
+        let objects = |from: u8, n: u8| (from..from + n).map(|byte| [byte; 20]).collect();
+        let answer = |repository: &str, led: Vec<Oid>| Kept {
+            repository: repository.into(),
+            tips: vec![],
+            led: Arc::new(Led::again(led).unwrap()),
+            whole: true,
+        };
+        let mut asked = Vec::new();
+        assert!(kept_within(&mut asked, answer("one", objects(0, 5)), 300).is_none());
+        assert!(kept_within(&mut asked, answer("two", objects(10, 5)), 300).is_none());
+        assert_eq!(held(&asked), 200);
+        let beyond = kept_within(&mut asked, answer("three", objects(20, 16)), 300);
+        assert_eq!(beyond.map(|kept| kept.repository), Some("three".to_owned()));
+        let left: Vec<&str> = asked.iter().map(|kept| kept.repository.as_str()).collect();
+        assert_eq!(left, ["one", "two"]);
+        // one within the bound lets the oldest go as before
+        assert!(kept_within(&mut asked, answer("four", objects(40, 10)), 300).is_none());
+        let left: Vec<&str> = asked.iter().map(|kept| kept.repository.as_str()).collect();
+        assert_eq!(left, ["two", "four"]);
     }
 }
