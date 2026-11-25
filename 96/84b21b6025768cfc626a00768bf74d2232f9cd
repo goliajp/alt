@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: refused-trees opens the instance at the schema it is at, where this release upgrades from it
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/pack_scrub.rs
+touched: crates/alt-server-store/src/store.rs
+touched: crates/alt-server/src/main.rs
+touched: crates/alt-server/src/operator/scrub.rs
