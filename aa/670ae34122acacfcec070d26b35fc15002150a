@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a page of records ends where the next record would take it past what it may read
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/records.rs
+touched: crates/alt-server/src/records/page.rs
+touched: crates/alt-server/tests/it/database/browser.rs
+touched: crates/alt-server/tests/it/database/browser/records_page.rs
+touched: crates/alt-server/tests/it/database/change_links.rs
+touched: crates/alt-server/tests/it/database/portable/cloud.rs
