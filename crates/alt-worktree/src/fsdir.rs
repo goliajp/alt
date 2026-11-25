@@ -47,6 +47,14 @@ impl Listing {
         self.items[i].2
     }
 
+    /// Whether the entry is a directory, and whether it is a file or a
+    /// symlink: what is neither is a FIFO, a socket or a device, which
+    /// is no file a tree can hold.
+    pub(crate) fn dir_or_plain(&self, i: usize) -> (bool, bool) {
+        let kind = self.items[i].2;
+        (kind == Kind::Dir, matches!(kind, Kind::File | Kind::Link))
+    }
+
     /// Takes an entry as a directory listing gives it: its NUL-terminated
     /// name and its type. One whose type the listing leaves open is noted
     /// in `unknown`.

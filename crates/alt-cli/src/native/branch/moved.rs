@@ -168,6 +168,29 @@ impl NativeRepo<'_> {
         Ok((from, old, at))
     }
 
+    /// Refuses the rename of the branch `from` to `new`: over a branch
+    /// that is there unless told to, and to a name git has no place for
+    /// beside the refs there are, in git's words.
+    fn ensure_renamed_to(&self, new: &str, from: &str, taken: bool, over: bool) -> Res<()> {
+        let to = format!("refs/heads/{new}");
+        if taken {
+            match over {
+                true => self.ensure_not_held(new)?,
+                false => self.ensure_no_branch(new)?,
+            }
+            return self.ensure_may_move(new);
+        }
+        match self.ref_in_the_way(&to, Some(from)) {
+            None => Ok(()),
+            Some(other) => Err(said::refused(
+                &format!(
+                    "error: '{other}' exists; cannot create '{to}'\nfatal: branch rename failed\n"
+                ),
+                128,
+            )),
+        }
+    }
+
     /// `alt branch -m [<old>] <new>`, and `-M` with `over`: the branch
     /// under another name, with what it follows, in every workspace
     /// that has it checked out. `-M` takes the place of a branch of the
@@ -186,21 +209,7 @@ impl NativeRepo<'_> {
         }
         let to = format!("refs/heads/{new}");
         let taken = self.store.refs.get(&to).cloned();
-        if taken.is_some() {
-            match over {
-                true => self.ensure_not_held(new)?,
-                false => self.ensure_no_branch(new)?,
-            }
-            self.ensure_may_move(new)?;
-        }
-        if taken.is_none()
-            && let Some(other) = self.ref_in_the_way(&to, Some(&from))
-        {
-            let said = format!(
-                "error: '{other}' exists; cannot create '{to}'\nfatal: branch rename failed\n"
-            );
-            return Err(said::refused(&said, 128));
-        }
+        self.ensure_renamed_to(new, &from, taken.is_some(), over)?;
         self.ensure_may_move(&old)?;
         // a branch without a commit is a name its heads have, and no ref
         let mut changes = Vec::new();

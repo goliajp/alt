@@ -149,6 +149,12 @@ impl PathMatcher {
     }
 }
 
+/// Whether `meta` is of a FIFO, a socket or a device: no file a tree
+/// can hold, and so nothing that is untracked.
+fn special(meta: &std::fs::Metadata) -> bool {
+    !meta.is_dir() && !meta.is_file() && !meta.is_symlink()
+}
+
 /// Scans `dir` into `out`. Inside an ignored directory (`only_tracked`) just
 /// the tracked files are picked up.
 fn scan_dir(
@@ -188,9 +194,7 @@ fn scan_dir(
         } else {
             &tracked.files
         };
-        // nor is a FIFO, a socket or a device a file a tree can hold
-        let special = !is_dir && !meta.is_file() && !meta.is_symlink();
-        if (hidden || special) && !known.contains(&rel_b) {
+        if (hidden || special(&meta)) && !known.contains(&rel_b) {
             continue; // untracked and masked by an ignore rule in scope
         }
         if is_dir {

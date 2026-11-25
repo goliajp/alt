@@ -8,7 +8,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::fsdir::{DirFd, Kind, Listing};
+use crate::fsdir::{DirFd, Listing};
 use crate::ignore::{self, IgnoreLayer, IgnoreStack};
 use crate::walk::{Reach, Walk, holds_repository, ignore_file};
 
@@ -163,17 +163,13 @@ impl Walk<'_> {
             }
             path.push(b'/');
             path.extend_from_slice(name);
-            let is_dir = names.kind(item) == Kind::Dir;
-            let special = names.kind(item) == Kind::Other;
+            let (is_dir, plain) = names.dir_or_plain(item);
             let flow = match self.reach(reach, path) {
                 Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
                     dirs.push((item, reach));
                     ControlFlow::Continue(())
                 }
-                // a FIFO, a socket or a device is no file a tree can hold
-                Some(Reach::Inside) if !is_dir && !special && !ignore.is_ignored(path, false) => {
-                    each(path)
-                }
+                Some(Reach::Inside) if plain && !ignore.is_ignored(path, false) => each(path),
                 _ => ControlFlow::Continue(()),
             };
             path.truncate(mark);

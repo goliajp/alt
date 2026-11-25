@@ -97,15 +97,15 @@ impl NativeRepo<'_> {
         self.index_path.with_file_name("REVERT_REFUSED")
     }
 
-    /// Keeps that the sequence refused the revert that waits first, with
-    /// the branch at `head`. It is kept apart from the state, which an
-    /// older alt reads and takes no line it does not know in.
-    pub(super) fn note_revert_refused(&self, head: ObjectId) -> Res<()> {
-        let noted = format!("{head}\n");
-        Ok(recovery::durable_write(
-            &self.revert_refused_path(),
-            noted.as_bytes(),
-        )?)
+    /// Saves `waits`, whose first revert the sequence refused, and keeps
+    /// that it was refused with the branch where it is. That is kept
+    /// apart from the state, which an older alt reads and takes no line
+    /// it does not know in.
+    pub(super) fn save_revert_refused(&self, waits: &RevertState) -> Res<()> {
+        self.save_revert_state(waits)?;
+        let noted = format!("{}\n", self.branch_tip("revert")?);
+        let place = self.revert_refused_path();
+        Ok(recovery::durable_write(&place, noted.as_bytes())?)
     }
 
     /// Whether the revert that waits first is one the sequence refused,
