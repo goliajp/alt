@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: chore
+summary: a walk of the commits looks at whether it is waited for as clippy asks
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/reach.rs
