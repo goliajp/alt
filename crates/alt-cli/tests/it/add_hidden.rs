@@ -4,6 +4,8 @@
 //! says ends in a newline, and with `--json` the paths are in the details
 //! of the error.
 
+mod special;
+
 use std::process::Output;
 
 use alt_bytes::{BStr, ByteSlice};

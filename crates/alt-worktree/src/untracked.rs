@@ -164,12 +164,16 @@ impl Walk<'_> {
             path.push(b'/');
             path.extend_from_slice(name);
             let is_dir = names.kind(item) == Kind::Dir;
+            let special = names.kind(item) == Kind::Other;
             let flow = match self.reach(reach, path) {
                 Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
                     dirs.push((item, reach));
                     ControlFlow::Continue(())
                 }
-                Some(Reach::Inside) if !is_dir && !ignore.is_ignored(path, false) => each(path),
+                // a FIFO, a socket or a device is no file a tree can hold
+                Some(Reach::Inside) if !is_dir && !special && !ignore.is_ignored(path, false) => {
+                    each(path)
+                }
                 _ => ControlFlow::Continue(()),
             };
             path.truncate(mark);

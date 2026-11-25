@@ -188,7 +188,9 @@ fn scan_dir(
         } else {
             &tracked.files
         };
-        if hidden && !known.contains(&rel_b) {
+        // nor is a FIFO, a socket or a device a file a tree can hold
+        let special = !is_dir && !meta.is_file() && !meta.is_symlink();
+        if (hidden || special) && !known.contains(&rel_b) {
             continue; // untracked and masked by an ignore rule in scope
         }
         if is_dir {

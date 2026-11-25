@@ -224,6 +224,8 @@ impl Walk<'_> {
                 continue;
             }
             let is_dir = names.kind(item) == Kind::Dir;
+            // a FIFO, a socket or a device is no file a tree can hold
+            let special = names.kind(item) == Kind::Other;
             with_name(&mut path, name, |path| match self.reach(reach, path) {
                 Some(reach) if is_dir && !ignore.is_ignored(path, true) => {
                     found.unwalked.push(path.to_vec());
@@ -233,7 +235,7 @@ impl Walk<'_> {
                         reach,
                     })
                 }
-                Some(Reach::Inside) if !is_dir && !ignore.is_ignored(path, false) => {
+                Some(Reach::Inside) if !is_dir && !special && !ignore.is_ignored(path, false) => {
                     found.untracked.push(path.to_vec())
                 }
                 Some(_) if is_dir => found.passed.push(path.to_vec()),
