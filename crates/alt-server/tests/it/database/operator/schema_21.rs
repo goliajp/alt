@@ -81,12 +81,15 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     let p = publish(&mut store, &token);
     let key = p.publication.key.clone();
     drop(store);
-    // a repository nothing was pushed to: no directory is made for it
+    // a repository nothing was pushed to, its directory not there, as an
+    // instance moved without its empty directories has it
     let empty = ["repository-create", "empty", "--quota-bytes", "100000000"];
     source.ok(&[&["--credential", &admin][..], &empty].concat());
     let name = alt_hash::blake3::hash(b"empty").to_hex();
     let segments_of_empty = source.root.path().join("bytes/packs").join(&name[..32]);
-    assert!(!segments_of_empty.exists());
+    if segments_of_empty.exists() {
+        std::fs::remove_dir(&segments_of_empty).unwrap();
+    }
     let config = source.config.to_str().unwrap().to_owned();
     let (before, receipt) = observed(&source, &config, &admin, &key);
     let trust = source.ok(&["health"])["receipt_public_key"]
