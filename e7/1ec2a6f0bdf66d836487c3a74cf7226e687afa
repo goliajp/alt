@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: the fetch told to come again waits behind responses of two megabytes
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
