@@ -44,3 +44,37 @@ fn a_limit_that_is_no_number_ends_the_start_with_its_name() {
         assert!(!said.contains("listening on"), "{said}");
     }
 }
+
+/// A server told the peers of its host and not its proxies says, as it
+/// starts, that a request through a proxy among those peers counts for no
+/// address; one told both says nothing of it.
+#[test]
+fn a_server_told_its_local_peers_and_not_its_proxies_says_so_as_it_starts() {
+    use std::io::{BufRead, BufReader};
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    repository(&origin);
+    let started = |told: &[(&str, &str)]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_altd-server"));
+        command.args(["--bind", "127.0.0.1:0"]);
+        command.env("ALT_SERVER_REPO", &origin);
+        command.envs(told.iter().copied());
+        let mut child = (command.stdout(Stdio::null()).stderr(Stdio::piped()))
+            .spawn()
+            .unwrap();
+        let lines = BufReader::new(child.stderr.take().unwrap()).lines();
+        let said: Vec<String> = lines
+            .map(Result::unwrap)
+            .take_while(|line| !line.contains("listening on"))
+            .collect();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        said.join("\n")
+    };
+    let peers = ("ALT_SERVER_LOCAL_PEERS", "127.0.0.0/8,172.30.90.1");
+    let unproxied = "ALT_SERVER_LOCAL_PEERS is set and ALT_SERVER_TRUSTED_PROXIES is not";
+    let said = started(&[peers]);
+    assert!(said.contains(unproxied), "{said}");
+    let said = started(&[peers, ("ALT_SERVER_TRUSTED_PROXIES", "172.30.90.1")]);
+    assert!(!said.contains(unproxied), "{said}");
+}

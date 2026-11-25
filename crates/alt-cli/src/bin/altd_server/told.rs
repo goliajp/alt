@@ -197,13 +197,23 @@ impl Told {
     }
 }
 
+/// What is said where the peers of this host are told and the proxies are
+/// not: a deployment that named its proxy among those peers before the
+/// proxies could be told counts every request through it for no address.
+pub(super) const UNPROXIED: &str = "ALT_SERVER_LOCAL_PEERS is set and ALT_SERVER_TRUSTED_PROXIES is not: a request through a proxy among those peers counts for no address, and no limit of an address holds for it; name the proxy in ALT_SERVER_TRUSTED_PROXIES for it to count for whom it is";
+
 /// What the environment of this process tells; the process ends where
 /// it does not read.
 pub(super) fn told() -> &'static Told {
     static TOLD: OnceLock<Told> = OnceLock::new();
     TOLD.get_or_init(|| {
-        let mut told =
-            Told::read(&|name| std::env::var_os(name)).unwrap_or_else(|why| super::die(&why));
+        let lookup = |name: &str| std::env::var_os(name);
+        if lookup("ALT_SERVER_LOCAL_PEERS").is_some()
+            && lookup("ALT_SERVER_TRUSTED_PROXIES").is_none()
+        {
+            eprintln!("altd-server: {UNPROXIED}");
+        }
+        let mut told = Told::read(&lookup).unwrap_or_else(|why| super::die(&why));
         let made = work::open(std::env::var_os("ALT_SERVER_TEMP_DIR"))
             .and_then(|work| alt_git_pack::BaseFiles::open(&work.join("bases"), told.index_bytes));
         let unmade = |why| super::die(&format!("the directory for temporary files: {why}"));
