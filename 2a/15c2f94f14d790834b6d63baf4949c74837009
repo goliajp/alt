@@ -1,0 +1,21 @@
+schema: alt-meta/1
+type: fix
+summary: a push is refused for what git fsck refuses only where it brings it anew, .gitmodules and .gitattributes among it
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-pack-segment/Cargo.toml
+touched: crates/alt-pack-segment/src/build.rs
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/lib.rs
+touched: crates/alt-pack-segment/src/told.rs
+touched: crates/alt-pack-segment/src/unsafe_names.rs
+touched: crates/alt-repository-service/Cargo.toml
+touched: crates/alt-repository-service/src/fsck.rs
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/src/lib.rs
+touched: crates/alt-repository-service/src/object.rs
+touched: crates/alt-repository-service/tests/it/main.rs
+touched: crates/alt-server/src/git_packs/made.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/fsck_anew.rs
