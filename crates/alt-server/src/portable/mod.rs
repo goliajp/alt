@@ -1,12 +1,15 @@
+mod download;
 pub mod route;
+use self::download::Asked;
+pub(crate) use self::download::Download;
 use self::route::{ExportAction, ImportAction, PortableRoute};
 use crate::{NativeOptions, Output};
 use alt_portable::{
-    BlobSource, ImportIntent,
+    ImportIntent,
     http::{BeginImport, Bounds, Capabilities, ImportState, InspectArchive},
 };
 use alt_server_store::{Credential, Error, Result, Store};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Read;
 
 /// the media type of an archive
 pub(crate) const ARCHIVE: &str = "application/vnd.alt.portable-v1";
@@ -56,7 +59,14 @@ pub fn request_bytes(
     }
 }
 
-pub fn execute(
+/// A portable request once what it needs of the database is read: its answer,
+/// or the download that is written without the database.
+pub(crate) enum Step {
+    Done(Output),
+    Download(Box<Download>),
+}
+
+pub(crate) fn execute(
     store: &mut Store,
     credential: &Credential,
     options: &NativeOptions,
@@ -65,11 +75,11 @@ pub fn execute(
     refresh: &mut dyn FnMut(&mut Store) -> Result<Credential>,
     // of the room responses have on disk, for what is written out to be sent
     sending: Option<alt_shares::Share>,
-) -> Result<Output> {
+) -> Result<Step> {
     use crate::native::{body, empty, json};
     let settings = bounds(options)?;
     let limits = settings.verification(store.limits(), options.task_limits)?;
-    match route {
+    let done = match route {
         PortableRoute::Inspect(scope) => {
             store.check_portable_inspection(credential, &scope)?;
             let maximum = settings
@@ -114,62 +124,15 @@ pub fn execute(
                     store.retire_portable_export(credential, &scope, &id)?;
                     json(&store.query_portable_export(credential, &scope, &id, limits.package)?)
                 }
-                ExportAction::Archive => {
+                ExportAction::Archive | ExportAction::Content(_) => {
                     let export =
                         store.open_portable_export(credential, &scope, &id, limits.package)?;
-                    let mut body = crate::git_response::Spill::within(sending);
-                    let (envelope, package) = (export.envelope(), limits.package);
-                    let written =
-                        alt_portable::write_archive(&mut body, envelope, &export, package);
-                    body.into_output(ARCHIVE, written.map_err(Into::into))
-                }
-                ExportAction::Content(digest) => {
-                    let export =
-                        store.open_portable_export(credential, &scope, &id, limits.package)?;
-                    let blob = export
-                        .envelope()
-                        .catalog
-                        .blobs
-                        .iter()
-                        .find(|b| b.blake3 == digest)
-                        .ok_or(Error::Unauthorized)?;
-                    let mut input = export.open(blob)?;
-                    let held = match sending {
-                        Some(mut room) => {
-                            let full = |_| Error::Busy("responses to fetches");
-                            room.take(blob.bytes).map_err(full)?;
-                            Some(room)
-                        }
-                        None => None,
+                    let asked = match action {
+                        ExportAction::Content(digest) => Asked::Content(digest),
+                        _ => Asked::Archive,
                     };
-                    let mut file = alt_os::temp::NamedTempFile::new()?;
-                    let mut hash = alt_hash::blake3::Hasher::new();
-                    let mut remaining = blob.bytes;
-                    let mut buffer = [0u8; 65536];
-                    while remaining > 0 {
-                        let count = input.read(&mut buffer[..remaining.min(65536) as usize])?;
-                        if count == 0 {
-                            return Err(Error::Integrity("portable export truncated"));
-                        }
-                        hash.update(&buffer[..count]);
-                        file.write_all(&buffer[..count])?;
-                        remaining -= count as u64;
-                    }
-                    if input.read(&mut [0])? != 0
-                        || hash.finalize().to_hex().as_str() != blob.blake3
-                    {
-                        return Err(Error::Integrity("portable export bytes changed"));
-                    }
-                    file.as_file_mut().seek(SeekFrom::Start(0))?;
-                    Ok(Output::File {
-                        bytes: blob.bytes,
-                        digest,
-                        file: alt_server_store::StoredReader::from_file(
-                            file.into_file(),
-                            blob.bytes,
-                        )?,
-                        held,
-                    })
+                    let download = Download::new(export, asked, limits.package, sending);
+                    return Ok(Step::Download(Box::new(download)));
                 }
             }
         }
@@ -219,7 +182,7 @@ pub fn execute(
                     if receipt.body.intent != intent {
                         return Err(Error::Precondition("portable import intent changed"));
                     }
-                    return json(&ImportState::Committed { receipt });
+                    return json(&ImportState::Committed { receipt }).map(Step::Done);
                 }
                 let work = store.verify_portable_import(credential, &intent, limits)?;
                 let current = refresh(store)?;
@@ -234,5 +197,6 @@ pub fn execute(
                 json(&store.query_portable_import(credential, &key)?)
             }
         },
-    }
+    };
+    done.map(Step::Done)
 }

@@ -61,6 +61,14 @@ impl Call {
                 },
                 Some(sending),
             )?;
+            let output = match output {
+                crate::portable::Step::Done(output) => output,
+                crate::portable::Step::Download(download) => {
+                    // a download that waits for its turn holds no connection of the database
+                    drop(store);
+                    download.answered()?
+                }
+            };
             return Ok((output, None));
         }
         let mut raw = Vec::new();

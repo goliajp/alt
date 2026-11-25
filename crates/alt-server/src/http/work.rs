@@ -93,8 +93,8 @@ pub(super) struct Work {
 }
 impl Work {
     /// The answer of the request. The store is let go of before the segments
-    /// are read for a Git request: a response that waits for its turn holds
-    /// no connection of the database.
+    /// are read for a Git request, and before a portable download is written:
+    /// a response that waits for its turn holds no connection of the database.
     pub(super) fn run(
         self,
         lease: &mut Option<pool::Lease>,
@@ -116,7 +116,7 @@ impl Work {
             }
             Route::Portable(route) => {
                 let current = self.factory.authenticate(store, &self.token)?;
-                crate::portable::execute(
+                let step = crate::portable::execute(
                     store,
                     &current,
                     &self.options,
@@ -124,7 +124,14 @@ impl Work {
                     source,
                     &mut |store| self.factory.authenticate(store, &self.token),
                     Some(self.verifying.share()),
-                )
+                )?;
+                match step {
+                    crate::portable::Step::Done(output) => Ok(output),
+                    crate::portable::Step::Download(download) => {
+                        drop(lease.take());
+                        download.answered()
+                    }
+                }
             }
             Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
                 let pushed = match &route {
