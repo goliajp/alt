@@ -1,0 +1,16 @@
+schema: alt-meta/1
+type: feat
+summary: what git fsck refuses in trees and blobs, and what of it is new beside the trees before
+author-type: human
+author: doracawl
+touched: Cargo.toml
+touched: crates/alt-git-codec/src/lib.rs
+touched: crates/alt-git-codec/src/names.rs
+touched: crates/alt-git-config/src/lib.rs
+touched: crates/alt-git-config/src/parse.rs
+touched: crates/alt-git-fsck/Cargo.toml
+touched: crates/alt-git-fsck/src/blob.rs
+touched: crates/alt-git-fsck/src/lib.rs
+touched: crates/alt-git-fsck/src/tree.rs
+touched: crates/alt-git-fsck/src/url.rs
+touched: crates/alt-git-fsck/src/walk.rs
