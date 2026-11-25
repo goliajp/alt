@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a push of the measurement of settled moments that fails says how the service answered
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/settled_cost.rs
