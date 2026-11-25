@@ -26,8 +26,8 @@ pub(super) enum Form {
     Plain(ObjectKind),
     /// a delta of the entry at this index
     Ofs(u32),
-    /// a delta of the object with this id
-    Ref(ObjectId),
+    /// a delta of the object with this id, which it says has so many bytes
+    Ref(ObjectId, u64),
 }
 
 pub(super) struct Entry {
@@ -110,7 +110,10 @@ pub(super) fn scan(
                     .map_err(|_| PackError::Format("ofs-delta base offset not found"))?;
                 (Form::Ofs(base as u32), None)
             }
-            EntryKind::RefDelta { base } => (Form::Ref(base), None),
+            EntryKind::RefDelta { base } => {
+                let size = crate::delta::source_size(&payload)?;
+                (Form::Ref(base, size), None)
+            }
         };
         entries.push(Entry {
             offset: pos as u64,

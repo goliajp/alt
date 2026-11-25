@@ -14,17 +14,18 @@ use std::path::Path;
 
 use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
 
-use super::IndexLimits;
 use super::scan::{Entry, Form, Scanned};
-use crate::PackError;
+use super::{IndexLimits, IndexWork, ObjectMemory, Taken, resolve};
+use crate::{Pack, PackError};
 
 /// Where the bases a thin pack leaves out are read: the object of an id,
 /// nothing for one the store does not hold.
 pub type Bases<'a> = &'a dyn Fn(&ObjectId) -> std::io::Result<Option<(ObjectKind, Vec<u8>)>>;
 
 /// The ids the deltas left unresolved name as their bases and no entry
-/// resolved so far is the object of, each once.
-fn wanted(scanned: &Scanned, oids: &[Option<ObjectId>]) -> Vec<ObjectId> {
+/// resolved so far is the object of, each once, with the most bytes a
+/// delta of it says it has.
+fn wanted(scanned: &Scanned, oids: &[Option<ObjectId>]) -> Vec<(ObjectId, u64)> {
     let mut known: Vec<ObjectId> = oids.iter().flatten().copied().collect();
     known.sort_unstable();
     let unresolved = scanned
@@ -32,14 +33,15 @@ fn wanted(scanned: &Scanned, oids: &[Option<ObjectId>]) -> Vec<ObjectId> {
         .iter()
         .zip(oids)
         .filter(|(_, oid)| oid.is_none());
-    let mut wanted: Vec<ObjectId> = unresolved
+    let mut wanted: Vec<(ObjectId, u64)> = unresolved
         .filter_map(|(entry, _)| match &entry.form {
-            Form::Ref(base) if known.binary_search(base).is_err() => Some(*base),
+            Form::Ref(base, size) if known.binary_search(base).is_err() => Some((*base, *size)),
             _ => None,
         })
         .collect();
-    wanted.sort_unstable();
-    wanted.dedup();
+    // the largest size of each id comes first, and is the one kept
+    wanted.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    wanted.dedup_by_key(|(oid, _)| *oid);
     wanted
 }
 
@@ -83,45 +85,102 @@ fn digest(file: &mut std::fs::File, algo: HashAlgo) -> std::io::Result<Vec<u8>> 
     })
 }
 
-/// Appends to the pack at `path` those of the bases its unresolved
-/// deltas name that `bases` has, and adds them to `scanned` as the plain
-/// entries they are. The new trailer, or nothing where no base was
-/// found. What the bases inflate to counts against the limit like the
-/// entries the pack came with.
-pub(super) fn complete(
-    path: &Path,
-    algo: HashAlgo,
+/// Makes the pack at `path` whole, where its unresolved deltas name bases
+/// that `bases` has, and resolves the deltas of those. `memory` is what the
+/// pack was let in with, as `now` says it has: it is let in again with what
+/// it has once the bases are known.
+pub(super) fn made_whole(
+    (path, algo): (&Path, HashAlgo),
+    (scanned, oids): (&mut Scanned, &mut Vec<Option<ObjectId>>),
+    bases: Bases<'_>,
+    limits: &IndexLimits<'_>,
+    (memory, mut now): (&mut Option<Taken<'static>>, (u64, u64)),
+    work: &mut IndexWork,
+) -> Result<Option<Vec<u8>>, PackError> {
+    let came = oids.len();
+    let wanted = wanted(scanned, oids);
+    // the bases are read whole: room for the largest is made before any is
+    let largest = wanted.iter().map(|(_, size)| *size).max().unwrap_or(0);
+    scanned.largest = scanned.largest.max(largest);
+    again(limits, scanned, &mut now, memory)?;
+    let objects = limits.objects(memory);
+    let (file, wanted) = ((path, algo), (&wanted[..], bases));
+    let made = complete(file, scanned, oids, wanted, limits, objects)?;
+    let Some(trailer) = made else {
+        return Ok(None);
+    };
+    // what the bases inflate to is among what may be held of them
+    again(limits, scanned, &mut now, memory)?;
+    let pack = Pack::open(path, algo)?;
+    let room = limits.objects(memory);
+    resolve::resolve(&pack, scanned, oids, came, limits, room, work)?;
+    Ok(Some(trailer))
+}
+
+/// Lets the pack in again with what it has throughout and what its largest
+/// object takes as `scanned` says now, where that is not what it has.
+fn again(
+    limits: &IndexLimits<'_>,
+    scanned: &Scanned,
+    now: &mut (u64, u64),
+    memory: &mut Option<Taken<'static>>,
+) -> Result<(), PackError> {
+    let after = limits.resolving(scanned);
+    if after != *now {
+        drop(memory.take());
+        *memory = limits.let_in(after.0, after.1)?;
+        *now = after;
+    }
+    Ok(())
+}
+
+/// Appends to the pack at `path` those of the bases `wanted` that `bases`
+/// has, and adds them to `scanned` as the plain entries they are; nothing
+/// where no base was found. What the bases inflate to counts against the
+/// limit like the entries the pack came with. A base is read where `objects`
+/// has room for it, as large as its deltas say it is, and is no other size.
+/// The new trailer, or nothing where no base was found.
+fn complete(
+    (path, algo): (&Path, HashAlgo),
     scanned: &mut Scanned,
     oids: &mut Vec<Option<ObjectId>>,
-    bases: Bases<'_>,
+    (wanted, bases): (&[(ObjectId, u64)], Bases<'_>),
     limits: &IndexLimits,
+    objects: Option<ObjectMemory<'_>>,
 ) -> Result<Option<Vec<u8>>, PackError> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let mut at = scanned.body_end as u64;
     file.set_len(at)?;
     file.seek(SeekFrom::Start(at))?;
     let came = scanned.entries.len();
-    for oid in wanted(scanned, oids) {
+    let mut room = None;
+    for (oid, size) in wanted {
         limits.going_on()?;
-        let Some((kind, data)) = bases(&oid)? else {
+        if let Some(objects) = &objects {
+            objects.room(&mut room, *size, limits.wait())?;
+        }
+        let Some((kind, data)) = bases(oid)? else {
             continue;
         };
-        scanned.largest = scanned.largest.max(data.len() as u64);
-        scanned.inflated = (scanned.inflated.checked_add(data.len() as u64))
+        if data.len() as u64 != *size {
+            return Err(PackError::Format("delta source size mismatch"));
+        }
+        scanned.inflated = (scanned.inflated.checked_add(*size))
             .filter(|total| *total <= limits.inflated_bytes)
             .ok_or(PackError::Limit("inflated bytes"))?;
         let mut raw = entry_header(kind, data.len());
         let data_at = at + raw.len() as u64;
         raw.extend(alt_deflate::compress(&data, 1, alt_deflate::Format::Zlib));
+        drop(data);
         file.write_all(&raw)?;
         scanned.entries.push(Entry {
             offset: at,
             data_at,
-            size: data.len() as u64,
+            size: *size,
             form: Form::Plain(kind),
             crc32: alt_hash::crc32(&raw),
         });
-        oids.push(Some(oid));
+        oids.push(Some(*oid));
         at += raw.len() as u64;
     }
     if scanned.entries.len() == came {

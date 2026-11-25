@@ -11,6 +11,11 @@ pub fn apply(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, PackError> {
     apply_bounded(base, delta, u64::MAX)
 }
 
+/// The size a delta says the object it is made of has.
+pub fn source_size(delta: &[u8]) -> Result<u64, PackError> {
+    varint(delta, &mut 0)
+}
+
 /// The size a delta says the object it makes has.
 pub fn target_size(delta: &[u8]) -> Result<u64, PackError> {
     let mut pos = 0;

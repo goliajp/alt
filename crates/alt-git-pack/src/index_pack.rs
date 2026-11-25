@@ -158,30 +158,15 @@ pub fn index_pack_thin(
     let room = limits.objects(&memory);
     resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, room, &mut work)?;
     drop(pack);
-    let came = oids.len();
     if let Some(bases) = bases
         && oids.contains(&None)
-        && let Some(whole) =
-            thin::complete(pack_path, algo, &mut scanned, &mut oids, bases, limits)?
     {
-        trailer = whole;
-        // a base that was appended may be larger than all the pack came with
-        let after = limits.resolving(&scanned);
-        if after != before {
-            drop(memory.take());
-            memory = limits.let_in(after.0, after.1)?;
+        let pieces = (&mut scanned, &mut oids);
+        let held = (&mut memory, before);
+        let made = thin::made_whole((pack_path, algo), pieces, bases, limits, held, &mut work)?;
+        if let Some(whole) = made {
+            trailer = whole;
         }
-        let pack = Pack::open(pack_path, algo)?;
-        let room = limits.objects(&memory);
-        resolve::resolve(
-            &pack,
-            &mut scanned,
-            &mut oids,
-            came,
-            limits,
-            room,
-            &mut work,
-        )?;
     }
     let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
     let oids: Vec<ObjectId> = oids.into_iter().collect::<Option<_>>().ok_or(stuck)?;
