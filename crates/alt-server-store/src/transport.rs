@@ -5,7 +5,7 @@ use crate::{Credential, Error, PublicationWork, Result, Store, reading};
 use alt_remote_protocol::{ContentEntry, Publication, RequestKey, Scope};
 
 mod git_content;
-pub(crate) use git_content::{Led, segment_content};
+pub(crate) use git_content::{Led, restoring_error, segment_content};
 
 pub use alt_remote_protocol::{PrincipalInfo, PublishedBundle, RepositoryInfo, ReviewSelection};
 

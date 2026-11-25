@@ -145,7 +145,7 @@ pub(super) async fn handle(
             if gzip {
                 source = encoding::decode(source, size)?;
             }
-            let mut store = factory.open()?;
+            let mut store = factory.open_for(Some(work.verifying.by), &work.verifying.given_up)?;
             source.as_file_mut().seek(SeekFrom::Start(0))?;
             work.run(&mut store, route, source.as_file_mut())
         }),

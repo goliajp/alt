@@ -104,7 +104,7 @@ impl Store {
             let published = self.published(&key.scope.repository_instance_id)?;
             if published.holds_entry(&entry)?
                 && let Some(content) =
-                    crate::transport::segment_content(&published.segments, digest)?
+                    crate::transport::segment_content(&published.segments, digest, self.restoring.as_ref())?
             {
                 return Ok(content);
             }

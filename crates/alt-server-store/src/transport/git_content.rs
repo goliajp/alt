@@ -55,7 +55,7 @@ impl Store {
                 return Err(Error::Unauthorized);
             }
         }
-        segment_content(&view.segments, digest)?.ok_or(Error::Unauthorized)
+        segment_content(&view.segments, digest, self.restoring.as_ref())?.ok_or(Error::Unauthorized)
     }
     /// Whether a publication of records that is published names the content in
     /// its manifest. The manifests are read one by one: this is asked of a
@@ -70,15 +70,16 @@ impl Store {
     }
 }
 /// The object whose content has this digest, inflated into an unnamed temporary file
-/// as it is read from its segment.
+/// as it is read from its segment; one stored as a delta is restored in `room`.
 pub(crate) fn segment_content(
     segments: &alt_pack_segment::SegmentSet,
     digest: &str,
+    room: Option<&alt_pack_segment::Restoring>,
 ) -> Result<Option<(u64, crate::StoredReader)>> {
     let key = alt_provenance::decode_hex::<32>(digest).map_err(|_| Error::Unauthorized)?;
     let Some((_, _, size, mut stream)) = segments
-        .open_blake3(&key)
-        .map_err(|_| Error::Integrity("published object bytes"))?
+        .open_blake3_within(&key, room)
+        .map_err(restoring_error)?
     else {
         return Ok(None);
     };
@@ -87,4 +88,15 @@ pub(crate) fn segment_content(
         return Err(Error::Integrity("published object bytes"));
     }
     Ok(Some((size, crate::StoredReader::from_file(file, size)?)))
+}
+
+/// What an object that could not be opened is told as: the memory it is
+/// restored in as it is, the rest as bytes that are not as they were stored.
+pub(crate) fn restoring_error(error: alt_pack_segment::Error) -> Error {
+    match error {
+        alt_pack_segment::Error::Limit(what) => Error::Limit(what),
+        alt_pack_segment::Error::Busy(what) => Error::Busy(what),
+        alt_pack_segment::Error::GivenUp => Error::Busy("the request is waited for no longer"),
+        _ => Error::Integrity("published object bytes"),
+    }
 }

@@ -242,7 +242,7 @@ pub async fn serve_with_browser(
         metrics: alt_server_telemetry::Metrics::new(alt_server_telemetry::process_log_losses())
             .map_err(|_| std::io::Error::other("metrics initialization unavailable"))?,
         compaction: crate::compaction::Compaction::start(factory.clone()),
-        factory: pool::Pool::new(factory, options.workers),
+        factory: pool::Pool::new(factory, (options.workers, options.verifying)),
         workers: Arc::new(Semaphore::new(options.workers)),
         receiving: receiving::Receiving::new(options.receiving_each, options.receiving_bytes),
         sources: sources::Sources::new(options.connections_each, &options.trusted_proxies),

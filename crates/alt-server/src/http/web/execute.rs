@@ -42,7 +42,7 @@ impl Call {
         } = self;
         let mut source = source;
         source.as_file_mut().rewind()?;
-        let mut store = factory.open()?;
+        let mut store = factory.open_for(None, &gone)?;
         store.check_browser_binding(Some(&browser.origin))?;
         if let WebRoute::Portable(selected) = &route {
             let token = token.as_deref().ok_or(Error::Unauthorized)?;

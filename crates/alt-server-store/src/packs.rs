@@ -191,8 +191,8 @@ impl Store {
         let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
         let (kind, size, stream) = view
             .segments
-            .open(&key)
-            .map_err(|_| Error::Integrity("published object bytes"))?
+            .open_within(&key, self.restoring.as_ref())
+            .map_err(crate::transport::restoring_error)?
             .ok_or(Error::Unauthorized)?;
         if size > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));

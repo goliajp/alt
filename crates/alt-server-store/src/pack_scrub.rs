@@ -218,14 +218,14 @@ impl Store {
         }
         crate::schema::check_rows(&rows, rows.len())?;
         let client = crate::database::Connection::new(client);
-        let waited = None;
         Ok(Store {
             client,
             bytes,
             spec,
             signing_key,
             limits,
-            waited,
+            waited: None,
+            restoring: None,
         })
     }
 
