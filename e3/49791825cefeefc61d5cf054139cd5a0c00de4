@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: a file url no transport of curl takes is taken as git takes it
+author-type: human
+author: doracawl
+touched: crates/alt-git-fsck/src/url.rs
