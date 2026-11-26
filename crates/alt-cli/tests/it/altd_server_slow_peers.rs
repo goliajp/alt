@@ -250,9 +250,12 @@ pub(crate) fn cloned_slowly(
     let alt = crate::altd_server::alt;
     crate::altd_server::ok(alt(&origin, &["add", "."]));
     crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
+    // the head goes out once the pack is made, and what is read from it on
+    // is the pack: no keepalive comes while the pack of 48 MiB is made
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_IO_WINDOW_MS", window_ms),
+        ("ALT_SERVER_KEEPALIVE_MS", "3600000"),
     ]);
     let refs = listed(&format!("http://{}/", server.addr)).unwrap();
     let head = refs.split_whitespace().next().unwrap();
