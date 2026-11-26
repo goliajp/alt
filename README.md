@@ -350,10 +350,16 @@ their answer once `ALT_SERVER_KEEPALIVE_MS` went by, five seconds by default,
 and a keepalive each time it goes by again, as Git's `upload-pack` and
 `receive-pack` send them; what refuses one of them from then on, the waits
 above among it, is told as an error in the side band instead of a `503`.
-An error of the server in making the pack of a fetch or taking in that of a
-push is told as it is to a client that signed in, and to another only as what
-failed and the kind of error of the system it came of: the error itself, which
-may name files of the server, goes to the server's log.
+An error of the server is told as it is to a client that signed in, and to
+another only as the step that failed and, where it is known, the kind of
+error of the system it came of: the error itself, which may name files of the
+server, goes to the server's log. That holds for an error in making the pack
+of a fetch and for want of room to make it; in the report of a push, for an
+error in indexing or writing its pack, in the transaction of its refs or in
+syncing it, and for writes stopped after a sync that failed. What the server
+refuses of what a client sent (a request or a pack that does not read, one
+over a limit, a ref the client may not move, a signature that is wanting) is
+told to every client as it is, and so is a fetch whose time is over.
 
 Under `ALT_SERVER_ROOT`, a file `users` in the root names who may come: a
 name, a tab, the BLAKE3 hash of a token in hex and, behind another tab, rules
