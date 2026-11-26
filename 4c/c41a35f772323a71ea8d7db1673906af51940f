@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: send a body begun before it is made as it is to http/1.0 peers and say when the connection ends
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/head.rs
+touched: crates/alt-cli/src/bin/altd_server/http/kept.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
