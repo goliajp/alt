@@ -63,6 +63,12 @@ impl Client {
         Ok(self.link.stream.set_read_timeout(timeout)?)
     }
 
+    /// What ends this connection from another thread, while a read waits on
+    /// it as well as between statements.
+    pub fn closer(&self) -> Result<crate::Closer> {
+        Ok(self.link.stream.closer()?)
+    }
+
     pub fn query(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>> {
         let mut rows = Vec::new();
         self.run(sql, params, true, Plan::Session, Fetch::Rows(&mut rows))?;

@@ -1,21 +1,19 @@
 //! One process serves a database at a time, wherever the processes run.
 
+use super::serving_line::Line;
 use super::*;
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
-use std::sync::{Arc, Mutex};
 
 const SERVED: &str = "another server serves this database";
 /// the sessions that hold the lock of the serving process, or wait for it
 const SESSIONS: &str = "SELECT pid FROM pg_locks WHERE locktype='advisory' AND (classid::bigint<<32|objid::bigint)=715071909112 AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND granted=$1";
 
-fn sessions(f: &Fixture, granted: bool) -> Vec<i32> {
+pub(super) fn sessions(f: &Fixture, granted: bool) -> Vec<i32> {
     let rows = f.client().query(SESSIONS, &[&granted]).unwrap();
     rows.iter().map(|row| row.get(0)).collect()
 }
 
 /// Waits until `met` says so of the sessions that hold the lock.
-fn held_until(f: &Fixture, what: &str, met: impl Fn(&[i32]) -> bool) -> Vec<i32> {
+pub(super) fn held_until(f: &Fixture, what: &str, met: impl Fn(&[i32]) -> bool) -> Vec<i32> {
     let until = std::time::Instant::now() + Duration::from_secs(60);
     loop {
         let holding = sessions(f, true);
@@ -27,7 +25,7 @@ fn held_until(f: &Fixture, what: &str, met: impl Fn(&[i32]) -> bool) -> Vec<i32>
     }
 }
 
-fn ended(f: &Fixture, session: i32) {
+pub(super) fn ended(f: &Fixture, session: i32) {
     let ended = "SELECT pg_terminate_backend($1)";
     f.client().query_one(ended, &[&session]).unwrap();
 }
@@ -114,73 +112,6 @@ fn a_database_is_served_by_one_process_at_a_time() {
     assert_eq!(served.unwrap(), Err(SERVED.to_owned()));
     serving.join().unwrap();
     drop(other);
-}
-
-/// A line to the database a test can make go silent: each connection made to
-/// it goes on to the socket of the database, and those made before
-/// [`Line::silent`] carry nothing more either way, without being closed. Once
-/// the line is dropped they are closed.
-struct Line {
-    address: std::net::SocketAddr,
-    /// how many connections were made, and how many of them carry nothing more
-    made: Arc<(AtomicUsize, AtomicUsize)>,
-    clients: Arc<Mutex<Vec<std::net::TcpStream>>>,
-}
-
-impl Line {
-    fn to(socket: std::path::PathBuf) -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let made = Arc::new((AtomicUsize::new(0), AtomicUsize::new(0)));
-        let clients = Arc::new(Mutex::new(Vec::new()));
-        let (counts, kept) = (made.clone(), clients.clone());
-        std::thread::spawn(move || {
-            for client in listener.incoming() {
-                let Ok(client) = client else { return };
-                let number = counts.0.fetch_add(1, SeqCst);
-                let database = std::os::unix::net::UnixStream::connect(&socket).unwrap();
-                kept.lock().unwrap().push(client.try_clone().unwrap());
-                let ends: [(Box<dyn Read + Send>, Box<dyn Write + Send>); 2] = [
-                    (
-                        Box::new(client.try_clone().unwrap()),
-                        Box::new(database.try_clone().unwrap()),
-                    ),
-                    (Box::new(database), Box::new(client)),
-                ];
-                for (mut from, mut to) in ends {
-                    let counts = counts.clone();
-                    std::thread::spawn(move || {
-                        let mut buffer = vec![0; 64 << 10];
-                        while let Ok(read @ 1..) = from.read(&mut buffer) {
-                            if counts.1.load(SeqCst) > number {
-                                return;
-                            }
-                            if to.write_all(&buffer[..read]).is_err() {
-                                return;
-                            }
-                        }
-                    });
-                }
-            }
-        });
-        Line {
-            address,
-            made,
-            clients,
-        }
-    }
-
-    fn silent(&self) {
-        self.made.1.store(self.made.0.load(SeqCst), SeqCst);
-    }
-}
-
-impl Drop for Line {
-    fn drop(&mut self) {
-        for client in self.clients.lock().unwrap().iter() {
-            let _ = client.shutdown(std::net::Shutdown::Both);
-        }
-    }
 }
 
 /// The server reaches its database over a line that goes silent, and the

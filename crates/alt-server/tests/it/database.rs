@@ -18,6 +18,8 @@ mod portable;
 mod read_deadline;
 mod running;
 mod serving;
+mod serving_line;
+mod serving_slow;
 mod sign_in_deadline;
 mod single_copy;
 use alt_crypto::ed25519::SigningKey;

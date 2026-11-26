@@ -65,6 +65,34 @@ impl Stream {
     }
 }
 
+/// The socket of a connection, to end it from another thread.
+pub enum Closer {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+impl Stream {
+    pub fn closer(&self) -> io::Result<Closer> {
+        Ok(match self {
+            Self::Tcp(stream) => Closer::Tcp(stream.try_clone()?),
+            Self::Unix(stream) => Closer::Unix(stream.try_clone()?),
+        })
+    }
+}
+
+impl Closer {
+    /// Ends the connection: a read that waits on it, here or in another
+    /// thread, ends with it. One the server ended already is ended.
+    pub fn close(&self) {
+        let ended = match self {
+            Self::Tcp(stream) => stream.shutdown(std::net::Shutdown::Both),
+            Self::Unix(stream) => stream.shutdown(std::net::Shutdown::Both),
+        };
+        // the one error is that the socket is no longer connected
+        drop(ended);
+    }
+}
+
 const INITIAL: usize = 64 << 10;
 /// a buffer grown past this by one large message is released afterwards
 const KEEP: usize = 1 << 20;

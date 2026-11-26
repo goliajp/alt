@@ -34,6 +34,10 @@ impl Connection {
     pub fn clear_read_timeout(&mut self) -> Result<(), Error> {
         self.client.set_read_timeout(None)
     }
+    /// what ends this connection from another thread
+    pub fn closer(&self) -> Result<alt_pg::Closer, Error> {
+        self.client.closer()
+    }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)
