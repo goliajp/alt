@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: read a clone slowly from where its pack is sent, not from its head
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
