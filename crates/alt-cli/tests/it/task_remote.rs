@@ -12,22 +12,15 @@ use alt_repository_service::{Grant, RefSelector};
 use alt_server::{HttpOptions, StoreFactory};
 use alt_server_store::{ByteStore, Credential, InstanceSpec, Store};
 use browser::{browser_json, browser_login};
-use served::limits;
+use served::{future, limits};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
     process::{Command, Output},
     sync::atomic::{AtomicUsize, Ordering},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
-fn future() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-        + 3_600_000
-}
 pub(crate) struct Server {
     pub(crate) url: String,
     pub(crate) token: String,

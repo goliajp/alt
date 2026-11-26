@@ -1,7 +1,16 @@
 //! What the server of these tests is given: its limits and how it listens.
 use alt_remote_protocol::Limits;
 use alt_server::{HttpOptions, NativeOptions};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// an hour from now, in milliseconds since the epoch
+pub(super) fn future() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 3_600_000
+}
 
 pub(super) fn limits() -> Limits {
     Limits {
