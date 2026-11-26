@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: the time an hour ahead the remote task tests use lives with what their server is given
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-cli/tests/it/task_remote/served.rs
