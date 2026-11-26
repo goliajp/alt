@@ -12,7 +12,10 @@ use std::{
 
 mod file;
 
-pub use file::{NamedTempFile, PathPersistError, PersistError, TempPath, tempfile, tempfile_in};
+pub use file::{
+    NamedTempFile, PathPersistError, PersistError, TempPath, rename_exclusive, tempfile,
+    tempfile_in,
+};
 
 const RANDOM_LENGTH: usize = 12;
 const ATTEMPTS: usize = 1 << 16;

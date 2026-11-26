@@ -50,6 +50,7 @@ mod kept;
 mod limits;
 mod memory;
 mod objects;
+mod placed;
 mod resolve;
 mod scan;
 mod thin;
@@ -64,8 +65,6 @@ pub use objects::Objects;
 pub use thin::Bases;
 pub use walk::Walk;
 
-use std::fs::File;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use alt_git_codec::{HashAlgo, ObjectId};
@@ -195,7 +194,8 @@ pub fn index_pack_thin(
     drop(scanned);
 
     let idx_bytes = idx::build_idx(algo, &mut oid_entries, &trailer);
-    let (final_pack, final_idx) = placed(pack_path, &idx_bytes, &trailer, rename, limits.kept)?;
+    let (final_pack, final_idx) =
+        placed::placed(pack_path, &idx_bytes, &trailer, rename, limits.kept)?;
 
     Ok(IndexedPackOnDisk {
         pack_path: final_pack,
@@ -205,66 +205,6 @@ pub fn index_pack_thin(
         work,
         memory,
     })
-}
-
-/// Writes `idx` next to the pack at `pack_path` and, with `rename`, gives
-/// both the names of `trailer`; where they are then. Where that fails, the
-/// idx is not left behind, and the pack is where it was unless a pack of
-/// the same name, which is the same pack, was there before.
-fn placed(
-    pack_path: &Path,
-    idx: &[u8],
-    trailer: &[u8],
-    rename: bool,
-    kept: bool,
-) -> Result<(PathBuf, PathBuf), PackError> {
-    let idx_path = pack_path.with_extension("idx");
-    let tmp_idx = pack_path.with_extension("idx.tmp");
-    let written =
-        write_idx(&tmp_idx, idx, kept).and_then(|()| std::fs::rename(&tmp_idx, &idx_path));
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp_idx);
-        return Err(e.into());
-    }
-    if !rename {
-        return Ok((pack_path.to_path_buf(), idx_path));
-    }
-    let dir = pack_path.parent().unwrap_or_else(|| Path::new("."));
-    let hex: String = trailer.iter().map(|b| format!("{b:02x}")).collect();
-    let renamed_pack = dir.join(format!("pack-{hex}.pack"));
-    let renamed_idx = dir.join(format!("pack-{hex}.idx"));
-    let there = std::fs::symlink_metadata(&renamed_pack).is_ok();
-    let moved = (|| {
-        if pack_path != renamed_pack {
-            std::fs::rename(pack_path, &renamed_pack)?;
-        }
-        if idx_path != renamed_idx
-            && let Err(e) = std::fs::rename(&idx_path, &renamed_idx)
-        {
-            // the pack goes back to whoever has it under its own name
-            if pack_path != renamed_pack && !there {
-                std::fs::rename(&renamed_pack, pack_path)?;
-            }
-            return Err(e);
-        }
-        Ok(())
-    })();
-    if let Err(e) = moved {
-        if idx_path != renamed_idx {
-            let _ = std::fs::remove_file(&idx_path);
-        }
-        return Err(e.into());
-    }
-    Ok((renamed_pack, renamed_idx))
-}
-
-fn write_idx(path: &Path, idx: &[u8], kept: bool) -> std::io::Result<()> {
-    let mut f = File::create(path)?;
-    f.write_all(idx)?;
-    if kept {
-        f.sync_all()?;
-    }
-    Ok(())
 }
 
 fn verify_trailer(map: &[u8], algo: HashAlgo, trailer: &[u8]) -> Result<(), PackError> {

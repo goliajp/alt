@@ -7,6 +7,7 @@ mod index_memory;
 mod index_pack;
 mod pack_read;
 mod pack_write;
+mod placed;
 mod read_again;
 mod read_bounds;
 mod regained;

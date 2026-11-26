@@ -42,7 +42,7 @@ fn c_path(path: &Path) -> io::Result<CString> {
 }
 
 /// Renames `from` to `to` and fails with `AlreadyExists` if `to` exists.
-fn rename_exclusive(from: &Path, to: &Path) -> io::Result<()> {
+pub fn rename_exclusive(from: &Path, to: &Path) -> io::Result<()> {
     use crate::sys;
     let (from_c, to_c) = (c_path(from)?, c_path(to)?);
     // SAFETY: both paths are NUL-terminated strings that outlive the call
