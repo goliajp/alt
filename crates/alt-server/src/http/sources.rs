@@ -20,7 +20,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering::Relaxed},
+        atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
     },
 };
 
@@ -32,9 +32,11 @@ pub(super) struct Sources {
     each: usize,
     proxies: Vec<caller::Network>,
     open: Mutex<HashMap<String, usize>>,
-    /// the requests through a proxy so far that named nobody past it; past
-    /// [`QUIET`] once one named somebody
+    /// the requests through a proxy so far that named nobody past it, counted
+    /// while fewer than [`QUIET`]
     quiet: AtomicUsize,
+    /// whether a request through a proxy named somebody past it
+    named: AtomicBool,
     log: alt_server_telemetry::BackgroundLog,
 }
 
@@ -51,6 +53,7 @@ impl Sources {
             proxies: proxies.to_vec(),
             open: Mutex::default(),
             quiet: AtomicUsize::new(0),
+            named: AtomicBool::new(false),
             log: alt_server_telemetry::BackgroundLog::current(),
         })
     }
@@ -95,12 +98,20 @@ impl Sources {
     ) -> Result<Option<Place>, ()> {
         let caller = caller::caller(peer, headers, &self.proxies);
         let (proxy, named) = (self.proxy(peer.ip()), !self.proxy(caller));
-        if proxy && self.quiet.load(Relaxed) < QUIET {
+        if proxy && !self.named.load(Relaxed) {
             if named {
-                self.quiet.store(usize::MAX, Relaxed);
-            } else if self.quiet.fetch_add(1, Relaxed) + 1 == QUIET {
-                self.log
-                    .failed("configuration", "", &caller::nobody(caller));
+                self.named.store(true, Relaxed);
+            } else {
+                // past where the log is told only by those that came at once,
+                // and never wrapping
+                let quiet = &self.quiet;
+                if quiet.load(Relaxed) < QUIET
+                    && quiet.fetch_add(1, Relaxed) + 1 == QUIET
+                    && !self.named.load(Relaxed)
+                {
+                    self.log
+                        .failed("configuration", "", &caller::nobody(caller));
+                }
             }
         }
         match proxy && named {
