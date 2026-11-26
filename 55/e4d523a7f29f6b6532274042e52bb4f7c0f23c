@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a push whose refs moved is refused only where what it leans on or names is lost, through annotated tags too
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/tests/it/database/git/read_moved_lost.rs
