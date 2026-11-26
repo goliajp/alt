@@ -1,5 +1,5 @@
 //! A server that stops answering does not keep the client waiting without
-//! end.
+//! end, and one that never stops sending does not fill its memory.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -77,6 +77,23 @@ fn a_download_that_no_answer_comes_for_is_given_up_on() {
     let endpoint = serve(&pointer, |stream| {
         thread::sleep(SILENCE * 20);
         drop(stream);
+    });
+    let got = within_bound(move || {
+        let client = Client::new(endpoint, None).with_timeout(SILENCE);
+        client.download(&[pointer]).map(drop)
+    });
+    assert!(got.is_err());
+}
+
+#[test]
+fn content_that_never_ends_is_read_no_further_than_its_size() {
+    let pointer = Pointer::of(b"weights");
+    let endpoint = serve(&pointer, |mut stream| {
+        let head = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+        let mut sent = stream.write_all(head.as_bytes());
+        while sent.is_ok() {
+            sent = stream.write_all(&[b'w'; 64 << 10]);
+        }
     });
     let got = within_bound(move || {
         let client = Client::new(endpoint, None).with_timeout(SILENCE);

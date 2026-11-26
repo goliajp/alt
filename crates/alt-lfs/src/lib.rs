@@ -283,7 +283,9 @@ impl Client {
             }
             let resp = get.call().map_err(|e| http(&action.href, e))?;
             let mut content = Vec::with_capacity(p.size as usize);
-            resp.into_reader().read_to_end(&mut content)?;
+            // a byte past the size tells content that is not this one
+            let most = p.size.saturating_add(1);
+            resp.into_reader().take(most).read_to_end(&mut content)?;
             p.verify(&content)?;
             out.push((p.clone(), content));
         }
