@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: tell a peer that is not signed in only the kind of the error a fetch had no room for
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
