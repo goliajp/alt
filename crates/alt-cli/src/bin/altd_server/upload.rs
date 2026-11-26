@@ -115,8 +115,8 @@ pub(super) fn handle_upload_pack(
 }
 
 /// Answers a fetch whose response was not made with why. One the server had
-/// no time or room for is told to come again. The error, but where the time
-/// was over, is the handler's too.
+/// no time or room for is told to come again. An error of the server is the
+/// handler's too.
 fn not_fetched(
     req: http::Request,
     repo: Reading,
@@ -124,15 +124,15 @@ fn not_fetched(
     (e, signed_in): (Box<dyn std::error::Error>, bool),
 ) -> Result<(), Box<dyn std::error::Error>> {
     let late = e.downcast_ref() == Some(&fetch::Stopped::Late);
-    let (status, why) = limits::fetch_refused(&*e, late, signed_in);
+    let (status, why, erred) = limits::fetch_refused(&*e, late, signed_in);
     let mut r = Response::from_string(why).with_status_code(status);
     if status == 503 && !late {
         r.add_header(header("Retry-After", "60"));
     }
     repo.answer(req, r, log)?;
-    match late {
-        true => Ok(()),
-        false => Err(e),
+    match erred {
+        true => Err(e),
+        false => Ok(()),
     }
 }
 

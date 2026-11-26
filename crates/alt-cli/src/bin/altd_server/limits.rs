@@ -195,25 +195,29 @@ pub(super) fn telling(
 }
 
 /// The status of the answer to a fetch whose response was not made for
-/// `error`, and what it tells the peer: of an error of the server, the
-/// want of room among them, a peer that is not `signed_in` is told only
-/// the kind.
+/// `error`, what it tells the peer, and whether `error` is one of the
+/// server. Of an error of the server, the want of room on its disk among
+/// them, a peer that is not `signed_in` is told only the kind; a fetch whose
+/// time is over, or whose response has no room beside those being sent, is
+/// told so as it is.
 pub(super) fn fetch_refused(
     error: &(dyn std::error::Error + 'static),
     late: bool,
     signed_in: bool,
-) -> (u16, String) {
-    if late {
-        return (503, error.to_string());
+) -> (u16, String, bool) {
+    let io = error.downcast_ref::<std::io::Error>();
+    let full = io.and_then(|io| io.get_ref()?.downcast_ref::<super::sending::Full>());
+    if late || full.is_some() {
+        return (503, error.to_string(), false);
     }
     match refusal(error) {
         503 => {
             let what = "the server had no room to make the pack";
-            (503, told_of(error, what, signed_in))
+            (503, told_of(error, what, signed_in), true)
         }
         _ => {
             let what = "the server failed to make the pack";
-            (500, told_of(error, what, signed_in))
+            (500, told_of(error, what, signed_in), true)
         }
     }
 }
@@ -230,24 +234,36 @@ mod tests {
             let why = "No space left on device (os error 28) at path \"/srv/tmp/.tmpAbc\"";
             std::io::Error::new(std::io::ErrorKind::StorageFull, why)
         };
-        let (status, told) = fetch_refused(&full(), false, false);
+        let (status, told, erred) = fetch_refused(&full(), false, false);
         assert_eq!(
-            (status, told.as_str()),
+            (status, told.as_str(), erred),
             (
                 503,
-                "the server had no room to make the pack: no storage space"
+                "the server had no room to make the pack: no storage space",
+                true
             )
         );
-        let (status, told) = fetch_refused(&full(), false, true);
+        let (status, told, _) = fetch_refused(&full(), false, true);
         assert_eq!(status, 503);
         assert!(told.contains("/srv/tmp/.tmpAbc"), "{told}");
+    }
+
+    /// A fetch whose response has no room beside those being sent is told
+    /// so, signed in or not
+    #[test]
+    fn a_fetch_whose_response_has_no_room_beside_others_is_told_so() {
+        let full =
+            std::io::Error::new(std::io::ErrorKind::StorageFull, super::super::sending::Full);
+        let (status, told, erred) = fetch_refused(&full, false, false);
+        let full = super::super::sending::FULL;
+        assert_eq!((status, told.as_str(), erred), (503, full, false));
     }
 
     /// A fetch whose time is over is told so, signed in or not
     #[test]
     fn a_fetch_whose_time_is_over_is_told_so() {
         let late = super::super::until::Stopped::Late;
-        let (status, told) = fetch_refused(&late, true, false);
-        assert_eq!((status, told), (503, late.to_string()));
+        let (status, told, erred) = fetch_refused(&late, true, false);
+        assert_eq!((status, told, erred), (503, late.to_string(), false));
     }
 }

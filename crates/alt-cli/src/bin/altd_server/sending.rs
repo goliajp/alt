@@ -20,6 +20,19 @@ use super::http::{Share, Shares};
 /// What a fetch is answered with when its response has no room.
 pub(super) const FULL: &str = "the responses being sent take all the room they have; fetch again";
 
+/// The refusal of a response that has no room, which names nothing of the
+/// server: whoever asked is told it as it is.
+#[derive(Debug)]
+pub(super) struct Full;
+
+impl std::fmt::Display for Full {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(FULL)
+    }
+}
+
+impl std::error::Error for Full {}
+
 /// The bytes the responses there are take, and the most they may.
 pub(super) struct Room(Arc<Shares>);
 
@@ -55,7 +68,7 @@ pub(super) struct Written {
 impl Write for Written {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.taken.take(buf.len() as u64).is_err() {
-            return Err(io::Error::new(io::ErrorKind::StorageFull, FULL));
+            return Err(io::Error::new(io::ErrorKind::StorageFull, Full));
         }
         self.file.write_all(buf)?;
         Ok(buf.len())
