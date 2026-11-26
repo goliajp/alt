@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: manage.py start takes down nothing but the services of the installation
+author-type: human
+author: doracawl
+touched: self-hosted/manage.py
