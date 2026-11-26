@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: give a pack and its idx their names only where no file has them
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/src/index_pack/placed.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
+touched: crates/alt-git-pack/tests/it/main.rs
+touched: crates/alt-git-pack/tests/it/placed.rs
+touched: crates/alt-os/src/temp.rs
+touched: crates/alt-os/src/temp/file.rs
