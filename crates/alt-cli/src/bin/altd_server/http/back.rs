@@ -11,8 +11,9 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use super::kept::Begun;
 use super::paced::Source;
 use super::request::Request;
 use super::response::Outgoing;
@@ -26,6 +27,17 @@ pub(super) enum Back {
     Answer(Box<(Source, Outgoing)>),
     /// the request, for its body to be received within so many bytes
     Receive(Box<Request>, u64),
+    /// how the answer begins, while the rest of it is made
+    Begun(Box<Begun>),
+}
+
+/// What the thread of a connection hears while it waits.
+pub(super) enum Heard {
+    Back(Back),
+    /// the time it was told to wait to is there
+    Due,
+    /// the request is gone without an answer
+    Gone,
 }
 
 /// The way from a request to the thread of its connection.
@@ -49,14 +61,23 @@ impl Way {
         let _ = self.to.send(back);
     }
 
-    /// What the request hands back next, or nothing where it is gone
-    /// without an answer. While none comes, `watched`, a second handle to
-    /// the connection, is looked at for a peer that closed its side.
-    pub(super) fn returned(&self, returned: &Receiver<Back>, watched: &TcpStream) -> Option<Back> {
+    /// What the request hands back next, until `due` where there is one.
+    /// While none comes, `watched`, a second handle to the connection, is
+    /// looked at for a peer that closed its side.
+    pub(super) fn returned(
+        &self,
+        returned: &Receiver<Back>,
+        watched: &TcpStream,
+        due: Option<Instant>,
+    ) -> Heard {
         loop {
-            match returned.recv_timeout(LOOK) {
-                Ok(back) => return Some(back),
-                Err(RecvTimeoutError::Disconnected) => return None,
+            let left = due.map(|due| due.saturating_duration_since(Instant::now()));
+            if left == Some(Duration::ZERO) {
+                return Heard::Due;
+            }
+            match returned.recv_timeout(left.map_or(LOOK, |left| left.min(LOOK))) {
+                Ok(back) => return Heard::Back(back),
+                Err(RecvTimeoutError::Disconnected) => return Heard::Gone,
                 Err(RecvTimeoutError::Timeout) => {
                     if alt_os::socket::peer_closed(watched) {
                         self.gone.store(true, Relaxed);

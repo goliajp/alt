@@ -42,6 +42,7 @@ ALT_SERVER_TEMP_DIR                     a directory on a disk for what is writte
   ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes); a quarter for one address
   ALT_SERVER_MAX_SENDING_BYTES            bytes of responses to fetches written and not yet sent (half of what is free for temporary files); a quarter for one address
   ALT_SERVER_MAX_FETCH_MS                 how long the response to a fetch is made before a 503 (600000)
+  ALT_SERVER_KEEPALIVE_MS                 how long a fetch whose pack is being made hears nothing (5000)
   ALT_SERVER_MAX_OPEN_REPOS               repositories of a root kept open (16)
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
   ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
@@ -78,6 +79,10 @@ pub(super) struct Told {
     /// of a large repository, 350,000 objects, took three and a half
     /// minutes on a host busy with other work: ten are several times that
     pub(super) fetch: Duration,
+    /// `ALT_SERVER_KEEPALIVE_MS`: how long a fetch hears nothing while its
+    /// pack is made, as `uploadpack.keepAlive` is to `git upload-pack`,
+    /// whose five seconds it is unless it is set
+    pub(super) keepalive: Duration,
     /// `ALT_SERVER_WORKERS`
     pub(super) workers: usize,
     /// `ALT_SERVER_MAX_CONNECTIONS`
@@ -139,6 +144,7 @@ impl Told {
         let shutdown = number(lookup, "ALT_SERVER_SHUTDOWN_DEADLINE_MS", 30_000u64)?;
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
         let fetch = number(lookup, "ALT_SERVER_MAX_FETCH_MS", 600_000u64)?;
+        let keepalive = number(lookup, "ALT_SERVER_KEEPALIVE_MS", 5_000u64)?;
         let networks = |name: &str| match lookup(name) {
             None => Ok(super::http::LOOPBACK.to_vec()),
             Some(told) => {
@@ -172,6 +178,7 @@ impl Told {
             bases: None,
             sending_bytes: number(lookup, "ALT_SERVER_MAX_SENDING_BYTES", 0u64)?,
             fetch: Duration::from_millis(fetch),
+            keepalive: Duration::from_millis(keepalive),
             workers: number(lookup, "ALT_SERVER_WORKERS", 4usize)?,
             connections,
             repos: number(lookup, "ALT_SERVER_MAX_OPEN_REPOS", 16usize)?,
@@ -228,6 +235,7 @@ mod tests {
         assert_eq!(unset.index_bytes, 4 << 30);
         assert_eq!(unset.index_wait, Duration::from_secs(600));
         assert_eq!(unset.fetch, Duration::from_secs(600));
+        assert_eq!(unset.keepalive, Duration::from_secs(5));
         assert_eq!(
             (unset.push_bytes, unset.inflated_bytes),
             (1 << 30, 128 << 30)
@@ -246,6 +254,7 @@ mod tests {
             "ALT_SERVER_MAX_INDEX_BYTES",
             "ALT_SERVER_MAX_INDEX_WAIT_MS",
             "ALT_SERVER_MAX_FETCH_MS",
+            "ALT_SERVER_KEEPALIVE_MS",
             "ALT_SERVER_WORKERS",
             "ALT_SERVER_MAX_CONNECTIONS",
             "ALT_SERVER_MAX_OPEN_REPOS",

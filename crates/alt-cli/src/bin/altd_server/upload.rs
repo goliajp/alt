@@ -87,7 +87,8 @@ pub(super) fn handle_upload_pack(
                 by: Some(std::time::Instant::now() + super::told::told().fetch),
                 gone: Some(req.given_up()),
             };
-            let sent = match fetch::response(&repo, &fetch_req, room, from, &until) {
+            let mut begun = |body| req.begin(result_headers(), body, super::told::told().keepalive);
+            let sent = match fetch::response(&repo, &fetch_req, room, from, &until, &mut begun) {
                 Ok(sent) => sent,
                 Err(e) if e.downcast_ref() == Some(&fetch::Stopped::Late) => {
                     let r = Response::from_string(format!("{e}")).with_status_code(503);
@@ -101,8 +102,9 @@ pub(super) fn handle_upload_pack(
                 Err(e) => return Err(e),
             };
             let mut resp = Response::sized(sent.length(), sent);
-            resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
-            resp.add_header(header("Cache-Control", "no-cache"));
+            result_headers()
+                .into_iter()
+                .for_each(|h| resp.add_header(h));
             return Ok(repo.answer(req, resp, log)?);
         }
         other => {
@@ -114,10 +116,17 @@ pub(super) fn handle_upload_pack(
     }
 
     let mut resp = Response::from_data(out);
-    resp.add_header(header("Content-Type", UPLOAD_PACK_RESULT));
-    resp.add_header(header("Cache-Control", "no-cache"));
+    result_headers()
+        .into_iter()
+        .for_each(|h| resp.add_header(h));
     repo.answer(req, resp, log)?;
     Ok(())
+}
+
+/// The headers of what `upload-pack` answers a command with.
+fn result_headers() -> Vec<Header> {
+    let content = header("Content-Type", UPLOAD_PACK_RESULT);
+    vec![content, header("Cache-Control", "no-cache")]
 }
 
 /// Find the leading `command=<name>` line of a v2 request body so the

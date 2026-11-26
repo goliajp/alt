@@ -206,7 +206,7 @@ pub(crate) struct Request {
     /// nothing once the request is answered
     body: Option<Body>,
     /// to the thread of the connection
-    back: Way,
+    pub(super) back: Way,
 }
 
 impl Request {

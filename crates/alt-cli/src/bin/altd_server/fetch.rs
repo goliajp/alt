@@ -143,12 +143,17 @@ fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<Obje
 /// The file is written within the room responses have between them, and has
 /// its part of it until it is sent. It is written for as long as `until`
 /// says, and the error is a [`Stopped`] where that is over.
+///
+/// Once nothing is left that answers it otherwise than with a pack, what
+/// the file begins with up to the pack is given to `begun`: the pack is
+/// what takes long to make.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
     room: &Room,
     from: Option<std::net::IpAddr>,
     until: &Until,
+    begun: &mut dyn FnMut(Vec<u8>),
 ) -> Res<Sent> {
     let dir = alt_os::temp::tempdir()?;
     let path = dir.path().join("response");
@@ -167,12 +172,17 @@ pub(super) fn response(
             match shallow::ends(repo, req, until)? {
                 Err(why) => refused(&mut framed, &why)?,
                 Ok(shallow) => {
+                    let mut before = Vec::new();
                     if !req.done {
-                        encode_acknowledgments(&mut framed, &common, true)?;
+                        encode_acknowledgments(&mut before, &common, true)?;
                     }
                     if let Some(told) = &shallow.told {
-                        encode_shallow_info(&mut framed, told)?;
+                        encode_shallow_info(&mut before, told)?;
                     }
+                    framed.write_all(&before)?;
+                    // the line the pack's frames come behind
+                    alt_wire::pkt::write_data(&mut before, b"packfile\n")?;
+                    begun(before);
                     pack(repo, req, &shallow, &common, dir.path(), &mut framed, until)?;
                 }
             }

@@ -18,6 +18,7 @@
 
 mod back;
 mod head;
+mod kept;
 mod paced;
 mod peers;
 mod request;
@@ -29,6 +30,8 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+
+use back::{Back, Heard};
 
 pub(crate) use alt_shares::{Share, Shares};
 pub(crate) use head::{Header, Method};
@@ -229,22 +232,38 @@ fn connection(open: Open, stream: TcpStream) {
         source.from = peers::asked_from(open.2, forwarded, shared.proxies, shared.here);
         let (way, returned) = back::Way::new();
         shared.enqueue(Request::new(head, source, way.clone()));
+        let mut kept: Option<kept::Kept> = None;
         let (back, answer) = loop {
-            match way.returned(&returned, &watched) {
-                Some(back::Back::Answer(answered)) => break *answered,
-                Some(back::Back::Receive(mut request, most)) => {
+            match way.returned(&returned, &watched, kept.as_ref().and_then(kept::Kept::due)) {
+                Heard::Back(Back::Answer(answered)) => break *answered,
+                Heard::Back(Back::Receive(mut request, most)) => {
                     // one whose body has no file to go to is let go of,
                     // and answers itself
                     if request.spool(most, &shared.held).is_ok() {
                         shared.enqueue(*request);
                     }
                 }
-                None => return,
+                Heard::Back(Back::Begun(begun)) => kept = Some(kept::Kept::new(begun)),
+                Heard::Due => {
+                    for kept in kept.iter_mut() {
+                        kept.beat(&watched, shared.limits.window);
+                        // the answer is made for nobody once it cannot go out
+                        if kept.broken {
+                            way.gone.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+                Heard::Gone => return,
             }
         };
         source = back;
         let last = answer.last;
-        if answer.send(&mut source).is_err() || last {
+        let sent = match &kept {
+            Some(kept) if kept.broken => return source.close(),
+            Some(kept) if kept.sent => answer.send_rest(&mut source, kept.begun()),
+            _ => answer.send(&mut source),
+        };
+        if sent.is_err() || last {
             return source.close();
         }
     }

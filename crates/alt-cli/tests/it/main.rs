@@ -16,6 +16,7 @@ mod altd_server_certified;
 mod altd_server_connected;
 mod altd_server_fetch_time;
 mod altd_server_index_memory;
+mod altd_server_keepalive;
 mod altd_server_landing;
 mod altd_server_left_unsynced;
 mod altd_server_many_repos;
