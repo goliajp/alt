@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: the old server builds a fetch response put off for its turn again in a time of its own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server_fetch_time.rs
+touched: crates/alt-cli/tests/it/altd_server_turned.rs
+touched: crates/alt-cli/tests/it/main.rs
