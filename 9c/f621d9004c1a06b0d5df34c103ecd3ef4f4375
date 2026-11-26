@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: a file or symbolic link kept by a name git fsck refuses is kept only as it was
+author-type: human
+author: doracawl
+touched: crates/alt-git-fsck/src/tree.rs
+touched: crates/alt-git-fsck/src/walk.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/fsck_kept.rs
