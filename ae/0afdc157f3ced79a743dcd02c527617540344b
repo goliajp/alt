@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: log the status and the bytes a peer is sent once the head of its answer went out
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/back.rs
+touched: crates/alt-cli/src/bin/altd_server/http/kept.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/log.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
