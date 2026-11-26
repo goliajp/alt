@@ -1,6 +1,7 @@
 //! Which of what `git fsck` refuses a push brings anew.
 
 use crate::{Entry, Fault, File, Flagged, Special, TREE};
+use alt_git_codec::unsafe_name;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// a commit a push brings: its tree, and the trees of its parents
@@ -30,12 +31,71 @@ struct Pending<'a, O> {
 /// they differ from those of its parents; a flagged tree no commit comes to
 /// has no tree before it. `read` gives the entries of a tree, of the push or
 /// of the repository.
+///
+/// A directory whose name is refused may be kept where the tree before had it,
+/// but nothing under it is brought anew: an entry below it that no tree before
+/// had at the same place, by name, type and id, is refused for the name of the
+/// directory. A checkout would write it into the directory of Git or of alt.
 pub fn first_new<O: Copy + Ord, E>(
     commits: &[Commit<O>],
     flagged: &BTreeMap<O, Flagged<O>>,
     read: &mut Trees<'_, O, E>,
     file: &mut Files<'_, O, E>,
 ) -> Result<Option<(O, &'static str)>, E> {
+    let pending = pending(flagged, file)?;
+    if pending.is_empty() {
+        return Ok(None);
+    }
+    let mut come_to = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    // each tree with the trees before it, and the fault of the name of the
+    // nearest directory above it whose name is refused
+    let mut walk: Vec<(O, Vec<O>, Option<&'static str>)> = (commits.iter())
+        .map(|commit| (commit.tree, commit.parents.clone(), None))
+        .collect();
+    while let Some((tree, mut before, below)) = walk.pop() {
+        before.sort_unstable();
+        before.dedup();
+        if before.contains(&tree) || !seen.insert((tree, before.clone(), below)) {
+            continue;
+        }
+        let entries = read(&tree)?;
+        let mut trees_before = Vec::with_capacity(before.len());
+        for tree in &before {
+            trees_before.push(read(tree)?);
+        }
+        if let Some(pending) = pending.get(&tree) {
+            come_to.insert(tree);
+            if let Some(refused) = refused(&tree, pending, &trees_before) {
+                return Ok(Some(refused));
+            }
+        }
+        if let Some(why) = below
+            && entries.iter().any(|entry| !had(entry, &trees_before))
+        {
+            return Ok(Some((tree, why)));
+        }
+        for entry in entries.iter().filter(|entry| entry.mode & 0o170000 == TREE) {
+            let under = (trees_before.iter().flatten())
+                .filter(|was| was.name == entry.name && was.mode & 0o170000 == TREE)
+                .map(|was| was.oid);
+            let below = below.or_else(|| unsafe_name(&entry.name));
+            walk.push((entry.oid, under.collect(), below));
+        }
+    }
+    let alone = pending.iter().filter(|(tree, _)| !come_to.contains(*tree));
+    Ok(alone
+        .filter_map(|(tree, pending)| refused(tree, pending, &[]))
+        .next())
+}
+
+/// What of each tree of `flagged` is refused unless the tree before it had
+/// it, where anything is: its faults, and the files it names whose blobs
+/// `file` tells a fault of.
+fn pending<'a, O: Copy + Ord, E>(
+    flagged: &'a BTreeMap<O, Flagged<O>>,
+    file: &mut Files<'_, O, E>,
+) -> Result<BTreeMap<O, Pending<'a, O>>, E> {
     // a file is read once, and only a fault is looked for where it is
     let mut told = BTreeMap::new();
     let mut pending = BTreeMap::new();
@@ -57,42 +117,20 @@ pub fn first_new<O: Copy + Ord, E>(
             pending.insert(*tree, Pending { faults, files });
         }
     }
-    if pending.is_empty() {
-        return Ok(None);
-    }
-    let mut come_to = BTreeSet::new();
-    let mut seen = BTreeSet::new();
-    let mut walk: Vec<(O, Vec<O>)> = (commits.iter())
-        .map(|commit| (commit.tree, commit.parents.clone()))
-        .collect();
-    while let Some((tree, mut before)) = walk.pop() {
-        before.sort_unstable();
-        before.dedup();
-        if before.contains(&tree) || !seen.insert((tree, before.clone())) {
-            continue;
-        }
-        let entries = read(&tree)?;
-        let mut trees_before = Vec::with_capacity(before.len());
-        for tree in &before {
-            trees_before.push(read(tree)?);
-        }
-        if let Some(pending) = pending.get(&tree) {
-            come_to.insert(tree);
-            if let Some(refused) = refused(&tree, pending, &trees_before) {
-                return Ok(Some(refused));
-            }
-        }
-        for entry in entries.iter().filter(|entry| entry.mode & 0o170000 == TREE) {
-            let under = (trees_before.iter().flatten())
-                .filter(|was| was.name == entry.name && was.mode & 0o170000 == TREE)
-                .map(|was| was.oid);
-            walk.push((entry.oid, under.collect()));
-        }
-    }
-    let alone = pending.iter().filter(|(tree, _)| !come_to.contains(*tree));
-    Ok(alone
-        .filter_map(|(tree, pending)| refused(tree, pending, &[]))
-        .next())
+    Ok(pending)
+}
+
+/// whether one of the trees `before` at the same place had `entry`: by its
+/// name, its mode and its id; a directory by its name alone, what is under it
+/// being walked
+fn had<O: PartialEq>(entry: &Entry<Vec<u8>, O>, before: &[Vec<Entry<Vec<u8>, O>>]) -> bool {
+    before
+        .iter()
+        .flatten()
+        .any(|was| match entry.mode & 0o170000 == TREE {
+            true => was.name == entry.name && was.mode & 0o170000 == TREE,
+            false => was.name == entry.name && was.mode == entry.mode && was.oid == entry.oid,
+        })
 }
 
 /// what of a tree at a place where the trees `before` were is refused
@@ -187,5 +225,48 @@ mod tests {
         let mut none = HashMap::new();
         none.insert(12, trees[&12].clone());
         assert_eq!(first(&none, &[12], &[(12, vec![99])], &[]), None);
+    }
+
+    #[test]
+    fn nothing_is_brought_anew_under_a_directory_whose_name_is_refused_where_it_is_kept() {
+        let (file, run) = (0o100644, 0o100755);
+        let alt = Some("hasDotalt: contains '.alt'");
+        let mut trees = HashMap::new();
+        // the root had `ALT~1`, a directory of `config` and a directory `d` of `x`
+        trees.insert(1, vec![entry("ALT~1", TREE, 2), entry("a", file, 50)]);
+        trees.insert(2, vec![entry("config", file, 51), entry("d", TREE, 3)]);
+        trees.insert(3, vec![entry("x", file, 52)]);
+        let root = |under: u8| vec![entry("ALT~1", TREE, under), entry("a", file, 53)];
+        // kept as it was, another file beside it: taken
+        trees.insert(10, root(2));
+        assert_eq!(first(&trees, &[10], &[(10, vec![1])], &[]), None);
+        // a file new under it
+        trees.insert(11, root(12));
+        trees.insert(
+            12,
+            vec![entry("config", file, 51), entry("hooks", file, 54)],
+        );
+        let refused = |at: u8| alt.map(|why| (at, why));
+        assert_eq!(first(&trees, &[11], &[(11, vec![1])], &[]), refused(12));
+        // a file under it of other bytes, or of another mode
+        trees.insert(13, root(14));
+        trees.insert(14, vec![entry("config", file, 55), entry("d", TREE, 3)]);
+        assert_eq!(first(&trees, &[13], &[(13, vec![1])], &[]), refused(14));
+        trees.insert(15, root(16));
+        trees.insert(16, vec![entry("config", run, 51), entry("d", TREE, 3)]);
+        assert_eq!(first(&trees, &[15], &[(15, vec![1])], &[]), refused(16));
+        // a file new in a directory below it
+        trees.insert(17, root(18));
+        trees.insert(18, vec![entry("config", file, 51), entry("d", TREE, 19)]);
+        trees.insert(19, vec![entry("x", file, 52), entry("y", file, 56)]);
+        assert_eq!(first(&trees, &[17], &[(17, vec![1])], &[]), refused(19));
+        // what was under it, less: taken
+        trees.insert(20, root(21));
+        trees.insert(21, vec![entry("config", file, 51)]);
+        assert_eq!(first(&trees, &[20], &[(20, vec![1])], &[]), None);
+        // a directory of the repository brought to where a file was
+        trees.insert(22, root(23));
+        trees.insert(23, vec![entry("config", file, 51), entry("d", TREE, 2)]);
+        assert_eq!(first(&trees, &[22], &[(22, vec![1])], &[]), refused(2));
     }
 }
