@@ -144,5 +144,6 @@ fn a_push_that_fails_once_its_head_went_out_is_told_why_in_the_side_band() {
     let pushed = pushed.join().unwrap();
     let said = String::from_utf8_lossy(&pushed.stderr).into_owned();
     assert!(!pushed.status.success(), "{said}");
-    assert!(said.contains("remote error: Not a directory"), "{said}");
+    // git shows an error of a push in the side band as it shows the progress
+    assert!(said.contains("remote: Not a directory"), "{said}");
 }
