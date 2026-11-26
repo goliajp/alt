@@ -214,6 +214,8 @@ fn pack(
     framed: &mut impl Write,
     until: &Until,
 ) -> Res<()> {
+    #[cfg(debug_assertions)]
+    failing()?;
     let mut roots = req.wants.clone();
     roots.extend(&shallow.parents);
     let go_on = || until.go_on().is_ok();
@@ -252,6 +254,24 @@ fn pack(
     // the file is this request's own and is not written to again
     let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
     Ok(encode_fetch_response_packfile(framed, &pack)?)
+}
+
+/// Where a debug build is told to, the pack of a fetch fails as one that
+/// an error of the server stops: with `ALT_SERVER_PACK_FAILS=<file>`, the
+/// file is made, and once it is removed the pack fails with an error that
+/// names it. A release build holds none of this.
+#[cfg(debug_assertions)]
+fn failing() -> Res<()> {
+    let Some(file) = std::env::var_os("ALT_SERVER_PACK_FAILS") else {
+        return Ok(());
+    };
+    let file = std::path::PathBuf::from(file);
+    std::fs::write(&file, "")?;
+    while file.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let gone = File::open(&file).expect_err("the file is removed");
+    Err(format!("{}: {gone}", file.display()).into())
 }
 
 #[cfg(test)]

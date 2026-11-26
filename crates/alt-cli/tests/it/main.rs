@@ -14,6 +14,7 @@ mod altd_server;
 mod altd_server_added_commits;
 mod altd_server_certified;
 mod altd_server_connected;
+mod altd_server_fetch_failed;
 mod altd_server_fetch_time;
 mod altd_server_index_memory;
 mod altd_server_keepalive;

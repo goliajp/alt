@@ -11,7 +11,7 @@ use crate::altd_server_slow_peers::noise;
 use crate::altd_server_untrusted::repository;
 
 /// A repository of `files` files that have nothing in common, and its head.
-fn of_files(origin: &Path, files: usize) -> String {
+pub(crate) fn of_files(origin: &Path, files: usize) -> String {
     repository(origin);
     let all = noise(files * 8192);
     for (n, file) in all.chunks(8192).enumerate() {
@@ -23,7 +23,7 @@ fn of_files(origin: &Path, files: usize) -> String {
 }
 
 /// The head of an answer, and its body put together from its chunks.
-fn chunked(answer: &[u8]) -> (String, Vec<u8>) {
+pub(crate) fn chunked(answer: &[u8]) -> (String, Vec<u8>) {
     let ended = answer.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
     let head = String::from_utf8_lossy(&answer[..ended]).into_owned();
     assert!(
@@ -66,7 +66,7 @@ fn logged(server: &mut crate::altd_server::Server) -> (u64, u64) {
 }
 
 /// The pkt-lines of `body`, each as its payload; a flush as nothing.
-fn lines(body: &[u8]) -> Vec<Option<&[u8]>> {
+pub(crate) fn lines(body: &[u8]) -> Vec<Option<&[u8]>> {
     let (mut at, mut out) = (0, Vec::new());
     while at < body.len() {
         let size = std::str::from_utf8(&body[at..at + 4]).unwrap();
