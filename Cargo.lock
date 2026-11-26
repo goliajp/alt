@@ -92,6 +92,7 @@ dependencies = [
  "alt-odb",
  "alt-oplog",
  "alt-os",
+ "alt-pack-segment",
  "alt-pg",
  "alt-portable",
  "alt-provenance",

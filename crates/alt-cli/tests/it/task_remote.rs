@@ -4,6 +4,7 @@ mod base;
 mod browser;
 mod changes;
 mod served;
+mod unsafe_history;
 use alt_crypto::ed25519::SigningKey;
 use alt_json::{Value, json};
 use alt_pg::Client;

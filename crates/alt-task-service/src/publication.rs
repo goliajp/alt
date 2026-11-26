@@ -3,7 +3,7 @@ use crate::{
 };
 use alt_remote_protocol::{ContentKind, Limits, Manifest, Publication};
 use alt_repository_service::{
-    ObjectSource, VerifiedGraph, verify_graph, verify_graph_to_send, verify_new_graph,
+    ObjectSource, VerifiedGraph, verify_graph_made_from, verify_graph_to_send, verify_new_graph,
 };
 use std::{cell::Cell, io::Read};
 
@@ -83,6 +83,7 @@ impl VerifiedPublication {
             })
             .collect::<Result<Vec<alt_git_codec::ObjectId>>>()?;
         let has_tasks = !publication.record_roots.is_empty();
+        let mut made_from = Vec::new();
         if has_tasks {
             let source = SelectionSource {
                 inner: artifacts,
@@ -91,6 +92,7 @@ impl VerifiedPublication {
             };
             let prepared = prepared(publication, manifest, &source, task_limits)?;
             roots.extend(prepared.object_roots(&source)?);
+            made_from = prepared.trees_made_from()?;
         }
         roots.sort_unstable();
         roots.dedup();
@@ -103,7 +105,7 @@ impl VerifiedPublication {
         let graph = if to_send {
             verify_graph_to_send(objects, algo, &roots, limits.into())?
         } else if has_tasks {
-            verify_graph(objects, algo, &roots, limits.into())?
+            verify_graph_made_from(objects, algo, &roots, &made_from, limits.into())?
         } else {
             verify_new_graph(objects, algo, &roots, limits.into())?
         };

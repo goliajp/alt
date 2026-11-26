@@ -5,6 +5,17 @@ use crate::{Error, GraphLimits, Node, ObjectSource, Result, VerifiedGraph};
 use alt_git_codec::{HashAlgo, ObjectId};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+/// A tree a publication carries that no commit of it names, with the trees
+/// it was made from, such as the tree of a candidate of a task and the tree of
+/// the baseline of the task. Of what `git fsck` refuses, what the tree has
+/// where one of those had it is not brought anew, as for the tree of a commit
+/// and the trees of its parents.
+#[derive(Clone, Debug)]
+pub struct MadeFrom {
+    pub tree: ObjectId,
+    pub from: Vec<ObjectId>,
+}
+
 /// Reads and verifies every object reachable from `roots`. Of what `git fsck`
 /// refuses, only what the objects the source reports as not settled bring is
 /// refused: what the repository holds was taken before, as a plain
@@ -15,7 +26,18 @@ pub fn verify_graph(
     roots: &[ObjectId],
     limits: GraphLimits,
 ) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, (false, true))
+    verify_graph_made_from(source, algo, roots, &[], limits)
+}
+/// [`verify_graph`] where trees no commit names were made from others
+/// ([`MadeFrom`]).
+pub fn verify_graph_made_from(
+    source: &impl ObjectSource,
+    algo: HashAlgo,
+    roots: &[ObjectId],
+    made_from: &[MadeFrom],
+    limits: GraphLimits,
+) -> Result<VerifiedGraph> {
+    verify(source, algo, (roots, made_from), limits, (false, true))
 }
 /// [`verify_graph`] of objects that are sent to a repository that is not their
 /// source: what `git fsck` refuses is told by the repository that receives
@@ -26,7 +48,7 @@ pub fn verify_graph_to_send(
     roots: &[ObjectId],
     limits: GraphLimits,
 ) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, (false, false))
+    verify(source, algo, (roots, &[]), limits, (false, false))
 }
 /// Reads and verifies what `roots` reach down to the objects the source reports as
 /// settled, so the work follows what is new and not the history behind it.
@@ -36,12 +58,12 @@ pub fn verify_new_graph(
     roots: &[ObjectId],
     limits: GraphLimits,
 ) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, (true, true))
+    verify(source, algo, (roots, &[]), limits, (true, true))
 }
 fn verify(
     source: &impl ObjectSource,
     algo: HashAlgo,
-    roots: &[ObjectId],
+    (roots, made_from): (&[ObjectId], &[MadeFrom]),
     limits: GraphLimits,
     (stop_at_settled, refuse): (bool, bool),
 ) -> Result<VerifiedGraph> {
@@ -119,7 +141,7 @@ fn verify(
                 brought.insert(*oid);
             }
         }
-        crate::fsck::refused_anew(source, &nodes, &brought, limits)?;
+        crate::fsck::refused_anew(source, (&nodes, &brought), made_from, limits)?;
     }
     Ok(VerifiedGraph {
         nodes,

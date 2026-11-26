@@ -4,7 +4,7 @@
 //! repository already holds is not refused again.
 
 use crate::object::verify_object;
-use crate::{Error, GraphLimits, Node, ObjectSource, Result};
+use crate::{Error, GraphLimits, MadeFrom, Node, ObjectSource, Result};
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_git_fsck::{ATTRIBUTES_LARGEST, Blob, Commit, Entry, Flagged, MODULES_LARGEST, Special};
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,11 +13,12 @@ use std::io::Read;
 /// Fails with what `git fsck` says of the first fault the objects of `nodes`
 /// that a publication brings, those of `brought`, bring anew. Objects beyond
 /// `nodes` are read from `source`; the trees are walked within the steps of
-/// `limits`.
+/// `limits`. A tree of `made_from` is told against the trees it was made
+/// from, as the tree of a commit is against those of its parents.
 pub(crate) fn refused_anew(
     source: &impl ObjectSource,
-    nodes: &BTreeMap<ObjectId, Node>,
-    brought: &BTreeSet<ObjectId>,
+    (nodes, brought): (&BTreeMap<ObjectId, Node>, &BTreeSet<ObjectId>),
+    made_from: &[MadeFrom],
     limits: GraphLimits,
 ) -> Result<()> {
     let mut flagged = BTreeMap::new();
@@ -59,6 +60,10 @@ pub(crate) fn refused_anew(
             commits.push(Commit { tree, parents });
         }
     }
+    for made in made_from.iter().filter(|made| brought.contains(&made.tree)) {
+        let (tree, parents) = (made.tree, made.from.clone());
+        commits.push(Commit { tree, parents });
+    }
     let mut left = limits.walk_steps;
     let mut read = |tree: &ObjectId| -> Result<Vec<Entry<Vec<u8>, ObjectId>>> {
         left = left
@@ -74,25 +79,32 @@ pub(crate) fn refused_anew(
         });
         Ok(entries.collect())
     };
-    let mut file = |blob: &ObjectId, special| -> Result<Option<&'static str>> {
-        let largest = match special {
-            Special::Gitmodules => MODULES_LARGEST,
-            Special::Gitattributes => ATTRIBUTES_LARGEST,
-        };
-        let mut data = Vec::new();
-        let found = match source.open(*blob)? {
-            None => Blob::Missing,
-            Some(object) if object.kind != ObjectKind::Blob => Blob::NotBlob,
-            Some(object) if object.bytes > largest => Blob::Larger,
-            Some(object) => {
-                object.reader.take(largest).read_to_end(&mut data)?;
-                Blob::Bytes(&data)
-            }
-        };
-        Ok(alt_git_fsck::blob_fault(special, found))
-    };
+    let mut file = |blob: &ObjectId, special| file_fault(source, blob, special);
     match alt_git_fsck::first_new(&commits, &flagged, &mut read, &mut file)? {
         Some((_, why)) => Err(Error::Integrity(why)),
         None => Ok(()),
     }
+}
+
+/// What `git fsck` says of the blob a tree names as a `special` file.
+fn file_fault(
+    source: &impl ObjectSource,
+    blob: &ObjectId,
+    special: Special,
+) -> Result<Option<&'static str>> {
+    let largest = match special {
+        Special::Gitmodules => MODULES_LARGEST,
+        Special::Gitattributes => ATTRIBUTES_LARGEST,
+    };
+    let mut data = Vec::new();
+    let found = match source.open(*blob)? {
+        None => Blob::Missing,
+        Some(object) if object.kind != ObjectKind::Blob => Blob::NotBlob,
+        Some(object) if object.bytes > largest => Blob::Larger,
+        Some(object) => {
+            object.reader.take(largest).read_to_end(&mut data)?;
+            Blob::Bytes(&data)
+        }
+    };
+    Ok(alt_git_fsck::blob_fault(special, found))
 }
