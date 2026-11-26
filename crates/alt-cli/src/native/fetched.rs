@@ -28,6 +28,8 @@ impl NativeRepo<'_> {
         // to its end: an answer cut short is an error of the transport
         std::io::copy(&mut reader, &mut std::io::sink())?;
         let (file, tmp_pack) = sink.into_parts();
+        // readable by all, as a file made with the usual umask is
+        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
         file.sync_all()?;
         drop(file);
         if bytes_written == 0 {
