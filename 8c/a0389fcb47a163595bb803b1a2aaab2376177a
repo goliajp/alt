@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: change the keys of a push once the head of its answer came, not after a fixed time
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_push_keepalive.rs
+touched: crates/alt-cli/tests/it/altd_server_relay.rs
