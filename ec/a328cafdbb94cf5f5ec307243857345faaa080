@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the walks of the old server's fetch down the refs have a module of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/reached.rs
