@@ -3,15 +3,18 @@
 //! and push integration tests so the wire-side coverage runs
 //! against real git binaries without bringing in a full HTTP server crate.
 //!
-//! The shim is intentionally minimal — Content-Length-framed requests,
-//! `HTTP/1.0` + `Connection: close` responses, and the `Git-Protocol`
-//! header is propagated to the subprocess as the `GIT_PROTOCOL` env var
-//! (the same path `git http-backend` itself uses). That's enough for ureq
-//! (alt-wire-http's client) and for switching `upload-pack` into v2.
+//! The shim is intentionally minimal — Content-Length-framed requests of
+//! HTTP/1.1, responses in chunks with `Connection: close`, and the
+//! `Git-Protocol` header is propagated to the subprocess as the
+//! `GIT_PROTOCOL` env var (the same path `git http-backend` itself uses).
+//! That's enough for ureq (alt-wire-http's client) and for switching
+//! `upload-pack` into v2.
 //!
 //! Like `git http-backend`, it sends the status line and the headers before
-//! it runs the service, and passes the service's output on as it comes: the
-//! body ends where the connection closes.
+//! it runs the service, and passes the service's output on as it comes. The
+//! last chunk goes out once the service ended well: a client reads the answer
+//! of one that failed, even after its whole answer, as cut short. A client
+//! that goes away has the service's output closed, and the service ends.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -19,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 
+mod ended;
 mod held;
 
 /// Spawn the test HTTP server bound to a free port on 127.0.0.1, returning
@@ -102,7 +106,7 @@ fn handle_one(mut stream: TcpStream, repo: &Path, env: &[(String, String)]) -> s
         let mut announced = Vec::new();
         write_pkt(&mut announced, format!("# service={service}\n").as_bytes());
         announced.extend_from_slice(b"0000");
-        stream.write_all(&announced)?;
+        chunk(&mut stream, &announced)?;
         cmd.args([subcommand, "--http-backend-info-refs"]).arg(repo);
         relay(cmd, &[], &mut stream, service)
     } else if method == "POST" && (url == "/git-upload-pack" || url == "/git-receive-pack") {
@@ -116,21 +120,29 @@ fn handle_one(mut stream: TcpStream, repo: &Path, env: &[(String, String)]) -> s
         relay(cmd, &body, &mut stream, service)
     } else {
         stream.write_all(
-            b"HTTP/1.0 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )
     }
 }
 
 fn head(stream: &mut TcpStream, ct: &str) -> std::io::Result<()> {
     let head = format!(
-        "HTTP/1.0 200 OK\r\nContent-Type: {ct}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
     );
     stream.write_all(head.as_bytes())?;
     stream.flush()
 }
 
+/// `bytes` as a chunk of the body.
+fn chunk(stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+    stream.write_all(format!("{:x}\r\n", bytes.len()).as_bytes())?;
+    stream.write_all(bytes)?;
+    stream.write_all(b"\r\n")?;
+    stream.flush()
+}
+
 /// Run `cmd` with `input` on its stdin and pass its stdout on to `stream`
-/// as it is written.
+/// as it is written, and the last chunk behind it where it ended well.
 fn relay(
     mut cmd: Command,
     input: &[u8],
@@ -148,17 +160,31 @@ fn relay(
         let _ = stderr.read_to_end(&mut said);
         said
     });
-    child.stdin.as_mut().unwrap().write_all(input)?;
-    drop(child.stdin.take());
-    let relayed = std::io::copy(child.stdout.as_mut().unwrap(), stream);
+    // a service that ends before it reads all of it is told of below
+    let _ = child.stdin.take().unwrap().write_all(input);
+    let mut out = child.stdout.take().unwrap();
+    let mut piece = vec![0u8; 64 * 1024];
+    let relayed = loop {
+        match out.read(&mut piece) {
+            Ok(0) => break Ok(()),
+            Ok(read) => {
+                if let Err(gone) = chunk(stream, &piece[..read]) {
+                    break Err(gone);
+                }
+            }
+            Err(error) => break Err(error),
+        }
+    };
+    // the service ends once a client that went away has its output closed
+    drop(out);
     let status = child.wait()?;
     let said = said.join().unwrap();
-    assert!(
-        status.success(),
-        "{service} failed: {}",
-        String::from_utf8_lossy(&said)
-    );
     relayed?;
+    if !status.success() {
+        eprintln!("{service} failed: {}", String::from_utf8_lossy(&said));
+        return Ok(());
+    }
+    stream.write_all(b"0\r\n\r\n")?;
     stream.flush()
 }
 

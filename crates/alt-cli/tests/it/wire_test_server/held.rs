@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-fn git(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -23,7 +23,24 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-fn pkt(out: &mut Vec<u8>, line: &str) {
+/// The body sent in `chunks`, which end with the last one.
+pub(super) fn dechunked(chunks: &[u8]) -> Vec<u8> {
+    let (mut at, mut body) = (0, Vec::new());
+    loop {
+        let line = chunks[at..].windows(2).position(|w| w == b"\r\n").unwrap();
+        let size = std::str::from_utf8(&chunks[at..at + line]).unwrap();
+        let size = usize::from_str_radix(size, 16).unwrap();
+        at += line + 2;
+        body.extend_from_slice(&chunks[at..at + size]);
+        at += size + 2;
+        if size == 0 {
+            assert_eq!(at, chunks.len(), "bytes behind the last chunk");
+            return body;
+        }
+    }
+}
+
+pub(super) fn pkt(out: &mut Vec<u8>, line: &str) {
     out.extend_from_slice(format!("{:04x}{line}", line.len() + 4).as_bytes());
 }
 
@@ -77,7 +94,7 @@ fn the_status_line_comes_before_the_pack_is_made() {
     body.extend_from_slice(b"0000");
     let mut stream = TcpStream::connect(url.strip_prefix("http://").unwrap()).unwrap();
     let request = format!(
-        "POST /git-upload-pack HTTP/1.0\r\nGit-Protocol: version=2\r\n\
+        "POST /git-upload-pack HTTP/1.1\r\nHost: h\r\nGit-Protocol: version=2\r\n\
          Content-Type: application/x-git-upload-pack-request\r\nContent-Length: {}\r\n\r\n",
         body.len()
     );
@@ -96,7 +113,7 @@ fn the_status_line_comes_before_the_pack_is_made() {
         read.is_ok(),
         "no status line while pack-objects was held: {read:?}"
     );
-    assert_eq!(status, "HTTP/1.0 200 OK\r\n");
+    assert_eq!(status, "HTTP/1.1 200 OK\r\n");
 
     let mut rest = Vec::new();
     reader.read_to_end(&mut rest).unwrap();
@@ -107,6 +124,7 @@ fn the_status_line_comes_before_the_pack_is_made() {
         head.contains("application/x-git-upload-pack-result"),
         "{head}"
     );
+    let answer = &dechunked(answer);
     assert!(answer.windows(13).any(|w| w == b"000dpackfile\n"));
     assert!(answer.windows(4).any(|w| w == b"PACK"));
     assert!(answer.ends_with(b"0000"));
