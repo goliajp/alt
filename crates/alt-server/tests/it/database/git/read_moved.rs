@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// The hook of the store is one for the process: the tests that set it take
 /// turns.
-static HOOKED: Mutex<()> = Mutex::new(());
+pub(super) static HOOKED: Mutex<()> = Mutex::new(());
 
 /// A branch `back` is pushed to the commit only the branch `side` holds, with
 /// a pack of nothing. While it is between its verification and its
@@ -175,7 +175,7 @@ fn leaning(directory: &Path, commit: &str, (base, more): (&str, &[u8])) -> Vec<u
 
 /// The push of `body` held between its verification and its publication
 /// while `meanwhile` runs, and what it was answered.
-fn held_while(
+pub(super) fn held_while(
     f: &Fixture,
     url: &str,
     token: &str,

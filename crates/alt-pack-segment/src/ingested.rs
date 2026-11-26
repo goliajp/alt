@@ -16,6 +16,8 @@ pub struct Ingested {
     /// of the ids: what it names and does not carry, and the bases of its
     /// deltas there
     pub(crate) leans: Vec<(Oid, Kind)>,
+    /// `leans` is all the pack leans on: it leaned on no more than was kept
+    pub(crate) leans_whole: bool,
     /// the trees `git fsck` looks at again, each once, in the order of the ids
     pub(crate) flagged: Vec<(Oid, alt_git_fsck::Flagged<Oid>)>,
     pub(crate) flags: u32,
@@ -43,6 +45,12 @@ impl Ingested {
     /// there, each once with its kind, in the order of the ids.
     pub fn leans(&self) -> &[(Oid, Kind)] {
         &self.leans
+    }
+
+    /// Whether [`Ingested::leans`] is all the pack leans on: what it leans on
+    /// is kept as many as it has entries, and some hundred thousand more.
+    pub fn leans_whole(&self) -> bool {
+        self.leans_whole
     }
 
     pub fn contains(&self, oid: &Oid) -> bool {

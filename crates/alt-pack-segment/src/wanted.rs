@@ -7,6 +7,11 @@
 //! wait within a bound: an id no segment present holds has to be an object of the
 //! pack, and there are no more of those than the pack has entries.
 //!
+//! An id a segment present holds is what the pack leans on, unless the pack
+//! carries it too: those are kept as they are looked up, as many as the pack
+//! has entries and as many again as wait to be looked up at once. A pack that
+//! leans on more is told to have leaned on more than was kept.
+//!
 //! Segments keep what no ref names any more. Where the pack comes from one who
 //! is led to less than the segments hold, what they hold beyond that is not
 //! there for the pack: an id is no proof of having the object, and a ref that
@@ -15,7 +20,7 @@
 use crate::{Error, Kind, Led, Oid, OidMap, SegmentSet, carried::Carried};
 use std::sync::{
     Mutex,
-    atomic::{AtomicUsize, Ordering::Relaxed},
+    atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
 };
 
 const SHARDS: usize = 64;
@@ -28,6 +33,8 @@ struct Shard {
     fresh: OidMap<(Kind, u32)>,
     /// no segment present holds it as that kind: the pack has to
     own: OidMap<(Kind, u32)>,
+    /// a segment present holds it as that kind
+    held: OidMap<Kind>,
 }
 
 pub(crate) struct Wanted<'a> {
@@ -39,6 +46,10 @@ pub(crate) struct Wanted<'a> {
     shards: Vec<Mutex<Shard>>,
     /// the ids the pack has to carry, in every shard
     own: AtomicUsize,
+    /// the ids kept that segments present hold, in every shard
+    held: AtomicUsize,
+    /// more were held than were kept
+    beyond: AtomicBool,
 }
 
 impl<'a> Wanted<'a> {
@@ -49,6 +60,8 @@ impl<'a> Wanted<'a> {
             entries,
             shards: (0..SHARDS).map(|_| Mutex::default()).collect(),
             own: AtomicUsize::new(0),
+            held: AtomicUsize::new(0),
+            beyond: AtomicBool::new(false),
         }
     }
 
@@ -67,7 +80,8 @@ impl<'a> Wanted<'a> {
             .lock()
             .expect("wanted");
         let shard = &mut *shard;
-        if let Some((known, _)) = shard.own.get(&to).or_else(|| shard.fresh.get(&to)) {
+        let known = shard.own.get(&to).or_else(|| shard.fresh.get(&to));
+        if let Some(known) = known.map(|(kind, _)| kind).or_else(|| shard.held.get(&to)) {
             // one id is one kind of object
             return if *known == kind {
                 Ok(())
@@ -80,10 +94,15 @@ impl<'a> Wanted<'a> {
             return Ok(());
         }
         let mut own = 0;
+        let keep = self.entries + SHARDS * TOGETHER;
         for (to, (kind, from)) in shard.fresh.drain() {
             if self.held(&to)? != Some(kind) {
                 shard.own.insert(to, (kind, from));
                 own += 1;
+            } else if self.held.fetch_add(1, Relaxed) < keep {
+                shard.held.insert(to, kind);
+            } else {
+                self.beyond.store(true, Relaxed);
             }
         }
         if self.own.fetch_add(own, Relaxed) + own > self.entries {
@@ -94,12 +113,13 @@ impl<'a> Wanted<'a> {
 
     /// Fails unless every object referred to is carried or held by a segment
     /// present, as the kind it is referred to as. `of` is the id of an entry.
-    /// The objects held and not carried, each once: what the pack leans on.
+    /// The objects held and not carried, each once: what the pack leans on;
+    /// and whether that is all it leans on, not more than was kept.
     pub fn check(
         self,
         carried: &Carried,
         of: impl Fn(u32) -> Oid + Sync,
-    ) -> Result<Vec<(Oid, Kind)>, Error> {
+    ) -> Result<(Vec<(Oid, Kind)>, bool), Error> {
         let leans = Mutex::new(Vec::new());
         alt_threads::try_for_each(&self.shards, 1, |shard| {
             let shard = shard.lock().expect("wanted");
@@ -108,7 +128,10 @@ impl<'a> Wanted<'a> {
                     return Err(Error::Dangling(of(*from), *to));
                 }
             }
-            let mut held = Vec::new();
+            let mut held: Vec<(Oid, Kind)> = (shard.held.iter())
+                .filter(|(to, kind)| carried.kind(to) != Some(**kind))
+                .map(|(to, kind)| (*to, *kind))
+                .collect();
             for (to, (kind, from)) in &shard.fresh {
                 let found = match carried.kind(to) {
                     Some(found) => Some(found),
@@ -124,7 +147,8 @@ impl<'a> Wanted<'a> {
             leans.lock().expect("leans").extend(held);
             Ok(())
         })?;
-        Ok(leans.into_inner().expect("leans"))
+        let whole = !self.beyond.load(Relaxed);
+        Ok((leans.into_inner().expect("leans"), whole))
     }
 }
 
@@ -170,7 +194,7 @@ mod tests {
             }
             wanted.check(carried, id)
         };
-        assert!(wanted(&all).unwrap().is_empty());
+        assert_eq!(wanted(&all).unwrap(), (Vec::new(), true));
         let missing = wanted(&but_one);
         assert!(matches!(missing, Err(Error::Dangling(a, b)) if a == id(0) && b == id(0)));
 

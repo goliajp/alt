@@ -214,10 +214,10 @@ fn verified(
     flagged.sort_unstable_by_key(|(tree, _)| *tree);
     flagged.dedup_by_key(|(tree, _)| *tree);
     // every reference resolves inside the pack or in the segments already present
-    let mut leans = Vec::new();
+    let (mut leans, mut leans_whole) = (Vec::new(), true);
     let settled = resolved.settle(existing, |carried| {
         let of = |from: u32| resolved.metas[from as usize].oid;
-        leans = told.wanted.check(carried, of)?;
+        (leans, leans_whole) = told.wanted.check(carried, of)?;
         Ok(())
     })?;
     leans.extend(bases);
@@ -227,6 +227,7 @@ fn verified(
         records: settled.records,
         commits: settled.commits,
         leans,
+        leans_whole,
         flagged,
         flags: settled.flags,
         pack_len: pack.len() as u64,

@@ -159,8 +159,10 @@ pub(super) fn publish(
 
 /// What of the segments the pack of `push` leans on, once it is verified.
 fn leaned(push: &Push<'_>) -> alt_server_store::Leans {
-    let leans = push.verified.as_ref().map(|pack| pack.leans());
-    alt_server_store::Leans::of(leans.unwrap_or_default())
+    let verified = push.verified.as_ref();
+    let leans = verified.map(|pack| pack.leans());
+    let whole = verified.is_none_or(|pack| pack.leans_whole());
+    alt_server_store::Leans::of(leans.unwrap_or_default(), whole)
 }
 
 /// The updates of a push that change a ref. A client may list refs it does not

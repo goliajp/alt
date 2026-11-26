@@ -28,21 +28,23 @@ pub(super) fn push_verified(root: &std::path::Path) {
 /// What of the segments a push leans on, each by its id: the commits it
 /// names, as parents or otherwise, and the other objects, which it names in
 /// its trees or as the bases of its deltas.
-#[derive(Default)]
 pub struct Leans {
     pub commits: Vec<Oid>,
     pub others: Vec<Oid>,
+    /// the pack leaned on no more than was kept of what it leans on
+    pub whole: bool,
 }
 
 impl Leans {
-    /// what a pack verified as `leans` has it lean on
-    pub fn of(leans: &[(Oid, alt_pack_segment::Kind)]) -> Self {
+    /// what a pack verified as `leans` has it lean on, where that is `whole`
+    pub fn of(leans: &[(Oid, alt_pack_segment::Kind)], whole: bool) -> Self {
         let (commits, others): (Vec<_>, Vec<_>) =
             (leans.iter()).partition(|(_, kind)| *kind == alt_pack_segment::Kind::Commit);
         let ids = |leans: Vec<&(Oid, _)>| leans.into_iter().map(|(oid, _)| *oid).collect();
         Leans {
             commits: ids(commits),
             others: ids(others),
+            whole,
         }
     }
 }
@@ -62,7 +64,9 @@ impl Leans {
 ///   refused while a ref moved, though it may be led to still, as finding
 ///   that out takes a walk of the history of the refs.
 ///
-/// A ref that moved and led to none of it changes nothing for the push.
+/// A push that leaned on more than was kept of what it leans on (see
+/// [`Leans::whole`]) is refused wherever a ref moved. A ref that moved and led
+/// to none of it changes nothing for the push.
 /// `current` is read with the row of the repository held.
 pub(super) fn still_led(
     current: &RepositorySnapshot,
@@ -88,6 +92,9 @@ pub(super) fn still_led(
     }
     if moved.is_empty() {
         return Ok(());
+    }
+    if !leans.whole {
+        return Err(Error::Precondition(REFS_MOVED));
     }
     let now: Vec<Oid> = (read.iter())
         .filter_map(|(name, _)| current.refs.get(name).map(|now| raw(*now)))
