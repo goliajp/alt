@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: tell a fetch whose pack an error of the server stops after its head why in the side band
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/tests/it/altd_server_fetch_failed.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
+touched: crates/alt-cli/tests/it/main.rs
