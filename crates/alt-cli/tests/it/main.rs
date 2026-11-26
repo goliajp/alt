@@ -39,6 +39,7 @@ mod altd_server_temp;
 mod altd_server_thin;
 mod altd_server_told;
 mod altd_server_trees;
+mod altd_server_turned;
 mod altd_server_unsynced_objects;
 mod altd_server_untrusted;
 mod altd_server_users;

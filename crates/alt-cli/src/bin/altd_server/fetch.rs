@@ -8,6 +8,7 @@
 
 use std::fs::File;
 use std::io::BufWriter;
+use std::time::Instant;
 use std::{net::IpAddr, sync::Arc, sync::atomic::AtomicBool};
 
 use alt_git_codec::{ObjectId, ObjectKind};
@@ -103,7 +104,8 @@ fn read(repo: &Repository, oid: &ObjectId, until: &Until) -> Res<alt_git_codec::
 /// The file has its part of the room responses have until it is sent. A response that would be
 /// large and would wait for its turn is dropped with what it was built from, and built again
 /// once the turn is had, which is waited for with the worker given back meanwhile. It is written
-/// for as long as `until` says, and the error is a [`Stopped`] where that is over.
+/// for as long as `until` says, and the error is a [`Stopped`] where that is over; one built
+/// again has as long again from when it has its turn.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
@@ -113,7 +115,13 @@ pub(super) fn response(
 ) -> Res<Sent> {
     let mut aside = Some(super::workers::Workers::aside(Arc::clone(from.1), until.by));
     let mut taken = None;
+    let time = until
+        .by
+        .map(|by| by.saturating_duration_since(Instant::now()));
+    let gone = until.gone;
+    let mut again = None;
     loop {
+        let until = again.as_ref().unwrap_or(until);
         let dir = alt_os::temp::tempdir()?;
         let path = dir.path().join("response");
         let file = File::create(&path)?;
@@ -128,6 +136,10 @@ pub(super) fn response(
             let (written, _) = framed.into_parts();
             drop(dir);
             taken = Some(written.turn()?);
+            again = Some(Until {
+                by: time.map(|time| Instant::now() + time),
+                gone,
+            });
             continue;
         }
         wrote?;
