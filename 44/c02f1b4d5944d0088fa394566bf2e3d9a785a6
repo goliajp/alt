@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the signature of a push out of its handler
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/push/signature.rs
