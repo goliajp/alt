@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: a task received refuses what git fsck refuses where it brings it anew to the repository
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/task/transfer/publication.rs
+touched: crates/alt-cli/tests/it/task_remote/unsafe_history.rs
+touched: crates/alt-task-transfer/src/lib.rs
+touched: crates/alt-task-transfer/src/package.rs
+touched: crates/alt-task-transfer/src/received.rs
+touched: crates/alt-task-transfer/src/verify.rs
