@@ -42,9 +42,10 @@ impl Room {
     }
 
     /// Has `file` written within the room, for a peer counted under `from`
-    /// that is gone where its mark is set: where it would be large, it waits
-    /// for its turn until `by` while the peer is there, with `aside` given
-    /// back meanwhile.
+    /// that is gone where its mark is set: where it would be large, it is put
+    /// off to wait for its turn (see [`Written::put_off`]), which it then waits
+    /// for until `by` while the peer is there, with `aside` given back
+    /// meanwhile.
     pub(super) fn writing(
         &self,
         file: File,
@@ -52,7 +53,9 @@ impl Room {
         by: Option<Instant>,
         aside: Option<Box<dyn alt_shares::Aside>>,
     ) -> Written {
-        let taken = self.0.share(from).waiting(by, Some(Arc::clone(gone)));
+        let taken = (self.0.share(from))
+            .waiting(by, Some(Arc::clone(gone)))
+            .turn_first();
         let taken = match aside {
             Some(aside) => taken.aside(aside),
             None => taken,
@@ -87,6 +90,37 @@ impl Write for Written {
 }
 
 impl Written {
+    /// The file of a response written again, with what was taken for one that
+    /// was put off and has had its turn since.
+    pub(super) fn again(file: File, taken: Share) -> Self {
+        Written { file, taken }
+    }
+
+    /// The response is to be `bytes` more: where that makes it large, it has
+    /// its turn now, or is put off.
+    pub(super) fn expect(&mut self, bytes: u64) -> io::Result<()> {
+        match self.taken.expect(bytes) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(io::Error::new(io::ErrorKind::StorageFull, FULL)),
+        }
+    }
+
+    /// Whether the response was put off where it would have waited for its
+    /// turn to be large: it is written again, with nothing it was built from
+    /// held meanwhile, once [`Written::turn`] is through.
+    pub(super) fn put_off(&self) -> bool {
+        self.taken.put_off()
+    }
+
+    /// What was taken, given back, and the turn of the response waited for.
+    pub(super) fn turn(self) -> io::Result<Share> {
+        let mut taken = self.taken;
+        match taken.take_turn() {
+            Ok(()) => Ok(taken),
+            Err(_) => Err(io::Error::new(io::ErrorKind::StorageFull, FULL)),
+        }
+    }
+
     /// What was written, to be read out of `file`, which is the same file
     /// opened from its beginning.
     pub(super) fn sent_from(self, file: File) -> Sent {

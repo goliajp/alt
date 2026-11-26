@@ -7,7 +7,7 @@
 //! refs reach, and for nothing else that is in its store.
 
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::{net::IpAddr, sync::Arc, sync::atomic::AtomicBool};
 
 use alt_git_codec::{ObjectId, ObjectKind};
@@ -100,9 +100,10 @@ fn read(repo: &Repository, oid: &ObjectId, until: &Until) -> Res<alt_git_codec::
 /// pack then leaves out what the commits acknowledged so far reach, which
 /// may be less than a longer negotiation would have found.
 ///
-/// The file has its part of the room responses have until it is sent; its turn to be large is
-/// waited for with the worker given back meanwhile. It is written for as long as `until` says,
-/// and the error is a [`Stopped`] where that is over.
+/// The file has its part of the room responses have until it is sent. A response that would be
+/// large and would wait for its turn is dropped with what it was built from, and built again
+/// once the turn is had, which is waited for with the worker given back meanwhile. It is written
+/// for as long as `until` says, and the error is a [`Stopped`] where that is over.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
@@ -110,37 +111,63 @@ pub(super) fn response(
     from: (Option<IpAddr>, &Arc<AtomicBool>),
     until: &Until,
 ) -> Res<Sent> {
-    let dir = alt_os::temp::tempdir()?;
-    let path = dir.path().join("response");
-    let aside = Some(super::workers::Workers::aside(Arc::clone(from.1), until.by));
-    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from, until.by, aside));
+    let mut aside = Some(super::workers::Workers::aside(Arc::clone(from.1), until.by));
+    let mut taken = None;
+    loop {
+        let dir = alt_os::temp::tempdir()?;
+        let path = dir.path().join("response");
+        let file = File::create(&path)?;
+        let written = match taken.take() {
+            Some(taken) => Written::again(file, taken),
+            None => room.writing(file, from, until.by, aside.take()),
+        };
+        let mut framed = BufWriter::new(written);
+        let wrote = built(repo, req, dir.path(), &mut framed, until);
+        if framed.get_ref().put_off() {
+            drop(wrote);
+            let (written, _) = framed.into_parts();
+            drop(dir);
+            taken = Some(written.turn()?);
+            continue;
+        }
+        wrote?;
+        let written = framed.into_inner().map_err(|failed| failed.into_error())?;
+        return Ok(written.sent_from(File::open(&path)?));
+    }
+}
+
+/// [`response`] written into `framed`, with what it is built from under `dir`.
+fn built(
+    repo: &Repository,
+    req: &FetchRequest,
+    dir: &std::path::Path,
+    framed: &mut BufWriter<Written>,
+    until: &Until,
+) -> Res<()> {
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };
     if let Some(oid) = unreached(repo, req, until)? {
-        refused(&mut framed, &format!("not our ref {oid}"))?;
-    } else {
-        let common = reached(repo, req, until)?;
-        let ready = !req.wait_for_done && !common.is_empty();
-        if !req.done && !ready {
-            encode_acknowledgments(&mut framed, &common, false)?;
-        } else {
-            match shallow::ends(repo, req, until)? {
-                Err(why) => refused(&mut framed, &why)?,
-                Ok(shallow) => {
-                    if !req.done {
-                        encode_acknowledgments(&mut framed, &common, true)?;
-                    }
-                    if let Some(told) = &shallow.told {
-                        encode_shallow_info(&mut framed, told)?;
-                    }
-                    pack(repo, req, &shallow, &common, dir.path(), &mut framed, until)?;
-                }
+        return Ok(refused(framed, &format!("not our ref {oid}"))?);
+    }
+    let common = reached(repo, req, until)?;
+    let ready = !req.wait_for_done && !common.is_empty();
+    if !req.done && !ready {
+        return Ok(encode_acknowledgments(framed, &common, false)?);
+    }
+    match shallow::ends(repo, req, until)? {
+        Err(why) => refused(framed, &why)?,
+        Ok(shallow) => {
+            if !req.done {
+                encode_acknowledgments(framed, &common, true)?;
             }
+            if let Some(told) = &shallow.told {
+                encode_shallow_info(framed, told)?;
+            }
+            pack(repo, req, &shallow, &common, dir, framed, until)?;
         }
     }
-    let written = framed.into_inner().map_err(|failed| failed.into_error())?;
-    Ok(written.sent_from(File::open(&path)?))
+    Ok(())
 }
 
 /// What a response looks for deltas with. It is the memory of one
@@ -162,7 +189,7 @@ fn pack(
     shallow: &Shallow,
     common: &[ObjectId],
     dir: &std::path::Path,
-    framed: &mut impl Write,
+    framed: &mut BufWriter<Written>,
     until: &Until,
 ) -> Res<()> {
     let mut roots = req.wants.clone();
@@ -202,5 +229,9 @@ fn pack(
     let pack = File::open(writer.finish()?.pack_path)?;
     // the file is this request's own and is not written to again
     let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
+    // a large one has its turn before it is framed, or is put off: the side
+    // band adds five bytes to each packet of 65515
+    let framing = (pack.len() as u64 / 65515 + 2) * 5 + 64;
+    framed.get_mut().expect(pack.len() as u64 + framing)?;
     Ok(encode_fetch_response_packfile(framed, &pack)?)
 }

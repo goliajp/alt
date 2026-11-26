@@ -237,3 +237,65 @@ fn a_large_response_that_waits_for_its_turn_holds_no_worker() {
     assert_eq!(second.len(), whole);
     assert!(refs_asked(&server.addr).starts_with(b"HTTP/1.1 200"));
 }
+
+/// The files under `dir`, at any depth, but the bodies of requests: what the
+/// server builds responses of under the directory of its own temporary files
+/// there. One removed while it is looked at is not.
+fn built_of(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in read.flatten() {
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => found.extend(built_of(&entry.path())),
+            Ok(_) if entry.file_name() != "body" => found.push(entry.path()),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// One worker, so one turn. Two fetches of other addresses that would wait
+/// for it while it is kept hold nothing they were built of while they wait:
+/// what they wrote under the temporary directory of the server is gone, and
+/// only their requests are there. Each
+/// is built again in its turn and answered whole.
+#[test]
+fn large_responses_that_wait_for_their_turn_hold_nothing_they_were_built_of() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let built = tmp.path().join("tmp");
+    std::fs::create_dir(&built).unwrap();
+    let env = [
+        ("ALT_SERVER_WORKERS", "1"),
+        ("ALT_SERVER_MAX_FETCH_MS", "120000"),
+        ("TMPDIR", built.to_str().unwrap()),
+    ];
+    let (server, head) = served(&tmp.path().join("origin"), &env);
+    let whole = answer(asked_for(&server.addr, &head, Some("203.0.113.9"))).len();
+    let first = kept(&server, &head, "203.0.113.9");
+    let before = built_of(&built);
+    let waiters = ["203.0.113.10", "203.0.113.11"].map(|from| waiting(&server, &head, from));
+    // their packs are written by then, and found large
+    std::thread::sleep(Duration::from_secs(3));
+    let by = Instant::now() + Duration::from_secs(30);
+    while built_of(&built) != before {
+        assert!(
+            Instant::now() < by,
+            "{:?} beside {before:?}",
+            built_of(&built)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(waiters.iter().all(|waiter| !waiter.is_finished()));
+    drop(first);
+    for waiter in waiters {
+        let answered = waiter.join().unwrap();
+        assert!(
+            answered.starts_with(b"HTTP/1.1 200"),
+            "{:.200}",
+            String::from_utf8_lossy(&answered)
+        );
+        assert_eq!(answered.len(), whole);
+    }
+}
