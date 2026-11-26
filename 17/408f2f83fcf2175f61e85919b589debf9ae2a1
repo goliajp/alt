@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a portable download that would wait for its turn lets go of the export and opens it again once it has it
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/web/portable.rs
+touched: crates/alt-server/src/http/work.rs
+touched: crates/alt-server/src/portable/download.rs
+touched: crates/alt-server/src/portable/mod.rs
+touched: crates/alt-server/tests/it/database/browser/migration_turns.rs
