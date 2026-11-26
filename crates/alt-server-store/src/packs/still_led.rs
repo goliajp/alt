@@ -194,7 +194,7 @@ fn lost_leant(
     if !leans.whole {
         return Err(Error::Precondition(REFS_MOVED));
     }
-    let (now, named_now) = now(refs, read, set, remaining)?;
+    let (now, named_now) = now(refs, (read, updated), set, remaining)?;
     let named = updated.iter().filter_map(|(_, new)| *new).map(raw);
     let lost = match set.select_while(&moved, &now, *remaining, None) {
         Ok(lost) => lost,
@@ -213,16 +213,22 @@ fn lost_leant(
 
 /// What the refs `read` lead to now: the commits they name, through their
 /// annotated tags, and what is named on the way to them, which is not lost.
+/// A ref the push updates is taken where it was read: the push is published
+/// only where it is still there, wherever it was meanwhile.
 fn now(
     refs: &BTreeMap<String, ObjectId>,
-    read: &Refs,
+    (read, updated): (&Refs, &[Updated<'_>]),
     set: &SegmentSet,
     remaining: &mut usize,
 ) -> Result<(Vec<Oid>, alt_hash::KeyedIdSet<Oid>)> {
     let (mut now, mut named) = (Vec::new(), alt_hash::KeyedIdSet::default());
-    for (name, _) in read.iter() {
-        if let Some(target) = refs.get(name) {
-            now.push(peeled(set, raw(*target), &mut named, remaining)?);
+    for (name, old) in read.iter() {
+        let target = match updated.iter().any(|(updated, _)| *updated == name) {
+            true => Some(old),
+            false => refs.get(name).copied(),
+        };
+        if let Some(target) = target {
+            now.push(peeled(set, raw(target), &mut named, remaining)?);
         }
     }
     Ok((now, named))

@@ -24,15 +24,18 @@ fn next(f: &Fixture, p: &Pushed, base: &str, file: &str) -> (String, Vec<u8>) {
     (next, pack)
 }
 
-/// The push of `body`, held once what it may have lost was found, while
-/// `meanwhile` is done: what it is answered.
-fn found_while(f: &Fixture, url: &str, body: Vec<u8>, meanwhile: impl FnOnce()) -> (u16, String) {
+type Hook = Mutex<Option<alt_server_store::PushVerified>>;
+
+/// Holds the first push to the repository of `f` that comes to `hook`: it is
+/// told on the first channel when the push is there, and the push goes on once
+/// it is told on the second.
+fn stop_at(f: &Fixture, hook: &Hook) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
     let (arrived, at) = mpsc::channel();
     let (go, gone) = mpsc::channel::<()>();
     let (arrived, gone) = (Mutex::new(arrived), Mutex::new(gone));
     let this = f.root.path().file_name().unwrap().to_owned();
     let held = AtomicBool::new(false);
-    *alt_server_store::PUSH_FOUND.lock().unwrap() = Some(Arc::new(move |root: &Path| {
+    *hook.lock().unwrap() = Some(Arc::new(move |root: &Path| {
         let ours = root.iter().any(|part| part == this);
         if ours && !held.swap(true, SeqCst) {
             arrived.lock().unwrap().send(()).unwrap();
@@ -42,6 +45,13 @@ fn found_while(f: &Fixture, url: &str, body: Vec<u8>, meanwhile: impl FnOnce()) 
                 .unwrap();
         }
     }));
+    (at, go)
+}
+
+/// The push of `body`, held once what it may have lost was found, while
+/// `meanwhile` is done: what it is answered.
+fn found_while(f: &Fixture, url: &str, body: Vec<u8>, meanwhile: impl FnOnce()) -> (u16, String) {
+    let (at, go) = stop_at(f, &alt_server_store::PUSH_FOUND);
     let pushing = {
         let (url, token) = (url.to_owned(), f.token.clone());
         std::thread::spawn(move || receive(&url, &token, &body))
@@ -144,4 +154,68 @@ fn a_push_whose_losses_take_more_to_find_than_it_may_is_refused_and_told_so() {
     let (status, report) = receive(&p.url, &f.token, &pushed_first);
     assert_eq!(status, 200, "{report}");
     assert!(report.contains("ok refs/heads/main"), "{report}");
+}
+
+/// A push to `main` names a file only `gone` holds. Before what the push may
+/// have lost is found, `main` is moved to `gone` and `gone` is deleted: the
+/// file is led to by `main` only. Once that is found, `main` is moved back to
+/// where the push read it, and the push is published there, where the file is
+/// led to by nothing. The push is refused: `main` is taken where the push read
+/// it, which is where it is when the push is published.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_is_refused_where_only_the_ref_it_updates_led_to_what_it_names_while_its_losses_were_found()
+ {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let p = pushed(&f, &server);
+    let git = |args: &[&str]| text(ok(&p.work, &f.token, args));
+    // a commit on `main` of the file of `gone`, without the file in its pack
+    git(&["checkout", "-q", "--detach", &p.main]);
+    std::fs::write(p.work.join("gone.txt"), "only gone has this\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "named"]);
+    let named = git(&["rev-parse", "HEAD"]);
+    let pack = packed(&p.work, &f.token, &[&named, &format!("{named}^{{tree}}")]);
+    git(&["checkout", "-q", "main"]);
+    let pushed_named = body(&[(&p.main, &named, "refs/heads/main")], &pack);
+
+    let (verified, go_verified) = stop_at(&f, &alt_server_store::PUSH_VERIFIED);
+    let pushing = {
+        let (url, token) = (p.url.clone(), f.token.clone());
+        std::thread::spawn(move || receive(&url, &token, &pushed_named))
+    };
+    verified.recv_timeout(Duration::from_secs(60)).unwrap();
+    git(&["push", "-q", &p.url, "gone:refs/heads/main"]);
+    git(&["push", "-q", &p.url, ":gone"]);
+    // stopped only now, so that neither push above stops there
+    let (found, go_found) = stop_at(&f, &alt_server_store::PUSH_FOUND);
+    go_verified.send(()).unwrap();
+    // a push refused once its losses are found does not come to the second stop
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        if found.recv_timeout(Duration::from_millis(50)).is_ok() {
+            let back = format!("{}:refs/heads/main", p.main);
+            git(&["push", "-q", "-f", &p.url, &back]);
+            go_found.send(()).unwrap();
+            break;
+        }
+        if pushing.is_finished() {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+    }
+    let (status, report) = pushing.join().unwrap();
+    *alt_server_store::PUSH_VERIFIED.lock().unwrap() = None;
+    *alt_server_store::PUSH_FOUND.lock().unwrap() = None;
+    assert_eq!(status, 200, "{report}");
+    assert!(
+        report.contains("ng refs/heads/main a ref changed since it was read"),
+        "{report}"
+    );
+    let listed = git(&["ls-remote", &p.url, "refs/heads/main"]);
+    assert!(!listed.starts_with(&named), "{listed}");
 }
