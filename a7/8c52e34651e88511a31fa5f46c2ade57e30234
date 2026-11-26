@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: give every git http request a connection of its own so its silence is bounded
+author-type: human
+author: doracawl
+touched: crates/alt-wire-http/src/lib.rs
+touched: crates/alt-wire-http/tests/it/silence.rs
