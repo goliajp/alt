@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: the count of requests through a proxy that name nobody stops where the log is told and never wraps
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/sources.rs
