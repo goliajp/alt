@@ -64,7 +64,7 @@ impl Asked {
             }
             groups[at].push(name);
         }
-        crate::crash::point("names asked");
+        crash_point!("names asked");
         for path in made {
             std::fs::remove_file(path)?;
         }
