@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: the log is told of a proxy whose requests name nobody where most of the first do, not the first in a row
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/caller.rs
+touched: crates/alt-server/src/http/sources.rs
+touched: crates/alt-server/tests/it/database/connections/quiet_proxy.rs
