@@ -1600,7 +1600,7 @@ impl<'a> NativeRepo<'a> {
         )?;
         let mut fetched =
             transport.command_stream(alt_wire_http::Service::UploadPack, &fetch_body)?;
-        let bytes_written = self.fetched_pack(remote_name, &mut fetched, algo)?;
+        let bytes_written = self.fetched_pack(&mut fetched, algo)?;
 
         // ref transaction: one tx for all the remote-tracking refs (plus
         // the mirrored remote HEAD when the server advertised a symref)

@@ -11,46 +11,45 @@ impl NativeRepo<'_> {
     /// bytes of the pack, none where the server had nothing new.
     pub(super) fn fetched_pack(
         &mut self,
-        remote_name: &str,
         response: &mut dyn std::io::Read,
         algo: HashAlgo,
     ) -> Res<u64> {
-        // drain preamble + sideband-wrapped pack stream into a temp .pack
+        // drain preamble + sideband-wrapped pack stream into a temp .pack,
+        // which is gone again unless it is read whole and indexed
         let pack_dir = self.store.alt_dir.join("pack");
         std::fs::create_dir_all(&pack_dir)?;
-        let tmp_pack = pack_dir.join(format!("fetch-{}-incoming.pack", remote_name));
         let mut reader = response;
         let preamble = alt_wire::read_fetch_preamble(&mut reader, algo)?;
         if preamble.packfile_missing {
             return Err("server returned no packfile (negotiation incomplete)".into());
         }
-        let bytes_written = {
-            let mut sink = std::fs::File::create(&tmp_pack)?;
-            let n = alt_wire::drain_packfile(&mut reader, &mut sink, |_| {})?;
-            sink.sync_all()?;
-            n
-        };
+        let mut sink = alt_os::temp::NamedTempFile::new_in(&pack_dir)?;
+        let bytes_written = alt_wire::drain_packfile(&mut reader, sink.as_file_mut(), |_| {})?;
         // to its end: an answer cut short is an error of the transport
         std::io::copy(&mut reader, &mut std::io::sink())?;
+        let (file, tmp_pack) = sink.into_parts();
+        file.sync_all()?;
+        drop(file);
         if bytes_written == 0 {
-            // server said "nothing new" — drop the empty file, skip indexing
-            let _ = crate::durable::remove_file(&tmp_pack);
-        } else {
-            // index the pack and ingest its objects into the native odb
-            let indexed = alt_git_pack::index_pack(&tmp_pack, algo, true)
-                .map_err(|e| format!("index-pack failed: {e}"))?;
-            let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, algo)?;
-            let idx = ip.idx();
-            let mut order: Vec<(u64, u32)> = (0..idx.len())
-                .map(|i| (idx.offset_at(i).expect("idx in range"), i))
-                .collect();
-            order.sort_unstable();
-            for (offset, i) in order {
-                let obj = ip.read_at(offset)?;
-                self.store.odb.put(idx.oid_at(i), obj.kind, &obj.data)?;
-            }
-            self.store.odb.flush()?;
+            // server said "nothing new": the empty file goes with `tmp_pack`
+            return Ok(0);
         }
+        // index the pack and ingest its objects into the native odb;
+        // indexed, it has the name of its content
+        let indexed = alt_git_pack::index_pack(&tmp_pack, algo, true)
+            .map_err(|e| format!("index-pack failed: {e}"))?;
+        tmp_pack.keep()?;
+        let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, algo)?;
+        let idx = ip.idx();
+        let mut order: Vec<(u64, u32)> = (0..idx.len())
+            .map(|i| (idx.offset_at(i).expect("idx in range"), i))
+            .collect();
+        order.sort_unstable();
+        for (offset, i) in order {
+            let obj = ip.read_at(offset)?;
+            self.store.odb.put(idx.oid_at(i), obj.kind, &obj.data)?;
+        }
+        self.store.odb.flush()?;
         Ok(bytes_written)
     }
 }

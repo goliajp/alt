@@ -60,6 +60,57 @@ fn a_service_that_fails_behind_its_whole_answer_fails_the_fetch() {
     assert!(!cloned.status.success(), "{said}");
 }
 
+/// A fetch whose answer is cut short in the middle of its pack fails and
+/// leaves nothing of the pack behind in the repository
+#[test]
+fn a_fetch_cut_short_in_its_pack_leaves_no_part_of_it() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    repository(&repo, 1000);
+    let (wrapped, cut) = (dir.path().join("wrapped"), dir.path().join("cut"));
+    std::fs::create_dir(&wrapped).unwrap();
+    // once `cut` is there, the answer to a fetch ends in the pack
+    let cuts = format!(
+        "input=$(mktemp)\ncat > \"$input\"\n\
+         if [ -e '{}' ] && grep -q command=fetch \"$input\"; then\n\
+         \"$git\" \"$@\" < \"$input\" | head -c 65536\nrm -f \"$input\"\nexit 1\nfi\n\
+         \"$git\" \"$@\" < \"$input\"\nended=$?\nrm -f \"$input\"\nexit $ended\n",
+        cut.display()
+    );
+    script(&wrapped.join("git"), &cuts);
+    let path = std::env::var("PATH").unwrap();
+    let path = format!("{}:{path}", wrapped.display());
+    let url = super::spawn_with_env(repo.clone(), vec![("PATH".to_owned(), path)]);
+    crate::altd_server::ok(crate::altd_server::alt(
+        dir.path(),
+        &["clone", &url, "copy"],
+    ));
+    let copy = dir.path().join("copy");
+    let packs = copy.join(".alt/pack");
+    // what is under the directory of packs, which a clone may not make
+    let listed = || {
+        let mut names: Vec<_> = match std::fs::read_dir(&packs) {
+            Ok(entries) => entries.map(|entry| entry.unwrap().file_name()).collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => panic!("{e}"),
+        };
+        names.sort();
+        names
+    };
+    let before = listed();
+
+    let noise = crate::altd_server_slow_peers::noise(1 << 20);
+    std::fs::write(repo.join("more"), noise).unwrap();
+    git(&repo, &["add", "more"]);
+    let who = ["-c", "user.name=t", "-c", "user.email=t@e"];
+    git(&repo, &[&who[..], &["commit", "-qm", "more"]].concat());
+    std::fs::write(&cut, "").unwrap();
+    let fetched = crate::altd_server::alt(&copy, &["fetch", "origin"]);
+    let said = String::from_utf8_lossy(&fetched.stderr);
+    assert!(!fetched.status.success(), "{said}");
+    assert_eq!(listed(), before, "{said}");
+}
+
 /// A client that goes away while git makes its pack leaves no git behind
 #[test]
 fn a_client_that_goes_away_leaves_no_service_behind() {
