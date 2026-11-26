@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: let go of a slow reader of a pack sent in chunks behind keepalives
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_slow_readers.rs
