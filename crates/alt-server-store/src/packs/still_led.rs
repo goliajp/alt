@@ -95,12 +95,7 @@ pub(super) fn still_led(
     if !leans.whole {
         return Err(Error::Precondition(REFS_MOVED));
     }
-    let mut now = Vec::new();
-    for (name, _) in read.iter() {
-        if let Some(target) = current.refs.get(name) {
-            now.push(peeled(set, raw(*target), &mut remaining)?);
-        }
-    }
+    let (now, named_now) = now(current, read, set, &mut remaining)?;
     let named = (publication.refs.iter())
         .filter_map(|update| update.new.as_deref())
         .filter_map(|new| alt_git_codec::ObjectId::from_hex(new.as_bytes()).ok())
@@ -111,7 +106,9 @@ pub(super) fn still_led(
         Err(alt_pack_segment::Error::Limit(_)) => return Err(Error::Precondition(REFS_MOVED)),
         Err(_) => return Err(Error::Integrity("pack segment object")),
     };
-    let lost: alt_hash::KeyedIdSet<&Oid> = lost.objects().iter().collect();
+    let lost: alt_hash::KeyedIdSet<&Oid> = (lost.objects().iter())
+        .filter(|oid| !named_now.contains(*oid))
+        .collect();
     let mut leant = (leans.commits.iter().chain(&leans.others).copied()).chain(named);
     match leant.any(|oid| lost.contains(&oid)) {
         true => Err(Error::Precondition(REFS_MOVED)),
@@ -119,11 +116,43 @@ pub(super) fn still_led(
     }
 }
 
+/// What the refs `read` lead to now: the commits they name, through their
+/// annotated tags, and what is named on the way to them, which is not lost.
+fn now(
+    current: &RepositorySnapshot,
+    read: &Refs,
+    set: &SegmentSet,
+    remaining: &mut usize,
+) -> Result<(Vec<Oid>, alt_hash::KeyedIdSet<Oid>)> {
+    let (mut now, mut named) = (Vec::new(), alt_hash::KeyedIdSet::default());
+    for (name, _) in read.iter() {
+        if let Some(target) = current.refs.get(name) {
+            now.push(peeled(set, raw(*target), &mut named, remaining)?);
+        }
+    }
+    Ok((now, named))
+}
+
 /// What the annotated tags of `oid` name, through each of them, where they are
-/// stored: `oid` where it is no tag.
-fn peeled(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Oid> {
+/// stored: `oid` where it is no tag. What is passed on the way, and what is
+/// named where it is no commit, is put in `named`.
+fn peeled(
+    set: &SegmentSet,
+    mut oid: Oid,
+    named: &mut alt_hash::KeyedIdSet<Oid>,
+    remaining: &mut usize,
+) -> Result<Oid> {
     let bad = |_| Error::Integrity("pack segment object");
-    while set.kind(&oid).map_err(bad)? == Some(alt_pack_segment::Kind::Tag) {
+    loop {
+        match set.kind(&oid).map_err(bad)? {
+            Some(alt_pack_segment::Kind::Tag) => {}
+            Some(alt_pack_segment::Kind::Commit) => return Ok(oid),
+            _ => {
+                named.insert(oid);
+                return Ok(oid);
+            }
+        }
+        named.insert(oid);
         *remaining = remaining
             .checked_sub(1)
             .ok_or(Error::Limit("Git tag peel walk"))?;
@@ -132,7 +161,6 @@ fn peeled(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Oid> 
             alt_git_codec::Tag::parse(&data).map_err(|_| Error::Integrity("tag object"))?;
         oid = raw(target.object().ok_or(Error::Integrity("tag object"))?);
     }
-    Ok(oid)
 }
 
 fn raw(oid: alt_git_codec::ObjectId) -> Oid {

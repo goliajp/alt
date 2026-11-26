@@ -15,6 +15,7 @@ mod moved;
 mod raw_push;
 mod read_moved;
 mod read_moved_lost;
+mod read_moved_named;
 mod restored;
 mod reverted;
 mod said;

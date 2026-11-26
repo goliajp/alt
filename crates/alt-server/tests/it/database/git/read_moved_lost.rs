@@ -11,14 +11,14 @@ const CHANGED: &str = "a ref changed since it was read";
 
 /// a repository of `main` and `gone`, which holds a file nothing else does,
 /// pushed; the work tree, the url and the tip of `main`
-struct Pushed {
-    _temp: alt_os::temp::TempDir,
-    work: std::path::PathBuf,
-    url: String,
-    main: String,
+pub(super) struct Pushed {
+    pub(super) _temp: alt_os::temp::TempDir,
+    pub(super) work: std::path::PathBuf,
+    pub(super) url: String,
+    pub(super) main: String,
 }
 
-fn pushed(f: &Fixture, server: &Running) -> Pushed {
+pub(super) fn pushed(f: &Fixture, server: &Running) -> Pushed {
     let temp = alt_os::temp::tempdir().unwrap();
     let work = temp.path().join("work");
     std::fs::create_dir(&work).unwrap();
@@ -46,7 +46,7 @@ fn pushed(f: &Fixture, server: &Running) -> Pushed {
 }
 
 /// the body of a push of `updates`, each an old id, a new id and a ref, with `pack`
-fn body(updates: &[(&str, &str, &str)], pack: &[u8]) -> Vec<u8> {
+pub(super) fn body(updates: &[(&str, &str, &str)], pack: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     for (at, (old, new, name)) in updates.iter().enumerate() {
         let caps = if at == 0 { "\0report-status" } else { "" };
