@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: a whole graph is refused only for what git fsck refuses that the repository does not hold
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/src/fsck.rs
+touched: crates/alt-repository-service/src/lib.rs
+touched: crates/alt-repository-service/src/verify.rs
+touched: crates/alt-repository-service/tests/it/fsck.rs
+touched: crates/alt-task-transfer/src/selection.rs
