@@ -296,7 +296,9 @@ impl Package {
         for entry in &self.request.manifest.entries {
             verify_file(&self.directory.join("content").join(&entry.blake3), entry)?;
         }
-        Ok(VerifiedPublication::verify(
+        // the server the package is sent to tells what `git fsck` refuses of
+        // it, by what that repository holds
+        Ok(VerifiedPublication::verify_to_send(
             &self.request.publication,
             &self.request.manifest,
             self,

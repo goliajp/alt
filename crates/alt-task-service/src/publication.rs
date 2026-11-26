@@ -2,7 +2,9 @@ use crate::{
     ArtifactSource, Error, PreparedTaskGraph, Result, TaskBundle, TaskLimits, VerifiedTaskGraph,
 };
 use alt_remote_protocol::{ContentKind, Limits, Manifest, Publication};
-use alt_repository_service::{ObjectSource, VerifiedGraph, verify_graph, verify_new_graph};
+use alt_repository_service::{
+    ObjectSource, VerifiedGraph, verify_graph, verify_graph_to_send, verify_new_graph,
+};
 use std::{cell::Cell, io::Read};
 
 /// Immutable byte validation shared by the client preview and server worker.
@@ -42,6 +44,31 @@ impl VerifiedPublication {
         limits: Limits,
         task_limits: TaskLimits,
     ) -> Result<Self> {
+        let sources = (objects, artifacts);
+        Self::verified(publication, manifest, sources, (limits, task_limits), false)
+    }
+    /// [`Self::verify`] of a publication whose objects are sent on to a
+    /// repository that is not where they were read, as a task transfer sends
+    /// them: what `git fsck` refuses of them is told by the repository that
+    /// receives them, which knows what it holds, and is not refused here.
+    pub fn verify_to_send(
+        publication: &Publication,
+        manifest: &Manifest,
+        objects: &impl ObjectSource,
+        artifacts: &impl ArtifactSource,
+        limits: Limits,
+        task_limits: TaskLimits,
+    ) -> Result<Self> {
+        let sources = (objects, artifacts);
+        Self::verified(publication, manifest, sources, (limits, task_limits), true)
+    }
+    fn verified(
+        publication: &Publication,
+        manifest: &Manifest,
+        (objects, artifacts): (&impl ObjectSource, &impl ArtifactSource),
+        (limits, task_limits): (Limits, TaskLimits),
+        to_send: bool,
+    ) -> Result<Self> {
         manifest
             .validate_publication(publication, limits)
             .map_err(|_| Error::Integrity("publication manifest"))?;
@@ -57,35 +84,12 @@ impl VerifiedPublication {
             .collect::<Result<Vec<alt_git_codec::ObjectId>>>()?;
         let has_tasks = !publication.record_roots.is_empty();
         if has_tasks {
-            let selected = manifest
-                .entries
-                .iter()
-                .find(|entry| entry.kind == ContentKind::TaskBundle)
-                .ok_or(Error::Integrity("missing task bundle"))?;
-            if selected.bytes > task_limits.structured_bytes as u64 {
-                return Err(Error::Limit("task bundle bytes"));
-            }
             let source = SelectionSource {
                 inner: artifacts,
                 bytes: Cell::new(task_limits.work_bytes),
                 reads: Cell::new(task_limits.walk_steps),
             };
-            let mut raw = Vec::new();
-            source
-                .open(&alt_task::Artifact {
-                    blake3: selected.blake3.clone(),
-                    bytes: selected.bytes,
-                })?
-                .take(selected.bytes.saturating_add(1))
-                .read_to_end(&mut raw)?;
-            if raw.len() as u64 != selected.bytes
-                || alt_hash::blake3::hash(&raw).to_hex().as_str() != selected.blake3
-            {
-                return Err(Error::Integrity("task bundle bytes"));
-            }
-            let bundle = TaskBundle::decode(&raw, task_limits)?;
-            let prepared =
-                PreparedTaskGraph::load(bundle, &publication.record_roots, &source, task_limits)?;
+            let prepared = prepared(publication, manifest, &source, task_limits)?;
             roots.extend(prepared.object_roots(&source)?);
         }
         roots.sort_unstable();
@@ -96,7 +100,9 @@ impl VerifiedPublication {
         };
         // A task graph is bound to exactly the objects its publication carries, so it is
         // read whole. A plain publication is read down to what the repository holds.
-        let graph = if has_tasks {
+        let graph = if to_send {
+            verify_graph_to_send(objects, algo, &roots, limits.into())?
+        } else if has_tasks {
             verify_graph(objects, algo, &roots, limits.into())?
         } else {
             verify_new_graph(objects, algo, &roots, limits.into())?
@@ -116,4 +122,35 @@ impl VerifiedPublication {
         };
         Ok(Self { graph, tasks })
     }
+}
+/// The task graph of a publication that has tasks, read from its bundle.
+fn prepared(
+    publication: &Publication,
+    manifest: &Manifest,
+    source: &impl ArtifactSource,
+    task_limits: TaskLimits,
+) -> Result<PreparedTaskGraph> {
+    let selected = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.kind == ContentKind::TaskBundle)
+        .ok_or(Error::Integrity("missing task bundle"))?;
+    if selected.bytes > task_limits.structured_bytes as u64 {
+        return Err(Error::Limit("task bundle bytes"));
+    }
+    let mut raw = Vec::new();
+    source
+        .open(&alt_task::Artifact {
+            blake3: selected.blake3.clone(),
+            bytes: selected.bytes,
+        })?
+        .take(selected.bytes.saturating_add(1))
+        .read_to_end(&mut raw)?;
+    if raw.len() as u64 != selected.bytes
+        || alt_hash::blake3::hash(&raw).to_hex().as_str() != selected.blake3
+    {
+        return Err(Error::Integrity("task bundle bytes"));
+    }
+    let bundle = TaskBundle::decode(&raw, task_limits)?;
+    PreparedTaskGraph::load(bundle, &publication.record_roots, source, task_limits)
 }
