@@ -17,6 +17,7 @@
 //! TLS is in front of this, with whatever else a public listener needs.
 
 mod back;
+mod chunks;
 mod head;
 mod kept;
 mod paced;

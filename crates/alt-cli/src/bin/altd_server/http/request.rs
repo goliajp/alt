@@ -14,19 +14,11 @@ use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 
 use super::back::{Back, Way};
+use super::chunks::{Chunks, chunk_size, line};
 use super::head::{Framing, Head, Header, Method};
 use super::paced::{Sent, Source};
 use super::response::Response;
 use super::{Share, Shares};
-
-/// Where the reading of a chunked body is.
-enum Chunks {
-    /// before the size of a chunk; `true` behind the bytes of one
-    Size(bool),
-    /// this many bytes of a chunk are still to come
-    Within(u64),
-    Over,
-}
 
 /// A body taken off the wire, and what ended the taking where it did
 /// not come whole. What it took on the wire, the lines around its chunks
@@ -52,33 +44,6 @@ struct Body {
     expects: bool,
     /// not read from yet
     untouched: bool,
-}
-
-fn line(source: &mut Source) -> io::Result<Vec<u8>> {
-    let mut line = Vec::new();
-    loop {
-        match source.byte()? {
-            b'\n' => break,
-            byte if line.len() < 4096 => line.push(byte),
-            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "a chunk line")),
-        }
-    }
-    if line.pop() != Some(b'\r') {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "a chunk line"));
-    }
-    Ok(line)
-}
-
-/// The size a chunk line gives: hex digits and nothing else, before any
-/// extensions.
-fn chunk_size(line: &[u8]) -> Option<u64> {
-    let digits = line.iter().take_while(|b| b.is_ascii_hexdigit()).count();
-    let behind = line[digits..].trim_ascii_start();
-    let extended = behind.is_empty() == (digits == line.len());
-    if digits == 0 || digits > 16 || !extended || !(behind.is_empty() || behind[0] == b';') {
-        return None;
-    }
-    u64::from_str_radix(std::str::from_utf8(&line[..digits]).ok()?, 16).ok()
 }
 
 impl Body {
@@ -318,38 +283,5 @@ impl Drop for Request {
     /// A request its handler let go of without an answer is answered here.
     fn drop(&mut self) {
         self.answer(Response::from_data(Vec::new()).with_status_code(500));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::chunk_size;
-
-    #[test]
-    fn the_size_of_a_chunk_is_hex_digits_and_nothing_before_or_around_them() {
-        for (line, size) in [
-            ("0", 0),
-            ("1a", 26),
-            ("A;x=y", 10),
-            ("3 ;x", 3),
-            ("ffffffffffffffff", u64::MAX),
-        ] {
-            assert_eq!(chunk_size(line.as_bytes()), Some(size), "{line:?}");
-        }
-        for line in [
-            "",
-            "+3",
-            " 3",
-            "\t3",
-            "3 ",
-            "3\t",
-            "0x3",
-            "3 x",
-            ";x",
-            "-1",
-            "10000000000000000",
-        ] {
-            assert_eq!(chunk_size(line.as_bytes()), None, "{line:?}");
-        }
     }
 }
