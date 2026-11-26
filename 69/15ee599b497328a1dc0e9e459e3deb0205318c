@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: what a pack leans on of the segments is kept where it is looked up with thousands of others
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/src/ingest.rs
+touched: crates/alt-pack-segment/src/ingested.rs
+touched: crates/alt-pack-segment/src/wanted.rs
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/read_moved.rs
+touched: crates/alt-server/tests/it/database/git/read_moved_lost.rs
