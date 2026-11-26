@@ -19,66 +19,12 @@ use alt_wire::fetch::{
 use super::sending::{Room, Sent, Written};
 use super::shallow::{self, Shallow};
 pub(super) use super::until::{Stopped, Until};
+use filter::parse_filter_spec;
+
+#[path = "fetch/filter.rs"]
+mod filter;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
-
-/// The partial-clone filter shapes [`response`] currently
-/// honours. Everything else parses as `None` (no filter) for
-/// forward-compatibility — unknown filters degrade to a full pack
-/// rather than rejecting the fetch, since the wire spec lets the
-/// server be permissive.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct FilterSpec {
-    omit_blobs: bool,
-    blob_limit: Option<usize>,
-    omit_trees: bool,
-}
-
-impl FilterSpec {
-    /// Whether an object of `kind` and of `bytes` bytes is left out.
-    fn excludes(&self, kind: ObjectKind, bytes: usize) -> bool {
-        match kind {
-            ObjectKind::Blob => {
-                if self.omit_blobs || self.omit_trees {
-                    return true;
-                }
-                if let Some(limit) = self.blob_limit
-                    && bytes >= limit
-                {
-                    return true;
-                }
-                false
-            }
-            ObjectKind::Tree => self.omit_trees,
-            _ => false,
-        }
-    }
-}
-
-fn parse_filter_spec(raw: Option<&str>) -> FilterSpec {
-    let mut out = FilterSpec::default();
-    let Some(spec) = raw else {
-        return out;
-    };
-    let spec = spec.trim();
-    match spec {
-        "blob:none" => out.omit_blobs = true,
-        "tree:0" => {
-            out.omit_trees = true;
-            out.omit_blobs = true; // tree:0 implies blob:none semantically
-        }
-        _ => {
-            if let Some(n) = spec.strip_prefix("blob:limit=")
-                && let Ok(limit) = n.parse::<usize>()
-            {
-                out.blob_limit = Some(limit);
-            }
-            // unknown / unsupported filters silently degrade to "send
-            // everything" — git's spec lets the server be permissive.
-        }
-    }
-    out
-}
 
 fn read(repo: &Repository, oid: &ObjectId, until: &Until) -> Res<alt_git_codec::RawObject> {
     until.go_on()?;
