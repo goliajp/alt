@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: fix
+summary: a serving session that is slow to answer is waited for while the database says it holds the lock
+author-type: human
+author: doracawl
+touched: crates/alt-pg/src/client.rs
+touched: crates/alt-pg/src/lib.rs
+touched: crates/alt-pg/src/stream.rs
+touched: crates/alt-server-store/src/database.rs
+touched: crates/alt-server-store/src/serving.rs
+touched: crates/alt-server/src/http/serving.rs
+touched: crates/alt-server/tests/it/database.rs
+touched: crates/alt-server/tests/it/database/serving.rs
+touched: crates/alt-server/tests/it/database/serving_line.rs
+touched: crates/alt-server/tests/it/database/serving_slow.rs
