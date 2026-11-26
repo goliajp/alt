@@ -55,9 +55,13 @@ fn a_fetch_whose_response_has_no_room_beside_one_being_sent_is_told_to_come_agai
     crate::altd_server::ok(alt(&origin, &["add", "."]));
     crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
     // less room than one response takes: alone it is sent all the same
+    // the head of a response goes out once its pack is made: one read
+    // from then on holds its room, and one refused is a 503. A head sent
+    // ahead of a pack slow to make would come before either
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_MAX_SENDING_BYTES", "1000000"),
+        ("ALT_SERVER_KEEPALIVE_MS", "3600000"),
     ]);
     let refs = listed(&format!("http://{}/", server.addr)).unwrap();
     let head = refs.split_whitespace().next().unwrap();
@@ -104,9 +108,11 @@ fn the_responses_one_address_lets_wait_leave_the_room_of_the_others() {
     let alt = crate::altd_server::alt;
     crate::altd_server::ok(alt(&origin, &["add", "."]));
     crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
+    // as above: the head goes out once the pack is made
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_MAX_SENDING_BYTES", "80000000"),
+        ("ALT_SERVER_KEEPALIVE_MS", "3600000"),
     ]);
     let refs = listed(&format!("http://{}/", server.addr)).unwrap();
     let head = refs.split_whitespace().next().unwrap();
