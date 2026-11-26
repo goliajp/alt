@@ -1,0 +1,14 @@
+schema: alt-meta/1
+type: fix
+summary: the tree of a task candidate is told what git fsck refuses against the trees it was made from
+author-type: human
+author: doracawl
+touched: Cargo.lock
+touched: crates/alt-cli/Cargo.toml
+touched: crates/alt-cli/tests/it/task_remote.rs
+touched: crates/alt-cli/tests/it/task_remote/unsafe_history.rs
+touched: crates/alt-repository-service/src/fsck.rs
+touched: crates/alt-repository-service/src/lib.rs
+touched: crates/alt-repository-service/src/verify.rs
+touched: crates/alt-task-service/src/graph.rs
+touched: crates/alt-task-service/src/publication.rs
