@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: docs
+summary: say what a client that is not signed in is told of an error of the server
+author-type: human
+author: doracawl
+touched: README.md
