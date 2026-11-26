@@ -141,7 +141,12 @@ pub(super) fn handle_receive_pack(
             Err(e) if receive::busy(&*e) => {
                 return Ok(repo.answer(req, limits::busy(), log)?);
             }
-            Err(e) => return Err(e),
+            // the client is told why, in the side band where the head went out
+            Err(e) => {
+                let r = Response::from_string(format!("{e}")).with_status_code(500);
+                repo.answer(req, r, log)?;
+                return Err(e);
+            }
         },
     };
     // wait for the group-commit leader's fsync to cover us, outside the

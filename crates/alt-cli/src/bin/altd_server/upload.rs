@@ -90,16 +90,7 @@ pub(super) fn handle_upload_pack(
             let mut begun = |body| req.begin(result_headers(), body, super::told::told().keepalive);
             let sent = match fetch::response(&repo, &fetch_req, room, from, &until, &mut begun) {
                 Ok(sent) => sent,
-                Err(e) if e.downcast_ref() == Some(&fetch::Stopped::Late) => {
-                    let r = Response::from_string(format!("{e}")).with_status_code(503);
-                    return repo.answer(req, r, log).map_err(Into::into);
-                }
-                Err(e) if limits::refusal(&*e) == 503 => {
-                    let mut r = Response::from_string(format!("{e}")).with_status_code(503);
-                    r.add_header(header("Retry-After", "60"));
-                    return repo.answer(req, r, log).map_err(Into::into);
-                }
-                Err(e) => return Err(e),
+                Err(e) => return not_fetched(req, repo, log, e),
             };
             let mut resp = Response::sized(sent.length(), sent);
             result_headers()
@@ -121,6 +112,32 @@ pub(super) fn handle_upload_pack(
         .for_each(|h| resp.add_header(h));
     repo.answer(req, resp, log)?;
     Ok(())
+}
+
+/// Answers a fetch whose response was not made with why. One the server had
+/// no time or room for is told to come again; another reason is an error of
+/// the server, which is the handler's too.
+fn not_fetched(
+    req: http::Request,
+    repo: Reading,
+    log: &mut LogCtx,
+    e: Box<dyn std::error::Error>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let late = e.downcast_ref() == Some(&fetch::Stopped::Late);
+    let status = match limits::refusal(&*e) {
+        _ if late => 503,
+        503 => 503,
+        _ => 500,
+    };
+    let mut r = Response::from_string(format!("{e}")).with_status_code(status);
+    if status == 503 && !late {
+        r.add_header(header("Retry-After", "60"));
+    }
+    repo.answer(req, r, log)?;
+    match status {
+        500 => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// The headers of what `upload-pack` answers a command with.

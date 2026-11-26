@@ -191,7 +191,8 @@ fn a_fetch_stopped_once_its_head_went_out_is_told_why_in_the_side_band() {
             continue;
         }
         let (_, body) = chunked(&got);
-        let why = &b"\x03error: the fetch takes longer than the server gives one"[..];
+        // as `upload-pack` tells it: the reason and no word before it
+        let why = &b"\x03the fetch takes longer than the server gives one"[..];
         // a flush where the pack was made in time
         if let Some(last) = lines(&body).last().unwrap() {
             assert_eq!(*last, why, "{:?}", String::from_utf8_lossy(last));

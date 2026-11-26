@@ -122,8 +122,9 @@ pub(super) struct Outgoing {
     pub(super) last: bool,
 }
 
-/// what an error told in the side band begins with
-const ERROR: &[u8] = b"\x03error: ";
+/// what an error told in the side band begins with: the band, and no word
+/// before the reason, as Git's clients put `remote error: ` there themselves
+const ERROR: &[u8] = b"\x03";
 /// the most of an error told in the side band
 const TOLD: u64 = 1000;
 
