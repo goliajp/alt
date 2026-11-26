@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: leave the crash point of the names asked out of a release build
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/checkout_files/asked.rs
