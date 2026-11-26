@@ -7,7 +7,7 @@ use super::*;
 use alt_wire_http::native::Transport;
 
 /// a tree of `entries`, each a mode, a name and the id it names, in the order given
-fn tree(entries: &[(&str, &[u8], ObjectId)]) -> Vec<u8> {
+pub(super) fn tree(entries: &[(&str, &[u8], ObjectId)]) -> Vec<u8> {
     let mut data = Vec::new();
     for (mode, name, id) in entries {
         data.extend_from_slice(mode.as_bytes());
@@ -19,18 +19,18 @@ fn tree(entries: &[(&str, &[u8], ObjectId)]) -> Vec<u8> {
     data
 }
 
-fn commit(tree: ObjectId, parent: Option<ObjectId>, message: &str) -> Vec<u8> {
+pub(super) fn commit(tree: ObjectId, parent: Option<ObjectId>, message: &str) -> Vec<u8> {
     let parent = parent.map(|p| format!("parent {p}\n")).unwrap_or_default();
     format!("tree {tree}\n{parent}author A <a@example.test> 1 +0000\ncommitter A <a@example.test> 1 +0000\n\n{message}\n").into_bytes()
 }
 
-fn id(kind: ObjectKind, data: &[u8]) -> ObjectId {
+pub(super) fn id(kind: ObjectKind, data: &[u8]) -> ObjectId {
     ObjectId::hash_object(HashAlgo::Sha1, kind, data)
 }
 
 /// The objects as a live segment of the repository and `refs/heads/main` at
 /// `head`, as a release that took any tree left them.
-fn planted(f: &Fixture, objects: &[(alt_pack_segment::Kind, &[u8])], head: ObjectId) {
+pub(super) fn planted(f: &Fixture, objects: &[(alt_pack_segment::Kind, &[u8])], head: ObjectId) {
     let none = alt_pack_segment::SegmentSet::default();
     let out = std::io::Cursor::new(Vec::new());
     let mut builder = alt_pack_segment::Builder::new(out, &none, objects.len() as u64).unwrap();
@@ -58,7 +58,7 @@ fn planted(f: &Fixture, objects: &[(alt_pack_segment::Kind, &[u8])], head: Objec
 
 /// A native publication of `objects` that moves `refs/heads/main` from
 /// `parent` to `head`.
-fn native(
+pub(super) fn native(
     request: &str,
     objects: &[(ContentKind, &[u8])],
     parent: ObjectId,

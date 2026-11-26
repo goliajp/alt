@@ -17,6 +17,8 @@ pub struct Fault {
     pub name: Vec<u8>,
     pub why: &'static str,
     kind: Kind,
+    /// the mode of the entry
+    mode: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,14 +65,19 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
         faults: Vec::new(),
         files: Vec::new(),
     };
-    let mut fault = |name: &[u8], why, kind| {
+    let mut fault = |name: &[u8], why, kind, mode| {
         let name = name.to_vec();
-        flagged.faults.push(Fault { name, why, kind });
+        flagged.faults.push(Fault {
+            name,
+            why,
+            kind,
+            mode,
+        });
     };
     for entry in entries {
         let name = entry.name.as_ref();
         if let Some(why) = unsafe_name(name) {
-            fault(name, why, Kind::Name);
+            fault(name, why, Kind::Name, entry.mode);
         }
         let mut file = |special| {
             let (name, oid) = (name.to_vec(), entry.oid);
@@ -82,6 +89,7 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
                     name,
                     "gitmodulesSymlink: .gitmodules is a symbolic link",
                     Kind::Symlink,
+                    entry.mode,
                 ),
                 false => file(Special::Gitmodules),
             }
@@ -95,7 +103,7 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
     for two in names.windows(2) {
         if two[0] == two[1] {
             let why = "duplicateEntries: contains duplicate file entries";
-            fault(two[0], why, Kind::Twice);
+            fault(two[0], why, Kind::Twice, 0);
             break;
         }
     }
@@ -105,13 +113,15 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
 
 impl Fault {
     /// Whether one of the trees `before` at the same place already had what
-    /// the tree is refused for: the name, the name twice, the name as a
-    /// symbolic link.
+    /// the tree is refused for: the name as an entry of the same type, the
+    /// name twice, the name as a symbolic link. A directory where a file of
+    /// the name was is brought anew, and so is a file where a directory was:
+    /// what a directory holds is not checked against the file before it.
     pub fn had<N: AsRef<[u8]>, O>(&self, before: &[Vec<Entry<N, O>>]) -> bool {
         before.iter().any(|tree| {
             let mut same = tree.iter().filter(|entry| entry.name.as_ref() == self.name);
             match self.kind {
-                Kind::Name => same.next().is_some(),
+                Kind::Name => same.any(|entry| entry.mode & 0o170000 == self.mode & 0o170000),
                 Kind::Twice => same.count() >= 2,
                 Kind::Symlink => same.any(|entry| symlink(entry.mode)),
             }
@@ -181,8 +191,14 @@ mod tests {
             .iter()
             .map(|fault| fault.had(&before))
             .collect();
-        // a symbolic link where a file was, and a name once where it is twice now
-        assert_eq!(had, [true, false, false]);
+        // a file where a directory was, a symbolic link where a file was, and
+        // a name once where it is twice now
+        assert_eq!(had, [false, false, false]);
+        let file_before = vec![vec![entry(b".alt", 0o100644, 9)]];
+        assert!(found.faults[0].had(&file_before));
+        let directory = flagged(&[entry(b".alt", 0o040000, 9)]).unwrap();
+        assert!(!directory.faults[0].had(&file_before));
+        assert!(directory.faults[0].had(&before));
         let twice = vec![
             before[0].clone(),
             vec![entry(b"x", 0o100644, 3), entry(b"x", 0o100644, 3)],

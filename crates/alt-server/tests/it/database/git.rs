@@ -1,6 +1,7 @@
 use super::*;
 mod fsck;
 mod fsck_anew;
+mod fsck_kinds;
 mod given_up;
 mod led;
 mod led_raced;
