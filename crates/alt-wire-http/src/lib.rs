@@ -29,7 +29,7 @@
 //!
 //! Synchronous, blocking, one request at a time — same model as the rest
 //! of alt (no async runtime). HTTP/2 is off (protocol v2 stateless POSTs
-//! don't benefit; HTTP/1.1 keep-alive is enough). No credential helper
+//! don't benefit), and no connection is kept for a next request. No credential helper
 //! protocol — auth comes from caller-supplied env / config. SSH transport
 //! is a later step.
 
@@ -77,9 +77,8 @@ pub struct BasicAuth {
     pub token: String,
 }
 
-/// A connection-bound handle to one git remote. Cheap to construct; reuses
-/// the underlying [`ureq::Agent`] across requests so TCP / TLS state is
-/// kept warm.
+/// A handle to one git remote. Cheap to construct; each request goes out
+/// on a connection of its own.
 pub struct GitTransport {
     base_url: String,
     auth: Option<BasicAuth>,
@@ -238,11 +237,17 @@ impl TransportError {
 /// An agent that gives up on a connection silent for `silence`, and puts no
 /// bound on a whole exchange: a pack takes as long as its size and the link
 /// make it, and Git's transport sets no such bound either.
+///
+/// Each request has a connection of its own. ureq clears the read and write
+/// limits of a connection it keeps for another request and sets them again
+/// only on a new one, so a request on a kept connection would wait without
+/// end for a peer that does not answer.
 fn agent(silence: Duration) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(silence)
         .timeout_read(silence)
         .timeout_write(silence)
+        .max_idle_connections(0)
         .build()
 }
 
