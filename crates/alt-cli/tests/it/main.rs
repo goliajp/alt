@@ -35,6 +35,7 @@ mod altd_server_shallow_lines;
 mod altd_server_signed_commits;
 mod altd_server_signed_in;
 mod altd_server_slow_peers;
+mod altd_server_slow_readers;
 mod altd_server_temp;
 mod altd_server_thin;
 mod altd_server_told;
