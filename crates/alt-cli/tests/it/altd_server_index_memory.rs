@@ -13,7 +13,7 @@ use crate::altd_server_pack_limits::{git, push, source};
 use crate::altd_server_untrusted::repository;
 
 /// A commit in `src` of a file of `bytes` bytes that do not compress.
-fn commit(src: &Path, name: &str, bytes: usize) {
+pub(crate) fn commit(src: &Path, name: &str, bytes: usize) {
     let mut state = 0x9e37_79b9_7f4a_7c15u64 ^ name.len() as u64;
     let noise: Vec<u8> = (0..bytes)
         .map(|_| {
@@ -132,7 +132,7 @@ fn received(held: &std::path::Path) -> usize {
 
 /// Lets the key file be read to its end when this is let go of, however the test
 /// ends: the threads that wait for that are waited for themselves.
-struct Released(mpsc::Sender<()>);
+pub(crate) struct Released(pub(crate) mpsc::Sender<()>);
 
 impl Drop for Released {
     fn drop(&mut self) {

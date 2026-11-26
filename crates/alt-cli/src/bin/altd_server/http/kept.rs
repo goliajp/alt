@@ -1,7 +1,9 @@
 //! An answer whose head goes out before its body is made, as `git
 //! http-backend` sends the head of an `upload-pack` before the pack is
 //! made: the pack of a large repository is made for minutes, and a
-//! client that hears nothing for so long takes the server for gone.
+//! client that hears nothing for so long takes the server for gone. The
+//! answer to a push is begun so too while its pack is taken in, as
+//! `receive-pack` sends its keepalive then.
 //!
 //! The handler says how its answer begins once nothing is left that would
 //! answer it with another status ([`Request::begin`]). The thread of the
@@ -87,7 +89,10 @@ impl Kept {
                 out.extend_from_slice(line.as_bytes());
             }
             out.extend_from_slice(b"Transfer-Encoding: chunked\r\n\r\n");
-            chunk(&mut out, &self.begun.body);
+            // a chunk of nothing would end the body
+            if !self.begun.body.is_empty() {
+                chunk(&mut out, &self.begun.body);
+            }
             self.sent = true;
         }
         chunk(&mut out, KEEPALIVE);

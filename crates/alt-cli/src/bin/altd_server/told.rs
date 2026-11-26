@@ -42,7 +42,7 @@ ALT_SERVER_TEMP_DIR                     a directory on a disk for what is writte
   ALT_SERVER_MAX_RECEIVING_BYTES          bytes of request bodies received and not yet handled (4 pushes); a quarter for one address
   ALT_SERVER_MAX_SENDING_BYTES            bytes of responses to fetches written and not yet sent (half of what is free for temporary files); a quarter for one address
   ALT_SERVER_MAX_FETCH_MS                 how long the response to a fetch is made before a 503 (600000)
-  ALT_SERVER_KEEPALIVE_MS                 how long a fetch whose pack is being made hears nothing (5000)
+  ALT_SERVER_KEEPALIVE_MS                 how long a fetch or a push whose pack is worked on hears nothing (5000)
   ALT_SERVER_MAX_OPEN_REPOS               repositories of a root kept open (16)
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
   ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
@@ -80,8 +80,9 @@ pub(super) struct Told {
     /// minutes on a host busy with other work: ten are several times that
     pub(super) fetch: Duration,
     /// `ALT_SERVER_KEEPALIVE_MS`: how long a fetch hears nothing while its
-    /// pack is made, as `uploadpack.keepAlive` is to `git upload-pack`,
-    /// whose five seconds it is unless it is set
+    /// pack is made, and a push while its pack is taken in, as
+    /// `uploadpack.keepAlive` and `receive.keepAlive` are to Git, whose five
+    /// seconds it is unless it is set
     pub(super) keepalive: Duration,
     /// `ALT_SERVER_WORKERS`
     pub(super) workers: usize,

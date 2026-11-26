@@ -117,6 +117,13 @@ pub(super) fn handle_receive_pack(
         return Ok(());
     }
 
+    // the pack is taken in for minutes where it is large or waits for memory:
+    // a client that asked for the side band hears from the server meanwhile
+    let banded = head.capabilities.iter().any(|c| c == "side-band-64k");
+    if banded {
+        req.begin(result_headers(), Vec::new(), super::told::told().keepalive);
+    }
+
     // the objects a thin pack is made of deltas of
     let bases = |oid: &ObjectId| {
         let read = repo.read_object(oid);
@@ -151,11 +158,15 @@ pub(super) fn handle_receive_pack(
     });
     let out = report_status(&head, &unpack_result, &moved)?;
     let mut resp = Response::from_data(out);
-    resp.add_header(header(
-        "Content-Type",
-        "application/x-git-receive-pack-result",
-    ));
-    resp.add_header(header("Cache-Control", "no-cache"));
+    result_headers()
+        .into_iter()
+        .for_each(|h| resp.add_header(h));
     repo.answer(req, resp, log)?;
     Ok(())
+}
+
+/// The headers of what `receive-pack` answers a push with.
+fn result_headers() -> Vec<http::Header> {
+    let content = header("Content-Type", "application/x-git-receive-pack-result");
+    vec![content, header("Cache-Control", "no-cache")]
 }

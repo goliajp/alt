@@ -344,7 +344,12 @@ indexed; pushes that find no memory wait in the order they came, for
 stays, and are then answered `503` with `Retry-After`. The response to a
 fetch is made for `ALT_SERVER_MAX_FETCH_MS` at the longest, ten minutes by
 default, and no longer than its client stays; a fetch that takes longer is
-answered `503`.
+answered `503`. A fetch whose pack is still being made, and a push that asked
+for the side band whose pack is still being taken in, are sent the head of
+their answer once `ALT_SERVER_KEEPALIVE_MS` went by, five seconds by default,
+and a keepalive each time it goes by again, as Git's `upload-pack` and
+`receive-pack` send them; what refuses one of them from then on, the waits
+above among it, is told as an error in the side band instead of a `503`.
 
 Under `ALT_SERVER_ROOT`, a file `users` in the root names who may come: a
 name, a tab, the BLAKE3 hash of a token in hex and, behind another tab, rules
