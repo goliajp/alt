@@ -1,0 +1,15 @@
+schema: alt-meta/1
+type: feat
+summary: send the head of a fetch and keepalives while its pack is made
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/http/back.rs
+touched: crates/alt-cli/src/bin/altd_server/http/kept.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
+touched: crates/alt-cli/tests/it/main.rs
