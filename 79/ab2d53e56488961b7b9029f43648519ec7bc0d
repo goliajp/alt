@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: the ref a push updates is taken where the push read it when what it may have lost is found
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/tests/it/database/git/read_moved_found.rs
