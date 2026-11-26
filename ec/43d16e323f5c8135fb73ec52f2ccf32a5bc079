@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: leave no idx behind where a pack or its idx cannot be renamed
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack.rs
+touched: crates/alt-git-pack/tests/it/index_pack.rs
