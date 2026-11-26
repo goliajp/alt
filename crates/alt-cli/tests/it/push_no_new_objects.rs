@@ -253,7 +253,7 @@ fn a_push_that_only_deletes_carries_no_pack() {
     .unwrap();
     assert!(body.ends_with(b"0000"));
     let reply = alt_wire_http::GitTransport::new(p.url.as_str())
-        .command(alt_wire_http::Service::ReceivePack, &body)
+        .command(alt_wire_http::Service::ReceivePack, &body, u64::MAX)
         .unwrap();
     let report = alt_wire::parse_report_status(&mut reply.as_slice()).unwrap();
     assert_eq!(report.unpack, Ok(()));

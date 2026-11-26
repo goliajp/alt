@@ -238,8 +238,11 @@ fn a_push_the_server_fails_on_leaves_none_of_its_objects() {
         &pack_of(&[(oid, commit)]),
     )
     .unwrap();
-    let reply = alt_wire_http::GitTransport::new(url.as_str())
-        .command(alt_wire_http::Service::ReceivePack, &body);
+    let reply = alt_wire_http::GitTransport::new(url.as_str()).command(
+        alt_wire_http::Service::ReceivePack,
+        &body,
+        u64::MAX,
+    );
     assert!(reply.is_err(), "{reply:?}");
     // without the policy a ref may be created at any object the odb holds
     std::fs::remove_file(alt_dir.join("policy")).unwrap();

@@ -12,7 +12,7 @@ impl NativeRepo<'_> {
     pub(super) fn fetched_pack(
         &mut self,
         remote_name: &str,
-        response: &[u8],
+        response: &mut dyn std::io::Read,
         algo: HashAlgo,
     ) -> Res<u64> {
         // drain preamble + sideband-wrapped pack stream into a temp .pack
@@ -30,6 +30,8 @@ impl NativeRepo<'_> {
             sink.sync_all()?;
             n
         };
+        // to its end: an answer cut short is an error of the transport
+        std::io::copy(&mut reader, &mut std::io::sink())?;
         if bytes_written == 0 {
             // server said "nothing new" — drop the empty file, skip indexing
             let _ = crate::durable::remove_file(&tmp_pack);

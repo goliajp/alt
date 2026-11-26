@@ -151,7 +151,9 @@ fn info_refs_sends_canonical_v2_get() {
     let (base, rx) = spawn_one_shot_server(server_body.clone());
 
     let t = GitTransport::new(format!("{base}/repo.git"));
-    let got = t.info_refs(Service::UploadPack).expect("info_refs");
+    let got = t
+        .info_refs(Service::UploadPack, u64::MAX)
+        .expect("info_refs");
     assert_eq!(got, server_body, "client received the server body verbatim");
 
     let req = rx
@@ -177,7 +179,9 @@ fn command_sends_canonical_v2_post_with_correct_headers() {
 
     let t = GitTransport::new(format!("{base}/repo.git"));
     let req_body = b"0014command=ls-refs\n00010000".to_vec();
-    let got = t.command(Service::UploadPack, &req_body).expect("command");
+    let got = t
+        .command(Service::UploadPack, &req_body, u64::MAX)
+        .expect("command");
     assert_eq!(got, server_body, "client received the server body verbatim");
 
     let req = rx
@@ -206,7 +210,9 @@ fn with_auth_attaches_basic_authorization_header() {
         username: "alice".into(),
         token: "ghp_secret".into(),
     });
-    let _ = t.info_refs(Service::UploadPack).expect("info_refs");
+    let _ = t
+        .info_refs(Service::UploadPack, u64::MAX)
+        .expect("info_refs");
     let req = rx.recv_timeout(Duration::from_secs(5)).expect("request");
     // base64("alice:ghp_secret") = "YWxpY2U6Z2hwX3NlY3JldA=="
     assert_eq!(
@@ -221,7 +227,9 @@ fn with_auth_attaches_basic_authorization_header() {
 fn receive_pack_uses_push_endpoint_and_media_types() {
     let (base, rx) = spawn_one_shot_server(b"".to_vec());
     let t = GitTransport::new(format!("{base}/repo.git"));
-    let _ = t.command(Service::ReceivePack, b"body").expect("command");
+    let _ = t
+        .command(Service::ReceivePack, b"body", u64::MAX)
+        .expect("command");
     let req = rx.recv_timeout(Duration::from_secs(5)).expect("request");
     assert_eq!(req.path, "/repo.git/git-receive-pack");
     assert_eq!(
@@ -248,7 +256,9 @@ fn http_error_status_surfaces_typed_with_body() {
         write_response(&mut stream, 401, "text/plain", b"please log in\n");
     });
     let t = GitTransport::new(format!("http://127.0.0.1:{port}/repo.git"));
-    let err = t.info_refs(Service::UploadPack).expect_err("should fail");
+    let err = t
+        .info_refs(Service::UploadPack, u64::MAX)
+        .expect_err("should fail");
     match err {
         TransportError::HttpStatus { status, body } => {
             assert_eq!(status, 401);

@@ -14,13 +14,14 @@
 //!
 //! ## Surface
 //!
-//! - [`GitTransport`] — a connection-bound handle:
+//! - [`GitTransport`] — a handle to one remote:
 //!   - [`info_refs`] — `GET <base>/info/refs?service=<svc>` (the capability
 //!     advertisement; pipe the bytes through
 //!     [`alt_wire::parse_capability_advertisement`]).
 //!   - [`command`] — `POST <base>/<svc>` with the encoded command body and
 //!     the protocol v2 headers. Returns the response body verbatim for the
-//!     pkt-line parsers in [`alt-wire`].
+//!     pkt-line parsers in [`alt-wire`]; `command_stream` hands it over as
+//!     it comes, for a pack.
 //! - [`BasicAuth`] — username + token for HTTPS auth (GitHub-style).
 //! - [`Service`] — `UploadPack` for fetch / clone reads,
 //!   `ReceivePack` for push writes.
@@ -141,9 +142,9 @@ impl GitTransport {
     }
 
     /// `GET <base>/info/refs?service=<svc>` with `Git-Protocol: version=2`.
-    /// Returns the body as a `Vec<u8>` — small enough to buffer (capability
-    /// advertisements are kB at most, even on large servers).
-    pub fn info_refs(&self, svc: Service) -> Result<Vec<u8>, TransportError> {
+    /// Returns the body, read into memory: one of more than `most` bytes is
+    /// an error.
+    pub fn info_refs(&self, svc: Service, most: u64) -> Result<Vec<u8>, TransportError> {
         let url = format!("{}/info/refs?service={}", self.base_url, svc.name());
         let mut req = self
             .agent
@@ -154,16 +155,29 @@ impl GitTransport {
             req = req.set("Authorization", &basic_auth_header(auth));
         }
         let resp = req.call().map_err(TransportError::from_ureq)?;
-        read_body(resp)
+        read_body(resp, most)
     }
 
     /// `POST <base>/<svc>` with `body` as the request payload and the
     /// protocol v2 `Git-Protocol: version=2` + service-specific
     /// `Content-Type` / `Accept` headers. Returns the response body
-    /// verbatim — the caller pipes it back through [`alt-wire`] parsers.
-    /// Pack-stream parsing (fetch's actual object stream) is a follow-up
-    /// step; this transport just moves bytes.
-    pub fn command(&self, svc: Service, body: &[u8]) -> Result<Vec<u8>, TransportError> {
+    /// verbatim, read into memory: one of more than `most` bytes is an
+    /// error. The caller pipes it back through [`alt-wire`] parsers.
+    pub fn command(&self, svc: Service, body: &[u8], most: u64) -> Result<Vec<u8>, TransportError> {
+        read_body(self.sent(svc, body)?, most)
+    }
+
+    /// [`Self::command`], with the response body read as it comes rather
+    /// than into memory: for a pack, which is as large as the repository.
+    pub fn command_stream(
+        &self,
+        svc: Service,
+        body: &[u8],
+    ) -> Result<Box<dyn Read + Send + Sync>, TransportError> {
+        Ok(self.sent(svc, body)?.into_reader())
+    }
+
+    fn sent(&self, svc: Service, body: &[u8]) -> Result<ureq::Response, TransportError> {
         let url = format!("{}/{}", self.base_url, svc.name());
         let mut req = self
             .agent
@@ -174,8 +188,7 @@ impl GitTransport {
         if let Some(auth) = &self.auth {
             req = req.set("Authorization", &basic_auth_header(auth));
         }
-        let resp = req.send_bytes(body).map_err(TransportError::from_ureq)?;
-        read_body(resp)
+        req.send_bytes(body).map_err(TransportError::from_ureq)
     }
 }
 
@@ -195,6 +208,8 @@ pub enum TransportError {
     /// URL parse, TLS). Distinct from `HttpStatus` so the caller doesn't
     /// have to guess.
     Other(String),
+    /// The response body has more bytes than the caller reads into memory.
+    TooLarge { most: u64 },
 }
 
 impl std::fmt::Display for TransportError {
@@ -203,6 +218,7 @@ impl std::fmt::Display for TransportError {
             Self::Io(e) => write!(f, "transport io: {e}"),
             Self::HttpStatus { status, body } => write!(f, "http {status}: {body}"),
             Self::Other(msg) => write!(f, "transport: {msg}"),
+            Self::TooLarge { most } => write!(f, "the answer has more than {most} bytes"),
         }
     }
 }
@@ -211,7 +227,7 @@ impl std::error::Error for TransportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(e) => Some(e),
-            Self::HttpStatus { .. } | Self::Other(_) => None,
+            Self::HttpStatus { .. } | Self::Other(_) | Self::TooLarge { .. } => None,
         }
     }
 }
@@ -256,9 +272,21 @@ fn basic_auth_header(auth: &BasicAuth) -> String {
     format!("Basic {}", alt_base64::STANDARD.encode(raw.as_bytes()))
 }
 
-fn read_body(resp: ureq::Response) -> Result<Vec<u8>, TransportError> {
+/// The body of `resp`, of `most` bytes at most.
+fn read_body(resp: ureq::Response, most: u64) -> Result<Vec<u8>, TransportError> {
+    let said = resp
+        .header("Content-Length")
+        .and_then(|n| n.parse::<u64>().ok());
+    if said.is_some_and(|said| said > most) {
+        return Err(TransportError::TooLarge { most });
+    }
     let mut buf = Vec::new();
-    resp.into_reader().read_to_end(&mut buf)?;
+    resp.into_reader()
+        .take(most.saturating_add(1))
+        .read_to_end(&mut buf)?;
+    if buf.len() as u64 > most {
+        return Err(TransportError::TooLarge { most });
+    }
     Ok(buf)
 }
 
@@ -335,7 +363,7 @@ mod tests {
                 .resolver(move |_: &str| Ok(vec![at]))
                 .build();
             named.push(transport.pushed_to().unwrap());
-            transport.command(Service::ReceivePack, b"").unwrap();
+            transport.command(Service::ReceivePack, b"", 0).unwrap();
         }
         let heads = heads.join().unwrap();
         for ((host, path), named) in heads.iter().zip(&named) {

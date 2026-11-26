@@ -1,5 +1,10 @@
 //! Credentials for the HTTP transports (git smart HTTP, LFS).
 
+/// The most bytes an answer of a git server that is read into memory may
+/// have: a listing of its refs or of what a push did to them. Ten million
+/// refs of a hundred bytes each fit.
+pub(super) const ANSWER: u64 = 1 << 30;
+
 /// Build an [`alt_wire_http::GitTransport`] for `url`. Credential
 /// resolution order:
 ///

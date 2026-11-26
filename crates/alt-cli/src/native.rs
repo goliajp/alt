@@ -18,7 +18,7 @@ use alt_worktree::{
     ChangeKind, Sig, WorkEntry, build_commit_bytes, flatten_tree, index_entries, write_commit,
     write_tree,
 };
-use http_auth::{build_transport, http_auth};
+use http_auth::{ANSWER, build_transport, http_auth};
 
 mod add;
 mod ahead_behind;
@@ -1496,7 +1496,7 @@ impl<'a> NativeRepo<'a> {
 
         // capability advertisement — surfaces the protocol version and the
         // server's offered commands; we only need to know v2 is supported
-        let ad_bytes = transport.info_refs(alt_wire_http::Service::UploadPack)?;
+        let ad_bytes = transport.info_refs(alt_wire_http::Service::UploadPack, ANSWER)?;
         let ad =
             alt_wire::parse_capability_advertisement(&mut ad_bytes.as_slice(), "git-upload-pack")?;
         if ad.version != 2 {
@@ -1516,7 +1516,7 @@ impl<'a> NativeRepo<'a> {
             },
             object_format,
         )?;
-        let ls_resp = transport.command(alt_wire_http::Service::UploadPack, &ls_body)?;
+        let ls_resp = transport.command(alt_wire_http::Service::UploadPack, &ls_body, ANSWER)?;
         let server_refs = alt_wire::parse_ls_refs_response(&mut ls_resp.as_slice(), algo)?;
 
         // refspec match: server refs → local destinations + wants
@@ -1598,9 +1598,9 @@ impl<'a> NativeRepo<'a> {
             },
             object_format,
         )?;
-        let fetch_resp = transport.command(alt_wire_http::Service::UploadPack, &fetch_body)?;
-
-        let bytes_written = self.fetched_pack(remote_name, &fetch_resp, algo)?;
+        let mut fetched =
+            transport.command_stream(alt_wire_http::Service::UploadPack, &fetch_body)?;
+        let bytes_written = self.fetched_pack(remote_name, &mut fetched, algo)?;
 
         // ref transaction: one tx for all the remote-tracking refs (plus
         // the mirrored remote HEAD when the server advertised a symref)
@@ -1687,7 +1687,7 @@ impl<'a> NativeRepo<'a> {
 
         // v1 ref advertisement: the receive-pack endpoint speaks v1 even
         // when we ask for v2 (push isn't in protocol v2 in upstream git)
-        let ad_bytes = transport.info_refs(alt_wire_http::Service::ReceivePack)?;
+        let ad_bytes = transport.info_refs(alt_wire_http::Service::ReceivePack, ANSWER)?;
         let ad =
             alt_wire::parse_v1_ref_advertisement(&mut ad_bytes.as_slice(), self.store.algo()?)?;
         if !ad.supports("report-status") {
@@ -1806,7 +1806,7 @@ impl<'a> NativeRepo<'a> {
             self.store.algo()?,
             &pack_bytes,
         )?;
-        let resp = transport.command(alt_wire_http::Service::ReceivePack, &body)?;
+        let resp = transport.command(alt_wire_http::Service::ReceivePack, &body, ANSWER)?;
 
         // we requested side-band-64k, so the report rides on band 1
         let report = alt_wire::parse_report_status_sideband(&mut resp.as_slice(), |_| {})?;

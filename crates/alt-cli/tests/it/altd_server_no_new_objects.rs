@@ -111,7 +111,7 @@ pub(crate) fn push(
     )
     .unwrap();
     let reply = alt_wire_http::GitTransport::new(url)
-        .command(alt_wire_http::Service::ReceivePack, &body)
+        .command(alt_wire_http::Service::ReceivePack, &body, u64::MAX)
         .unwrap();
     alt_wire::parse_report_status(&mut reply.as_slice()).unwrap()
 }

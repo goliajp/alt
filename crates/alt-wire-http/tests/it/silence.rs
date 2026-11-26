@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use alt_wire_http::{GitTransport, Service};
+use alt_wire_http::{GitTransport, Service, TransportError};
 
 const SILENCE: Duration = Duration::from_secs(1);
 
@@ -46,7 +46,9 @@ fn an_answer_that_keeps_coming_is_read_however_long_it_takes() {
     let whole = pieces.concat();
     let url = slow_server(SILENCE / 2, pieces, SILENCE / 10);
     let transport = GitTransport::new(url).with_timeout(SILENCE);
-    let got = transport.command(Service::UploadPack, b"0000").unwrap();
+    let got = transport
+        .command(Service::UploadPack, b"0000", u64::MAX)
+        .unwrap();
     assert_eq!(got.len(), whole.len());
     assert!(got == whole);
 }
@@ -56,7 +58,11 @@ fn an_answer_that_keeps_coming_is_read_however_long_it_takes() {
 fn a_connection_silent_for_longer_is_given_up_on() {
     let url = slow_server(Duration::ZERO, vec![b"0008abc\n".to_vec()], SILENCE * 4);
     let transport = GitTransport::new(url).with_timeout(SILENCE);
-    assert!(transport.command(Service::UploadPack, b"0000").is_err());
+    assert!(
+        transport
+            .command(Service::UploadPack, b"0000", u64::MAX)
+            .is_err()
+    );
 }
 
 /// Reads the head of a request off `stream`; false where the peer closed
@@ -124,8 +130,10 @@ fn a_second_request_that_no_status_line_comes_for_is_given_up_on() {
     let url = answers_once(true);
     let got = within_bound(move || {
         let transport = GitTransport::new(url).with_timeout(SILENCE);
-        transport.info_refs(Service::UploadPack).unwrap();
-        transport.command(Service::UploadPack, b"0000").map(drop)
+        transport.info_refs(Service::UploadPack, u64::MAX).unwrap();
+        transport
+            .command(Service::UploadPack, b"0000", u64::MAX)
+            .map(drop)
     });
     assert!(got.is_err());
 }
@@ -136,10 +144,84 @@ fn a_second_request_whose_body_is_not_taken_is_given_up_on() {
     let url = answers_once(false);
     let got = within_bound(move || {
         let transport = GitTransport::new(url).with_timeout(SILENCE);
-        transport.info_refs(Service::UploadPack).unwrap();
+        transport.info_refs(Service::UploadPack, u64::MAX).unwrap();
         // more than the sockets of a connection hold between them
         let body = vec![b'0'; 64 << 20];
-        transport.command(Service::UploadPack, &body).map(drop)
+        transport
+            .command(Service::UploadPack, &body, u64::MAX)
+            .map(drop)
     });
     assert!(got.is_err());
+}
+
+/// A server that answers the one request it gets with `head` and then
+/// `body`, and closes. Returns the URL to dial.
+fn answers(head: &'static str, body: Vec<u8>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        super::read_request(&mut stream);
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(&body);
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+/// An answer of more bytes than the caller reads into memory is an error,
+/// whether it says its length or ends where its connection does
+#[test]
+fn an_answer_larger_than_its_caller_takes_is_an_error() {
+    let sized = "HTTP/1.1 200 OK\r\nContent-Length: 1001\r\nConnection: close\r\n\r\n";
+    let to_close = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+    for head in [sized, to_close] {
+        let transport = GitTransport::new(answers(head, vec![b'0'; 1001]));
+        let got = transport.command(Service::UploadPack, b"0000", 1000);
+        assert!(
+            matches!(got, Err(TransportError::TooLarge { most: 1000 })),
+            "{head}: {got:?}"
+        );
+        let transport = GitTransport::new(answers(head, vec![b'0'; 1001]));
+        assert_eq!(
+            transport
+                .info_refs(Service::UploadPack, 1001)
+                .unwrap()
+                .len(),
+            1001
+        );
+    }
+}
+
+/// A pack is handed over as it comes: the first of it is there to be read
+/// while the rest is not sent yet
+#[test]
+fn a_streamed_answer_is_read_before_it_is_whole() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (read, first_read) = mpsc::channel::<()>();
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        super::read_request(&mut stream);
+        let head = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nfirst";
+        stream.write_all(head.as_bytes()).unwrap();
+        // the rest only once the first was read, or never
+        if first_read.recv_timeout(SILENCE * 10).is_ok() {
+            stream.write_all(b"rest").unwrap();
+        }
+    });
+    let url = format!("http://127.0.0.1:{port}");
+    let got = within_bound(move || {
+        let transport = GitTransport::new(url).with_timeout(SILENCE * 20);
+        let mut answer = transport
+            .command_stream(Service::UploadPack, b"0000")
+            .unwrap();
+        let mut first = [0u8; 5];
+        answer.read_exact(&mut first).unwrap();
+        read.send(()).unwrap();
+        let mut rest = Vec::new();
+        answer.read_to_end(&mut rest).unwrap();
+        (first, rest)
+    });
+    assert_eq!(&got.0, b"first");
+    assert_eq!(got.1, b"rest");
 }
