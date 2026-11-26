@@ -20,6 +20,11 @@ pub struct Share {
     sending: Option<(Instant, u64)>,
     /// what it gives back while it waits for its turn
     aside: Option<Box<dyn Aside>>,
+    /// it does not wait for its turn while it is taken of: it is put off, to
+    /// wait with nothing of what it was being built from held
+    first: bool,
+    /// it was put off where it would have waited
+    put_off: bool,
 }
 
 /// What a taker gives back while it waits for its turn to be large, and
@@ -44,6 +49,17 @@ impl Wait {
             .as_ref()
             .is_some_and(|gone| gone.load(Ordering::Relaxed));
         !gone && self.by.is_none_or(|by| Instant::now() < by)
+    }
+}
+
+/// A taker counted as being built while this is held: from when what it is
+/// built of is first taken, such as the objects a response is chosen from,
+/// to when it is all written or dropped.
+pub struct Building(Arc<Shares>);
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        self.0.building.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -74,6 +90,8 @@ impl Share {
             waits,
             sending,
             aside: None,
+            first: false,
+            put_off: false,
         }
     }
 
@@ -92,6 +110,80 @@ impl Share {
     pub fn aside(mut self, aside: Box<dyn Aside>) -> Self {
         self.aside = Some(aside);
         self
+    }
+
+    /// The taker has its turn to be large before it is built: where it would
+    /// wait for it, [`Share::take`] and [`Share::expect`] put it off instead,
+    /// and what is built is dropped and built again once [`Share::take_turn`]
+    /// is through. What waits for a turn then holds no more than the request
+    /// it answers, and those that are built at once are no more than the
+    /// workers that build them.
+    pub fn turn_first(mut self) -> Self {
+        self.first = true;
+        self
+    }
+
+    /// The taker counted under [`Shares::building`] while what is given is held.
+    pub fn building(&self) -> Building {
+        self.of.building.fetch_add(1, Ordering::Relaxed);
+        Building(Arc::clone(&self.of))
+    }
+
+    /// whether the taker was put off where it would have waited for its turn
+    pub fn put_off(&self) -> bool {
+        self.put_off
+    }
+
+    /// The taker is to take about `bytes` more: where that makes it large, it
+    /// has its turn now, as [`Share::take`] would. One whose address has all
+    /// its part has none, and is refused, not put off: [`Share::take`] would
+    /// refuse what it took first.
+    pub fn expect(&mut self, bytes: u64) -> Result<(), Full> {
+        let of = Arc::clone(&self.of);
+        let (Some(from), false) = (self.from, self.large) else {
+            return Ok(());
+        };
+        let part = of.most / PARTS;
+        if self.bytes + bytes <= part {
+            return Ok(());
+        }
+        let held = of.lock();
+        if held.by.get(&from).copied().unwrap_or(0) - self.bytes >= part {
+            return Err(Full);
+        }
+        let mut held = self.turn(&of, held, from)?;
+        self.large_now(&mut held, from);
+        Ok(())
+    }
+
+    /// The taker gives back what it took and waits for its turn to be large,
+    /// as long as it is told and with what it gives back meanwhile given back:
+    /// what it is built from is built again once it has it.
+    pub fn take_turn(&mut self) -> Result<(), Full> {
+        self.put_off = false;
+        let of = Arc::clone(&self.of);
+        let Some(from) = self.from else {
+            return Ok(());
+        };
+        let mut held = of.lock();
+        held.all -= self.bytes;
+        if !self.large {
+            let theirs = held.by.get(&from).copied().unwrap_or(0) - self.bytes;
+            match theirs {
+                0 => held.by.remove(&from),
+                theirs => held.by.insert(from, theirs),
+            };
+        }
+        self.bytes = 0;
+        if self.large {
+            return Ok(());
+        }
+        self.first = false;
+        let turned = self.turn(&of, held, from);
+        self.first = true;
+        let mut held = turned?;
+        self.large_now(&mut held, from);
+        Ok(())
     }
 
     /// Whether the taker is a large one that a taker of another address waits
@@ -172,14 +264,20 @@ impl Share {
             of.changed.notify_all();
             return Err(Full);
         }
+        self.large_now(&mut held, from);
+        held.all += bytes;
+        self.bytes = mine;
+        Ok(())
+    }
+
+    /// the taker is large, let in to be: what it holds is no more its address's part
+    fn large_now(&mut self, held: &mut Held, from: IpAddr) {
         let theirs = held.by.get(&from).copied().unwrap_or(0) - self.bytes;
         match theirs {
             0 => held.by.remove(&from),
             theirs => held.by.insert(from, theirs),
         };
-        held.all += bytes;
-        (self.bytes, self.large) = (mine, true);
-        Ok(())
+        self.large = true;
     }
 
     /// Waits for the turn of the taker to be large, as long as it is told to,
@@ -212,6 +310,11 @@ impl Share {
                 held.large.remove(&from);
                 held.let_in(of.large);
                 of.changed.notify_all();
+                return Err(Full);
+            }
+            if self.first {
+                held.waits_no_more(from, taker);
+                self.put_off = true;
                 return Err(Full);
             }
             if !self.waits.as_ref().is_some_and(Wait::goes_on) {

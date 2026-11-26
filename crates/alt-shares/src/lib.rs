@@ -34,12 +34,13 @@ mod share;
 
 use std::collections::VecDeque;
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 pub use disk::half_of_what_is_free;
 use held::Held;
-pub use share::{Aside, Full, Share, Slow};
+pub use share::{Aside, Building, Full, Share, Slow};
 
 /// the parts the amount has for one address: a quarter each
 const PARTS: u64 = 4;
@@ -59,6 +60,8 @@ pub struct Shares {
     held: Mutex<Held>,
     /// told whenever a large taker is gone or one that waits is let in
     pub(crate) changed: Condvar,
+    /// the takers being built of what they are answered from
+    pub(crate) building: AtomicUsize,
 }
 
 impl Shares {
@@ -78,12 +81,14 @@ impl Shares {
             ..Held::default()
         });
         let (changed, large) = (Condvar::new(), large.max(1));
+        let building = AtomicUsize::new(0);
         Arc::new(Shares {
             most,
             alone,
             large,
             held,
             changed,
+            building,
         })
     }
 
@@ -113,6 +118,11 @@ impl Shares {
     /// what all the takers there are have between them
     pub fn held(&self) -> u64 {
         self.lock().all
+    }
+
+    /// the takers being built now (see [`Share::building`])
+    pub fn building(&self) -> usize {
+        self.building.load(Ordering::Relaxed)
     }
 
     /// the takers that wait for their turn to be large
