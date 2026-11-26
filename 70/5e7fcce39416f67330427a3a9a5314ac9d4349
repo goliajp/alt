@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: put the keepalives of a push in a file of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
+touched: crates/alt-cli/tests/it/altd_server_push_keepalive.rs
+touched: crates/alt-cli/tests/it/main.rs
