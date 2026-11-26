@@ -91,3 +91,46 @@ fn what_git_fsck_refuses_is_refused_where_a_publication_brings_it_anew() {
         "{refused:?}"
     );
 }
+
+/// A repository that took a commit whose tree has `.alt`, before such trees
+/// were refused. A publication that reads the whole graph, as one with tasks
+/// does, and brings a commit on top that keeps it is not refused for what the
+/// repository holds; one whose commit brings `ALT~1` is. Read with nothing
+/// settled, the old commit is brought too and refused. Objects to be sent
+/// elsewhere are not refused for it here at all: the repository that receives
+/// them tells.
+#[test]
+fn a_whole_graph_is_refused_only_for_what_the_repository_does_not_hold() {
+    let mut held = Objects::default();
+    let blob = held.put(ObjectKind::Blob, b"x");
+    let old_tree = held.tree(&[("100644", b".alt", blob)]);
+    let tip = held.commit(old_tree, &[]);
+    let mut new = Objects::default();
+    let more = new.put(ObjectKind::Blob, b"more");
+    let kept = new.tree(&[("100644", b".alt", blob), ("100644", b"m", more)]);
+    let next = new.commit(kept, &[tip]);
+    let brings = new.tree(&[("100644", b".alt", blob), ("100644", b"ALT~1", more)]);
+    let bringing = new.commit(brings, &[tip]);
+    let source = Beside {
+        new: &new,
+        held: &held,
+    };
+    let whole = |root| verify_graph(&source, HashAlgo::Sha1, &[root], graph_limits()).map(drop);
+    assert!(whole(next).is_ok());
+    let refused = whole(bringing);
+    assert!(
+        matches!(refused, Err(Error::Integrity("hasDotalt: contains '.alt'"))),
+        "{refused:?}"
+    );
+
+    let mut all = Objects::default();
+    all.0.extend(held.0.clone());
+    all.0.extend(new.0.clone());
+    let refused = verify_graph(&all, HashAlgo::Sha1, &[next], graph_limits()).map(drop);
+    assert!(
+        matches!(refused, Err(Error::Integrity("hasDotalt: contains '.alt'"))),
+        "{refused:?}"
+    );
+    let sent = verify_graph_to_send(&all, HashAlgo::Sha1, &[bringing], graph_limits());
+    assert!(sent.is_ok());
+}

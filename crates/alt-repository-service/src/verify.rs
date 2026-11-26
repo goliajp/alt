@@ -5,14 +5,28 @@ use crate::{Error, GraphLimits, Node, ObjectSource, Result, VerifiedGraph};
 use alt_git_codec::{HashAlgo, ObjectId};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// Reads and verifies every object reachable from `roots`.
+/// Reads and verifies every object reachable from `roots`. Of what `git fsck`
+/// refuses, only what the objects the source reports as not settled bring is
+/// refused: what the repository holds was taken before, as a plain
+/// publication does not read it again.
 pub fn verify_graph(
     source: &impl ObjectSource,
     algo: HashAlgo,
     roots: &[ObjectId],
     limits: GraphLimits,
 ) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, false)
+    verify(source, algo, roots, limits, (false, true))
+}
+/// [`verify_graph`] of objects that are sent to a repository that is not their
+/// source: what `git fsck` refuses is told by the repository that receives
+/// them, which knows what it holds, and is not refused here.
+pub fn verify_graph_to_send(
+    source: &impl ObjectSource,
+    algo: HashAlgo,
+    roots: &[ObjectId],
+    limits: GraphLimits,
+) -> Result<VerifiedGraph> {
+    verify(source, algo, roots, limits, (false, false))
 }
 /// Reads and verifies what `roots` reach down to the objects the source reports as
 /// settled, so the work follows what is new and not the history behind it.
@@ -22,14 +36,14 @@ pub fn verify_new_graph(
     roots: &[ObjectId],
     limits: GraphLimits,
 ) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, true)
+    verify(source, algo, roots, limits, (true, true))
 }
 fn verify(
     source: &impl ObjectSource,
     algo: HashAlgo,
     roots: &[ObjectId],
     limits: GraphLimits,
-    stop_at_settled: bool,
+    (stop_at_settled, refuse): (bool, bool),
 ) -> Result<VerifiedGraph> {
     if limits.objects == 0
         || limits.edges == 0
@@ -98,7 +112,15 @@ fn verify(
             }
         }
     }
-    crate::fsck::refused_anew(source, &nodes, limits)?;
+    if refuse {
+        let mut brought = BTreeSet::new();
+        for oid in nodes.keys() {
+            if stop_at_settled || source.settled(*oid)?.is_none() {
+                brought.insert(*oid);
+            }
+        }
+        crate::fsck::refused_anew(source, &nodes, &brought, limits)?;
+    }
     Ok(VerifiedGraph {
         nodes,
         settled,

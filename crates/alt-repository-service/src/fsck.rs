@@ -7,19 +7,21 @@ use crate::object::verify_object;
 use crate::{Error, GraphLimits, Node, ObjectSource, Result};
 use alt_git_codec::{ObjectId, ObjectKind};
 use alt_git_fsck::{ATTRIBUTES_LARGEST, Blob, Commit, Entry, Flagged, MODULES_LARGEST, Special};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
-/// Fails with what `git fsck` says of the first fault `nodes`, the objects
-/// read for a publication, bring anew. Objects beyond them are read from
-/// `source`; the trees are walked within the steps of `limits`.
+/// Fails with what `git fsck` says of the first fault the objects of `nodes`
+/// that a publication brings, those of `brought`, bring anew. Objects beyond
+/// `nodes` are read from `source`; the trees are walked within the steps of
+/// `limits`.
 pub(crate) fn refused_anew(
     source: &impl ObjectSource,
     nodes: &BTreeMap<ObjectId, Node>,
+    brought: &BTreeSet<ObjectId>,
     limits: GraphLimits,
 ) -> Result<()> {
     let mut flagged = BTreeMap::new();
-    for (oid, node) in nodes {
+    for (oid, node) in nodes.iter().filter(|(oid, _)| brought.contains(*oid)) {
         if let Node::Tree(links) = node {
             let entries: Vec<Entry<&[u8], ObjectId>> = (links.iter())
                 .map(|link| Entry {
@@ -45,7 +47,7 @@ pub(crate) fn refused_anew(
         verify_object(*oid, object, limits).map(Some)
     };
     let mut commits = Vec::new();
-    for node_of in nodes.values() {
+    for (_, node_of) in nodes.iter().filter(|(oid, _)| brought.contains(*oid)) {
         if let Node::Commit { tree, parents } = node_of {
             let mut before = Vec::new();
             for parent in parents {
