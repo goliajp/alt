@@ -27,7 +27,7 @@ pub(super) fn push_verified(root: &std::path::Path) {
 
 /// What of the segments a push leans on, each by its id: the commits it
 /// names, as parents or otherwise, and the other objects, which it names in
-/// its trees or as the bases of its deltas.
+/// its trees or as the bases of its deltas; and whether that is all of it.
 pub struct Leans {
     pub commits: Vec<Oid>,
     pub others: Vec<Oid>,
@@ -50,24 +50,23 @@ impl Leans {
 }
 
 /// A push may lean on the objects the refs it was read with led to: one it
-/// names as a parent or a base, or as the new target of a ref. Where a ref it
-/// does not update is gone by now, or points where its old target is not an
-/// ancestor, what it led to may be led to by nothing any more, and the push
-/// would have it back by its id. A push is refused for it, and reads the
-/// refs again, where it leans on such an object:
-///
-/// - a commit it names (`leans`, and the new targets of its updates) that
-///   such a ref led to, and that no ref it was read with leads to now;
-/// - another object (a tree, a blob), unless it is in a tree of one of those
-///   commits that a ref leads to now. That is where a Git client takes the
-///   objects a thin pack leans on from; an object it leans on beyond them is
-///   refused while a ref moved, though it may be led to still, as finding
-///   that out takes a walk of the history of the refs.
+/// names as a parent or a base, in a tree, or as the new target of a ref.
+/// Where a ref it does not update is gone by now, or points where its old
+/// target is not an ancestor, what it led to may be led to by nothing any
+/// more, and the push would have it back by its id. A push is refused for it,
+/// and reads the refs again, where an object it leans on, or names as a new
+/// target, whatever its kind, is lost: led to by such a ref, through its
+/// annotated tags too, and by none of the refs it was read with as they are
+/// now. What is lost is found as a fetch finds what a client lacks: the
+/// objects the old targets lead to that are not in the history the refs lead
+/// to now, a tree and what is under it compared at the same path. An object
+/// that the history now has at another path only is taken as lost: the push
+/// is refused though it need not be, and is taken when it is sent again.
 ///
 /// A push that leaned on more than was kept of what it leans on (see
 /// [`Leans::whole`]) is refused wherever a ref moved. A ref that moved and led
-/// to none of it changes nothing for the push.
-/// `current` is read with the row of the repository held.
+/// to none of it changes nothing for the push. `current` is read with the row
+/// of the repository held.
 pub(super) fn still_led(
     current: &RepositorySnapshot,
     publication: &Publication,
@@ -96,96 +95,44 @@ pub(super) fn still_led(
     if !leans.whole {
         return Err(Error::Precondition(REFS_MOVED));
     }
-    let now: Vec<Oid> = (read.iter())
-        .filter_map(|(name, _)| current.refs.get(name).map(|now| raw(*now)))
-        .collect();
+    let mut now = Vec::new();
+    for (name, _) in read.iter() {
+        if let Some(target) = current.refs.get(name) {
+            now.push(peeled(set, raw(*target), &mut remaining)?);
+        }
+    }
     let named = (publication.refs.iter())
         .filter_map(|update| update.new.as_deref())
         .filter_map(|new| alt_git_codec::ObjectId::from_hex(new.as_bytes()).ok())
         .map(raw);
-    let mut commits: Vec<Oid> = leans.commits.iter().copied().chain(named).collect();
-    commits.retain(|commit| set.commit(commit).is_some());
-    let floor = commits.iter().filter_map(|commit| set.commit(commit));
-    let Some(floor) = floor.map(|commit| commit.generation).min() else {
-        return match leans.others.is_empty() {
-            true => Ok(()),
-            false => Err(Error::Precondition(REFS_MOVED)),
-        };
+    let lost = match set.select_while(&moved, &now, remaining, None) {
+        Ok(lost) => lost,
+        // finding out is more than a push may take: it reads the refs again
+        Err(alt_pack_segment::Error::Limit(_)) => return Err(Error::Precondition(REFS_MOVED)),
+        Err(_) => return Err(Error::Integrity("pack segment object")),
     };
-    let led_before = reached(set, &moved, floor, &mut remaining)?;
-    let led_now = reached(set, &now, floor, &mut remaining)?;
-    if commits
-        .iter()
-        .any(|commit| led_before.contains(commit) && !led_now.contains(commit))
-    {
-        return Err(Error::Precondition(REFS_MOVED));
-    }
-    if leans.others.is_empty() {
-        return Ok(());
-    }
-    let trees = (commits.iter())
-        .filter(|commit| led_now.contains(*commit))
-        .filter_map(|commit| set.commit(commit).map(|commit| commit.tree));
-    match in_trees(set, trees.collect(), &leans.others, &mut remaining)? {
-        true => Ok(()),
-        false => Err(Error::Precondition(REFS_MOVED)),
+    let lost: alt_hash::KeyedIdSet<&Oid> = lost.objects().iter().collect();
+    let mut leant = (leans.commits.iter().chain(&leans.others).copied()).chain(named);
+    match leant.any(|oid| lost.contains(&oid)) {
+        true => Err(Error::Precondition(REFS_MOVED)),
+        false => Ok(()),
     }
 }
 
-/// Whether every object of `others` is in the trees `trees` or below them.
-fn in_trees(
-    set: &SegmentSet,
-    mut pending: Vec<Oid>,
-    others: &[Oid],
-    remaining: &mut usize,
-) -> Result<bool> {
-    let mut others: alt_hash::KeyedIdSet<Oid> = others.iter().copied().collect();
-    let mut seen = alt_hash::KeyedIdSet::default();
-    while let Some(tree) = pending.pop() {
-        if others.is_empty() {
-            break;
-        }
-        if !seen.insert(tree) {
-            continue;
-        }
+/// What the annotated tags of `oid` name, through each of them, where they are
+/// stored: `oid` where it is no tag.
+fn peeled(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Oid> {
+    let bad = |_| Error::Integrity("pack segment object");
+    while set.kind(&oid).map_err(bad)? == Some(alt_pack_segment::Kind::Tag) {
         *remaining = remaining
             .checked_sub(1)
-            .ok_or(Error::Limit("Git tree walk"))?;
-        let (_, data) = (set.read(&tree)).map_err(|_| Error::Integrity("pack segment object"))?;
-        for entry in alt_git_codec::Tree::raw_entries(&data, alt_git_codec::HashAlgo::Sha1) {
-            let (mode, _, oid) = entry.map_err(|_| Error::Integrity("pack segment tree"))?;
-            let oid: Oid = oid.try_into().expect("sha1 object id");
-            others.remove(&oid);
-            if mode.value() & 0o170000 == 0o040000 {
-                pending.push(oid);
-            }
-        }
+            .ok_or(Error::Limit("Git tag peel walk"))?;
+        let (_, data) = set.read(&oid).map_err(bad)?;
+        let target =
+            alt_git_codec::Tag::parse(&data).map_err(|_| Error::Integrity("tag object"))?;
+        oid = raw(target.object().ok_or(Error::Integrity("tag object"))?);
     }
-    Ok(others.is_empty())
-}
-
-/// The commits `tips` lead to down to generation `floor`, the tips among them.
-fn reached(
-    set: &SegmentSet,
-    tips: &[Oid],
-    floor: u32,
-    remaining: &mut usize,
-) -> Result<alt_hash::KeyedIdSet<Oid>> {
-    let mut seen = alt_hash::KeyedIdSet::default();
-    let mut pending = tips.to_vec();
-    while let Some(oid) = pending.pop() {
-        *remaining = remaining
-            .checked_sub(1)
-            .ok_or(Error::Limit("Git fast-forward walk"))?;
-        let Some(commit) = set.commit(&oid) else {
-            continue;
-        };
-        if commit.generation < floor || !seen.insert(oid) {
-            continue;
-        }
-        pending.extend(commit.parents);
-    }
-    Ok(seen)
+    Ok(oid)
 }
 
 fn raw(oid: alt_git_codec::ObjectId) -> Oid {

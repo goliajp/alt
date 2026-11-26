@@ -1,7 +1,9 @@
 //! A push whose refs moved between its verification and its publication is
-//! refused where it leans on what is lost by it, however many other objects
-//! it leans on.
+//! refused where it leans on, or names, what is lost by it: what the old
+//! targets led to, through annotated tags too, that the refs as they are now
+//! do not lead to. One that leans on what is not lost is published.
 
+use super::led::packed;
 use super::read_moved::{HOOKED, held_while};
 use super::*;
 
@@ -122,4 +124,126 @@ fn a_push_is_refused_for_a_lost_object_looked_up_with_thousands_of_others() {
     );
     let refs = git(&["ls-remote", "--refs", &p.url]);
     assert_eq!(refs, format!("{}\trefs/heads/main", p.main));
+}
+
+/// A branch is pushed to a commit only an annotated tag leads to, with a pack
+/// of nothing; the tag is deleted while the push waits to be published, and
+/// the push is refused.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_is_refused_for_a_commit_only_a_deleted_annotated_tag_led_to() {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let p = pushed(&f, &server);
+    let git = |args: &[&str]| text(ok(&p.work, &f.token, args));
+    git(&["checkout", "-q", "--detach", &p.main]);
+    std::fs::write(p.work.join("tagged.txt"), "tagged\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "tagged"]);
+    let tagged = git(&["rev-parse", "HEAD"]);
+    git(&["tag", "-a", "-m", "v1", "v1"]);
+    git(&["checkout", "-q", "main"]);
+    git(&["push", "-q", &p.url, "refs/tags/v1"]);
+    let zero = "0".repeat(40);
+    let body = body(
+        &[(&zero, &tagged, "refs/heads/back")],
+        &packed(&p.work, &f.token, &[]),
+    );
+    let (status, report) = held_while(&f, &p.url, &f.token, body, || {
+        git(&["push", "-q", &p.url, ":refs/tags/v1"]);
+    });
+    assert_eq!(status, 200, "{report}");
+    assert!(
+        report.contains(&format!("ng refs/heads/back {CHANGED}")),
+        "{report}"
+    );
+    let refs = git(&["ls-remote", "--refs", &p.url]);
+    assert!(!refs.contains("refs/heads/back"), "{refs}");
+}
+
+/// A tag is pushed to the file only `gone` holds, with a pack of nothing:
+/// the new target is no commit and the push leans on nothing it carries. The
+/// branch is deleted while the push waits to be published, and the push is
+/// refused.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_push_of_nothing_is_refused_for_a_new_target_that_is_no_commit_and_is_lost() {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let p = pushed(&f, &server);
+    let git = |args: &[&str]| text(ok(&p.work, &f.token, args));
+    let file = git(&["rev-parse", "gone:gone.txt"]);
+    let zero = "0".repeat(40);
+    let body = body(
+        &[(&zero, &file, "refs/tags/file")],
+        &packed(&p.work, &f.token, &[]),
+    );
+    let (status, report) = held_while(&f, &p.url, &f.token, body, || {
+        git(&["push", "-q", &p.url, ":gone"]);
+    });
+    assert_eq!(status, 200, "{report}");
+    assert!(
+        report.contains(&format!("ng refs/tags/file {CHANGED}")),
+        "{report}"
+    );
+    let refs = git(&["ls-remote", "--refs", &p.url]);
+    assert_eq!(refs, format!("{}\trefs/heads/main", p.main));
+}
+
+/// A branch rebased onto `main` is pushed with a pack of its commit and tree
+/// alone, as a client that knows what the server holds sends it: it leaves
+/// out the file the branch had before, which `main` does not hold (Git sends
+/// that file again, finding what to leave out in the trees of the parents
+/// alone). A branch that has nothing to do with it is deleted while the push
+/// waits to be published, and the push is published; a clone of it has every
+/// object.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_rebased_branch_is_published_though_an_unrelated_branch_is_deleted_meanwhile() {
+    let _hooked = HOOKED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let f = Fixture::new();
+    let server = Running::start(&f);
+    let p = pushed(&f, &server);
+    let git = |args: &[&str]| text(ok(&p.work, &f.token, args));
+    git(&["checkout", "-q", "-b", "feature", &p.main]);
+    std::fs::write(p.work.join("feature.txt"), "a feature of its own\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "feature"]);
+    let before = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "main"]);
+    std::fs::write(p.work.join("main.txt"), "main, later\n").unwrap();
+    git(&["commit", "-qam", "later"]);
+    git(&["push", "-q", &p.url, "main", "feature"]);
+    git(&["checkout", "-q", "feature"]);
+    git(&["rebase", "-q", "main"]);
+    let after = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "main"]);
+    let tree = format!("{after}^{{tree}}");
+    let pack = packed(&p.work, &f.token, &[&after, &tree]);
+    let body = body(&[(&before, &after, "refs/heads/feature")], &pack);
+    let (status, report) = held_while(&f, &p.url, &f.token, body, || {
+        git(&["push", "-q", &p.url, ":gone"]);
+    });
+    assert_eq!(status, 200, "{report}");
+    assert!(report.contains("ok refs/heads/feature"), "{report}");
+    let temp = alt_os::temp::tempdir().unwrap();
+    ok(
+        temp.path(),
+        &f.token,
+        &["clone", "-q", "--mirror", &p.url, "c"],
+    );
+    let cloned = temp.path().join("c");
+    ok(&cloned, &f.token, &["fsck", "--strict"]);
+    assert_eq!(
+        text(ok(&cloned, &f.token, &["rev-parse", "feature"])),
+        after
+    );
 }
