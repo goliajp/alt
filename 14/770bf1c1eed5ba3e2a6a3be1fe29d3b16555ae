@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: give up on an lfs connection that goes silent
+author-type: human
+author: doracawl
+touched: crates/alt-lfs/src/lib.rs
+touched: crates/alt-lfs/tests/it/main.rs
+touched: crates/alt-lfs/tests/it/silence.rs
