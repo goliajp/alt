@@ -136,12 +136,29 @@ pub(super) fn publish(
         }
     }
     // the segments moved under it time after time: no other is let by now
+    held(store, credential, repository, &mut push, published)
+}
+
+/// [`publish`] of `push` with the row of its repository held from before the
+/// segments are looked at.
+fn held(
+    store: &mut Store,
+    credential: &Credential,
+    repository: &str,
+    push: &mut Push<'_>,
+    published: &mut bool,
+) -> Result<Option<RequestKey>> {
     let fresh = fresh(store, repository)?;
-    let leans = leaned(&push);
+    let leans = leaned(push);
     let mut last = None;
+    let changes = push.changes;
+    let updated: Vec<_> = (changes.iter())
+        .map(|update| (update.name.as_str(), update.new))
+        .collect();
+    let view = push.view;
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
         let read = (repository, &view.refs, &leans);
-        store.pack_publish_held(credential, read, &mut |ids, set| {
+        store.pack_publish_held(credential, read, &updated, &mut |ids, set| {
             let mut made = push.made(fresh.clone(), (ids, set))?;
             let segment = made.stored.as_mut().map(|stored| HeldSegment {
                 inline: stored.0.inline.take(),

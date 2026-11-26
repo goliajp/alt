@@ -2,14 +2,43 @@
 //! published.
 
 use crate::{Error, Refs, Result};
+use alt_git_codec::ObjectId;
 use alt_pack_segment::{Oid, SegmentSet};
 use alt_remote_protocol::Publication;
 use alt_repository_service::RepositorySnapshot;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
 /// what a push is refused with where a ref it was read with moved off what it
 /// led to before the push was published
 pub const REFS_MOVED: &str = "a ref the push was read with moved before it was published";
+
+/// what a push is refused with where a ref it was read with moved, and finding
+/// out whether the push leans on what it led to takes more than [`LOST_WALK`]
+pub const LOST_UNTOLD: &str = "a ref the push was read with moved, and what it led to is more than is looked through for a push";
+
+/// The steps the walk that finds what a push may have lost takes at the most:
+/// the commits it goes through and the trees it reads. It is taken before the
+/// row of the repository is held, and apart from the walks of requests: a
+/// tag deleted far down a long history is not looked for beyond this, and the
+/// push is refused ([`LOST_UNTOLD`]); sent again, it is read with the refs as
+/// they are then. Some 100,000 steps take a few seconds.
+#[doc(hidden)]
+pub static LOST_WALK: AtomicUsize = AtomicUsize::new(100_000);
+
+/// Called with the directory of the stored bytes of a push once what it may
+/// have lost was found and before the row of its repository is held: for a
+/// test to move a ref meanwhile.
+#[doc(hidden)]
+pub static PUSH_FOUND: Mutex<Option<PushVerified>> = Mutex::new(None);
+
+pub(super) fn push_found(root: &std::path::Path) {
+    let found = PUSH_FOUND.lock().expect("push found").clone();
+    if let Some(found) = found {
+        found(root);
+    }
+}
 
 /// Called with the directory of the stored bytes of a push that was verified,
 /// before the row of its repository is held to publish it: for a test to move
@@ -65,24 +94,94 @@ impl Leans {
 ///
 /// A push that leaned on more than was kept of what it leans on (see
 /// [`Leans::whole`]) is refused wherever a ref moved. A ref that moved and led
-/// to none of it changes nothing for the push. `current` is read with the row
-/// of the repository held.
-pub(super) fn still_led(
-    current: &RepositorySnapshot,
-    publication: &Publication,
+/// to none of it changes nothing for the push.
+///
+/// This is found with the refs `refs` as they are before the row of the
+/// repository is held, within [`LOST_WALK`] steps, in `set`, which holds what
+/// they lead to. What is found holds where the refs then still are where they
+/// were, or have moved on from there ([`Led::holds`]).
+pub(super) fn found(
+    refs: &BTreeMap<String, ObjectId>,
+    updated: &[Updated<'_>],
     (read, leans): (&Refs, &Leans),
     set: &SegmentSet,
-    steps: usize,
+) -> Result<Led> {
+    let then = (read.iter())
+        .filter(|(name, _)| !updated.iter().any(|(updated, _)| updated == name))
+        .map(|(name, _)| (name.to_owned(), refs.get(name).copied()));
+    let led = Led {
+        then: then.collect(),
+    };
+    let mut remaining = LOST_WALK.load(Relaxed);
+    match lost_leant(refs, updated, (read, leans), set, &mut remaining) {
+        Ok(()) => Ok(led),
+        Err(Error::Limit(_)) => Err(Error::Precondition(LOST_UNTOLD)),
+        Err(error) => Err(error),
+    }
+}
+
+/// A ref a push updates, and what it names after, where anything.
+pub(super) type Updated<'a> = (&'a str, Option<ObjectId>);
+
+/// The refs of `publication` and what each names after.
+pub(super) fn updated(publication: &Publication) -> Vec<Updated<'_>> {
+    let new = |new: &Option<String>| new.as_deref().and_then(|new| new.parse().ok());
+    let refs = publication.refs.iter();
+    refs.map(|update| (update.name.as_str(), new(&update.new)))
+        .collect()
+}
+
+/// The refs a push was read with that it does not update, each with where it
+/// was once what the push may have lost was found.
+pub(super) struct Led {
+    then: Vec<(String, Option<ObjectId>)>,
+}
+
+impl Led {
+    /// Whether what was found holds with the refs as they are now, `current`,
+    /// read with the row of the repository held: where each ref is where it
+    /// was then, was gone then, or moved on from there. A ref that moved on
+    /// leads to more than it did, and nothing that was found not lost is lost
+    /// by it; one that was deleted or moved elsewhere since may lose what
+    /// was not looked for, and the push is refused ([`REFS_MOVED`]).
+    pub(super) fn holds(
+        &self,
+        current: &RepositorySnapshot,
+        set: &SegmentSet,
+        steps: usize,
+    ) -> Result<()> {
+        let mut remaining = steps;
+        for (name, then) in &self.then {
+            let on = match (then, current.refs.get(name)) {
+                (None, _) => true,
+                (Some(then), Some(now)) if then == now => true,
+                (Some(then), Some(now)) => ancestor(set, &raw(*then), &raw(*now), &mut remaining)?,
+                (Some(_), None) => false,
+            };
+            if !on {
+                return Err(Error::Precondition(REFS_MOVED));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Fails where the push leans on, or names, what is lost (see [`found`]).
+fn lost_leant(
+    refs: &BTreeMap<String, ObjectId>,
+    updated: &[Updated<'_>],
+    (read, leans): (&Refs, &Leans),
+    set: &SegmentSet,
+    remaining: &mut usize,
 ) -> Result<()> {
-    let mut remaining = steps;
     let mut moved = Vec::new();
     for (name, old) in read.iter() {
-        if publication.refs.iter().any(|update| update.name == name) {
+        if updated.iter().any(|(updated, _)| *updated == name) {
             continue;
         }
-        let kept = match current.refs.get(name) {
+        let kept = match refs.get(name) {
             Some(now) if *now == old => true,
-            Some(now) => ancestor(set, &raw(old), &raw(*now), &mut remaining)?,
+            Some(now) => ancestor(set, &raw(old), &raw(*now), remaining)?,
             None => false,
         };
         if !kept {
@@ -95,15 +194,11 @@ pub(super) fn still_led(
     if !leans.whole {
         return Err(Error::Precondition(REFS_MOVED));
     }
-    let (now, named_now) = now(current, read, set, &mut remaining)?;
-    let named = (publication.refs.iter())
-        .filter_map(|update| update.new.as_deref())
-        .filter_map(|new| alt_git_codec::ObjectId::from_hex(new.as_bytes()).ok())
-        .map(raw);
-    let lost = match set.select_while(&moved, &now, remaining, None) {
+    let (now, named_now) = now(refs, read, set, remaining)?;
+    let named = updated.iter().filter_map(|(_, new)| *new).map(raw);
+    let lost = match set.select_while(&moved, &now, *remaining, None) {
         Ok(lost) => lost,
-        // finding out is more than a push may take: it reads the refs again
-        Err(alt_pack_segment::Error::Limit(_)) => return Err(Error::Precondition(REFS_MOVED)),
+        Err(alt_pack_segment::Error::Limit(what)) => return Err(Error::Limit(what)),
         Err(_) => return Err(Error::Integrity("pack segment object")),
     };
     let lost: alt_hash::KeyedIdSet<&Oid> = (lost.objects().iter())
@@ -119,14 +214,14 @@ pub(super) fn still_led(
 /// What the refs `read` lead to now: the commits they name, through their
 /// annotated tags, and what is named on the way to them, which is not lost.
 fn now(
-    current: &RepositorySnapshot,
+    refs: &BTreeMap<String, ObjectId>,
     read: &Refs,
     set: &SegmentSet,
     remaining: &mut usize,
 ) -> Result<(Vec<Oid>, alt_hash::KeyedIdSet<Oid>)> {
     let (mut now, mut named) = (Vec::new(), alt_hash::KeyedIdSet::default());
     for (name, _) in read.iter() {
-        if let Some(target) = current.refs.get(name) {
+        if let Some(target) = refs.get(name) {
             now.push(peeled(set, raw(*target), &mut named, remaining)?);
         }
     }

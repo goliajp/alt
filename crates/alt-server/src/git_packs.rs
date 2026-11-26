@@ -235,6 +235,9 @@ fn refused_for(outcome: &Result<()>) -> Option<String> {
         | Err(Error::Precondition(CHANGED | alt_server_store::REFS_MOVED)) => {
             Some("a ref changed since it was read; fetch and push again".to_owned())
         }
+        Err(Error::Precondition(alt_server_store::LOST_UNTOLD)) => Some(
+            "a ref changed since it was read, and what it led to is more than is looked through; fetch and push again".to_owned(),
+        ),
         Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
     }
 }

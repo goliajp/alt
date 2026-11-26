@@ -15,7 +15,9 @@ use std::{path::PathBuf, sync::Arc};
 mod published;
 mod still_led;
 pub use published::{HeldPublication, HeldSegment};
-pub use still_led::{Leans, PUSH_VERIFIED, PushVerified, REFS_MOVED, ancestor};
+pub use still_led::{
+    LOST_UNTOLD, LOST_WALK, Leans, PUSH_FOUND, PUSH_VERIFIED, PushVerified, REFS_MOVED, ancestor,
+};
 
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;

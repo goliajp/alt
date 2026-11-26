@@ -14,6 +14,7 @@ mod merge_gone;
 mod moved;
 mod raw_push;
 mod read_moved;
+mod read_moved_found;
 mod read_moved_lost;
 mod read_moved_named;
 mod restored;
