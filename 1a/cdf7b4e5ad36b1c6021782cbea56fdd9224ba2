@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: a portable request of the browser has a module of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/web/execute.rs
+touched: crates/alt-server/src/http/web/portable.rs
