@@ -1,0 +1,10 @@
+schema: alt-meta/1
+type: fix
+summary: tell the reason a fetch or a push failed in the side band without a prefix
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/response.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
+touched: crates/alt-cli/tests/it/altd_server_push_keepalive.rs
