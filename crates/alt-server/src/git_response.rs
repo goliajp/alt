@@ -2,6 +2,7 @@
 //! band as it is written, and moved to a temporary file once it outgrows memory.
 
 use crate::Output;
+use crate::git_read::Answer;
 use alt_server_store::{Error, Result};
 use std::io::{self, Seek, SeekFrom, Write};
 
@@ -59,6 +60,16 @@ impl Spill {
                 })
             }
         }
+    }
+
+    /// What was written, or, where the room put it off to wait for its turn
+    /// first, the room's share without it: it is written again once the turn
+    /// is had.
+    pub fn into_answer(self, content_type: &'static str, written: Result<()>) -> Result<Answer> {
+        if self.full && self.room.as_ref().is_some_and(alt_shares::Share::put_off) {
+            return Ok(Answer::Turn(self.room.expect("a room")));
+        }
+        self.into_output(content_type, written).map(Answer::Done)
     }
 
     /// takes `bytes` more of the room, where there is one to take of

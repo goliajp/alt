@@ -115,6 +115,18 @@ impl SegmentSet {
         Ok(())
     }
 
+    /// What the entries of `selection` take as they are stored: about what
+    /// [`SegmentSet::write_selected`] writes of them, less where a delta is
+    /// written whole because its base does not go with it.
+    pub fn selected_bytes(&self, selection: &Selection) -> Result<u64, Error> {
+        let mut bytes = 0;
+        for oid in &selection.objects {
+            let (at, index) = self.oldest(oid).ok_or(Error::NotFound(*oid))?;
+            bytes += u64::from(self.segments()[at].record(index)?.len);
+        }
+        Ok(bytes)
+    }
+
     /// writes `selection` as one pack; with `thin`, deltas may rest on objects the client holds
     pub fn write_selected(
         &self,

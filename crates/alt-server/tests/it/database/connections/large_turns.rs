@@ -12,7 +12,7 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 /// a fetch from `from` sent on a thread of its own: its status and the bytes of its body
-fn waiting(
+pub(super) fn waiting(
     f: &Fixture,
     server: &Running,
     head: &str,
@@ -25,7 +25,7 @@ fn waiting(
     })
 }
 
-fn until_waiting(room: &Shares, count: usize) {
+pub(super) fn until_waiting(room: &Shares, count: usize) {
     let by = Instant::now() + Duration::from_secs(60);
     while room.waiting() != count {
         assert!(Instant::now() < by, "{} wait, not {count}", room.waiting());
@@ -34,7 +34,7 @@ fn until_waiting(room: &Shares, count: usize) {
 }
 
 /// The status of a response that is not read further.
-fn begun(reader: &mut BufReader<TcpStream>) -> u16 {
+pub(super) fn begun(reader: &mut BufReader<TcpStream>) -> u16 {
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     let status = line.split(' ').nth(1).unwrap().parse().unwrap();

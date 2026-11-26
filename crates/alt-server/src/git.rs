@@ -182,12 +182,26 @@ pub(crate) struct Reading {
 }
 
 impl Reading {
+    /// The answer, read again for as long as it is put off to wait for its
+    /// turn first: what waits holds the request and its view, and nothing
+    /// that was built of them.
     pub(crate) fn answered(self) -> Result<Output> {
         let room = self.room.as_ref();
-        let sending = room.map(Verifying::share);
+        let mut sending = room.map(|room| room.share().turn_first());
         let gone = room.map(|room| &*room.given_up);
         let (limits, receive, command) = (self.limits, self.receive, &self.command);
-        crate::git_read::read(limits, receive, command, self.view, sending, gone)
+        loop {
+            let read = crate::git_read::read(limits, receive, command, &self.view, sending, gone);
+            match read? {
+                crate::git_read::Answer::Done(output) => return Ok(output),
+                crate::git_read::Answer::Turn(mut share) => {
+                    if share.take_turn().is_err() {
+                        return Err(Error::Busy("responses to fetches"));
+                    }
+                    sending = Some(share);
+                }
+            }
+        }
     }
 }
 
