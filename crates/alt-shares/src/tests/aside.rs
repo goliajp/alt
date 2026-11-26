@@ -50,3 +50,37 @@ fn a_taker_steps_aside_while_it_waits_and_back_once_it_is_let_in() {
     drop(waiter.join().unwrap().unwrap());
     assert_eq!(counts.0.load(Ordering::SeqCst), 0);
 }
+
+/// counts how often the taker is told it has its turn after it was put off
+struct Turned(Arc<AtomicUsize>);
+
+impl Aside for Turned {
+    fn step_aside(&mut self) {}
+    fn step_back(&mut self) -> bool {
+        true
+    }
+    fn turned(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_taker_put_off_is_told_once_it_has_its_turn() {
+    let shares = Shares::of(1000, 1);
+    let first = taker(&shares, 1, 300).unwrap();
+    let told = Arc::new(AtomicUsize::new(0));
+    let aside = Box::new(Turned(Arc::clone(&told)));
+    let mut share = (shares.share(at(2)).waiting(None, None))
+        .aside(aside)
+        .turn_first();
+    assert!(share.take(300).is_err() && share.put_off());
+    assert_eq!(told.load(Ordering::SeqCst), 0);
+    let waiter = std::thread::spawn(move || share.take_turn().map(|()| share));
+    until_waiting(&shares, 1);
+    drop(first);
+    let mut share = waiter.join().unwrap().unwrap();
+    assert_eq!(told.load(Ordering::SeqCst), 1);
+    // being large, it takes the rest with nothing more to wait for
+    share.take(300).unwrap();
+    assert_eq!(told.load(Ordering::SeqCst), 1);
+}

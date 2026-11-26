@@ -35,6 +35,9 @@ pub trait Aside: Send {
     /// Takes back what was given back, for as long as the taker is waited
     /// for: false where it was not had again.
     fn step_back(&mut self) -> bool;
+    /// The taker has its turn after it was put off (see
+    /// [`Share::turn_first`]): what it is built from is built again from now.
+    fn turned(&mut self) {}
 }
 
 struct Wait {
@@ -183,6 +186,10 @@ impl Share {
         self.first = true;
         let mut held = turned?;
         self.large_now(&mut held, from);
+        drop(held);
+        if let Some(aside) = self.aside.as_mut() {
+            aside.turned();
+        }
         Ok(())
     }
 

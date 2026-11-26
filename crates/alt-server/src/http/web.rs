@@ -222,18 +222,15 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             .aside(worker.aside(waiting.0.clone())),
         gone: waiting.0.clone(),
     };
-    let outcome = tokio::time::timeout(
-        state.options.work_timeout,
-        crate::http::spawn_observed(Phase::Execute, move || {
-            let _done = done;
-            let _password_permit = password_permit;
-            call.run(route, source)
-        }),
-    )
-    .await;
-    let unopened = login && outcome.is_err() && claim.abandon();
+    let executed = crate::http::spawn_observed(Phase::Execute, move || {
+        let _done = done;
+        let _password_permit = password_permit;
+        call.run(route, source)
+    });
+    let outcome = worker.within(state.options.work_timeout, executed).await;
+    let unopened = login && outcome.is_none() && claim.abandon();
     match outcome {
-        Ok(Ok(Ok((output, cookie)))) => {
+        Some(Ok(Ok((output, cookie)))) => {
             // what was written out to be sent is a file where it is long, and
             // bytes where it is not
             const DOWNLOADS: [&str; 2] = ["application/octet-stream", crate::portable::ARCHIVE];
@@ -263,8 +260,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             }
             response
         }
-        Ok(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
-        Ok(Ok(Err(error))) => store_failure(error, None),
+        Some(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
+        Some(Ok(Err(error))) => store_failure(error, None),
         _ => login::unfinished(writing, unopened),
     }
 }

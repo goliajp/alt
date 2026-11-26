@@ -6,7 +6,7 @@ use std::time::Instant;
 
 /// A history for `git fast-import`: a directory of `files` files, and `commits`
 /// commits that each give one of them other content.
-fn history(files: usize, commits: usize) -> Vec<u8> {
+pub(super) fn history(files: usize, commits: usize) -> Vec<u8> {
     let mut stream = b"blob\nmark :1\ndata 2\nx\n\n".to_vec();
     let who = "committer Original Actor <original@example.test>";
     let commit = |stream: &mut Vec<u8>, at: usize| {

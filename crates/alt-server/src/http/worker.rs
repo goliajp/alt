@@ -1,11 +1,12 @@
 //! The worker a request holds, given back while its response waits for its
 //! turn to be large: those that wait for a turn take no worker from the
-//! requests that would be served meanwhile.
+//! requests that would be served meanwhile. A response put off to wait for
+//! its turn is built again once it has it, in a time of its own.
 
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 /// how often a request that waits for a worker again looks whether it is
 /// still waited for
@@ -18,6 +19,8 @@ pub(crate) struct Slot {
     held: Arc<Mutex<Option<OwnedSemaphorePermit>>>,
     workers: Arc<Semaphore>,
     runtime: tokio::runtime::Handle,
+    /// told each time a response of the request has its turn after it was put off
+    turned: Arc<Notify>,
 }
 
 impl Slot {
@@ -27,6 +30,29 @@ impl Slot {
             held: Arc::new(Mutex::new(Some(permit))),
             workers: Arc::clone(workers),
             runtime: tokio::runtime::Handle::current(),
+            turned: Arc::new(Notify::new()),
+        }
+    }
+
+    /// What `work` gives, where it is done within `time`, and within `time`
+    /// again from each time a response of the request has its turn after it
+    /// was put off: what is built again then is not timed by what it took to
+    /// be built before and to wait.
+    pub(crate) async fn within<F: Future>(&self, time: Duration, work: F) -> Option<F::Output> {
+        let mut work = std::pin::pin!(work);
+        loop {
+            let turned = self.turned.notified();
+            let done = async {
+                tokio::select! {
+                    done = &mut work => Some(done),
+                    () = turned => None,
+                }
+            };
+            match tokio::time::timeout(time, done).await {
+                Ok(Some(done)) => return Some(done),
+                Ok(None) => {}
+                Err(_) => return None,
+            }
         }
     }
 
@@ -79,5 +105,9 @@ impl alt_shares::Aside for Aside {
             }
         }
         false
+    }
+
+    fn turned(&mut self) {
+        self.slot.turned.notify_one();
     }
 }
