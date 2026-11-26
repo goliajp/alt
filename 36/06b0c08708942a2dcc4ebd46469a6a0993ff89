@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: a share of the room takes its turn before it is built and is put off where it would wait
+author-type: human
+author: doracawl
+touched: crates/alt-shares/src/lib.rs
+touched: crates/alt-shares/src/share.rs
+touched: crates/alt-shares/src/tests.rs
+touched: crates/alt-shares/src/tests/first.rs
