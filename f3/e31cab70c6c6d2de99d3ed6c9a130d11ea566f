@@ -1,0 +1,13 @@
+schema: alt-meta/1
+type: fix
+summary: a fetch response put off for its turn is built again in a time of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/handle.rs
+touched: crates/alt-server/src/http/web.rs
+touched: crates/alt-server/src/http/worker.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/given_up.rs
+touched: crates/alt-server/tests/it/database/git/turned.rs
+touched: crates/alt-shares/src/share.rs
+touched: crates/alt-shares/src/tests/aside.rs
