@@ -141,12 +141,7 @@ pub(super) fn handle_receive_pack(
             Err(e) if receive::busy(&*e) => {
                 return Ok(repo.answer(req, limits::busy(), log)?);
             }
-            // the client is told why, in the side band where the head went out
-            Err(e) => {
-                let r = Response::from_string(format!("{e}")).with_status_code(500);
-                repo.answer(req, r, log)?;
-                return Err(e);
-            }
+            Err(e) => return not_taken_in(req, repo, log, (e, auth_user.is_some())),
         },
     };
     // wait for the group-commit leader's fsync to cover us, outside the
@@ -168,6 +163,21 @@ pub(super) fn handle_receive_pack(
         .for_each(|h| resp.add_header(h));
     repo.answer(req, resp, log)?;
     Ok(())
+}
+
+/// Answers a push whose pack an error of the server kept from being taken
+/// in, in the side band where the head went out. A peer that is not
+/// `signed_in` is told only the kind of the error, which is the handler's
+/// too.
+fn not_taken_in(
+    req: http::Request,
+    repo: Reading,
+    log: &mut LogCtx,
+    (e, signed_in): (Box<dyn std::error::Error>, bool),
+) -> Result<(), Box<dyn std::error::Error>> {
+    let why = limits::told_of(&*e, "the server failed to take the push in", signed_in);
+    repo.answer(req, Response::from_string(why).with_status_code(500), log)?;
+    Err(e)
 }
 
 /// The headers of what `receive-pack` answers a push with.

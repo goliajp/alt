@@ -145,3 +145,25 @@ pub(super) fn refusal(error: &(dyn std::error::Error + 'static)) -> u16 {
         _ => 413,
     }
 }
+
+/// What the peer of a request is told of `error`, an error of the server in
+/// doing `what`: the error where the peer signed in, and otherwise `what`
+/// and the kind of the error of the system it comes of, if any. Those name
+/// no file of the server: the error itself goes to its log.
+pub(super) fn told_of(
+    error: &(dyn std::error::Error + 'static),
+    what: &str,
+    signed_in: bool,
+) -> String {
+    if signed_in {
+        return error.to_string();
+    }
+    let mut cause = Some(error);
+    while let Some(error) = cause {
+        if let Some(io) = error.downcast_ref::<std::io::Error>() {
+            return format!("{what}: {}", io.kind());
+        }
+        cause = error.source();
+    }
+    what.to_owned()
+}

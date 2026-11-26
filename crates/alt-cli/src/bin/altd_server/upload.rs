@@ -57,12 +57,12 @@ pub(super) fn handle_upload_pack(
     mut req: http::Request,
     log: &mut LogCtx,
     repo: Reading,
+    signed_in: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut body = Vec::new();
     if let Err(e) = read_body_capped(&mut req, &mut body, max_command_bytes()) {
         let r = Response::from_string(format!("{e}")).with_status_code(limits::refusal(&*e));
-        repo.answer(req, r, log)?;
-        return Ok(());
+        return Ok(repo.answer(req, r, log)?);
     }
     let cmd = sniff_command(&body)?;
 
@@ -90,7 +90,7 @@ pub(super) fn handle_upload_pack(
             let mut begun = |body| req.begin(result_headers(), body, super::told::told().keepalive);
             let sent = match fetch::response(&repo, &fetch_req, room, from, &until, &mut begun) {
                 Ok(sent) => sent,
-                Err(e) => return not_fetched(req, repo, log, e),
+                Err(e) => return not_fetched(req, repo, log, (e, signed_in)),
             };
             let mut resp = Response::sized(sent.length(), sent);
             result_headers()
@@ -116,12 +116,13 @@ pub(super) fn handle_upload_pack(
 
 /// Answers a fetch whose response was not made with why. One the server had
 /// no time or room for is told to come again; another reason is an error of
-/// the server, which is the handler's too.
+/// the server, which is the handler's too, and which a peer that is not
+/// `signed_in` is told only the kind of.
 fn not_fetched(
     req: http::Request,
     repo: Reading,
     log: &mut LogCtx,
-    e: Box<dyn std::error::Error>,
+    (e, signed_in): (Box<dyn std::error::Error>, bool),
 ) -> Result<(), Box<dyn std::error::Error>> {
     let late = e.downcast_ref() == Some(&fetch::Stopped::Late);
     let status = match limits::refusal(&*e) {
@@ -129,7 +130,11 @@ fn not_fetched(
         503 => 503,
         _ => 500,
     };
-    let mut r = Response::from_string(format!("{e}")).with_status_code(status);
+    let why = match status {
+        500 => limits::told_of(&*e, "the server failed to make the pack", signed_in),
+        _ => e.to_string(),
+    };
+    let mut r = Response::from_string(why).with_status_code(status);
     if status == 503 && !late {
         r.add_header(header("Retry-After", "60"));
     }

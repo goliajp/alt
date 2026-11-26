@@ -384,7 +384,7 @@ fn dispatch(
         }
         if method == Method::Post && suffix.ends_with("/git-upload-pack") {
             let repo = handle.open_repo()?;
-            return handle_upload_pack(req, log, repo);
+            return handle_upload_pack(req, log, repo, auth_user.is_some());
         }
         if method == Method::Post && suffix.ends_with("/git-receive-pack") {
             let repo = handle.open_repo()?;
