@@ -182,13 +182,16 @@ def network_of(directory):
     return project, written, [(config.get('Subnet'), config.get('Gateway')) for config in configs]
 
 
-def strangers_on(project):
-    """The containers on the default network of the project that are not of the project: Compose cannot take the network down while they are on it."""
+def strangers_on(directory, project):
+    """The containers on the default network of the project that are not services of its Compose file: Compose cannot take the network down while they are on it, and one started by hand under the name of the project is not taken down with the services."""
+    listed = subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), 'config', '--services'], capture_output=True, text=True, check=True)
+    services = set(listed.stdout.split())
     found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{json .Containers}}'], capture_output=True, text=True, check=True)
     strangers = []
     for container, endpoint in (json.loads(found.stdout) or {}).items():
-        label = subprocess.run(['docker', 'inspect', container, '--format', '{{index .Config.Labels "com.docker.compose.project"}}'], capture_output=True, text=True)
-        if label.returncode or label.stdout.strip() != project:
+        labels = subprocess.run(['docker', 'inspect', container, '--format', '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.service"}}'], capture_output=True, text=True)
+        of, _, service = labels.stdout.strip().partition(' ')
+        if labels.returncode or of != project or service not in services:
             strangers.append(endpoint.get('Name') or container)
     return strangers
 
@@ -199,15 +202,16 @@ def start(directory, *services):
     # one an older Compose made is kept as it is, on a subnet Docker chose,
     # and the gateway the edge and the application are told of is not where
     # a proxy on the host connects from. Such a network is taken down first,
-    # and only where nothing but the containers of the project is on it: a
-    # stranger on it would stop the taking down half way, the services down.
+    # and only where nothing but the services of the installation is on it: a
+    # stranger on it would stop the taking down half way, the services down,
+    # and nothing that is not a service is taken down with them.
     project, written, found = network_of(directory)
     if found is not None and written not in found:
-        strangers = strangers_on(project)
+        strangers = strangers_on(directory.resolve(strict=True), project)
         if strangers:
             raise ValueError(f'the network of the edge is to be made anew, and containers that are not of the installation are on it: {", ".join(strangers)}; disconnect them first')
         print(json.dumps({'network': found, 'written': written, 'taken_down': True}), file=sys.stderr)
-        compose(directory, 'down', '--remove-orphans')
+        compose(directory, 'down')
     compose(directory, 'up', '-d', '--wait', *services)
     project, written, found = network_of(directory)
     if found is None or written not in found:
