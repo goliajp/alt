@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: read the refusal of a push that waited past its head in the side band
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_index_memory.rs
