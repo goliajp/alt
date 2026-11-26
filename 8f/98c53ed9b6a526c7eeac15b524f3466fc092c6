@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: send the head of a fetch with its pack where the room it holds is asserted
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_sending.rs
