@@ -1,7 +1,6 @@
-use crate::object::{check_oid, verify_object};
 use crate::{Error, Result};
-use alt_git_codec::{HashAlgo, ObjectId, ObjectKind};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use alt_git_codec::{ObjectId, ObjectKind};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 /// The adapter must expose only this repository's pinned objects and this
@@ -75,7 +74,7 @@ impl Node {
             Self::Tag { .. } => ObjectKind::Tag,
         }
     }
-    fn edges(&self) -> Vec<(ObjectId, ObjectKind)> {
+    pub(crate) fn edges(&self) -> Vec<(ObjectId, ObjectKind)> {
         match self {
             Self::Blob => vec![],
             Self::Tree(entries) => entries
@@ -213,10 +212,10 @@ fn paths(
 /// Only constructible by complete byte/hash/type validation. This is evidence
 /// about a pinned snapshot, not a capability to publish without a transaction.
 pub struct VerifiedGraph {
-    nodes: BTreeMap<ObjectId, Node>,
+    pub(crate) nodes: BTreeMap<ObjectId, Node>,
     /// objects the walk stopped at because the repository already holds them verified
-    settled: BTreeMap<ObjectId, ObjectKind>,
-    limits: GraphLimits,
+    pub(crate) settled: BTreeMap<ObjectId, ObjectKind>,
+    pub(crate) limits: GraphLimits,
     pub bytes: u64,
 }
 /// A graph verified down to what the repository already holds, continued there:
@@ -306,106 +305,4 @@ impl VerifiedGraph {
     ) -> Result<Vec<Vec<u8>>> {
         changed_paths_bounded(self, before, after, budget)
     }
-}
-
-/// Reads and verifies every object reachable from `roots`.
-pub fn verify_graph(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, false)
-}
-/// Reads and verifies what `roots` reach down to the objects the source reports as
-/// settled, so the work follows what is new and not the history behind it.
-pub fn verify_new_graph(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, true)
-}
-fn verify(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-    stop_at_settled: bool,
-) -> Result<VerifiedGraph> {
-    if limits.objects == 0
-        || limits.edges == 0
-        || limits.object_bytes == 0
-        || limits.structured_bytes == 0
-        || limits.total_bytes == 0
-        || limits.paths == 0
-        || limits.path_bytes == 0
-        || limits.walk_steps == 0
-    {
-        return Err(Error::Limit("invalid graph limits"));
-    }
-    let mut nodes = BTreeMap::new();
-    let mut settled = BTreeMap::new();
-    let mut pending: VecDeque<_> = roots.iter().copied().collect();
-    let mut queued: BTreeSet<_> = roots.iter().copied().collect();
-    if queued.len() > limits.objects || roots.len() > limits.edges {
-        return Err(Error::Limit("roots"));
-    }
-    let mut bytes = 0u64;
-    let mut edges = 0usize;
-    while let Some(oid) = pending.pop_front() {
-        if nodes.contains_key(&oid) || settled.contains_key(&oid) {
-            continue;
-        }
-        check_oid(oid, algo)?;
-        if stop_at_settled && let Some(kind) = source.settled(oid)? {
-            settled.insert(oid, kind);
-            continue;
-        }
-        let object = source.open(oid)?.ok_or(Error::Missing(oid))?;
-        bytes = bytes
-            .checked_add(object.bytes)
-            .ok_or(Error::Limit("total bytes"))?;
-        if bytes > limits.total_bytes {
-            return Err(Error::Limit("total bytes"));
-        }
-        let node = verify_object(oid, object, limits)?;
-        let dependencies = node.edges();
-        edges = edges
-            .checked_add(dependencies.len())
-            .ok_or(Error::Limit("edges"))?;
-        if edges > limits.edges {
-            return Err(Error::Limit("edges"));
-        }
-        for (dependency, _) in dependencies {
-            check_oid(dependency, algo)?;
-            if queued.insert(dependency) {
-                if queued.len() > limits.objects {
-                    return Err(Error::Limit("objects"));
-                }
-                pending.push_back(dependency);
-            }
-        }
-        nodes.insert(oid, node);
-    }
-    // an object reused at a different edge must still have the required type
-    for node in nodes.values() {
-        for (oid, kind) in node.edges() {
-            let found = nodes
-                .get(&oid)
-                .map(Node::kind)
-                .or(settled.get(&oid).copied());
-            if found != Some(kind) {
-                return Err(Error::Integrity("dependency type mismatch"));
-            }
-        }
-    }
-    crate::fsck::refused_anew(source, &nodes, limits)?;
-    Ok(VerifiedGraph {
-        nodes,
-        settled,
-        limits,
-        bytes,
-    })
 }

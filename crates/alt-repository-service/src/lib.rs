@@ -6,10 +6,12 @@ mod fsck;
 mod graph;
 mod object;
 mod publication;
+mod verify;
 
 pub use graph::*;
 pub use object::{parse_node, verify_object};
 pub use publication::*;
+pub use verify::{verify_graph, verify_new_graph};
 
 #[derive(Debug)]
 pub enum Error {
