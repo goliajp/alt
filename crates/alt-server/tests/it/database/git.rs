@@ -2,6 +2,7 @@ use super::*;
 mod digests;
 mod fsck;
 mod fsck_anew;
+mod fsck_kept;
 mod fsck_kinds;
 mod fsck_under;
 mod given_up;

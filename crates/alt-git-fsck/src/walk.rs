@@ -17,7 +17,7 @@ pub type Files<'a, O, E> = dyn FnMut(&O, Special) -> Result<Option<&'static str>
 
 /// what of a flagged tree is refused unless the tree before it had it
 struct Pending<'a, O> {
-    faults: Vec<&'a Fault>,
+    faults: Vec<&'a Fault<O>>,
     files: Vec<(&'a File<O>, &'static str)>,
 }
 
@@ -36,6 +36,8 @@ struct Pending<'a, O> {
 /// but nothing under it is brought anew: an entry below it that no tree before
 /// had at the same place, by name, type and id, is refused for the name of the
 /// directory. A checkout would write it into the directory of Git or of alt.
+/// A file, symbolic link or submodule whose name is refused may be kept only
+/// as it was, by mode and id.
 pub fn first_new<O: Copy + Ord, E>(
     commits: &[Commit<O>],
     flagged: &BTreeMap<O, Flagged<O>>,
@@ -268,5 +270,46 @@ mod tests {
         trees.insert(22, root(23));
         trees.insert(23, vec![entry("config", file, 51), entry("d", TREE, 2)]);
         assert_eq!(first(&trees, &[22], &[(22, vec![1])], &[]), refused(2));
+    }
+
+    #[test]
+    fn a_file_a_symbolic_link_or_a_submodule_whose_name_is_refused_is_kept_only_as_it_was() {
+        let (file, run, link, module) = (0o100644, 0o100755, 0o120000, 0o160000);
+        let mut trees = HashMap::new();
+        // `sub/.GIT` a file, `ALT~1` a file, `.ALT` a symbolic link, `GIT~1` a submodule
+        trees.insert(1, vec![entry("sub", TREE, 2), entry("ALT~1", file, 50)]);
+        trees.insert(2, vec![entry(".GIT", file, 51)]);
+        trees.insert(3, vec![entry(".ALT", link, 52), entry("GIT~1", module, 53)]);
+        let git = |at| Some((at, "hasDotgit: contains '.git'"));
+        let alt = |at| Some((at, "hasDotalt: contains '.alt'"));
+        // kept as they were, another file beside them: taken
+        trees.insert(10, vec![entry("sub", TREE, 11), entry("ALT~1", file, 50)]);
+        trees.insert(11, vec![entry(".GIT", file, 51), entry("a", file, 54)]);
+        assert_eq!(first(&trees, &[10, 11], &[(10, vec![1])], &[]), None);
+        // other bytes under `sub/.GIT`
+        trees.insert(12, vec![entry("sub", TREE, 13), entry("ALT~1", file, 50)]);
+        trees.insert(13, vec![entry(".GIT", file, 55)]);
+        assert_eq!(first(&trees, &[12, 13], &[(12, vec![1])], &[]), git(13));
+        // `ALT~1` made to run, and of other bytes
+        trees.insert(14, vec![entry("sub", TREE, 2), entry("ALT~1", run, 50)]);
+        assert_eq!(first(&trees, &[14], &[(14, vec![1])], &[]), alt(14));
+        trees.insert(15, vec![entry("sub", TREE, 2), entry("ALT~1", file, 56)]);
+        assert_eq!(first(&trees, &[15], &[(15, vec![1])], &[]), alt(15));
+        // `.ALT` to another target, `GIT~1` at another commit
+        trees.insert(
+            16,
+            vec![entry(".ALT", link, 57), entry("GIT~1", module, 53)],
+        );
+        assert_eq!(first(&trees, &[16], &[(16, vec![3])], &[]), alt(16));
+        trees.insert(
+            17,
+            vec![entry(".ALT", link, 52), entry("GIT~1", module, 58)],
+        );
+        assert_eq!(first(&trees, &[17], &[(17, vec![3])], &[]), git(17));
+        trees.insert(
+            18,
+            vec![entry(".ALT", link, 52), entry("GIT~1", module, 53)],
+        );
+        assert_eq!(first(&trees, &[18], &[(18, vec![3])], &[]), None);
     }
 }

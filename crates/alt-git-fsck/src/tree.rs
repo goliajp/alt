@@ -1,6 +1,6 @@
 //! What `git fsck` says of the entries of one tree.
 
-use crate::SYMLINK;
+use crate::{SYMLINK, TREE};
 use alt_git_codec::{dot_file, unsafe_name};
 
 /// an entry of a tree: its name, its mode as a number, and the id it names
@@ -13,22 +13,22 @@ pub struct Entry<N, O> {
 
 /// An entry `git fsck` refuses a tree for, and in what words.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Fault {
+pub struct Fault<O> {
     pub name: Vec<u8>,
     pub why: &'static str,
-    kind: Kind,
+    kind: Kind<O>,
     /// the mode of the entry
     mode: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    /// the name alone
-    Name,
+enum Kind<O> {
+    /// the name alone, of an entry naming the object
+    Name(O),
     /// the name twice in the tree
     Twice,
-    /// the name as a symbolic link
-    Symlink,
+    /// the name as a symbolic link to the object
+    Symlink(O),
 }
 
 /// The files whose blobs `git fsck` reads.
@@ -50,7 +50,7 @@ pub struct File<O> {
 /// and the files whose blobs are read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Flagged<O> {
-    pub faults: Vec<Fault>,
+    pub faults: Vec<Fault<O>>,
     pub files: Vec<File<O>>,
 }
 
@@ -77,7 +77,7 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
     for entry in entries {
         let name = entry.name.as_ref();
         if let Some(why) = unsafe_name(name) {
-            fault(name, why, Kind::Name, entry.mode);
+            fault(name, why, Kind::Name(entry.oid), entry.mode);
         }
         let mut file = |special| {
             let (name, oid) = (name.to_vec(), entry.oid);
@@ -88,7 +88,7 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
                 true => fault(
                     name,
                     "gitmodulesSymlink: .gitmodules is a symbolic link",
-                    Kind::Symlink,
+                    Kind::Symlink(entry.oid),
                     entry.mode,
                 ),
                 false => file(Special::Gitmodules),
@@ -111,19 +111,25 @@ pub fn flagged<N: AsRef<[u8]>, O: Copy>(entries: &[Entry<N, O>]) -> Option<Flagg
     (!nothing).then_some(flagged)
 }
 
-impl Fault {
+impl<O: PartialEq> Fault<O> {
     /// Whether one of the trees `before` at the same place already had what
-    /// the tree is refused for: the name as an entry of the same type, the
-    /// name twice, the name as a symbolic link. A directory where a file of
-    /// the name was is brought anew, and so is a file where a directory was:
-    /// what a directory holds is not checked against the file before it.
-    pub fn had<N: AsRef<[u8]>, O>(&self, before: &[Vec<Entry<N, O>>]) -> bool {
+    /// the tree is refused for: the name as a directory, the name as the same
+    /// entry, by mode and id, where it is no directory, the name twice. A
+    /// directory where a file of the name was is brought anew, and so is a
+    /// file where a directory was: what a directory holds is not checked
+    /// against the file before it. A file, symbolic link or submodule kept by
+    /// a name that is refused is kept as it was: other bytes, another mode or
+    /// another target under the name are brought anew.
+    pub fn had<N: AsRef<[u8]>>(&self, before: &[Vec<Entry<N, O>>]) -> bool {
+        let directory = self.mode & 0o170000 == TREE;
         before.iter().any(|tree| {
             let mut same = tree.iter().filter(|entry| entry.name.as_ref() == self.name);
-            match self.kind {
-                Kind::Name => same.any(|entry| entry.mode & 0o170000 == self.mode & 0o170000),
+            match &self.kind {
+                Kind::Name(_) if directory => same.any(|entry| entry.mode & 0o170000 == TREE),
+                Kind::Name(oid) | Kind::Symlink(oid) => {
+                    same.any(|entry| entry.mode == self.mode && entry.oid == *oid)
+                }
                 Kind::Twice => same.count() >= 2,
-                Kind::Symlink => same.any(|entry| symlink(entry.mode)),
             }
         })
     }
@@ -194,8 +200,12 @@ mod tests {
         // a file where a directory was, a symbolic link where a file was, and
         // a name once where it is twice now
         assert_eq!(had, [false, false, false]);
-        let file_before = vec![vec![entry(b".alt", 0o100644, 9)]];
+        let file_before = vec![vec![entry(b".alt", 0o100644, 1)]];
         assert!(found.faults[0].had(&file_before));
+        // a file kept by the name is kept as it was: other bytes or another
+        // mode are new
+        assert!(!found.faults[0].had(&[vec![entry(b".alt", 0o100644, 9)]]));
+        assert!(!found.faults[0].had(&[vec![entry(b".alt", 0o100755, 1)]]));
         let directory = flagged(&[entry(b".alt", 0o040000, 9)]).unwrap();
         assert!(!directory.faults[0].had(&file_before));
         assert!(directory.faults[0].had(&before));
@@ -204,8 +214,19 @@ mod tests {
             vec![entry(b"x", 0o100644, 3), entry(b"x", 0o100644, 3)],
         ];
         assert!(found.faults[2].had(&twice));
-        let link = vec![vec![entry(b".gitmodules", 0o120000, 7)]];
+        let link = vec![vec![entry(b".gitmodules", 0o120000, 2)]];
         assert!(found.faults[1].had(&link));
+        // a symbolic link to another target is new
+        assert!(!found.faults[1].had(&[vec![entry(b".gitmodules", 0o120000, 7)]]));
+        // a symbolic link or a submodule kept by a name that is refused is
+        // kept as it was
+        let kept = |mode, oid| flagged(&[entry(b"GIT~1", mode, oid)]).unwrap().faults;
+        for mode in [0o120000, 0o160000] {
+            let before = vec![vec![entry(b"GIT~1", mode, 3)]];
+            assert!(kept(mode, 3)[0].had(&before));
+            assert!(!kept(mode, 4)[0].had(&before));
+        }
+        assert!(!kept(0o100644, 3)[0].had(&[vec![entry(b"GIT~1", 0o120000, 3)]]));
 
         let file = &found.files[0];
         assert!(!file.had(&before));
