@@ -1,6 +1,8 @@
 //! What a fetch leaves in the directory of packs of the repository.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use super::held::git;
@@ -47,4 +49,40 @@ fn a_fetch_removes_the_temporary_files_that_fetches_ended_long_ago_left() {
     crate::altd_server::ok(crate::altd_server::alt(&copy, &["fetch", "origin"]));
     assert!(!old.exists());
     assert_eq!(std::fs::read_to_string(&new).unwrap(), "being written");
+}
+
+/// The files of a pack a clone takes in have the permissions the umask of
+/// the clone gives a file, as Git's have
+#[test]
+fn a_pack_a_fetch_takes_in_has_the_permissions_the_umask_gives() {
+    let dir = alt_os::temp::tempdir().unwrap();
+    let repo = dir.path().join("repo");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    committed(&repo, "one");
+    let url = super::spawn(repo);
+    let alt = crate::alt_command();
+    for (umask, mode) in [("077", 0o600), ("022", 0o644)] {
+        let copy = format!("copy-{umask}");
+        let cloned = Command::new("sh")
+            .current_dir(dir.path())
+            .args(["-c", &format!("umask {umask} && exec \"$0\" \"$@\"")])
+            .arg(alt.get_program())
+            .args(["clone", &url, &copy])
+            .envs(alt.get_envs().map(|(k, v)| (k, v.unwrap())))
+            .env("ALT_NO_DAEMON", "1")
+            .output()
+            .unwrap();
+        crate::altd_server::ok(cloned);
+        let packs = dir.path().join(&copy).join(".alt/pack");
+        let names: Vec<_> = std::fs::read_dir(&packs)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(!names.is_empty());
+        for name in names {
+            let had = std::fs::metadata(packs.join(&name)).unwrap();
+            assert_eq!(had.permissions().mode() & 0o777, mode, "{umask} {name:?}");
+        }
+    }
 }

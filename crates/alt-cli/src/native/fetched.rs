@@ -24,13 +24,12 @@ impl NativeRepo<'_> {
         if preamble.packfile_missing {
             return Err("server returned no packfile (negotiation incomplete)".into());
         }
-        let mut sink = alt_os::temp::NamedTempFile::new_in(&pack_dir)?;
+        // with the permissions the umask gives, as the pack it becomes
+        let mut sink = alt_os::temp::NamedTempFile::new_plain_in(&pack_dir)?;
         let bytes_written = alt_wire::drain_packfile(&mut reader, sink.as_file_mut(), |_| {})?;
         // to its end: an answer cut short is an error of the transport
         std::io::copy(&mut reader, &mut std::io::sink())?;
         let (file, tmp_pack) = sink.into_parts();
-        // readable by all, as a file made with the usual umask is
-        file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
         file.sync_all()?;
         drop(file);
         if bytes_written == 0 {

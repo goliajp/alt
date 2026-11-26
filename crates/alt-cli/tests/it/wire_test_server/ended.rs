@@ -98,12 +98,6 @@ fn a_fetch_cut_short_in_its_pack_leaves_no_part_of_it() {
         names
     };
     let before = listed();
-    // a pack taken in is readable by all, as a file made under the usual umask is
-    for name in &before {
-        let mode = std::fs::metadata(packs.join(name)).unwrap().permissions();
-        let mode = std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777;
-        assert_eq!(mode, 0o644, "{name:?}");
-    }
     assert!(!before.is_empty());
 
     let noise = crate::altd_server_slow_peers::noise(1 << 20);

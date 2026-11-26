@@ -11,12 +11,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn create_file(path: &Path) -> io::Result<File> {
+fn create_file(path: &Path, mode: u32) -> io::Result<File> {
     OpenOptions::new()
         .read(true)
         .write(true)
         .create_new(true)
-        .mode(0o600)
+        .mode(mode)
         .open(path)
 }
 
@@ -30,7 +30,7 @@ pub fn tempfile() -> io::Result<File> {
 /// Creates a file without a name inside `directory`.
 pub fn tempfile_in(directory: impl AsRef<Path>) -> io::Result<File> {
     create_unique(directory.as_ref(), OsStr::new(DEFAULT_PREFIX), |path| {
-        let file = create_file(&path)?;
+        let file = create_file(&path, 0o600)?;
         let _ = std::fs::remove_file(&path);
         Ok(file)
     })
@@ -153,7 +153,8 @@ impl Drop for TempPath {
 /// An open file with a name; the file is removed when the value is dropped
 /// unless it was persisted or kept.
 ///
-/// Created readable and writable by the owner only (mode 0600).
+/// Created readable and writable by the owner only (mode 0600), unless it
+/// is made by [`NamedTempFile::new_plain_in`].
 #[derive(Debug)]
 pub struct NamedTempFile {
     path: TempPath,
@@ -168,8 +169,19 @@ impl NamedTempFile {
 
     /// Creates the file inside `directory`.
     pub fn new_in(directory: impl AsRef<Path>) -> io::Result<Self> {
-        create_unique(directory.as_ref(), OsStr::new(DEFAULT_PREFIX), |path| {
-            let file = create_file(&path)?;
+        Self::created_in(directory.as_ref(), 0o600)
+    }
+
+    /// Creates the file inside `directory` with the permissions
+    /// [`File::create`] gives a file: 0666 less the umask. For a file that
+    /// is to stay where others read it, as a file made at once would be.
+    pub fn new_plain_in(directory: impl AsRef<Path>) -> io::Result<Self> {
+        Self::created_in(directory.as_ref(), 0o666)
+    }
+
+    fn created_in(directory: &Path, mode: u32) -> io::Result<Self> {
+        create_unique(directory, OsStr::new(DEFAULT_PREFIX), |path| {
+            let file = create_file(&path, mode)?;
             Ok(Self {
                 path: TempPath { path, keep: false },
                 file,
