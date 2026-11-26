@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: fix
+summary: remove a pack that does not go back to its name and tell why with the error it went back for
+author-type: human
+author: doracawl
+touched: crates/alt-git-pack/src/index_pack/placed.rs
