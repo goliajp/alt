@@ -44,6 +44,8 @@ mod mode;
 mod nonces;
 #[path = "altd_server/push.rs"]
 mod push;
+#[path = "altd_server/reached.rs"]
+mod reached;
 #[path = "altd_server/readers.rs"]
 mod readers;
 #[path = "altd_server/sending.rs"]
