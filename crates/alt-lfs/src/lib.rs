@@ -11,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::time::Duration;
 
 use alt_json::{FromJson, ToJson};
 
@@ -207,9 +208,16 @@ impl Client {
     pub fn new(endpoint: impl Into<String>, auth: Option<(String, String)>) -> Client {
         Client {
             endpoint: endpoint.into().trim_end_matches('/').to_owned(),
-            agent: ureq::AgentBuilder::new().build(),
+            agent: agent(Duration::from_secs(30)),
             auth,
         }
+    }
+
+    /// Override how long a connection may stay silent (defaults to 30s, as
+    /// `lfs.activitytimeout` does for git-lfs).
+    pub fn with_timeout(mut self, silence: Duration) -> Client {
+        self.agent = agent(silence);
+        self
     }
 
     /// Downloads the contents `pointers` name, each checked against its
@@ -281,6 +289,18 @@ impl Client {
         }
         Ok(out)
     }
+}
+
+/// An agent that gives up on a connection silent for `silence`, and on no
+/// content that goes on coming. Each request has a connection of its own:
+/// ureq clears the limits of a connection it keeps for another request.
+fn agent(silence: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(silence)
+        .timeout_read(silence)
+        .timeout_write(silence)
+        .max_idle_connections(0)
+        .build()
 }
 
 fn http(url: &str, e: ureq::Error) -> Error {
