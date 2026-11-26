@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: tell every peer whole that the responses being sent leave its fetch no room
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
