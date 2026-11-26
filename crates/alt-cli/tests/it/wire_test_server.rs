@@ -24,6 +24,7 @@ use std::thread;
 
 mod ended;
 mod held;
+mod pack_dir;
 
 /// Spawn the test HTTP server bound to a free port on 127.0.0.1, returning
 /// the URL prefix. The listener thread is leaked; the OS cleans it up when

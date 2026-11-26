@@ -18,6 +18,7 @@ impl NativeRepo<'_> {
         // which is gone again unless it is read whole and indexed
         let pack_dir = self.store.alt_dir.join("pack");
         std::fs::create_dir_all(&pack_dir)?;
+        stale_removed(&pack_dir)?;
         let mut reader = response;
         let preamble = alt_wire::read_fetch_preamble(&mut reader, algo)?;
         if preamble.packfile_missing {
@@ -54,6 +55,38 @@ impl NativeRepo<'_> {
         self.store.odb.flush()?;
         Ok(bytes_written)
     }
+}
+
+/// How long a temporary file of a fetch is let be before it is taken for
+/// one that a fetch which was ended left behind, as Git's `gc.pruneExpire`
+/// lets its temporary files be.
+const STALE: std::time::Duration = std::time::Duration::from_secs(2 * 60 * 60);
+
+/// Removes from `pack_dir` the temporary files that fetches which were
+/// ended before they could remove them left there: those not written to
+/// for [`STALE`]. A fetch going on now writes to its own all along.
+fn stale_removed(pack_dir: &std::path::Path) -> std::io::Result<()> {
+    let now = std::time::SystemTime::now();
+    for entry in std::fs::read_dir(pack_dir)? {
+        let entry = entry?;
+        if !entry.file_name().as_encoded_bytes().starts_with(b".tmp") {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            meta => meta?,
+        };
+        let age = now.duration_since(meta.modified()?).unwrap_or_default();
+        if !meta.is_file() || age < STALE {
+            continue;
+        }
+        // another fetch may have removed it meanwhile
+        match std::fs::remove_file(entry.path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Writes what a fetch of `(objects, bytes_written)` did to the refs in `updates`.
