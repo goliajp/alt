@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: refactor
+summary: move the filters of a partial clone out of the fetch response
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/fetch/filter.rs
