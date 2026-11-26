@@ -38,6 +38,7 @@ fn landing<T>(
         principal: &principal,
         signed_in: None,
         sig_label: "none",
+        told: &receive::told_whole,
     };
     let mut store = Store::open(alt_dir.to_path_buf()).unwrap();
     let landed = landing(&mut store, &push);

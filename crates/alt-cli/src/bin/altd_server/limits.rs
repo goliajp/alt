@@ -168,6 +168,32 @@ pub(super) fn told_of(
     what.to_owned()
 }
 
+/// [`told_of`] for a line that names what failed in either case: `what`
+/// and, where the peer signed in, the error with what caused it.
+pub(super) fn told_at(
+    error: &(dyn std::error::Error + 'static),
+    what: &str,
+    signed_in: bool,
+) -> String {
+    match signed_in {
+        true => format!("{what}: {}", alt_cli::machine::causes(error)),
+        false => told_of(error, what, false),
+    }
+}
+
+/// What a push is told of an error of the server at a step, as
+/// [`told_at`] has it for a peer `signed_in` or not; the error itself goes
+/// to the log whatever the peer is told.
+pub(super) fn telling(
+    signed_in: bool,
+) -> impl Fn(&str, &(dyn std::error::Error + 'static)) -> String {
+    move |what, error| {
+        let causes = alt_cli::machine::causes(error);
+        eprintln!("altd-server: push: {what}: {causes}");
+        told_at(error, what, signed_in)
+    }
+}
+
 /// The status of the answer to a fetch whose response was not made for
 /// `error`, and what it tells the peer: of an error of the server, the
 /// want of room among them, a peer that is not `signed_in` is told only

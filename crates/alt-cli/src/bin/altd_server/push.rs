@@ -17,6 +17,7 @@ pub(super) fn read_push(
     req: &mut http::Request,
     max: u64,
     pack: &std::path::Path,
+    told: &receive::Told,
 ) -> Result<(alt_wire::push::PushHead, u64), (u16, String)> {
     use std::io::Read;
     let gzipped = req
@@ -36,12 +37,17 @@ pub(super) fn read_push(
     let mut commands = (&mut reader).take(max_command_bytes());
     let head = alt_wire::push::parse_push_request_head(&mut commands, HashAlgo::Sha1)
         .map_err(|e| (limits::unread_commands(&e), format!("{e}")))?;
-    let mut tmp = std::fs::File::create(pack).map_err(|e| (500, format!("tempfile: {e}")))?;
+    let mut tmp = std::fs::File::create(pack).map_err(|e| (500, told("tempfile", &e)))?;
     // the cap is on what the body inflates to as well: a gzip body is
     // counted as it is written out. Not synced: the file is gone when
     // the request is over
-    let n = std::io::copy(&mut (&mut reader).take(over), &mut tmp)
-        .map_err(|e| (limits::refusal(&e), format!("stream pack: {e}")))?;
+    let n = std::io::copy(&mut (&mut reader).take(over), &mut tmp).map_err(|e| {
+        match limits::refusal(&e) {
+            // the server had no room for it
+            503 => (503, told("stream pack", &e)),
+            status => (status, format!("stream pack: {e}")),
+        }
+    })?;
     Ok((head, n))
 }
 
@@ -85,7 +91,8 @@ pub(super) fn handle_receive_pack(
     let max = max_body_bytes();
     let pack_tmp_dir = alt_os::temp::tempdir()?;
     let pack_tmp_path = pack_tmp_dir.path().join("incoming.pack");
-    let parse_outcome = read_push(&mut req, max, &pack_tmp_path);
+    let (signed_in, told) = (auth_user.is_some(), limits::telling(auth_user.is_some()));
+    let parse_outcome = read_push(&mut req, max, &pack_tmp_path, &told);
     let (head, pack_bytes_streamed) = match parse_outcome {
         Ok(t) => t,
         Err((status, reason)) => {
@@ -95,15 +102,10 @@ pub(super) fn handle_receive_pack(
         }
     };
 
-    // refresh the cached Store so an operator-edited
-    // `.alt/policy` (or fresh oplog ops from another writer) takes
-    // effect on the *next* request — no server restart. `users` is
-    // already re-read per request inside `check_auth`; `trust` keys
-    // are re-read per request inside `verify_push_signature`. policy
-    // is the last cached piece, and `Store::refresh()` is the same
-    // entry the daemon uses to catch up its read view. Must
-    // happen *before* the sig_block decision below so the next
-    // signing policy is seen on this request, not a request later.
+    // refresh the cached Store so an operator-edited `.alt/policy` (or
+    // fresh oplog ops from another writer) takes effect without a restart,
+    // before the sig_block decision below sees it: `users` and `trust` are
+    // re-read per request already, and policy is the last cached piece
     if let Err(e) = store.take().settle_told() {
         eprintln!("altd-server: store refresh failed (continuing with stale policy): {e}");
     }
@@ -133,15 +135,17 @@ pub(super) fn handle_receive_pack(
     let whole = (pack_tmp_path.as_path(), pack_limits(&req), &bases as _);
     let pack = (pack_bytes_streamed != 0).then_some(whole);
     // nothing is appended behind what a failed sync left in doubt
-    let stopped = writer.group.failed().map(|e| format!("{STOPPED}: {e}"));
+    let stopped = writer.group.failed().map(|e| told(STOPPED, &*Box::from(e)));
+    let taken =
+        |pack| receive::take_in(store, pack, &head.updates, &principal, &writer.group, &told);
     let (unpack_result, moved) = match sig_block.or(stopped) {
         Some(reason) => (Ok(()), Err(reason)),
-        None => match receive::take_in(store, pack, &head.updates, &principal, &writer.group) {
+        None => match taken(pack) {
             Ok(report) => report,
             Err(e) if receive::busy(&*e) => {
                 return Ok(repo.answer(req, limits::busy(), log)?);
             }
-            Err(e) => return not_taken_in(req, repo, log, (e, auth_user.is_some())),
+            Err(e) => return not_taken_in(req, repo, log, (e, signed_in)),
         },
     };
     // wait for the group-commit leader's fsync to cover us, outside the
@@ -154,7 +158,7 @@ pub(super) fn handle_receive_pack(
             None => Ok(()),
         };
         log.fsync_seq = Some(writer.group.fsync_count());
-        durable.map_err(|e| format!("durability: {e}"))
+        durable.map_err(|e| told("durability", &*Box::from(e)))
     });
     let out = report_status(&head, &unpack_result, &moved)?;
     let mut resp = Response::from_data(out);

@@ -39,6 +39,7 @@ fn lands(
         principal: &principal,
         signed_in: None,
         sig_label: "none",
+        told: &receive::told_whole,
     };
     let at = |step| {
         (step == Step::Recorded).then(recorded);

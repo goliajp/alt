@@ -3,7 +3,8 @@
 
 use alt_wire::push::RefUpdate;
 
-use super::{Landed, Push, Res, land, prepare_pack, signed};
+use super::told::unpack_told;
+use super::{Landed, Push, Res, Told, land, prepare_pack, signed};
 use crate::held::Held;
 use crate::native::{Principal, Store};
 
@@ -32,7 +33,8 @@ pub fn busy(error: &(dyn std::error::Error + 'static)) -> bool {
 /// went) with the pack at `pack`, when it sent one, what that pack may
 /// hold and where the bases it leaves out are read. The pack is indexed
 /// and the signatures of its commits are checked before the store is
-/// taken in hand; `recorded` is called with it still in hand.
+/// taken in hand; `recorded` is called with it still in hand. What the
+/// pusher is told of an error of the server is what `told` makes of it.
 pub fn take_in<T>(
     store: &Held<Store>,
     pack: Option<(
@@ -43,13 +45,14 @@ pub fn take_in<T>(
     updates: &[RefUpdate],
     (principal, sig_label, signed_in): &(Principal, &str, Option<Principal>),
     recorded: impl Recorded<T>,
+    told: &Told,
 ) -> Res<Report<T>> {
     // a pack that fails to index is reported as the unpack error; one
     // that was not looked at for want of memory is no failed push
     let prepared = match pack.map(|(path, limits, bases)| prepare_pack(path, &limits, bases)) {
         Some(Err(e)) if busy(&*e) => return Err(e),
         Some(Err(e)) => {
-            let unpack = Err(format!("index-pack: {e}"));
+            let unpack = Err(unpack_told(told, &*e));
             return Ok((unpack, Err("pack unpack failed".into())));
         }
         Some(Ok(prepared)) => Some(prepared),
@@ -79,6 +82,7 @@ pub fn take_in<T>(
         principal,
         signed_in: signed_in.as_ref(),
         sig_label,
+        told,
     };
     let mut store = store.take();
     Ok(match land(&mut store, &push)? {
@@ -87,7 +91,8 @@ pub fn take_in<T>(
         Landed::Refused(reason) => (Ok(()), Err(reason)),
         Landed::Unsynced(why) => {
             recorded.unsynced(&why);
-            (Ok(()), Err(format!("durability: {why}")))
+            let why: Box<dyn std::error::Error> = why.into();
+            (Ok(()), Err(told("durability", &*why)))
         }
     })
 }

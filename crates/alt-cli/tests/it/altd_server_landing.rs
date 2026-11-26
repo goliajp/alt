@@ -87,6 +87,7 @@ pub(crate) fn land_held_to(
         principal,
         signed_in,
         sig_label: "none",
+        told: &receive::told_whole,
     };
     let written = |step| {
         (step == Step::Written).then(written);

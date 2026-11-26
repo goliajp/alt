@@ -96,6 +96,8 @@ fn writes_are_stopped(root: &Path, url: &str) {
     assert!(!after.status.success(), "{}", said(&after));
     let stopped = said(&after).contains("writes are stopped");
     assert!(stopped, "{}", said(&after));
+    // a peer that is not signed in is not told the error of the sync
+    assert!(!said(&after).contains("os error"), "{}", said(&after));
     let listed = git(root, &["ls-remote", url]);
     assert!(listed.status.success(), "{}", said(&listed));
     let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
@@ -116,6 +118,7 @@ fn no_push_is_told_it_landed_after_a_sync_that_failed() {
     assert!(!armed.exists(), "no sync of the log was made");
     assert!(!failed.status.success(), "{}", said(&failed));
     assert!(said(&failed).contains("durability"), "{}", said(&failed));
+    assert!(!said(&failed).contains("os error"), "{}", said(&failed));
     // its ref transaction lies behind the one that was not synced
     writes_are_stopped(tmp.path(), &url);
 }

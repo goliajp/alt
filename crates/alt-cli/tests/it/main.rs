@@ -27,6 +27,8 @@ mod altd_server_pack_limits;
 mod altd_server_push_cost;
 mod altd_server_push_keepalive;
 mod altd_server_push_refused;
+#[cfg(debug_assertions)]
+mod altd_server_push_told;
 mod altd_server_reads;
 mod altd_server_recorded;
 mod altd_server_refused_objects;

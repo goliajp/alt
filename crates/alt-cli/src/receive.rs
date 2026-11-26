@@ -41,8 +41,10 @@ mod kept;
 mod ref_tx;
 pub mod signed;
 mod taken;
+mod told;
 
 pub use taken::{Recorded, Report, busy, take_in};
+pub use told::{Told, told_whole};
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -83,6 +85,8 @@ pub fn prepare_pack(
     limits: &alt_git_pack::IndexLimits<'_>,
     bases: alt_git_pack::Bases<'_>,
 ) -> Res<(PreparedPack, PackMemory)> {
+    #[cfg(debug_assertions)]
+    told::failing()?;
     let indexed = alt_git_pack::index_pack_thin(path, HashAlgo::Sha1, true, limits, Some(bases))?;
     let ip = alt_git_pack::IndexedPack::open(&indexed.pack_path, HashAlgo::Sha1)?;
     let idx = ip.idx();
@@ -144,6 +148,8 @@ pub struct Push<'a> {
     /// takes nothing off what the account it came in by is held to.
     pub signed_in: Option<&'a Principal>,
     pub sig_label: &'a str,
+    /// what the pusher is told of an error of the server
+    pub told: &'a Told,
 }
 
 /// What became of a push.
@@ -233,7 +239,7 @@ fn attempt(
     if let Some(added) = &added
         && let Err(e) = batch.write(push.pack, added)
     {
-        return Ok(Some(Landed::Unpack(format!("index-pack: {e}"))));
+        return Ok(Some(Landed::Unpack(told::unpack_told(push.told, &*e))));
     }
     observe(Step::Written);
     let moved = Cell::new(false);
@@ -254,7 +260,7 @@ fn attempt(
     let op = match tx.append(refs, &state) {
         Ok(op) => op,
         Err(_) if moved.get() => return Ok(None),
-        Err(e) => return Ok(Some(Landed::Refused(format!("ref tx: {e}")))),
+        Err(e) => return Ok(Some(Landed::Refused(told::ref_tx_told(push.told, &e)))),
     };
     // in the log, whatever fails from here on: the objects stay, synced first
     batch.keep();
