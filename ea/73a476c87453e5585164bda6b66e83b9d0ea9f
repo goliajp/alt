@@ -1,0 +1,12 @@
+schema: alt-meta/1
+type: fix
+summary: what a push whose refs moved may have lost is found before the row is held, within steps of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server-store/src/packs.rs
+touched: crates/alt-server-store/src/packs/published.rs
+touched: crates/alt-server-store/src/packs/still_led.rs
+touched: crates/alt-server/src/git_packs.rs
+touched: crates/alt-server/src/git_packs/published.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/read_moved_found.rs
