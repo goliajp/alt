@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: put the slow readers of a clone in a file of their own
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_slow_peers.rs
+touched: crates/alt-cli/tests/it/altd_server_slow_readers.rs
+touched: crates/alt-cli/tests/it/main.rs
