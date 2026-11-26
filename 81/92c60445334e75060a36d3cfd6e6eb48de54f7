@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: read the content of an lfs download no further than its size
+author-type: human
+author: doracawl
+touched: crates/alt-lfs/src/lib.rs
+touched: crates/alt-lfs/tests/it/silence.rs
