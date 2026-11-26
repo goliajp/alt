@@ -8,10 +8,14 @@
 //! says nothing of a request has no limit for it, and neither has a peer on
 //! this host: the proxy in front of an instance is one, named or not.
 //!
-//! Where the requests through a proxy name nobody past it, many in a row and
-//! none named before, the log is told once: a proxy in front of it that names
-//! the callers is most likely not one the configuration names, and every
-//! caller is taken for that proxy.
+//! Where most of the first requests through a proxy name nobody past it, the
+//! log is told once: a proxy in front of it that names the callers is most
+//! likely not one the configuration names, and every caller is taken for that
+//! proxy. Such a proxy names nobody, ever. Where the configuration is right a
+//! request sent to the proxy in front of the instance by a client beside it,
+//! not through the proxy in front of that, names nobody too and can not be
+//! told from one of a proxy left out: so it is what most requests do that is
+//! told of, not what the first ones do.
 
 use super::{caller, receiving};
 use axum::http::HeaderMap;
@@ -20,23 +24,23 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
+        atomic::{AtomicBool, Ordering::Relaxed},
     },
 };
 
-/// the requests in a row through a proxy that name nobody past it after which
-/// the log is told
-const QUIET: usize = 32;
+/// the requests through a proxy most of which name nobody past it where the
+/// log is told
+const FIRST: usize = 256;
 
 pub(super) struct Sources {
     each: usize,
     proxies: Vec<caller::Network>,
     open: Mutex<HashMap<String, usize>>,
-    /// the requests through a proxy so far that named nobody past it, counted
-    /// while fewer than [`QUIET`]
-    quiet: AtomicUsize,
-    /// whether a request through a proxy named somebody past it
-    named: AtomicBool,
+    /// of the first [`FIRST`] requests through a proxy, those so far, those of
+    /// them that named somebody past it, and the proxy of the last that did not
+    first: Mutex<(usize, usize, Option<IpAddr>)>,
+    /// whether there were [`FIRST`]
+    told: AtomicBool,
     log: alt_server_telemetry::BackgroundLog,
 }
 
@@ -52,8 +56,8 @@ impl Sources {
             each,
             proxies: proxies.to_vec(),
             open: Mutex::default(),
-            quiet: AtomicUsize::new(0),
-            named: AtomicBool::new(false),
+            first: Mutex::new((0, 0, None)),
+            told: AtomicBool::new(false),
             log: alt_server_telemetry::BackgroundLog::current(),
         })
     }
@@ -98,19 +102,21 @@ impl Sources {
     ) -> Result<Option<Place>, ()> {
         let caller = caller::caller(peer, headers, &self.proxies);
         let (proxy, named) = (self.proxy(peer.ip()), !self.proxy(caller));
-        if proxy && !self.named.load(Relaxed) {
-            if named {
-                self.named.store(true, Relaxed);
-            } else {
-                // past where the log is told only by those that came at once,
-                // and never wrapping
-                let quiet = &self.quiet;
-                if quiet.load(Relaxed) < QUIET
-                    && quiet.fetch_add(1, Relaxed) + 1 == QUIET
-                    && !self.named.load(Relaxed)
-                {
-                    self.log
-                        .failed("configuration", "", &caller::nobody(caller));
+        if proxy && !self.told.load(Relaxed) {
+            let mut first = self.first.lock().expect("sources");
+            let (seen, some, quiet) = &mut *first;
+            if *seen < FIRST {
+                *seen += 1;
+                match named {
+                    true => *some += 1,
+                    false => *quiet = Some(caller),
+                }
+                if *seen == FIRST {
+                    self.told.store(true, Relaxed);
+                    if let Some(proxy) = quiet.filter(|_| FIRST - *some > *some) {
+                        let told = caller::nobody(proxy, FIRST - *some, FIRST);
+                        self.log.failed("configuration", "", &told);
+                    }
                 }
             }
         }

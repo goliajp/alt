@@ -1,5 +1,5 @@
-//! A proxy whose requests name nobody past it, many in a row: the log says
-//! that a proxy in front is most likely not trusted, once.
+//! A proxy whose requests name nobody past it, most of the first: the log
+//! says that a proxy in front is most likely not trusted, once.
 use super::*;
 use crate::database::sign_in_deadline::start;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -51,9 +51,10 @@ fn health(server: &Running, forwarded: &str) -> u16 {
 }
 
 /// The proxy on this host passes on requests that a proxy it trusts says come
-/// from that proxy: the callers are all taken for it. After many in a row the
-/// log says so, naming it. Where one request named a caller first, it does
-/// not.
+/// from that proxy: the callers are all taken for it. Once most of the first
+/// ones are, the log says so, naming it. Where the proxy in front is trusted
+/// and a hundred requests are sent to the proxy on this host by a client
+/// beside it, named by nobody, before those of the callers come, it does not.
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by server acceptance and closing gate"]
 fn a_proxy_whose_requests_name_nobody_past_it_is_told_of_in_the_log() {
@@ -63,7 +64,7 @@ fn a_proxy_whose_requests_name_nobody_past_it_is_told_of_in_the_log() {
     let server = start(&mut f, |_, options| {
         options.trusted_proxies = vec!["127.0.0.1".parse().unwrap(), quiet.parse().unwrap()];
     });
-    for _ in 0..40 {
+    for _ in 0..260 {
         assert_eq!(health(&server, quiet), 200);
     }
     assert!(told_of(quiet));
@@ -74,9 +75,12 @@ fn a_proxy_whose_requests_name_nobody_past_it_is_told_of_in_the_log() {
     let server = start(&mut f, |_, options| {
         options.trusted_proxies = vec!["127.0.0.1".parse().unwrap(), named.parse().unwrap()];
     });
-    assert_eq!(health(&server, &format!("203.0.113.5, {named}")), 200);
-    for _ in 0..40 {
+    for _ in 0..100 {
         assert_eq!(health(&server, named), 200);
+    }
+    for caller in 0..200 {
+        let forwarded = format!("203.0.113.{}, {named}", caller % 250);
+        assert_eq!(health(&server, &forwarded), 200);
     }
     assert!(!told_of(named));
 }
