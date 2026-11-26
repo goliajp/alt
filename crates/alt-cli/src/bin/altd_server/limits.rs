@@ -167,3 +167,61 @@ pub(super) fn told_of(
     }
     what.to_owned()
 }
+
+/// The status of the answer to a fetch whose response was not made for
+/// `error`, and what it tells the peer: of an error of the server, the
+/// want of room among them, a peer that is not `signed_in` is told only
+/// the kind.
+pub(super) fn fetch_refused(
+    error: &(dyn std::error::Error + 'static),
+    late: bool,
+    signed_in: bool,
+) -> (u16, String) {
+    if late {
+        return (503, error.to_string());
+    }
+    match refusal(error) {
+        503 => {
+            let what = "the server had no room to make the pack";
+            (503, told_of(error, what, signed_in))
+        }
+        _ => {
+            let what = "the server failed to make the pack";
+            (500, told_of(error, what, signed_in))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fetch the server had no room for is told so; a peer that is not
+    /// signed in is not told the file the room was wanted for
+    #[test]
+    fn a_fetch_there_is_no_room_for_is_told_the_file_where_signed_in_alone() {
+        let full = || {
+            let why = "No space left on device (os error 28) at path \"/srv/tmp/.tmpAbc\"";
+            std::io::Error::new(std::io::ErrorKind::StorageFull, why)
+        };
+        let (status, told) = fetch_refused(&full(), false, false);
+        assert_eq!(
+            (status, told.as_str()),
+            (
+                503,
+                "the server had no room to make the pack: no storage space"
+            )
+        );
+        let (status, told) = fetch_refused(&full(), false, true);
+        assert_eq!(status, 503);
+        assert!(told.contains("/srv/tmp/.tmpAbc"), "{told}");
+    }
+
+    /// A fetch whose time is over is told so, signed in or not
+    #[test]
+    fn a_fetch_whose_time_is_over_is_told_so() {
+        let late = super::super::until::Stopped::Late;
+        let (status, told) = fetch_refused(&late, true, false);
+        assert_eq!((status, told), (503, late.to_string()));
+    }
+}
