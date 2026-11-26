@@ -104,7 +104,10 @@ fn a_push_waits_for_the_memory_another_is_indexed_in_and_is_told_when_it_waited_
         }
     });
     let told = said(&refused);
-    assert!(told.contains("503"), "{told}");
+    // it waited for longer than the server waits before it sends the head of
+    // the answer: it is told in the side band, as git shows it
+    let again = "remote: the packs of other pushes are being indexed; send the push again";
+    assert!(told.contains(again), "{told}");
     let landed = landed.expect("the push that waited did not end");
     assert!(landed.status.success(), "{}", said(&landed));
     // what was told to come again does so, and lands
