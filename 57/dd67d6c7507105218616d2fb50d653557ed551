@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: feat
+summary: the log is told once where every request through a proxy names nobody past it
+author-type: human
+author: doracawl
+touched: crates/alt-server/src/http/caller.rs
+touched: crates/alt-server/src/http/sources.rs
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/quiet_proxy.rs
