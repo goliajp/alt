@@ -7,19 +7,35 @@
 //! clients and says in `X-Forwarded-For` whose each request is. A proxy that
 //! says nothing of a request has no limit for it, and neither has a peer on
 //! this host: the proxy in front of an instance is one, named or not.
+//!
+//! Where the requests through a proxy name nobody past it, many in a row and
+//! none named before, the log is told once: a proxy in front of it that names
+//! the callers is most likely not one the configuration names, and every
+//! caller is taken for that proxy.
 
 use super::{caller, receiving};
 use axum::http::HeaderMap;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering::Relaxed},
+    },
 };
+
+/// the requests in a row through a proxy that name nobody past it after which
+/// the log is told
+const QUIET: usize = 32;
 
 pub(super) struct Sources {
     each: usize,
     proxies: Vec<caller::Network>,
     open: Mutex<HashMap<String, usize>>,
+    /// the requests through a proxy so far that named nobody past it; past
+    /// [`QUIET`] once one named somebody
+    quiet: AtomicUsize,
+    log: alt_server_telemetry::BackgroundLog,
 }
 
 /// One connection, or one request under way, of an address: until it is dropped.
@@ -34,6 +50,8 @@ impl Sources {
             each,
             proxies: proxies.to_vec(),
             open: Mutex::default(),
+            quiet: AtomicUsize::new(0),
+            log: alt_server_telemetry::BackgroundLog::current(),
         })
     }
 
@@ -76,7 +94,16 @@ impl Sources {
         headers: &HeaderMap,
     ) -> Result<Option<Place>, ()> {
         let caller = caller::caller(peer, headers, &self.proxies);
-        match self.proxy(peer.ip()) && !self.proxy(caller) {
+        let (proxy, named) = (self.proxy(peer.ip()), !self.proxy(caller));
+        if proxy && self.quiet.load(Relaxed) < QUIET {
+            if named {
+                self.quiet.store(usize::MAX, Relaxed);
+            } else if self.quiet.fetch_add(1, Relaxed) + 1 == QUIET {
+                self.log
+                    .failed("configuration", "", &caller::nobody(caller));
+            }
+        }
+        match proxy && named {
             true => self.place(caller).map(Some),
             false => Ok(None),
         }
