@@ -134,10 +134,21 @@ fn a_push_that_fails_once_its_head_went_out_is_told_why_in_the_side_band() {
     let waits = source(tmp.path(), "waits");
     commit(&waits, "noise", 100_000);
 
+    // the push to `other` goes through a relay that tells when the head of
+    // its answer comes
+    let (head_came, came) = mpsc::channel();
+    let relayed = crate::altd_server_relay::Relayed {
+        push_answered: Some(std::sync::Arc::new(move || {
+            let _ = head_came.send(());
+        })),
+        ..Default::default()
+    };
+    let through = crate::altd_server_relay::relay(&server.addr, relayed);
     let pushed = while_one_stands(&pipe, (&large, &url("held")), || {
-        let pushed = git_push(&waits, url("other"), "waits", &[]);
-        // ten keepalives and more: the head of its answer went out
-        std::thread::sleep(Duration::from_secs(2));
+        let pushed = git_push(&waits, format!("http://{through}/other/"), "waits", &[]);
+        if came.recv_timeout(Duration::from_secs(120)).is_err() {
+            panic!("the head of the answer to the push never came");
+        }
         fs::write(root.join("other/.alt/trust"), "").unwrap();
         pushed
     });
