@@ -1,4 +1,5 @@
 mod download;
+pub(crate) use download::turned;
 pub mod route;
 use self::download::Asked;
 pub(crate) use self::download::Download;
@@ -60,10 +61,12 @@ pub fn request_bytes(
 }
 
 /// A portable request once what it needs of the database is read: its answer,
-/// or the download that is written without the database.
+/// the download that is written without the database, or the share of the room
+/// of a download put off to wait for its turn, with which it is asked again.
 pub(crate) enum Step {
     Done(Output),
     Download(Box<Download>),
+    Turn(alt_shares::Share),
 }
 
 pub(crate) fn execute(
@@ -131,6 +134,17 @@ pub(crate) fn execute(
                         ExportAction::Content(digest) => Asked::Content(digest),
                         _ => Asked::Archive,
                     };
+                    // a large one has its turn before it is written, or is put off
+                    // to wait for it with nothing of the export held
+                    let mut sending = sending;
+                    if let Some(share) = sending.as_mut()
+                        && share.expect(download::bytes(&export, &asked)).is_err()
+                    {
+                        return match share.put_off() {
+                            true => Ok(Step::Turn(sending.expect("a share"))),
+                            false => Err(Error::Busy("responses to fetches")),
+                        };
+                    }
                     let download = Download::new(export, asked, limits.package, sending);
                     return Ok(Step::Download(Box::new(download)));
                 }

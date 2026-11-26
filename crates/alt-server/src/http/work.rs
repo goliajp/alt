@@ -101,6 +101,9 @@ impl Work {
         route: Route,
         source: &mut std::fs::File,
     ) -> alt_server_store::Result<Output> {
+        if let Route::Portable(route) = route {
+            return self.portable(lease, route, source);
+        }
         let store: &mut Store = lease.as_mut().expect("a store");
         match route {
             Route::Metrics => observation::metrics(store, &self.credential, &self.metrics),
@@ -113,25 +116,6 @@ impl Work {
                     route,
                     source,
                 )
-            }
-            Route::Portable(route) => {
-                let current = self.factory.authenticate(store, &self.token)?;
-                let step = crate::portable::execute(
-                    store,
-                    &current,
-                    &self.options,
-                    route,
-                    source,
-                    &mut |store| self.factory.authenticate(store, &self.token),
-                    Some(self.verifying.share()),
-                )?;
-                match step {
-                    crate::portable::Step::Done(output) => Ok(output),
-                    crate::portable::Step::Download(download) => {
-                        drop(lease.take());
-                        download.answered()
-                    }
-                }
             }
             Route::GitAdvertise(..) | Route::GitUpload(..) | Route::GitReceive(..) => {
                 let pushed = match &route {
@@ -160,6 +144,49 @@ impl Work {
                 Ok(output)
             }
             route => self.native(store, route, source),
+        }
+    }
+
+    /// A portable route. A download put off to wait for its turn lets go of
+    /// its store and of what it read, and is asked again once it has the turn.
+    fn portable(
+        self,
+        lease: &mut Option<pool::Lease>,
+        route: crate::PortableRoute,
+        source: &mut std::fs::File,
+    ) -> alt_server_store::Result<Output> {
+        use crate::{git_read::Answer, portable::Step};
+        let mut sending = Some(self.verifying.share().turn_first());
+        loop {
+            if lease.is_none() {
+                *lease = Some(self.factory.open()?);
+            }
+            let store: &mut Store = lease.as_mut().expect("a store");
+            let current = self.factory.authenticate(store, &self.token)?;
+            let step = crate::portable::execute(
+                store,
+                &current,
+                &self.options,
+                route.clone(),
+                source,
+                &mut |store| self.factory.authenticate(store, &self.token),
+                sending.take(),
+            )?;
+            let share = match step {
+                Step::Done(output) => return Ok(output),
+                Step::Download(download) => {
+                    drop(lease.take());
+                    match download.answered()? {
+                        Answer::Done(output) => return Ok(output),
+                        Answer::Turn(share) => share,
+                    }
+                }
+                Step::Turn(share) => {
+                    drop(lease.take());
+                    share
+                }
+            };
+            sending = Some(crate::portable::turned(share)?);
         }
     }
 

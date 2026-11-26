@@ -38,6 +38,7 @@ fn until_given_back(room: &Shares) {
 /// One worker; the turn to be large is taken by the test for an address. A
 /// download of the archive of an export from another address, through the
 /// browser and through the native protocol, and of its one file, waits for
+/// the turn holding nothing of the export, which it opens again once it has
 /// the turn: meanwhile a request that takes a worker and a store is answered,
 /// on a connection of the database that was there before, and the download
 /// is answered whole once the turn is given back.
@@ -114,6 +115,7 @@ fn a_download_of_a_migration_that_waits_for_its_turn_holds_no_worker_and_no_conn
         kept.take(ROOM / 4 + 1).unwrap();
         let waiting = download(path.clone(), who);
         until_waiting(&room, 1);
+        assert_eq!(room.building(), 0, "{path}");
         let before = backends(&mut client);
         let metrics = server.send("GET", "/v1/instance/metrics", Some(&f.token), b"");
         assert_eq!(metrics.status(), 200, "{path}");
