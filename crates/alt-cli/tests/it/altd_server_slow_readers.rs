@@ -9,14 +9,17 @@ use crate::altd_server::spawn_server_with_env;
 use crate::altd_server_slow_peers::{listed, noise};
 use crate::altd_server_untrusted::repository;
 
-/// How much of a clone comes when, from the first of the response on, it is read
+/// How much of a clone comes when, from the first of the pack on, it is read
 /// `piece` bytes at a time with `rest` between two pieces for `slowly`, and then
 /// as fast as it comes; the window a response has to move in is `window_ms`. And
-/// the bytes of the file cloned.
+/// the bytes of the file cloned. Where `kept`, the head of the response goes out
+/// while the pack is made, keepalives behind it, and the pack in chunks behind
+/// those; where not, the head goes out with the pack.
 pub(crate) fn cloned_slowly(
     window_ms: &str,
     (piece, rest): (usize, Duration),
     slowly: Duration,
+    kept: bool,
 ) -> (usize, usize) {
     let tmp = alt_os::temp::tempdir().unwrap();
     let origin = tmp.path().join("origin");
@@ -27,12 +30,11 @@ pub(crate) fn cloned_slowly(
     let alt = crate::altd_server::alt;
     crate::altd_server::ok(alt(&origin, &["add", "."]));
     crate::altd_server::ok(alt(&origin, &["commit", "-m", "noise"]));
-    // the head goes out once the pack is made, and what is read from it on
-    // is the pack: no keepalive comes while the pack of 48 MiB is made
+    let keepalive = if kept { "1" } else { "3600000" };
     let server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_IO_WINDOW_MS", window_ms),
-        ("ALT_SERVER_KEEPALIVE_MS", "3600000"),
+        ("ALT_SERVER_KEEPALIVE_MS", keepalive),
     ]);
     let refs = listed(&format!("http://{}/", server.addr)).unwrap();
     let head = refs.split_whitespace().next().unwrap();
@@ -54,10 +56,18 @@ pub(crate) fn cloned_slowly(
     let wait = Some(Duration::from_secs(120));
     socket.set_read_timeout(wait).unwrap();
     socket.write_all(request.as_bytes()).unwrap();
-    // the response is being sent from here on: the server took its time to make it
-    let mut begun = [0u8; 12];
-    socket.read_exact(&mut begun).unwrap();
-    assert_eq!(&begun, b"HTTP/1.1 200");
+    // the pack is being sent from here on
+    let mut begun = Vec::new();
+    while !begun.windows(4).any(|w| w == b"PACK") {
+        let mut more = [0u8; 4096];
+        let count = socket.read(&mut more).unwrap();
+        assert_ne!(count, 0, "no pack in {}", String::from_utf8_lossy(&begun));
+        begun.extend_from_slice(&more[..count]);
+    }
+    let chunked = begun
+        .windows(26)
+        .any(|w| w == b"Transfer-Encoding: chunked");
+    assert!(begun.starts_with(b"HTTP/1.1 200") && chunked == kept);
     let mut buffer = vec![0u8; piece];
     let mut read = begun.len();
     let began = std::time::Instant::now();
@@ -81,7 +91,7 @@ pub(crate) fn cloned_slowly(
 #[test]
 fn a_clone_read_slowly_and_evenly_goes_on_for_many_windows() {
     let pace = (32 << 10, Duration::from_millis(250));
-    let (read, whole) = cloned_slowly("2000", pace, Duration::from_secs(16));
+    let (read, whole) = cloned_slowly("2000", pace, Duration::from_secs(16), false);
     assert!(read > whole, "{read} bytes of more than {whole}");
 }
 
@@ -90,6 +100,15 @@ fn a_clone_read_slowly_and_evenly_goes_on_for_many_windows() {
 #[test]
 fn a_clone_whose_reader_stops_for_two_windows_is_given_up() {
     let pace = (1, Duration::from_secs(10));
-    let (read, whole) = cloned_slowly("3000", pace, Duration::from_secs(10));
+    let (read, whole) = cloned_slowly("3000", pace, Duration::from_secs(10), false);
+    assert!(read < whole, "{read} bytes of {whole}");
+}
+
+/// The same reader of a clone whose head went out while its pack was made,
+/// and whose pack goes out in chunks behind the keepalives, is let go of too.
+#[test]
+fn a_clone_sent_in_chunks_whose_reader_stops_for_two_windows_is_given_up() {
+    let pace = (1, Duration::from_secs(10));
+    let (read, whole) = cloned_slowly("3000", pace, Duration::from_secs(10), true);
     assert!(read < whole, "{read} bytes of {whole}");
 }
