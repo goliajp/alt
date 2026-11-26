@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: read an error of a push in the side band as git shows it
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_push_keepalive.rs
