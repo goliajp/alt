@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: fix
+summary: tell a peer that is not signed in only what failed and its kind where the server errs
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server.rs
+touched: crates/alt-cli/src/bin/altd_server/limits.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/upload.rs
+touched: crates/alt-cli/tests/it/altd_server_fetch_failed.rs
+touched: crates/alt-cli/tests/it/altd_server_push_keepalive.rs
