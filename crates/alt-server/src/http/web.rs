@@ -4,6 +4,7 @@ mod content;
 mod execute;
 mod input;
 mod login;
+mod portable;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;

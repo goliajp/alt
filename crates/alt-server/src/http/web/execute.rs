@@ -28,6 +28,9 @@ impl Call {
         route: WebRoute,
         source: alt_os::temp::NamedTempFile,
     ) -> Result<(Output, Option<String>)> {
+        if let WebRoute::Portable(selected) = &route {
+            return Ok((self.portable(selected.clone(), source)?, None));
+        }
         let Self {
             factory,
             options,
@@ -44,33 +47,6 @@ impl Call {
         source.as_file_mut().rewind()?;
         let mut store = factory.open_for(None, &gone)?;
         store.check_browser_binding(Some(&browser.origin))?;
-        if let WebRoute::Portable(selected) = &route {
-            let token = token.as_deref().ok_or(Error::Unauthorized)?;
-            let credential = factory.authenticate(&mut store, token)?;
-            store.browser_session(&credential, &browser.origin)?;
-            let output = crate::portable::execute(
-                &mut store,
-                &credential,
-                &options,
-                selected.clone(),
-                source.as_file_mut(),
-                &mut |store| {
-                    let current = factory.authenticate(store, token)?;
-                    store.browser_session(&current, &browser.origin)?;
-                    Ok(current)
-                },
-                Some(sending),
-            )?;
-            let output = match output {
-                crate::portable::Step::Done(output) => output,
-                crate::portable::Step::Download(download) => {
-                    // a download that waits for its turn holds no connection of the database
-                    drop(store);
-                    download.answered()?
-                }
-            };
-            return Ok((output, None));
-        }
         let mut raw = Vec::new();
         source.as_file_mut().read_to_end(&mut raw)?;
         if route == WebRoute::Config {
