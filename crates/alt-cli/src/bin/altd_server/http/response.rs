@@ -81,14 +81,6 @@ impl<R: Read> Response<R> {
         self.headers.push(header);
     }
 
-    pub(crate) fn status_code(&self) -> StatusCode {
-        self.status
-    }
-
-    pub(crate) fn data_length(&self) -> Option<usize> {
-        usize::try_from(self.length).ok()
-    }
-
     /// The response as it goes out, without its body where the request
     /// was for the head alone. `last` tells the peer that the connection
     /// ends behind it.
@@ -122,15 +114,29 @@ impl<R: Read> Response<R> {
 
 /// A response on its way out: the bytes of its head, and its body.
 pub(super) struct Outgoing {
-    status: u16,
+    pub(super) status: u16,
     head: Vec<u8>,
     body: Box<dyn Read + Send>,
-    length: u64,
+    pub(super) length: u64,
     /// the connection ends behind it
     pub(super) last: bool,
 }
 
+/// what an error told in the side band begins with
+const ERROR: &[u8] = b"\x03error: ";
+/// the most of an error told in the side band
+const TOLD: u64 = 1000;
+
 impl Outgoing {
+    /// The bytes of the body that go out behind the first `begun` where
+    /// those went out ahead of the rest.
+    pub(super) fn rest(&self, begun: u64) -> u64 {
+        match self.status {
+            200 => self.length - begun,
+            _ => 4 + ERROR.len() as u64 + self.length.min(TOLD),
+        }
+    }
+
     /// Writes the response to `source`, within the time a response of
     /// its length has.
     pub(super) fn send(mut self, source: &mut Source) -> io::Result<()> {
@@ -179,9 +185,9 @@ impl Outgoing {
                 left -= count as u64;
             }
         } else {
-            let mut said = b"\x03error: ".to_vec();
+            let mut said = ERROR.to_vec();
             (&mut self.body)
-                .take(self.length.min(1000))
+                .take(self.length.min(TOLD))
                 .read_to_end(&mut said)?;
             let mut band = Vec::new();
             alt_wire::pkt::write_data(&mut band, &said)?;

@@ -47,6 +47,24 @@ fn chunked(answer: &[u8]) -> (String, Vec<u8>) {
     }
 }
 
+/// The status and the bytes of the body the access log of `server` has for
+/// its one fetch.
+fn logged(server: &mut crate::altd_server::Server) -> (u64, u64) {
+    let log = server.drain_stderr();
+    let line = log
+        .lines()
+        .find(|l| l.contains("\"path\":\"/git-upload-pack\""));
+    let line = line.unwrap_or_else(|| panic!("no fetch in the log: {log}"));
+    let field = |name: &str| {
+        let after = line.split(&format!("\"{name}\":")).nth(1).unwrap();
+        let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+        digits
+            .parse()
+            .unwrap_or_else(|_| panic!("{name} in {line}"))
+    };
+    (field("status"), field("bytes_out"))
+}
+
 /// The pkt-lines of `body`, each as its payload; a flush as nothing.
 fn lines(body: &[u8]) -> Vec<Option<&[u8]>> {
     let (mut at, mut out) = (0, Vec::new());
@@ -68,11 +86,13 @@ fn the_head_of_a_fetch_goes_out_and_keepalives_follow_while_its_pack_is_made() {
     let tmp = alt_os::temp::tempdir().unwrap();
     let origin = tmp.path().join("origin");
     let head = of_files(&origin, 400);
-    let server = spawn_server_with_env(&[
+    let mut server = spawn_server_with_env(&[
         ("ALT_SERVER_REPO", origin.to_str().unwrap()),
         ("ALT_SERVER_KEEPALIVE_MS", "1"),
     ]);
     let (told, body) = chunked(&answer(asked(&server.addr, &head)));
+    // the log has what the client was sent, keepalives and all
+    assert_eq!(logged(&mut server), (200, body.len() as u64));
     assert!(told.starts_with("HTTP/1.1 200 OK\r\n"), "{told}");
     // the request said that the connection ends behind it
     assert!(told.contains("\r\nConnection: close\r\n"), "{told}");
@@ -159,7 +179,7 @@ fn a_fetch_stopped_once_its_head_went_out_is_told_why_in_the_side_band() {
     let head = of_files(&origin, 4000);
     let mut in_band = 0;
     for ms in ["50", "200", "800", "3200"] {
-        let server = spawn_server_with_env(&[
+        let mut server = spawn_server_with_env(&[
             ("ALT_SERVER_REPO", origin.to_str().unwrap()),
             ("ALT_SERVER_KEEPALIVE_MS", "1"),
             ("ALT_SERVER_MAX_FETCH_MS", ms),
@@ -176,6 +196,8 @@ fn a_fetch_stopped_once_its_head_went_out_is_told_why_in_the_side_band() {
         if let Some(last) = lines(&body).last().unwrap() {
             assert_eq!(*last, why, "{:?}", String::from_utf8_lossy(last));
             in_band += 1;
+            // the log has the 200 the client was sent, not the refusal
+            assert_eq!(logged(&mut server), (200, body.len() as u64));
         }
     }
     assert!(in_band > 0, "no time fell where the pack is made");

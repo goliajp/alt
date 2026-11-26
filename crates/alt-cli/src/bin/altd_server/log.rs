@@ -108,8 +108,7 @@ pub(super) fn respond_logged<R: std::io::Read + Send + 'static>(
     resp: Response<R>,
     log: &mut LogCtx,
 ) -> std::io::Result<()> {
-    log.status = resp.status_code().0;
-    log.bytes_out = resp.data_length().map(|n| n as u64);
-    req.respond(resp);
+    let (status, bytes) = req.respond(resp);
+    (log.status, log.bytes_out) = (status, Some(bytes));
     Ok(())
 }

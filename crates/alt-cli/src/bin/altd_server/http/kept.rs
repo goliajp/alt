@@ -19,11 +19,13 @@
 
 use std::io::Write;
 use std::net::TcpStream;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use super::back::Back;
+use super::back::{Back, Way};
 use super::head::Header;
 use super::request::Request;
+use super::response::Outgoing;
 
 /// the keepalive `upload-pack` sends while it makes a pack
 const KEEPALIVE: &[u8] = b"0005\x01";
@@ -39,11 +41,42 @@ pub(crate) struct Begun {
     last: bool,
 }
 
+/// What of an answer begun went out, as the worker that answers it and the
+/// thread of its connection both see it.
+#[derive(Default)]
+pub(super) struct Out {
+    /// the bytes the body begins with, where it was begun
+    begun: Option<u64>,
+    /// the answer is handed back: nothing more goes out ahead of it
+    answered: bool,
+    /// the head went out
+    head: bool,
+    /// the keepalives that went out
+    beats: u64,
+}
+
+impl Way {
+    /// The status the peer is sent, and the bytes of the body, for
+    /// `outgoing`, which is handed back now.
+    pub(super) fn answered(&self, outgoing: &Outgoing) -> (u16, u64) {
+        let mut out = self.out.lock().expect("what went out");
+        out.answered = true;
+        match out.begun {
+            Some(begun) if out.head => {
+                let beats = out.beats * KEEPALIVE.len() as u64;
+                (200, begun + beats + outgoing.rest(begun))
+            }
+            _ => (outgoing.status, outgoing.length),
+        }
+    }
+}
+
 impl Request {
     /// Tells the thread of the connection that the answer is a 200 with
     /// `headers` whose body begins with `body`, and that a keepalive may
     /// go out each `every` until the rest of it is there.
     pub(crate) fn begin(&self, headers: Vec<Header>, body: Vec<u8>, every: Duration) {
+        self.back.out.lock().expect("what went out").begun = Some(body.len() as u64);
         let begun = Begun {
             headers,
             body,
@@ -63,6 +96,8 @@ pub(super) struct Kept {
     pub(super) sent: bool,
     /// a write to the peer failed
     pub(super) broken: bool,
+    /// the answer was handed back, and nothing more goes out ahead of it
+    stopped: bool,
 }
 
 impl Kept {
@@ -73,12 +108,14 @@ impl Kept {
             next,
             sent: false,
             broken: false,
+            stopped: false,
         }
     }
 
-    /// When the next keepalive is due; never where the connection broke.
+    /// When the next keepalive is due; never where the connection broke or
+    /// the answer is there.
     pub(super) fn due(&self) -> Option<Instant> {
-        (!self.broken).then_some(self.next)
+        (!self.broken && !self.stopped).then_some(self.next)
     }
 
     /// The bytes of the body that went out with the head.
@@ -97,8 +134,18 @@ impl Kept {
     }
 
     /// Sends a keepalive on `watched`, behind the head and what begins
-    /// the body where those did not go out yet, each write within `window`.
-    pub(super) fn beat(&mut self, watched: &TcpStream, window: Duration) {
+    /// the body where those did not go out yet, each write within `window`;
+    /// none where the answer was handed back meanwhile. What goes out is
+    /// counted in `told`.
+    pub(super) fn beat(&mut self, watched: &TcpStream, window: Duration, told: &Mutex<Out>) {
+        let mut counted = told.lock().expect("what went out");
+        if counted.answered {
+            self.stopped = true;
+            return;
+        }
+        counted.head = true;
+        counted.beats += 1;
+        drop(counted);
         let mut out = Vec::new();
         if !self.sent {
             out.extend_from_slice(b"HTTP/1.1 200 OK\r\n");

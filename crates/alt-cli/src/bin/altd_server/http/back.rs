@@ -8,12 +8,12 @@
 //! pushes have, or is being indexed, is gone on with for nobody then.
 
 use std::net::TcpStream;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::kept::Begun;
+use super::kept::{Begun, Out};
 use super::paced::Source;
 use super::request::Request;
 use super::response::Outgoing;
@@ -46,14 +46,16 @@ pub(super) struct Way {
     to: Sender<Back>,
     /// set once the peer has closed its side
     pub(super) gone: Arc<AtomicBool>,
+    /// what of an answer begun went out
+    pub(super) out: Arc<Mutex<Out>>,
 }
 
 impl Way {
     /// the way, and where the thread of the connection hears of what is handed back
     pub(super) fn new() -> (Way, Receiver<Back>) {
         let (to, returned) = mpsc::channel();
-        let gone = Arc::default();
-        (Way { to, gone }, returned)
+        let (gone, out) = (Arc::default(), Arc::default());
+        (Way { to, gone, out }, returned)
     }
 
     pub(super) fn send(&self, back: Back) {

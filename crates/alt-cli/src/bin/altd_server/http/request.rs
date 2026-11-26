@@ -266,23 +266,24 @@ impl Request {
         body
     }
 
-    /// Has `response` sent. Whether the peer takes it is not waited for.
-    pub(crate) fn respond<R: Read + Send + 'static>(mut self, response: Response<R>) {
-        self.answer(response);
+    /// Has `response` sent, and says the status the peer is sent and the
+    /// bytes of the body. Whether the peer takes it is not waited for.
+    pub(crate) fn respond<R: Read + Send + 'static>(mut self, response: Response<R>) -> (u16, u64) {
+        self.answer(response).expect("a request not yet answered")
     }
 
     /// Hands `response` to the thread of the connection. The connection
     /// goes on to its next request where the body of this one was read
     /// to its end; where it was not, what is left of it cannot be told
     /// from a next request, and the connection ends.
-    fn answer<R: Read + Send + 'static>(&mut self, response: Response<R>) {
-        let Some(body) = self.body.take() else {
-            return;
-        };
+    fn answer<R: Read + Send + 'static>(&mut self, response: Response<R>) -> Option<(u16, u64)> {
+        let body = self.body.take()?;
         let last = self.head.last || !body.over();
-        let bodiless = self.head.method == Method::Head;
-        let answer = Back::Answer(Box::new((body.source, response.outgoing(last, bodiless))));
-        self.back.send(answer);
+        let outgoing = response.outgoing(last, self.head.method == Method::Head);
+        let sent = self.back.answered(&outgoing);
+        self.back
+            .send(Back::Answer(Box::new((body.source, outgoing))));
+        Some(sent)
     }
 }
 
