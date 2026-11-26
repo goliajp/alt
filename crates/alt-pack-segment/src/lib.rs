@@ -14,6 +14,7 @@ mod descend;
 mod format;
 mod generation;
 mod ingest;
+mod ingested;
 mod led;
 mod limits;
 mod mend;
