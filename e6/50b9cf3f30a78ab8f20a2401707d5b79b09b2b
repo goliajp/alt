@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: nothing is brought anew under a kept directory whose name git fsck refuses
+author-type: human
+author: doracawl
+touched: crates/alt-git-fsck/src/walk.rs
+touched: crates/alt-server/tests/it/database/git.rs
+touched: crates/alt-server/tests/it/database/git/fsck_under.rs
