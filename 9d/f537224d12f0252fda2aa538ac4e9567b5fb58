@@ -1,0 +1,11 @@
+schema: alt-meta/1
+type: feat
+summary: send the head of a push and keepalives while its pack is taken in
+author-type: human
+author: doracawl
+touched: README.md
+touched: crates/alt-cli/src/bin/altd_server/http/kept.rs
+touched: crates/alt-cli/src/bin/altd_server/push.rs
+touched: crates/alt-cli/src/bin/altd_server/told.rs
+touched: crates/alt-cli/tests/it/altd_server_index_memory.rs
+touched: crates/alt-cli/tests/it/altd_server_keepalive.rs
