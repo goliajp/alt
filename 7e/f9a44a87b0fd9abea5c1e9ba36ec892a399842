@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: fix
+summary: a task transfer leaves what git fsck refuses to the server that receives it
+author-type: human
+author: doracawl
+touched: crates/alt-task-service/src/publication.rs
+touched: crates/alt-task-transfer/src/package.rs
