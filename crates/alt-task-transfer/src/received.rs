@@ -1,4 +1,4 @@
-use crate::{Error, Package, Provenance, Result, Source};
+use crate::{Error, Held, Package, Provenance, Result, Source};
 use alt_git_codec::ObjectId;
 use alt_repository_service::{ObjectReader, ObjectSource};
 use alt_task::Artifact;
@@ -18,7 +18,14 @@ pub struct Received<'a> {
 }
 impl<'a> Received<'a> {
     pub fn verify(package: &'a Package, limits: TaskLimits) -> Result<Self> {
-        let verified = package.verify(limits)?;
+        Self::of(package, package.verify(limits)?, limits)
+    }
+    /// [`Self::verify`] of a package received into a repository that holds
+    /// the objects `held` tells the kind of (see [`Package::verify_into`])
+    pub fn verify_into(package: &'a Package, limits: TaskLimits, held: &Held<'_>) -> Result<Self> {
+        Self::of(package, package.verify_into(limits, held)?, limits)
+    }
+    fn of(package: &'a Package, verified: VerifiedPublication, limits: TaskLimits) -> Result<Self> {
         let tasks = verified
             .tasks
             .as_ref()

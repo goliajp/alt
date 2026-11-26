@@ -251,7 +251,15 @@ impl NativeRepo<'_> {
             }
             draft.seal(selected.publication.clone(), &directory, task_limits())?
         };
-        let received = Received::verify(&package, task_limits())?;
+        let odb = &self.store.odb;
+        let unavailable = |_| alt_repository_service::Error::Integrity("local object unavailable");
+        let held = |oid| {
+            Ok(odb
+                .lookup(&oid)
+                .map_err(unavailable)?
+                .map(|entry| entry.kind))
+        };
+        let received = Received::verify_into(&package, task_limits(), &held)?;
         let key = alt_task_transfer::root_key(&root);
         if !received.bundle().records.iter().any(|r| r.record == key) {
             return Err(refused("publication does not contain the requested record"));

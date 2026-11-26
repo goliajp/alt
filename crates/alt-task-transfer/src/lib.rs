@@ -6,6 +6,8 @@ mod selection;
 pub use selection::*;
 mod received;
 pub use received::*;
+mod verify;
+pub use verify::Held;
 
 #[derive(Debug)]
 pub enum Error {

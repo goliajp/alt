@@ -1,7 +1,9 @@
 //! A repository whose history holds a name `git fsck` refuses, which the
 //! server holds as a release that took it left it: a task sent from it is
 //! not refused by the client, which does not know what the server holds,
-//! and the server takes it, the history being its own.
+//! and the server takes it, the history being its own. A client receiving
+//! the task refuses it where the history is new to its repository, and takes
+//! it where the repository holds it.
 use super::*;
 
 /// Every object of the Git repository `git` as a live segment of the
@@ -72,7 +74,7 @@ fn planted(server: &Server, git: &Path) {
 
 #[test]
 #[ignore = "requires isolated PostgreSQL, loopback HTTP, real Git and disk-backed runner; exercised by closing gate"]
-fn a_task_of_a_history_with_a_name_git_fsck_refuses_is_sent_and_taken_where_the_server_holds_it() {
+fn a_task_of_a_history_with_a_name_git_fsck_refuses_is_taken_and_received_where_it_is_held() {
     let server = Server::new();
     std::fs::create_dir_all(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let root = alt_os::temp::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -165,4 +167,35 @@ fn a_task_of_a_history_with_a_name_git_fsck_refuses_is_sent_and_taken_where_the_
         &["task", "remote", "publish", id, "--json"],
     );
     assert_eq!(published["state"], "committed", "{published}");
+
+    let digest = string(&previewed, "request_digest");
+    let receive = [
+        "task",
+        "remote",
+        "receive",
+        "origin",
+        "--kind",
+        "evidence",
+        "--id",
+        string(&evidence, "evidence_id"),
+        "--publication",
+        digest,
+        "--json",
+    ];
+    // a repository the history is new to
+    let bob = root.path().join("bob");
+    std::fs::create_dir(&bob).unwrap();
+    ok(&bob, &server.bob, &["init", "."]);
+    connect(&bob, &server, &server.bob, "origin");
+    let refused = run(&bob, &server.bob, &receive);
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success(), "{said}");
+    assert!(said.contains("hasDotalt: contains '.alt'"), "{said}");
+    let base = String::from_utf8(ok(&alice, &server.token, &["rev-parse", "HEAD"]).stdout);
+    let base = base.unwrap();
+    let held = run(&bob, &server.bob, &["cat-file", "-t", base.trim()]);
+    assert!(!held.status.success(), "{held:?}");
+    // the repository the history is from
+    let received = value(&aw, &server.token, &receive);
+    assert_eq!(received["state"], "received", "{received}");
 }
