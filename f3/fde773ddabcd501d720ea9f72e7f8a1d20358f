@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: fix
+summary: give the pack a fetch takes in the permissions the umask gives a file
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/native/fetched.rs
+touched: crates/alt-cli/tests/it/wire_test_server/ended.rs
+touched: crates/alt-cli/tests/it/wire_test_server/pack_dir.rs
+touched: crates/alt-os/src/temp/file.rs
