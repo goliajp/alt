@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: build the tests of a failed fetch pack only where its hook of the server is
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/main.rs
