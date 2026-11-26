@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: what git fsck refuses of a publication has a test module of its own
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/tests/it/fsck.rs
+touched: crates/alt-repository-service/tests/it/main.rs
