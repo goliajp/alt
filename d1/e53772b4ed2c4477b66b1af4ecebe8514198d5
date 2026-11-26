@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: move the framing of chunked request bodies out of the request
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/http/chunks.rs
+touched: crates/alt-cli/src/bin/altd_server/http/mod.rs
+touched: crates/alt-cli/src/bin/altd_server/http/request.rs
