@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: fix
+summary: an old server fetch that would wait for its turn is built again once it has it, holding nothing meanwhile
+author-type: human
+author: doracawl
+touched: crates/alt-cli/src/bin/altd_server/fetch.rs
+touched: crates/alt-cli/src/bin/altd_server/sending.rs
+touched: crates/alt-cli/tests/it/altd_server_large_turns.rs
