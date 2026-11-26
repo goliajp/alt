@@ -23,6 +23,7 @@ mod review_reads;
 mod schema_20;
 mod schema_21;
 mod schema_22;
+mod schema_23;
 mod segments;
 mod single_copy;
 mod tasks;
@@ -732,7 +733,7 @@ fn published_content_reuse_checks_the_new_requests_chunk_manifest() {
     f.store
         .begin(&f.credential, &p.publication, &p.manifest, 60_000)
         .unwrap();
-    // Previously published content can be reused without uploading it again.
+    // previously published content can be reused without uploading it again
     p.publish(&mut f.store, &f.credential);
     assert_eq!(f.counts(), (2, 2, 2));
 

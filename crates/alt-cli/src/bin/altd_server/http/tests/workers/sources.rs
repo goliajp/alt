@@ -44,7 +44,7 @@ fn receiving_here(
     here: &'static [Network],
     proxies: &'static [Network],
 ) -> (u16, Arc<Shares>) {
-    let server = Server::listen("[::]:0", limits, 16, here, proxies).unwrap();
+    let server = Server::listen("[::]:0", limits, (16, 1), here, proxies).unwrap();
     let port = (server.server_addr().port(), Arc::clone(&server.shared.held));
     std::thread::spawn(move || {
         while let Ok(mut request) = server.recv() {
@@ -250,7 +250,7 @@ fn an_address_has_so_many_connections_open_and_no_more() {
         arrived: Condvar::new(),
         open: AtomicUsize::new(0),
         from: Mutex::default(),
-        held: Shares::of(u64::MAX),
+        held: Shares::of(u64::MAX, 1),
         limits: within(GRACE),
         here: &LOOPBACK,
         proxies: &LOOPBACK,

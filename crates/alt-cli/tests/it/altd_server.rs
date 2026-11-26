@@ -64,7 +64,7 @@ fn altd_server_info_refs_serves_what_git_ls_remote_expects() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
 
-    // The alt store advertises refs/heads/main + refs/heads/feature-x.
+    // the alt store advertises refs/heads/main + refs/heads/feature-x
     assert!(
         stdout.contains("refs/heads/main"),
         "ls-remote missing main: {stdout}"
@@ -585,7 +585,7 @@ fn altd_server_acl_scopes_user_to_listed_repos_and_actions() {
 
 #[test]
 fn altd_server_acl_wildcard_grants_all_repos() {
-    // operator with `*:rw` → every repo, every action.
+    // operator with `*:rw` → every repo, every action
     let root_dir = alt_os::temp::tempdir().unwrap();
     let root = root_dir.path();
     for name in ["one", "two"] {
@@ -653,7 +653,7 @@ fn altd_server_a6_policy_denies_push_to_protected_ref() {
 
     let server = spawn_server_with_env(&[("ALT_SERVER_ROOT", root.to_str().unwrap())]);
 
-    // build a tiny git source repo with a commit to push.
+    // build a tiny git source repo with a commit to push
     let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = Command::new("git")
@@ -1118,7 +1118,7 @@ fn altd_server_round_trips_signed_commit_through_push() {
         "origin's commit object must still carry the alt-sig header: {dump}"
     );
 
-    // A subsequent clone fetches the same signed bytes.
+    // a subsequent clone fetches the same signed bytes
     let cdir2 = alt_os::temp::tempdir().unwrap();
     let downstream = cdir2.path().join("C");
     ok(alt(
@@ -1257,7 +1257,7 @@ fn altd_server_honors_git_clone_filter_blob_none() {
         .unwrap()
         .to_owned();
     let tree_listing = ok(alt(origin, &["cat-file", "-p", &tree_oid]));
-    // Format is `<mode> <kind> <oid>\t<name>`; pick the first blob row.
+    // format is `<mode> <kind> <oid>\t<name>`; pick the first blob row
     let blob_oid = tree_listing
         .lines()
         .find_map(|l| {
@@ -1824,7 +1824,7 @@ fn altd_server_two_concurrent_pushes_to_distinct_branches_both_land() {
         String::from_utf8_lossy(&bob_out.stderr)
     );
 
-    // Both refs landed and carry the right messages.
+    // both refs landed and carry the right messages
     let alice_log = ok(alt(
         origin,
         &["log", "--pretty=oneline", "refs/heads/from-alice"],
@@ -1994,7 +1994,7 @@ fn altd_server_n_clients_m_iters_stress_harness() {
         std::fs::create_dir_all(&work).unwrap();
         let barrier = std::sync::Arc::clone(&barrier);
         handles.push(std::thread::spawn(move || -> Result<(), String> {
-            // Prepare a source git repo per client.
+            // prepare a source git repo per client
             let src = work.join("src");
             let st = std::process::Command::new("git")
                 .args(["init", "-q", "-b", "main", src.to_str().unwrap()])
@@ -2234,7 +2234,7 @@ fn altd_server_streaming_push_keeps_rss_bounded() {
         );
     }
 
-    // Sample the server's RSS in a watcher thread while the push runs.
+    // sample the server's RSS in a watcher thread while the push runs
     use std::sync::{Arc, Mutex};
     let peak_kib = Arc::new(Mutex::new(0u64));
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -2509,16 +2509,15 @@ fn altd_server_require_auth_refuses_to_start_without_users_file() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let started = loop {
         line.clear();
-        let read = reader.read_line(&mut line).unwrap();
-        if line.contains("listening on ") {
-            break true;
-        }
-        if read == 0 || Instant::now() > deadline {
-            break false;
+        let read = reader.read_line(&mut line);
+        let listening = line.contains("listening on ");
+        if listening || !matches!(read, Ok(1..)) || Instant::now() > deadline {
+            break read.map(|_| listening);
         }
     };
     let _ = child.kill();
     let _ = child.wait();
+    let started = started.unwrap();
     assert!(
         started,
         "REQUIRE_AUTH=1 with users file present must start; tail of stderr line={line}"
@@ -2539,7 +2538,7 @@ fn altd_server_returns_405_with_allow_header_on_wrong_method() {
 
     let server = spawn_server(root);
 
-    // PUT to /info/refs — GET is the only allowed method.
+    // PUT to /info/refs — GET is the only allowed method
     let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
     use std::io::{Read, Write};
     conn.write_all(b"PUT /info/refs?service=git-upload-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 0\r\n\r\n").unwrap();
@@ -2741,7 +2740,7 @@ fn altd_server_concurrent_pushes_are_all_durable() {
             continue;
         }
         receive_lines += 1;
-        // Find `"fsync_seq":<n>` — n is a small integer.
+        // find `"fsync_seq":<n>` — n is a small integer
         if let Some(pos) = line.find("\"fsync_seq\":") {
             let tail = &line[pos + "\"fsync_seq\":".len()..];
             let n: String = tail.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -2786,7 +2785,7 @@ fn altd_server_advertises_alt_nonce_and_signed_push_consumes_it() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    // 1) info/refs must carry an `alt-nonce=` cap of 64 hex chars.
+    // 1) info/refs must carry an `alt-nonce=` cap of 64 hex chars
     let mut conn = std::net::TcpStream::connect(&server.addr).unwrap();
     conn.write_all(
         b"GET /info/refs?service=git-receive-pack HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
@@ -2882,7 +2881,7 @@ fn altd_server_rejected_push_does_not_leave_orphan_objects() {
     let server = spawn_server(origin);
     let url = format!("http://{}/", server.addr);
 
-    // Build a git source with an unsigned commit and try to push.
+    // build a git source with an unsigned commit and try to push
     let src_dir = alt_os::temp::tempdir().unwrap();
     let src = src_dir.path();
     let st = std::process::Command::new("git")

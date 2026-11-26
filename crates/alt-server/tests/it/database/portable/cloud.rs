@@ -226,7 +226,7 @@ impl Process {
         config.tasks = task_limits();
         config.portable = Some(bounds());
         config.validate().unwrap();
-        // Explicit fixture volume binding; initialization is covered separately.
+        // explicit fixture volume binding; initialization is covered separately
         let marker = alt_json::json!({"version":1,"installation_id":f.spec.installation_id,"workspace_id":f.spec.workspace_id,"deployment_mode":f.spec.deployment_mode,"receipt_key_id":alt_hash::blake3::hash(SigningKey::from_bytes(&[f.key_seed;32]).verifying_key().as_bytes()).to_hex().to_string()});
         alt_server::operator::create_private(
             &root.join("bytes/instance.json"),
@@ -413,7 +413,7 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
         .find(|e| e.kind == ContentKind::Commit)
         .unwrap()
         .blake3;
-    // modes: renew, revoke account, suspend paid writes, provider unavailable.
+    // modes: renew, revoke account, suspend paid writes, provider unavailable
     for importing in [false, true] {
         for mode in [0, 1, 2, 3] {
             let mut f = Fixture::new_with_identity("cloud-installation", 8);
@@ -471,7 +471,7 @@ fn portable_cloud_validation_refreshes_current_authority_before_completion() {
                 // an export reads Git objects from the mapped pack segments; the read
                 // to pause on is the task record, which the content store holds
                 let mut task = super::super::change_links::task_payload_with_source(
-                    "cloud-validation-task",
+                    ("cloud-validation-task", "publish selected task"),
                     None,
                 );
                 task.publication.key.scope = intent.key.scope.clone();

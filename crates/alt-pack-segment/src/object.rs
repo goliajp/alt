@@ -108,8 +108,12 @@ pub(crate) fn tree(
 /// What an entry of a tree names by its mode: a tree, a file, or with `Some(None)`
 /// a commit of another repository, which is no object of this one. A mode is
 /// the number it is written as, with zeros before it or without: Git reads
-/// `040000` as the directory `40000` is, and warns of it at the most.
+/// `040000` as the directory `40000` is, and warns of it at the most. Sixteen
+/// digits at the most: the reader of trees of the rest of alt reads no more.
 pub(crate) fn names(mode: &[u8]) -> Option<Option<Kind>> {
+    if mode.len() > 16 {
+        return None;
+    }
     let mut number = 0u32;
     for digit in mode {
         if !(b'0'..=b'7').contains(digit) || number > 0o777777 {

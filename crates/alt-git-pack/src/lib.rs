@@ -24,8 +24,9 @@ use cache::DeltaBaseCache;
 pub use delta_window::DeltaOptions;
 pub use idx::PackIndex;
 pub use index_pack::{
-    BASE_FILES, BaseFiles, Bases, EACH, IndexLimits, IndexWork, IndexedPackOnDisk, MAX_DELTA_DEPTH,
-    Memory, SPILL_FILES, Taken, Wait, index_pack, index_pack_thin, index_pack_within,
+    BASE_FILES, BaseFiles, Bases, EACH, HELD_FOR_AN_INDEXED_ENTRY, IndexLimits, IndexWork,
+    IndexedPackOnDisk, MAX_DELTA_DEPTH, Memory, SPILL_FILES, Taken, Wait, index_pack,
+    index_pack_thin, index_pack_within,
 };
 /// The walk below the bases of a pack, for whoever verifies packs its own way.
 pub mod walk {

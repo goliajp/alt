@@ -4,26 +4,44 @@
 use super::{Config, Error, Result, create_private, read_regular};
 use alt_base64::STANDARD;
 use alt_crypto::ed25519::{Signature, VerifyingKey};
-use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog};
+use alt_server_store::{ByteStore, MaintenanceSnapshot, SnapshotCatalog, Store};
 use std::{
     collections::BTreeMap,
-    fs::{File, OpenOptions},
-    io::{Read, Seek, Write},
+    fs::OpenOptions,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::Path,
     process::{Child, Command, Stdio},
 };
 
+mod archive;
 mod restore;
 mod tools;
 mod unread;
 mod verify;
+use archive::{append, blob_path, digest, regular, segment_path};
 pub use restore::restore;
 use tools::{Process, checked, postgres_command};
 pub use unread::Unread;
 pub use verify::{VerifiedBackup, verify};
 
 const MANIFEST_LIMIT: usize = 64 * 1024 * 1024;
+
+/// What the objects were found to be before the snapshot: the operation, the
+/// segments not read, and those that were, with whether a backup is made
+/// with such.
+type Found<'a> = (&'a str, Vec<Unread>, (alt_server_store::Read, bool));
+
+/// The directory `path` is in, where what a command writes on its way to `path`
+/// is put: on the disk `path` is on, not among the temporary files of the host,
+/// which may be small or kept in memory, and a backup is as large as the bytes
+/// of the instance.
+pub fn beside(path: &Path) -> Result<&Path> {
+    match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Ok(Path::new(".")),
+        Some(parent) => Ok(parent),
+        None => Err(Error::Config("a directory to write beside")),
+    }
+}
 #[derive(Clone, Debug, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
 pub struct FileDigest {
@@ -50,55 +68,6 @@ pub struct Manifest {
 pub(crate) struct SignedManifest {
     manifest: Manifest,
     signature: String,
-}
-fn regular(path: &Path) -> Result<File> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(alt_os::sys::O_NOFOLLOW | alt_os::sys::O_CLOEXEC)
-        .open(path)
-        .map_err(|_| Error::File)?;
-    if !file.metadata().map_err(|_| Error::File)?.is_file() {
-        return Err(Error::Config("backup entry is not a regular file"));
-    }
-    Ok(file)
-}
-fn digest(file: &mut (impl Read + Seek)) -> Result<FileDigest> {
-    file.rewind().map_err(|_| Error::File)?;
-    let mut hash = alt_hash::blake3::Hasher::new();
-    let mut bytes = 0u64;
-    let mut buffer = [0u8; 65536];
-    loop {
-        let n = file.read(&mut buffer).map_err(|_| Error::File)?;
-        if n == 0 {
-            break;
-        }
-        hash.update(&buffer[..n]);
-        bytes = bytes
-            .checked_add(n as u64)
-            .ok_or(Error::Config("backup size overflow"))?;
-    }
-    file.rewind().map_err(|_| Error::File)?;
-    Ok(FileDigest {
-        bytes,
-        blake3: hash.finalize().to_hex().to_string(),
-    })
-}
-fn append<W: Write>(
-    archive: &mut alt_tar::Builder<W>,
-    name: &str,
-    file: &mut (impl Read + Seek),
-) -> Result<FileDigest> {
-    let description = digest(file)?;
-    archive
-        .append_file(name.as_bytes(), 0o600, 0, description.bytes, file)
-        .map_err(|_| Error::File)?;
-    Ok(description)
-}
-fn blob_path(blob: &alt_server_store::SnapshotBlob) -> String {
-    format!("bytes/{}/{}", blob.repository, blob.blake3)
-}
-fn segment_path(segment: &alt_server_store::SnapshotPackSegment) -> String {
-    format!("packs/{}/{}", segment.repository, segment.segment)
 }
 /// Physical access to the configuration, receipt key and database is required;
 /// an HTTP administrator token alone cannot export passwords or signing keys.
@@ -132,22 +101,19 @@ pub fn create(
     }
     // a copy of segments that do not give their objects back is no backup,
     // unless it is asked for as that
-    let unread = match &mut store {
-        Some(store) => unread::found(store, "backup")?,
-        None => Vec::new(),
+    let (unread, read) = match &mut store {
+        Some(store) => unread::found_besides(store, "backup", &Default::default())?,
+        None => Default::default(),
     };
     if !unread.is_empty() && !with_unread {
-        return Err(unread::refused(
-            "backup_created",
-            &unread,
-            unread::BACKED_UP,
-        ));
+        return Err(unread::not_backed_up(&unread));
     }
     let operation = alt_browser_auth::secret();
     if let Some(store) = &mut store {
         store.record_backup_event(&operation, alt_server_store::BackupEvent::Started)?;
     }
-    let result = create_inner(config, schema, recipient, output, (&operation, unread));
+    let found = (operation.as_str(), unread, (read, with_unread));
+    let result = create_inner(config, schema, recipient, output, (store.as_mut(), found));
     if let Some(store) = &mut store {
         let event = if result.is_ok() {
             alt_server_store::BackupEvent::Created
@@ -167,7 +133,7 @@ fn create_inner(
     schema: u32,
     recipient: &str,
     output: &Path,
-    (operation, unread): (&str, Vec<Unread>),
+    (store, (operation, mut unread, (read, with_unread))): (Option<&mut Store>, Found<'_>),
 ) -> Result<Manifest> {
     alt_server_store::check_backup_schema(schema).map_err(Error::Config)?;
     config.check_volume()?;
@@ -175,7 +141,7 @@ fn create_inner(
         .mode(0o700)
         .create(output)
         .map_err(|_| Error::Config("backup output must be a new directory"))?;
-    let work = alt_os::temp::tempdir().map_err(|_| Error::File)?;
+    let work = alt_os::temp::tempdir_in(beside(output)?).map_err(|_| Error::File)?;
     let mut client = config.client()?;
     let signing_key = config.signing_key()?;
     let snapshot = MaintenanceSnapshot::begin(
@@ -185,6 +151,15 @@ fn create_inner(
         &signing_key,
         schema,
     )?;
+    // what was published after the objects were read is read now, the writes
+    // held behind the snapshot
+    if let Some(store) = store {
+        let (later, _) = unread::found_besides(store, "backup", &read)?;
+        if !later.is_empty() && !with_unread {
+            return Err(unread::not_backed_up(&later));
+        }
+        unread.extend(later);
+    }
     let database = work.path().join("database.dump");
     let mut dump = Process(
         postgres_command(config, "pg_dump")?
@@ -222,31 +197,14 @@ fn create_inner(
     );
     let mut archive = alt_tar::Builder::new(encrypt.0.stdin.take().ok_or(Error::File)?);
     let mut files = BTreeMap::new();
-    files.insert(
-        "database.dump".into(),
-        append(&mut archive, "database.dump", &mut regular(&database)?)?,
-    );
-    create_private(&work.path().join("receipt.key"), &signing_key.to_bytes())?;
-    files.insert(
-        "receipt.key".into(),
-        append(
-            &mut archive,
-            "receipt.key",
-            &mut regular(&work.path().join("receipt.key"))?,
-        )?,
-    );
-    create_private(
-        &work.path().join("config.json"),
-        &alt_json::to_vec(config).map_err(|_| Error::File)?,
-    )?;
-    files.insert(
-        "config.json".into(),
-        append(
-            &mut archive,
-            "config.json",
-            &mut regular(&work.path().join("config.json"))?,
-        )?,
-    );
+    let key = signing_key.to_bytes().to_vec();
+    let told = alt_json::to_vec(config).map_err(|_| Error::File)?;
+    let written = [("receipt.key", Some(&key)), ("config.json", Some(&told))];
+    for (name, content) in [("database.dump", None)].into_iter().chain(written) {
+        let content = content.map(Vec::as_slice);
+        let appended = archive::appended(&mut archive, (work.path(), name), content)?;
+        files.insert(name.into(), appended);
+    }
     for blob in &snapshot.catalog().blobs {
         let name = blob_path(blob);
         let description = append(&mut archive, &name, &mut snapshot.read_verified(blob)?)?;

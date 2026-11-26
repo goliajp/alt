@@ -1,6 +1,19 @@
 //! What indexing a pack may take.
 
-use super::{BaseFiles, Memory};
+use alt_git_codec::ObjectId;
+
+use super::{BaseFiles, Memory, scan::Entry};
+
+/// What indexing keeps of each entry until the index is written: where it
+/// is, the id it has twice over, how it is found among the deltas and
+/// whether the deltas of its id are being resolved, and its line of the
+/// index as it is put in order.
+pub const HELD_FOR_AN_INDEXED_ENTRY: u64 = (size_of::<Entry>()
+    + 2 * size_of::<Option<ObjectId>>()
+    + size_of::<(ObjectId, u32)>()
+    + size_of::<bool>()
+    + size_of::<u32>()
+    + size_of::<(ObjectId, u64, u32)>()) as u64;
 
 /// What indexing a pack may take.
 #[derive(Debug, Clone, Copy)]
@@ -80,11 +93,16 @@ impl<'a> IndexLimits<'a> {
     }
 
     /// What the pack has throughout while it is resolved, and what its
-    /// largest object takes: the bases that are held; and the object as a
-    /// base, as the instructions of a delta and as what they make.
-    pub(super) fn resolving(&self, inflated: u64, largest: u64) -> (u64, u64) {
-        let held = (self.base_bytes as u64).min(inflated);
-        (held, largest.saturating_mul(3))
+    /// largest object takes: the bases that are held and what is kept of
+    /// each entry; and the object as a base, as the instructions of a delta
+    /// and as what they make.
+    pub(super) fn resolving(&self, scanned: &super::scan::Scanned) -> (u64, u64) {
+        let held = (self.base_bytes as u64).min(scanned.inflated);
+        let entries = super::scan::held(scanned.entries.len());
+        (
+            held.saturating_add(entries),
+            scanned.largest.saturating_mul(3),
+        )
     }
 
     /// where an object that is large has its memory taken
@@ -93,6 +111,16 @@ impl<'a> IndexLimits<'a> {
         taken: &'b Option<super::Taken<'static>>,
     ) -> Option<super::ObjectMemory<'b>> {
         super::ObjectMemory::of(taken, self.each_bytes)
+    }
+
+    /// The pack is scanned and made whole no further once nobody waits for it.
+    pub(super) fn going_on(&self) -> Result<(), crate::PackError> {
+        match self.given_up {
+            Some(gone) if gone.load(std::sync::atomic::Ordering::Relaxed) => {
+                Err(crate::PackError::GivenUp)
+            }
+            _ => Ok(()),
+        }
     }
 
     /// how long the pack waits for what others have

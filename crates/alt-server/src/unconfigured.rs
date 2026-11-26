@@ -27,7 +27,7 @@ pub(super) fn execute(args: &Args) -> Result<Option<Value>> {
         spec.validate()
             .map_err(|_| Error::Config("recovery specification"))?;
         let verified = operator::backup::verify(
-            input,
+            (input, operator::backup::beside(input)?),
             identity,
             public_key(&spec.backup.receipt_public_key)?,
             spec.backup.maximum_bytes.0,
@@ -96,7 +96,7 @@ pub(super) fn execute(args: &Args) -> Result<Option<Value>> {
     } = &args.command
     {
         let verified = operator::backup::verify(
-            input,
+            (input, operator::backup::beside(input)?),
             identity,
             public_key(trusted_receipt_key)?,
             *maximum_bytes,

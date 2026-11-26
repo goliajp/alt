@@ -32,10 +32,8 @@ struct OperatorDb {
 }
 impl OperatorDb {
     fn new() -> Self {
-        assert_eq!(
-            std::env::var("ALT_SERVER_TEST_ISOLATED").as_deref(),
-            Ok("1")
-        );
+        let isolated = std::env::var("ALT_SERVER_TEST_ISOLATED");
+        assert_eq!(isolated.as_deref(), Ok("1"));
         let admin = std::env::var("ALT_SERVER_TEST_ADMIN_DSN").unwrap();
         assert!(
             admin.contains("dbname=postgres"),
@@ -91,6 +89,7 @@ impl OperatorDb {
                 receiving_megabytes: None,
                 indexing_megabytes: None,
                 sending_megabytes: None,
+                large_sending_kib: None,
             },
         };
         std::fs::write(&config, alt_json::to_vec(&spec).unwrap()).unwrap();

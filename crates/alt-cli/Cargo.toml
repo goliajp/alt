@@ -77,6 +77,7 @@ alt-deflate.workspace = true
 alt-server.workspace = true
 alt-server-store.workspace = true
 alt-pg.workspace = true
+alt-pack-segment.workspace = true
 tokio = {version="1",features=["rt-multi-thread","net","sync"]}
 alt-sign.workspace = true
 alt-store.workspace = true

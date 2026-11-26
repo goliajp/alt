@@ -37,7 +37,14 @@ as_owner "$bin/initdb" -D "$run/data" -U alt_test --auth=trust --no-locale > "$r
 # tests of sixteen threads doing so at once the table of locks PostgreSQL sizes
 # for its connections by default is filled, and whichever statement asks for the
 # next lock fails with "out of shared memory".
-as_owner "$bin/pg_ctl" -D "$run/data" -l "$run/server.log" -o "-h '' -k $run -c max_connections=60 -c max_locks_per_transaction=512" -w start
+# The tests of every thread run at once, each with a database and a server of
+# its own: the test, the server's hold on its database, its pool and its
+# background work have up to seven connections at once between them. A
+# connection past the limit fails whichever test opens it, so there are twelve
+# for each thread.
+. "$(dirname "$0")/test-postgres-threads.sh"
+connections=$((threads * 12 + 20))
+as_owner "$bin/pg_ctl" -D "$run/data" -l "$run/server.log" -o "-h '' -k $run -c max_connections=$connections -c max_locks_per_transaction=512" -w start
 started=1
 "$bin/postgres" --version
 ALT_SERVER_TEST_ADMIN_DSN="host=$run user=alt_test dbname=postgres connect_timeout=5"

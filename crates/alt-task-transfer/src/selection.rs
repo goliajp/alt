@@ -1,7 +1,7 @@
 use crate::{Draft, Error, Result};
 use alt_git_codec::{HashAlgo, ObjectKind};
 use alt_remote_protocol::{ContentKind, Limits, Publication, RecordRoot};
-use alt_repository_service::{ObjectSource, verify_graph};
+use alt_repository_service::{ObjectSource, verify_graph_to_send};
 use alt_task::Artifact;
 use alt_task_service::{
     ArtifactSource, AttachmentOmission, CollectorAttestation, PreparedTaskGraph, RecordKey,
@@ -186,7 +186,8 @@ pub fn build(
     }
     roots.sort_unstable();
     roots.dedup();
-    let graph = verify_graph(source, HashAlgo::Sha1, &roots, limits.into())?;
+    // the receiver tells what of it `git fsck` refuses, knowing what it holds
+    let graph = verify_graph_to_send(source, HashAlgo::Sha1, &roots, limits.into())?;
     for oid in graph.objects() {
         let mut object =
             ObjectSource::open(source, oid)?.ok_or(Error::Invalid("source object missing"))?;

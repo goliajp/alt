@@ -2,7 +2,7 @@
 //! a directory of its own for what it keeps for a while, and killed with
 //! the test.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -32,7 +32,6 @@ impl Server {
         let _ = self.child.wait();
         let mut out = String::new();
         if let Some(mut reader) = self.stderr.take() {
-            use std::io::Read;
             // Read from the BufReader, not the inner ChildStderr:
             // the bind-line `read_line` may have buffered additional
             // bytes (BufReader fills its 8 KiB buffer on the first
@@ -81,14 +80,14 @@ pub(crate) fn listening(mut cmd: Command) -> Server {
     let deadline = Instant::now() + Duration::from_secs(5);
     let addr = loop {
         let before = said.len();
-        if reader.read_line(&mut said).unwrap() == 0 {
+        if (&mut reader).take(1 << 16).read_line(&mut said).unwrap() == 0 {
             let ended = child.wait();
             panic!("altd-server ended before it listened ({ended:?}), having said: {said}");
         }
         if let Some((_, after)) = said[before..].split_once("listening on ") {
             break after.split_whitespace().next().unwrap().to_owned();
         }
-        if Instant::now() > deadline {
+        if Instant::now() > deadline || said.len() > 1 << 20 {
             panic!("altd-server never logged its listening address, having said: {said}");
         }
     };

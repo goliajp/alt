@@ -1,7 +1,16 @@
 //! What the server of these tests is given: its limits and how it listens.
 use alt_remote_protocol::Limits;
 use alt_server::{HttpOptions, NativeOptions};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// an hour from now, in milliseconds since the epoch
+pub(super) fn future() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+        + 3_600_000
+}
 
 pub(super) fn limits() -> Limits {
     Limits {
@@ -53,7 +62,7 @@ pub(super) fn options() -> HttpOptions {
         password_places: 2,
         verifying: Box::leak(Box::new(alt_server::PackMemory::new(4 << 30))),
         base_files: None,
-        sending: alt_server::shares::Shares::passed_by_one_alone(u64::MAX),
+        sending: alt_server::shares::Shares::passed_by_one_alone(u64::MAX, 1),
         native: NativeOptions {
             portable: None,
             task_limits: task_limits(),

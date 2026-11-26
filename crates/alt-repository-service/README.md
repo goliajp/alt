@@ -6,7 +6,8 @@ streamed; parsed objects, graph size, edges and tree expansion have explicit
 limits. Every dependency is present, hash-checked and type-checked. Gitlinks
 retain their external commit IDs without requiring another repository's objects.
 The initial write boundary accepts canonical Git tree modes and rejects unsafe
-metadata paths, duplicate names and unsorted trees; raw non-UTF8 names survive.
+metadata paths and duplicate names; a tree out of Git's order is taken as it is,
+as Git takes it, and raw non-UTF8 names survive.
 
 Publication validation checks authenticated actor/delegation, installation,
 repository and recovery epoch, current runtime/revocation generation and lease,

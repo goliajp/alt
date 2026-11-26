@@ -6,7 +6,7 @@ use std::time::Instant;
 
 /// A history for `git fast-import`: a directory of `files` files, and `commits`
 /// commits that each give one of them other content.
-fn history(files: usize, commits: usize) -> Vec<u8> {
+pub(super) fn history(files: usize, commits: usize) -> Vec<u8> {
     let mut stream = b"blob\nmark :1\ndata 2\nx\n\n".to_vec();
     let who = "committer Original Actor <original@example.test>";
     let commit = |stream: &mut Vec<u8>, at: usize| {
@@ -102,9 +102,11 @@ fn a_fetch_whose_time_is_over_chooses_no_further_and_gives_its_worker_back() {
         .spawn()
         .unwrap();
     let mut stream = importing.stdin.take().unwrap();
-    stream.write_all(&history(8000, 3000)).unwrap();
+    let written = stream.write_all(&history(8000, 3000));
     drop(stream);
-    assert!(importing.wait().unwrap().success());
+    let imported = importing.wait().unwrap();
+    written.unwrap();
+    assert!(imported.success());
     // a branch beside the one that is asked for: the fetch is not of all there is
     ok(work, &f.token, &["branch", "older", "main~1"]);
     let older = text(ok(work, &f.token, &["rev-parse", "older"]));
@@ -145,4 +147,51 @@ fn a_fetch_whose_time_is_over_chooses_no_further_and_gives_its_worker_back() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// A history of three hundred commits of one tree. What a fetch of most of it sends is
+/// chosen in a walk that reads that tree and goes through every commit: the
+/// commits are steps of the walk as the trees are, and a walk that may take
+/// fewer steps than there are commits is refused.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn the_commits_a_fetch_goes_through_are_steps_of_its_walk() {
+    let f = Fixture::new();
+    let temp = alt_os::temp::tempdir().unwrap();
+    let work = temp.path();
+    ok(work, &f.token, &["init", "-q", "--initial-branch=main"]);
+    let mut stream = b"blob\nmark :1\ndata 2\nx\n\n".to_vec();
+    let who = "commit refs/heads/main\ncommitter Original Actor <original@example.test>";
+    for at in 0..300 {
+        write!(stream, "{who} {at} +0000\ndata 2\nc\n").unwrap();
+        if at == 0 {
+            stream.extend_from_slice(b"M 100644 :1 file\n");
+        }
+    }
+    let mut importing = Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(work)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let written = importing.stdin.take().unwrap().write_all(&stream);
+    let imported = importing.wait().unwrap();
+    written.unwrap();
+    assert!(imported.success());
+    // a branch beside the one that is asked for: a fetch of every tip is sent with no walk
+    ok(work, &f.token, &["branch", "older", "main~1"]);
+    let tip = text(ok(work, &f.token, &["rev-parse", "older"]));
+    let server = |steps: usize| {
+        let (mut factory, options) = Running::parts(&f, None, vec![]);
+        factory.limits.walk_steps = steps;
+        Running::serve(factory, options, None, false)
+    };
+    let all = server(1 << 30);
+    let url = format!("{}/git/repository", all.url);
+    ok(work, &f.token, &["push", "-q", &url, "main", "older"]);
+    assert_eq!(fetched(&url, &f.token, &tip).0, 200);
+    drop(all);
+    let few = server(100);
+    let url = format!("{}/git/repository", few.url);
+    assert_ne!(fetched(&url, &f.token, &tip).0, 200);
 }

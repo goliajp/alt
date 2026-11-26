@@ -25,7 +25,7 @@
 //!   a set of the ids gone through: under [`HELD_FOR_AN_ENTRY`] bytes for
 //!   each, while the lists grow as well.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use alt_git_codec::ObjectId;
@@ -63,17 +63,26 @@ struct Found {
     anew: bool,
 }
 
-/// Where the entries looked at are: a few in a row, and a set once there
-/// are many. Most reads are of a short chain and have no need of a set.
+/// Where the entries looked at are, and at which place of those found: a few
+/// in a row, and a map once there are many. Most reads are of a short chain
+/// and have no need of a map.
 #[derive(Default)]
 struct Seen {
     few: Vec<u64>,
-    many: HashSet<u64>,
+    many: HashMap<u64, u32>,
 }
 
 impl Seen {
-    /// whether `offset` was not seen before
-    fn insert(&mut self, offset: u64) -> bool {
+    /// the place of `offset`, where it was seen
+    fn place(&self, offset: u64) -> Option<u32> {
+        match self.many.is_empty() {
+            true => (self.few.iter().position(|seen| *seen == offset)).map(|at| at as u32),
+            false => self.many.get(&offset).copied(),
+        }
+    }
+
+    /// whether `offset` was not seen before; it is seen at `place` from now on
+    fn insert(&mut self, offset: u64, place: u32) -> bool {
         if self.many.is_empty() && self.few.len() < 64 {
             let new = !self.few.contains(&offset);
             if new {
@@ -82,20 +91,37 @@ impl Seen {
             return new;
         }
         if self.many.is_empty() {
-            self.many.extend(self.few.drain(..));
+            let few = self.few.drain(..).enumerate();
+            self.many.extend(few.map(|(at, seen)| (seen, at as u32)));
         }
-        self.many.insert(offset)
+        let new = !self.many.contains_key(&offset);
+        if new {
+            self.many.insert(offset, place);
+        }
+        new
     }
 }
 
 impl Found {
     /// whether the entry was not found before
     fn entry(&mut self, offset: u64, under: u32) -> bool {
-        let new = self.seen.insert(offset);
+        let new = self.seen.insert(offset, self.entries.len() as u32);
         if new {
             self.entries.push((offset, under));
         }
         new
+    }
+
+    /// whether the entry at `place` is one the entry `under` is made from, or
+    /// that entry itself: a way down that comes back to it goes round
+    fn below(&self, place: u32, mut under: u32) -> bool {
+        while under != NONE {
+            if under == place {
+                return true;
+            }
+            under = self.entries[under as usize].1;
+        }
+        false
     }
 }
 
@@ -112,7 +138,8 @@ impl IndexedPack {
         self.read_at_counting(offset, &mut ReadWork::default())
     }
 
-    /// [`Self::read`], adding to `work` what it took.
+    /// [`Self::read`], adding to `work` what it took, for a test to count
+    #[doc(hidden)]
     pub fn read_counting(
         &self,
         oid: &ObjectId,
@@ -127,7 +154,8 @@ impl IndexedPack {
         self.read_from(&begin, Some(all.clone()), work).map(Some)
     }
 
-    /// [`Self::read_at`], adding to `work` what it took.
+    /// [`Self::read_at`], adding to `work` what it took, for a test to count
+    #[doc(hidden)]
     pub fn read_at_counting(
         &self,
         offset: u64,
@@ -182,14 +210,17 @@ impl IndexedPack {
     ) -> Result<(), PackError> {
         if all.len() > 1 && !found.anew {
             let kept = self.found_in.lock().unwrap().get(&all.start).copied();
-            // the entry kept may be one this read came from: the object is
-            // then looked for in the others
-            if let Some(offset) = kept
-                && found.entry(offset, under)
-            {
-                found.kept = true;
-                work.ranged += 1;
-                return Ok(());
+            // the entry kept may be found already: beside the way this read
+            // came, where it is reached from there; on that way, where the
+            // object is then looked for in the others
+            if let Some(offset) = kept {
+                let place = found.seen.place(offset);
+                if place.is_none_or(|place| !found.below(place, under)) {
+                    found.entry(offset, under);
+                    found.kept = true;
+                    work.ranged += 1;
+                    return Ok(());
+                }
             }
         }
         // once is enough: whatever comes to this id again finds them found

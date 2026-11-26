@@ -59,7 +59,7 @@ mod walk;
 pub use budget::{Budget, IndexWork, Objects as ObjectMemory, SPILL_FILES};
 pub use deltas::{Deltas, Of};
 pub use files::{BaseFiles, FILES as BASE_FILES};
-pub use limits::IndexLimits;
+pub use limits::{HELD_FOR_AN_INDEXED_ENTRY, IndexLimits};
 pub use memory::{Memory, Taken, Wait};
 pub use objects::Objects;
 pub use thin::Bases;
@@ -96,6 +96,9 @@ pub struct IndexedPackOnDisk {
     pub work: IndexWork,
     /// the memory the pack took, held for as long as its objects are read
     pub memory: Option<Taken<'static>>,
+    /// the room on the disk of the bases appended to make the pack whole, held
+    /// for as long as the pack is
+    pub appended: Vec<Taken<'static>>,
 }
 
 /// Build a `.idx` for an existing `.pack` file. The idx is written next
@@ -147,40 +150,26 @@ pub fn index_pack_thin(
     // an entry is inflated whole to be scanned: no larger than an object
     // may be, nor than what its stream can inflate to
     let body = (map.len() as u64).saturating_mul(1032);
-    let scanning = limits.let_in(0, body.min(limits.object_bytes))?;
+    let scanning = limits.let_in(scan::held_by(&pack, count), body.min(limits.object_bytes))?;
     let room = limits.objects(&scanning);
     let mut scanned = scan::scan(&pack, count, limits, room, &mut work)?;
     drop(scanning);
-    let before = limits.resolving(scanned.inflated, scanned.largest);
+    let before = limits.resolving(&scanned);
     let mut memory = limits.let_in(before.0, before.1)?;
     let mut oids = scanned.oids.clone();
     let room = limits.objects(&memory);
     resolve::resolve(&pack, &mut scanned, &mut oids, 0, limits, room, &mut work)?;
     drop(pack);
-    let came = oids.len();
+    let mut appended = Vec::new();
     if let Some(bases) = bases
         && oids.contains(&None)
-        && let Some(whole) =
-            thin::complete(pack_path, algo, &mut scanned, &mut oids, bases, limits)?
     {
-        trailer = whole;
-        // a base that was appended may be larger than all the pack came with
-        let after = limits.resolving(scanned.inflated, scanned.largest);
-        if after != before {
-            drop(memory.take());
-            memory = limits.let_in(after.0, after.1)?;
+        let pieces = (&mut scanned, &mut oids);
+        let held = (&mut memory, before);
+        let made = thin::made_whole((pack_path, algo), pieces, bases, limits, held, &mut work)?;
+        if let Some(whole) = made {
+            (trailer, appended) = (whole.trailer, whole.appended);
         }
-        let pack = Pack::open(pack_path, algo)?;
-        let room = limits.objects(&memory);
-        resolve::resolve(
-            &pack,
-            &mut scanned,
-            &mut oids,
-            came,
-            limits,
-            room,
-            &mut work,
-        )?;
     }
     let stuck = PackError::Format("delta resolution stuck (ref-delta base missing or cycle)");
     let oids: Vec<ObjectId> = oids.into_iter().collect::<Option<_>>().ok_or(stuck)?;
@@ -204,6 +193,7 @@ pub fn index_pack_thin(
         objects: count,
         work,
         memory,
+        appended,
     })
 }
 

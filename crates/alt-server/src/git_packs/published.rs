@@ -41,6 +41,9 @@ pub(super) fn spool(
         if first.len() as u64 + copied > limit {
             return Err(Error::Limit("Git pack bytes"));
         }
+        // synced as it is received: a publication writes the index behind it and
+        // syncs the file, the last of them with the row of its repository held
+        file.sync_data()?;
         // the file is new and only this request writes to it; the index it gets
         // later lies behind what is mapped here
         let pack = unsafe { alt_os::map::Mmap::map(&file) }?;
@@ -88,9 +91,8 @@ pub(super) fn publish(
     }
     let limits = store.limits();
     let gone = room.as_ref().map(|room| &*room.given_up);
-    let led = (view.unreachable)
-        .then(|| store.led(view, gone))
-        .transpose()?;
+    let led = (view.unreachable).then(|| store.led(view, gone));
+    let led = led.transpose()?;
     let mut behind = (view.segment_ids.clone(), view.segments.clone());
     let mut push = Push {
         view,
@@ -106,6 +108,7 @@ pub(super) fn publish(
     for _ in 0..MOVED_MOST {
         let fresh = fresh(store, repository)?;
         let made = push.made(fresh, (&behind.0, &behind.1))?;
+        let leans = leaned(&push);
         let segment = made.stored.as_ref().map(|stored| NewSegment {
             id: &stored.0.id,
             objects: stored.0.objects,
@@ -121,7 +124,8 @@ pub(super) fn publish(
         // transaction for inspection, not for replay
         let committed =
             alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-                store.pack_publish(credential, &made.publication, &graph, segment, &behind.0)
+                let read = (&behind.0[..], &view.refs, &leans);
+                store.pack_publish(credential, &made.publication, &graph, segment, read)
             });
         match committed {
             Err(Error::Precondition(alt_server_store::SEGMENTS_MOVED)) => {
@@ -132,10 +136,29 @@ pub(super) fn publish(
         }
     }
     // the segments moved under it time after time: no other is let by now
+    held(store, credential, repository, &mut push, published)
+}
+
+/// [`publish`] of `push` with the row of its repository held from before the
+/// segments are looked at.
+fn held(
+    store: &mut Store,
+    credential: &Credential,
+    repository: &str,
+    push: &mut Push<'_>,
+    published: &mut bool,
+) -> Result<Option<RequestKey>> {
     let fresh = fresh(store, repository)?;
+    let leans = leaned(push);
     let mut last = None;
+    let changes = push.changes;
+    let updated: Vec<_> = (changes.iter())
+        .map(|update| (update.name.as_str(), update.new))
+        .collect();
+    let view = push.view;
     alt_server_store::telemetry::observe(alt_server_telemetry::Phase::Commit, || {
-        store.pack_publish_held(credential, repository, &mut |ids, set| {
+        let read = (repository, &view.refs, &leans);
+        store.pack_publish_held(credential, read, &updated, &mut |ids, set| {
             let mut made = push.made(fresh.clone(), (ids, set))?;
             let segment = made.stored.as_mut().map(|stored| HeldSegment {
                 inline: stored.0.inline.take(),
@@ -151,6 +174,14 @@ pub(super) fn publish(
     made.adopted(store, repository, published)
 }
 
+/// What of the segments the pack of `push` leans on, once it is verified.
+fn leaned(push: &Push<'_>) -> alt_server_store::Leans {
+    let verified = push.verified.as_ref();
+    let leans = verified.map(|pack| pack.leans());
+    let whole = verified.is_none_or(|pack| pack.leans_whole());
+    alt_server_store::Leans::of(leans.unwrap_or_default(), whole)
+}
+
 /// The updates of a push that change a ref. A client may list refs it does not
 /// change: they take no part in the publication, but a stale expectation is
 /// still a conflict.
@@ -163,7 +194,7 @@ fn changed<'a>(
         if update.old != update.new {
             changes.push(update);
         } else if view.refs.get(&update.name) != update.old {
-            return Err(Error::Precondition("reference changed since it was read"));
+            return Err(Error::Precondition(super::CHANGED));
         }
     }
     Ok(changes)

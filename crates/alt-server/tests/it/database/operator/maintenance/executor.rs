@@ -14,8 +14,9 @@ pub(super) fn recovered_by_the_executor(
     // The executor-facing command reconciles a lost completion response without
     // importing the archive again or overwriting a completed target.
     use golia_platform_contract::lifecycle::{Images, ProvisionSpec, RecoveryBackup, RecoverySpec};
+    let beside = alt_server::operator::backup::beside(backup).unwrap();
     let verified = alt_server::operator::backup::verify(
-        backup,
+        (backup, beside),
         std::path::Path::new(&identity),
         config.signing_key().unwrap().verifying_key().to_bytes(),
         100_000_000,

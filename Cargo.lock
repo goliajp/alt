@@ -92,6 +92,7 @@ dependencies = [
  "alt-odb",
  "alt-oplog",
  "alt-os",
+ "alt-pack-segment",
  "alt-pg",
  "alt-portable",
  "alt-precompose",
@@ -235,6 +236,14 @@ dependencies = [
  "alt-bytes",
  "alt-os",
  "alt-testutil",
+]
+
+[[package]]
+name = "alt-git-fsck"
+version = "0.1.0"
+dependencies = [
+ "alt-git-codec",
+ "alt-git-config",
 ]
 
 [[package]]
@@ -406,6 +415,8 @@ name = "alt-pack-segment"
 version = "0.1.0"
 dependencies = [
  "alt-deflate",
+ "alt-git-codec",
+ "alt-git-fsck",
  "alt-git-pack",
  "alt-hash",
  "alt-inflate",
@@ -550,6 +561,7 @@ version = "0.1.0"
 dependencies = [
  "alt-bytes",
  "alt-git-codec",
+ "alt-git-fsck",
  "alt-hash",
  "alt-json",
  "alt-json-testkit",

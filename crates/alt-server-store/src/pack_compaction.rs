@@ -13,7 +13,7 @@ use crate::{
     store::{instance, integer, now, unsigned},
 };
 use alt_pack_segment::{Segment, SegmentSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// fewest segments a merge is worth
 const RUN: usize = 8;
@@ -42,6 +42,19 @@ fn run_start(bytes: &[u64]) -> Option<usize> {
         total += next;
     }
     (bytes.len() - start >= RUN).then_some(start)
+}
+
+/// Called with the file a merge wrote, before the merge is published: for a test
+/// to take it away, as the sweep of another process may.
+#[doc(hidden)]
+pub static MERGE_WRITTEN: Mutex<Option<MergeWritten>> = Mutex::new(None);
+pub type MergeWritten = Arc<dyn Fn(&std::path::Path) + Send + Sync>;
+
+fn merge_written(path: &std::path::Path) {
+    let written = MERGE_WRITTEN.lock().expect("merge written").clone();
+    if let Some(written) = written {
+        written(path);
+    }
 }
 
 impl Store {
@@ -139,13 +152,13 @@ impl Store {
     ) -> Result<Option<Arc<Segment>>> {
         let segment =
             Arc::new(Segment::open(path).map_err(|_| Error::Integrity("merged pack segment"))?);
+        merge_written(path);
         let part_ids: Vec<&str> = parts.iter().map(|(id, _)| id.as_str()).collect();
         // the segments behind the parts that were found to stand on the merged one
         let mut standing: Vec<(String, bool)> = Vec::new();
         loop {
             let mut tx = self.client.transaction()?;
-            // a backup holds the instance row while it copies the files of the live
-            // segments; like every write, a merge waits behind it
+            // like every write, a merge waits behind a backup copying the live segments
             instance(&mut tx, &self.spec, &self.signing_key)?;
             // publications take this lock too, so the set of live segments stands still
             tx.query_one(
@@ -186,7 +199,8 @@ impl Store {
                 "UPDATE alt_pack_segments SET state='retired',retired_at=$3 WHERE repository=$1 AND segment_id=ANY($2) AND state='live' RETURNING sequence,bytes",
                 &[&repository, &part_ids, &integer(time)?],
             )?;
-            if retired.len() != parts.len() {
+            // a sweep removes the files no row knows with this lock held
+            if retired.len() != parts.len() || !path.is_file() {
                 return Ok(None);
             }
             let mut sequence = 0;

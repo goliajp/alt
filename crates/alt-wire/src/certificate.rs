@@ -72,19 +72,48 @@ pub fn pushee_is_at(pushee: &str, origins: &[String], path: &str) -> bool {
 
 /// An address a server is told it is reached at, as certificates are compared
 /// with it: `http` or `https`, a host, and a port where it is not the one of
-/// the scheme; in lower case, and nothing behind it but a slash.
+/// the scheme; in lower case, and nothing behind it but a slash. The host is
+/// written as a client writes the one of an address it is given: a name with
+/// no dot at its end, four numbers of an IPv4 address, or an IPv6 address in
+/// brackets in its shortest form. Another way of writing it would match no
+/// certificate.
 pub fn origin(told: &str) -> Option<String> {
     let (scheme, rest) = told.trim().split_once("://")?;
     let scheme = scheme.to_ascii_lowercase();
     let default = match scheme.as_str() {
-        "http" => ":80",
-        "https" => ":443",
+        "http" => 80,
+        "https" => 443,
         _ => return None,
     };
-    let host = rest.strip_suffix('/').unwrap_or(rest).to_ascii_lowercase();
-    let host = host.strip_suffix(default).unwrap_or(&host);
-    let plain = |byte: u8| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte);
-    (!host.is_empty() && host.bytes().all(plain)).then(|| format!("{scheme}://{host}"))
+    let rest = rest.strip_suffix('/').unwrap_or(rest).to_ascii_lowercase();
+    let (host, port) = match rest.rfind(':').filter(|at| !rest[*at..].contains(']')) {
+        Some(at) => (&rest[..at], Some(&rest[at + 1..])),
+        None => (rest.as_str(), None),
+    };
+    let port = match port {
+        None => default,
+        Some(port) if port.starts_with('0') => return None,
+        Some(port) => port.parse::<u16>().ok().filter(|port| *port != 0)?,
+    };
+    let bracketed = host.strip_prefix('[').and_then(|v6| v6.strip_suffix(']'));
+    let written = match bracketed {
+        Some(v6) => format!("[{}]", v6.parse::<std::net::Ipv6Addr>().ok()?),
+        None if host.bytes().all(|b| b.is_ascii_digit() || b == b'.') => {
+            host.parse::<std::net::Ipv4Addr>().ok()?.to_string()
+        }
+        None => {
+            let named = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
+            let label = |label: &str| !label.is_empty() && label.bytes().all(named);
+            host.split('.').all(label).then(|| host.to_owned())?
+        }
+    };
+    if written != host {
+        return None;
+    }
+    Some(match port == default {
+        true => format!("{scheme}://{host}"),
+        false => format!("{scheme}://{host}:{port}"),
+    })
 }
 
 #[cfg(test)]

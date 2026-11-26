@@ -179,9 +179,14 @@ repository as it is stored) take no more than `http.sending_megabytes` between
 them until they are sent: half of what is free on that disk when the server
 starts where the key is absent. The responses to one address have a quarter of
 that; a single response of an address may pass the quarter as far as half of
-the room, one such response at a time, and one that is alone on the server is
-written whatever its size. A fetch
-whose response has no room is answered `503` with `Retry-After`. The files of bases of
+the room, one such response for each address and as many on the server as half
+of `http.workers`, and one that is alone on the server is written whatever its
+size. A response that would pass the quarter while those are taken waits for
+its turn until its request's time is over, the addresses that wait taking turns.
+While another waits, such a response is taken at
+`http.large_sending_kib` KiB a second at the least (1024 where the key is
+absent), counted over 30 seconds, and is let go of where it is taken slower. A
+fetch whose response has no room is answered `503` with `Retry-After`. The files of bases of
 all the packs verified at once take no more than `http.indexing_megabytes`
 between them; a base that has no room there, or cannot be written, is made
 again instead, which counts against what its pack may inflate to. A pack that
@@ -416,10 +421,10 @@ operation's isolated scratch directory until investigation finishes, then
 remove that exact directory. Do not expose scratch or backup directories through
 the web server.
 
-This release upgrades from schema 18, 19, 20 and 21, and backs up and restores
-schema 18 to 21 and the current schema 22. A backup of an instance that is not yet
+This release upgrades from schema 18, 19, 20, 21 and 22, and backs up and restores
+schema 18 to 22 and the current schema 23. A backup of an instance that is not yet
 upgraded requires its schema explicitly, `--schema 18`, `--schema 19`,
-`--schema 20` or `--schema 21`. Stop
+`--schema 20`, `--schema 21` or `--schema 22`. Stop
 the old service, save and verify its backup, then upgrade, naming the schema the
 instance is at:
 
@@ -487,6 +492,19 @@ of as a repository without unread objects. A pack is indexed anew within
 once, whatever the length of its chains; the objects kept for the deltas made of
 them take 256 MiB at the most.
 
+`refused-trees [repository]` reads the trees of the live pack segments, of one
+repository or of all, and lists those a push is now refused for: a name that is
+`.git` or `.alt` (in any case, and as NTFS and HFS+ read a name), `.`, `..`,
+empty or holding `/`, a name twice in one tree, or a mode of more than sixteen
+digits. Each is told with its repository, segment, tree id and the reason in
+the words of `git fsck`. It changes nothing. Where there are any, or a
+repository could not be read, the command ends with status 1. Versions before
+this one took such trees in; run it before upgrading, with the new version
+against the instance as it is: it needs no credential, and reads nothing of
+the database that schema 21 does not have. A tree it lists is still served; a portable export of its
+repository fails on it, and `scrub --mend` cannot index anew a segment that
+holds it.
+
 `backup` reads the instance through in the same way before it copies anything.
 Where a segment does not give all of its objects back it makes no backup, ends
 with status 1 and tells under `unread` which repository, which segment, how
@@ -524,6 +542,12 @@ From schema 20 the transaction removes the foreign key from a ref to its
 repository. The database checked it once for every ref a push created, while a
 ref is only ever written under the lock of its repository's row and no
 repository is removed. No row changes.
+
+From schema 22 the transaction adds two indexes, over what the manifests of
+committed requests and of archived publications name: the native content route
+asks them whether a published publication of records names an object no ref
+leads to, which read every manifest of the repository without them. Building
+them reads each committed request once; no row changes.
 
 From schema 21 the transaction adds the moment a request ended and the moment a
 credential was revoked, and three indexes. A revoked credential is given the

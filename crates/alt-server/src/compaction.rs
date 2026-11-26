@@ -45,9 +45,11 @@ impl Compaction {
 }
 
 fn compact(factory: &StoreFactory, store: &mut Option<Store>, repository: &str) -> Result<()> {
+    // the store is kept between repositories; each is merged through the gate
+    let _inside = factory.gate.enter()?;
     let store = match store {
         Some(store) => store,
-        None => store.insert(factory.open()?),
+        None => store.insert(factory.connect()?),
     };
     while store.compact_packs(repository)? {}
     store.sweep_packs(repository, PACK_RETIRED_GRACE_MS)?;

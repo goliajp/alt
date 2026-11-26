@@ -11,6 +11,8 @@ struct Inner {
     factory: StoreFactory,
     idle: Mutex<Idle>,
     limit: usize,
+    /// what the objects stored as deltas that are read whole are restored in
+    restoring: &'static alt_pack_segment::Memory,
 }
 #[derive(Default)]
 struct Idle {
@@ -32,12 +34,29 @@ impl Drop for Inner {
 #[derive(Clone)]
 pub(super) struct Pool(Arc<Inner>);
 impl Pool {
-    pub fn new(factory: StoreFactory, workers: usize) -> Self {
+    pub fn new(
+        factory: StoreFactory,
+        (workers, restoring): (usize, &'static alt_pack_segment::Memory),
+    ) -> Self {
         Self(Arc::new(Inner {
             factory,
             idle: Mutex::new(Idle::default()),
             limit: workers.min(16),
+            restoring,
         }))
+    }
+    /// [`Self::open`] for a request that is answered until `by` and while
+    /// `gone` is not set: what it restores of objects stored as deltas waits
+    /// as long for its memory.
+    pub fn open_for(
+        &self,
+        by: Option<std::time::Instant>,
+        gone: &Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<Lease> {
+        let mut lease = self.open()?;
+        let (memory, gone) = (self.0.restoring, Some(Arc::clone(gone)));
+        lease.restoring_within(Some(alt_pack_segment::Restoring { memory, by, gone }));
+        Ok(lease)
     }
     pub fn open(&self) -> Result<Lease> {
         let retained = {
@@ -49,6 +68,7 @@ impl Pool {
         };
         let store = match retained {
             Some(mut store) => {
+                store.holding(Some(Box::new(self.0.factory.gate.enter()?)));
                 // Every store transaction checks the instance row itself, and a
                 // dead connection fails its first statement; neither is retried.
                 self.0.factory.check_mode(&mut store)?;
@@ -100,7 +120,10 @@ impl Drop for Lease {
             return;
         }
         let mut idle = self.pool.0.idle.lock().expect("idle stores");
-        let store = self.store.take().expect("store lease");
+        let mut store = self.store.take().expect("store lease");
+        store.restoring_within(None);
+        // an idle store is none in use
+        store.holding(None);
         // a connection that died during the request is dropped, not reused
         if !idle.closed && !store.is_closed() && idle.stores.len() < self.pool.0.limit {
             idle.stores.push(store);

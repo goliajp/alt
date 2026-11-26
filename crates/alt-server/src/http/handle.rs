@@ -117,6 +117,8 @@ pub(super) async fn handle(
     };
     let factory = state.factory.clone();
     let waiting = crate::git::Waiting::default();
+    let worker = worker::Slot::new(permit, &state.workers);
+    let done = worker.until_done();
     let work = work::Work {
         factory: factory.clone(),
         credential,
@@ -134,25 +136,23 @@ pub(super) async fn handle(
             given_up: waiting.0.clone(),
             files: state.options.base_files,
             sending: (state.options.sending.clone(), alt_shares::address(from)),
+            worker: Some(worker.clone()),
         },
     };
-    let result = tokio::time::timeout(
-        state.options.work_timeout,
-        spawn_observed(Phase::Execute, move || {
-            // This permit remains held if the HTTP waiter times out. Dropping a
-            // response cannot start unlimited detached database/validation work.
-            let _permit = permit;
-            if gzip {
-                source = encoding::decode(source, size)?;
-            }
-            let mut store = factory.open()?;
-            source.as_file_mut().seek(SeekFrom::Start(0))?;
-            work.run(&mut store, route, source.as_file_mut())
-        }),
-    )
-    .await;
+    let executed = spawn_observed(Phase::Execute, move || {
+        // This worker remains held if the HTTP waiter times out. Dropping a
+        // response cannot start unlimited detached database/validation work.
+        let _done = done;
+        if gzip {
+            source = encoding::decode(source, size)?;
+        }
+        let store = factory.open_for(Some(work.verifying.by), &work.verifying.given_up)?;
+        source.as_file_mut().seek(SeekFrom::Start(0))?;
+        work.run(&mut Some(store), route, source.as_file_mut())
+    });
+    let result = worker.within(state.options.work_timeout, executed).await;
     match result {
-        Ok(Ok(result)) => render_output(result, request_key),
+        Some(Ok(result)) => render_output(result, request_key),
         // a read changed nothing, so there is no outcome to look up
         _ if reading => failure(
             503,

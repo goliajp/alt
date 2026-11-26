@@ -16,6 +16,8 @@ use crate::{
 use alt_pack_segment::{Memory, Segment, SegmentSet};
 use std::sync::Arc;
 
+mod mend;
+
 /// the objects told of by name for one segment; the rest are counted
 const NAMED: usize = 16;
 
@@ -51,6 +53,9 @@ impl Unread {
         }
     }
 }
+
+/// Segments whose objects were read, each by its repository and its id.
+pub type Read = std::collections::BTreeSet<(String, String)>;
 
 /// How far a reading of every object has come, told as each object was read:
 /// the repository, how many of its objects were read, and how many it has.
@@ -130,6 +135,8 @@ impl Store {
             unread: Vec::new(),
         };
         let mut older: Vec<Arc<Segment>> = Vec::with_capacity(ids.len());
+        // the ids of those segments, the ones put in the place of others among them
+        let mut older_ids: Vec<(String, bool)> = Vec::with_capacity(ids.len());
         let mut read = 0;
         let mut each = || {
             read += 1;
@@ -139,24 +146,18 @@ impl Store {
             let before = SegmentSet::new(older.clone());
             let lost = alt_pack_segment::unread_telling(segment, &before, &mut each)
                 .map_err(|_| Error::Integrity("pack segment index"))?;
-            if lost.is_empty() {
-                older.push(Arc::clone(segment));
-                continue;
-            }
-            let mut unread = Unread::of(&part.0, &lost);
-            let mut stands = Arc::clone(segment);
-            if let Some(memory) = mend {
-                match self.index_anew(repository, part, segment, &before, memory) {
-                    Ok((id, anew)) => {
-                        unread.replaced_by = Some(id);
-                        stands = anew;
-                    }
-                    Err(Error::OutcomeUnknown) => return Err(Error::OutcomeUnknown),
-                    Err(error) => unread.kept_because = Some(error.to_string()),
+            let mut stands = (part.clone(), Arc::clone(segment));
+            if !lost.is_empty() {
+                let mut unread = Unread::of(&part.0, &lost);
+                let behind = (&older_ids[..], &before);
+                let found = (part, segment, &mut unread);
+                if let Some(anew) = self.mended(repository, found, behind, mend)? {
+                    stands = anew;
                 }
+                scrubbed.unread.push(unread);
             }
-            older.push(stands);
-            scrubbed.unread.push(unread);
+            older_ids.push(stands.0);
+            older.push(stands.1);
         }
         Ok(scrubbed)
     }
@@ -168,6 +169,18 @@ impl Store {
     /// backed up and what was restored is read through before it is taken for
     /// a copy of the instance.
     pub fn unread_packs(&mut self, told: Reading<'_>) -> Result<Vec<(String, Unread)>> {
+        Ok(self.unread_packs_besides(&Read::new(), told)?.0)
+    }
+
+    /// [`Self::unread_packs`] of the live segments that are not among those
+    /// `done` already, each still read behind for those that follow it; and
+    /// all that are live, by repository, as read by now.
+    pub fn unread_packs_besides(
+        &mut self,
+        done: &Read,
+        told: Reading<'_>,
+    ) -> Result<(Vec<(String, Unread)>, Read)> {
+        let mut now_read = Read::new();
         let mut tx = self.client.transaction()?;
         instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
         let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
@@ -183,58 +196,97 @@ impl Store {
                 told(&repository, read, all)
             };
             for (part, segment) in ids.iter().zip(set.segments()) {
-                let before = SegmentSet::new(older.clone());
-                let lost = alt_pack_segment::unread_telling(segment, &before, &mut each);
-                let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
-                if !lost.is_empty() {
-                    unread.push((repository.clone(), Unread::of(&part.0, &lost)));
+                let known = (repository.clone(), part.0.clone());
+                if !done.contains(&known) {
+                    let before = SegmentSet::new(older.clone());
+                    let lost = alt_pack_segment::unread_telling(segment, &before, &mut each);
+                    let lost = lost.map_err(|_| Error::Integrity("pack segment index"))?;
+                    if !lost.is_empty() {
+                        unread.push((repository.clone(), Unread::of(&part.0, &lost)));
+                    }
                 }
+                now_read.insert(known);
                 older.push(Arc::clone(segment));
             }
         }
-        Ok(unread)
+        Ok((unread, now_read))
     }
 
-    /// Puts the pack of `segment`, indexed anew behind `before`, in the place of
-    /// the live segment `part`. The id of the new segment, and the segment.
-    fn index_anew(
+    /// A store of an instance at a schema this release upgrades from, or at
+    /// the current one, for what is read of it before it is upgraded: every
+    /// such schema has what [`Self::repositories`] and [`Self::refused_trees`]
+    /// read, and nothing else is to be asked of the store.
+    pub fn open_older(
+        mut client: alt_pg::Client,
+        bytes: crate::ByteStore,
+        spec: crate::InstanceSpec,
+        signing_key: alt_crypto::ed25519::SigningKey,
+        limits: alt_remote_protocol::Limits,
+    ) -> Result<Self> {
+        spec.validate()?;
+        limits.validate()?;
+        let rows = client.query(
+            "SELECT version,checksum FROM alt_schema ORDER BY version",
+            &[],
+        )?;
+        let supported = crate::OLDEST_SCHEMA as usize..=crate::SCHEMA_VERSION as usize;
+        if !supported.contains(&rows.len()) {
+            return Err(Error::Precondition(crate::UNSUPPORTED_SOURCE_SCHEMA));
+        }
+        crate::schema::check_rows(&rows, rows.len())?;
+        let client = crate::database::Connection::new(client);
+        Ok(Store {
+            client,
+            bytes,
+            spec,
+            signing_key,
+            limits,
+            waited: None,
+            restoring: None,
+            held: None,
+        })
+    }
+
+    /// The repositories of the instance, in the order of their names, for one
+    /// who has the configuration and the database of the instance in hand.
+    pub fn repositories(&mut self) -> Result<Vec<String>> {
+        let mut tx = self.client.transaction()?;
+        instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
+        let rows = tx.query("SELECT id FROM alt_repositories ORDER BY id", &[])?;
+        tx.commit()?;
+        Ok(rows.iter().map(|row| row.get(0)).collect())
+    }
+
+    /// The trees of the live segments of `repository` that a push is now
+    /// refused for: each with its segment, its id and why, in the words of
+    /// `git fsck`. Nothing is changed, and nothing is read that schema 21 does
+    /// not have: it is asked before an instance is upgraded.
+    pub fn refused_trees(
         &mut self,
         repository: &str,
-        part: &(String, bool),
-        segment: &Arc<Segment>,
-        before: &SegmentSet,
-        memory: &'static Memory,
-    ) -> Result<(String, Arc<Segment>)> {
-        let content =
-            alt_pack_segment::indexed_anew(segment, before, memory).map_err(
-                |error| match error {
-                    alt_pack_segment::Error::Limit("index memory") => Error::Limit(NO_MEMORY),
-                    _ => Error::Integrity("pack of the segment does not verify"),
-                },
-            )?;
-        let (id, path, _writing) = self.write_segment(repository, &content)?;
-        let inline = content.len() <= INLINE_SEGMENT_BYTES;
-        let anew = Segment::open(&path).map(Arc::new);
-        let whole = anew.as_ref().is_ok_and(|anew| {
-            alt_pack_segment::unread(anew, before).is_ok_and(|lost| lost.is_empty())
-        });
-        if !whole {
-            let _ = std::fs::remove_file(&path);
-            return Err(Error::Integrity("pack segment indexed anew is not read"));
+        told: Reading<'_>,
+    ) -> Result<Vec<(String, String, &'static str)>> {
+        let mut tx = self.client.transaction()?;
+        instance_unlocked(&mut tx, &self.spec, &self.signing_key)?;
+        let known = tx.query_opt("SELECT 1 FROM alt_repositories WHERE id=$1", &[&repository])?;
+        if known.is_none() {
+            return Err(Error::Precondition(NO_REPOSITORY));
         }
-        let parts = std::slice::from_ref(part);
-        match self.publish_merge(repository, None, parts, &id, &content, &path, inline) {
-            Ok(Some(segment)) => {
-                self.adopt_segment(repository, &id, Arc::clone(&segment))?;
-                Ok((id, segment))
-            }
-            // the outcome is not known: a sweep removes the file if the row is not there
-            Err(Error::OutcomeUnknown) => Err(Error::OutcomeUnknown),
-            other => {
-                let _ = std::fs::remove_file(&path);
-                other?;
-                Err(Error::Precondition("pack segment is no longer live"))
+        let ids = Self::live_segment_ids(&mut tx, repository)?;
+        tx.commit()?;
+        let set = self.segments_as_they_are(repository, &ids)?;
+        let (mut read, all, mut refused) = (0, set.objects(), Vec::new());
+        let mut each = || {
+            read += 1;
+            told(repository, read, all)
+        };
+        for (at, (part, segment)) in ids.iter().zip(set.segments()).enumerate() {
+            let before = SegmentSet::new(set.segments()[..at].to_vec());
+            let found = alt_pack_segment::refused_trees(segment, &before, &mut each);
+            for (tree, why) in found.map_err(|_| Error::Integrity("pack segment index"))? {
+                refused.push((part.0.clone(), alt_pack_segment::hex(&tree), why));
             }
         }
+        Ok(refused)
     }
 }

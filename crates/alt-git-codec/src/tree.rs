@@ -99,22 +99,28 @@ impl Tree {
 /// them canonically would change the tree's hash.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EntryMode {
-    bytes: [u8; 6],
+    bytes: [u8; MODE_DIGITS],
     len: u8,
 }
 
+/// The most digits a mode is written with: six, and zeros before them, which
+/// Git reads as the same mode.
+pub const MODE_DIGITS: usize = 16;
+
 impl EntryMode {
-    /// Accepts 1–6 octal digits, as git's tree parser does.
+    /// Accepts 1 to [`MODE_DIGITS`] octal digits whose value has six at the
+    /// most, as Git's tree parser reads them.
     pub fn from_bytes(mode: &[u8]) -> Result<Self, ObjectParseError> {
-        if mode.is_empty() || mode.len() > 6 {
+        let digits = mode.iter().skip_while(|digit| **digit == b'0').count();
+        if mode.is_empty() || mode.len() > MODE_DIGITS || digits > 6 {
             return Err(ObjectParseError::Tree(
-                "entry mode must be 1-6 octal digits",
+                "entry mode must be 1-6 octal digits, after zeros",
             ));
         }
         if !mode.iter().all(|b| (b'0'..=b'7').contains(b)) {
             return Err(ObjectParseError::Tree("entry mode has non-octal digit"));
         }
-        let mut bytes = [0u8; 6];
+        let mut bytes = [0u8; MODE_DIGITS];
         bytes[..mode.len()].copy_from_slice(mode);
         Ok(Self {
             bytes,
@@ -246,6 +252,18 @@ mod tests {
         assert!(tree.entries[4].mode.is_symlink());
         assert_eq!(tree.entries[1].mode.as_str(), "100664");
         assert_eq!(tree.serialize(), data);
+
+        // zeros before a mode, as many as sixteen digits: what Git reads them as
+        let mut padded = entry_bytes("040000", b"dir", &oid);
+        padded.extend(entry_bytes("0000000000100644", b"file", &oid));
+        let tree = Tree::parse(&padded, HashAlgo::Sha1).unwrap();
+        assert_eq!(tree.entries[0].mode.value(), 0o40000);
+        assert_eq!(tree.entries[1].mode.value(), 0o100644);
+        assert_eq!(tree.serialize(), padded);
+        for mode in ["00000000000100644", "1000644"] {
+            let data = entry_bytes(mode, b"file", &oid);
+            assert!(Tree::parse(&data, HashAlgo::Sha1).is_err(), "{mode}");
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::{Error, Result};
-use alt_git_codec::{Commit, HashAlgo, ObjectId, ObjectKind, Tag, Tree};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use alt_git_codec::{ObjectId, ObjectKind};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
 /// The adapter must expose only this repository's pinned objects and this
@@ -74,7 +74,7 @@ impl Node {
             Self::Tag { .. } => ObjectKind::Tag,
         }
     }
-    fn edges(&self) -> Vec<(ObjectId, ObjectKind)> {
+    pub(crate) fn edges(&self) -> Vec<(ObjectId, ObjectKind)> {
         match self {
             Self::Blob => vec![],
             Self::Tree(entries) => entries
@@ -212,10 +212,10 @@ fn paths(
 /// Only constructible by complete byte/hash/type validation. This is evidence
 /// about a pinned snapshot, not a capability to publish without a transaction.
 pub struct VerifiedGraph {
-    nodes: BTreeMap<ObjectId, Node>,
+    pub(crate) nodes: BTreeMap<ObjectId, Node>,
     /// objects the walk stopped at because the repository already holds them verified
-    settled: BTreeMap<ObjectId, ObjectKind>,
-    limits: GraphLimits,
+    pub(crate) settled: BTreeMap<ObjectId, ObjectKind>,
+    pub(crate) limits: GraphLimits,
     pub bytes: u64,
 }
 /// A graph verified down to what the repository already holds, continued there:
@@ -305,252 +305,4 @@ impl VerifiedGraph {
     ) -> Result<Vec<Vec<u8>>> {
         changed_paths_bounded(self, before, after, budget)
     }
-}
-
-/// Reads and verifies every object reachable from `roots`.
-pub fn verify_graph(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, false)
-}
-/// Reads and verifies what `roots` reach down to the objects the source reports as
-/// settled, so the work follows what is new and not the history behind it.
-pub fn verify_new_graph(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-) -> Result<VerifiedGraph> {
-    verify(source, algo, roots, limits, true)
-}
-fn verify(
-    source: &impl ObjectSource,
-    algo: HashAlgo,
-    roots: &[ObjectId],
-    limits: GraphLimits,
-    stop_at_settled: bool,
-) -> Result<VerifiedGraph> {
-    if limits.objects == 0
-        || limits.edges == 0
-        || limits.object_bytes == 0
-        || limits.structured_bytes == 0
-        || limits.total_bytes == 0
-        || limits.paths == 0
-        || limits.path_bytes == 0
-        || limits.walk_steps == 0
-    {
-        return Err(Error::Limit("invalid graph limits"));
-    }
-    let mut nodes = BTreeMap::new();
-    let mut settled = BTreeMap::new();
-    let mut pending: VecDeque<_> = roots.iter().copied().collect();
-    let mut queued: BTreeSet<_> = roots.iter().copied().collect();
-    if queued.len() > limits.objects || roots.len() > limits.edges {
-        return Err(Error::Limit("roots"));
-    }
-    let mut bytes = 0u64;
-    let mut edges = 0usize;
-    while let Some(oid) = pending.pop_front() {
-        if nodes.contains_key(&oid) || settled.contains_key(&oid) {
-            continue;
-        }
-        check_oid(oid, algo)?;
-        if stop_at_settled && let Some(kind) = source.settled(oid)? {
-            settled.insert(oid, kind);
-            continue;
-        }
-        let object = source.open(oid)?.ok_or(Error::Missing(oid))?;
-        bytes = bytes
-            .checked_add(object.bytes)
-            .ok_or(Error::Limit("total bytes"))?;
-        if bytes > limits.total_bytes {
-            return Err(Error::Limit("total bytes"));
-        }
-        let node = verify_object(oid, object, limits)?;
-        let dependencies = node.edges();
-        edges = edges
-            .checked_add(dependencies.len())
-            .ok_or(Error::Limit("edges"))?;
-        if edges > limits.edges {
-            return Err(Error::Limit("edges"));
-        }
-        for (dependency, _) in dependencies {
-            check_oid(dependency, algo)?;
-            if queued.insert(dependency) {
-                if queued.len() > limits.objects {
-                    return Err(Error::Limit("objects"));
-                }
-                pending.push_back(dependency);
-            }
-        }
-        nodes.insert(oid, node);
-    }
-    // An object reused at a different edge must still have the required type.
-    for node in nodes.values() {
-        for (oid, kind) in node.edges() {
-            let found = nodes
-                .get(&oid)
-                .map(Node::kind)
-                .or(settled.get(&oid).copied());
-            if found != Some(kind) {
-                return Err(Error::Integrity("dependency type mismatch"));
-            }
-        }
-    }
-    Ok(VerifiedGraph {
-        nodes,
-        settled,
-        limits,
-        bytes,
-    })
-}
-fn check_oid(oid: ObjectId, algo: HashAlgo) -> Result<()> {
-    if oid.algo() != algo || oid.as_bytes().iter().all(|b| *b == 0) {
-        return Err(Error::Integrity("object id algorithm or zero sentinel"));
-    }
-    Ok(())
-}
-fn parse_oid(bytes: &[u8], algo: HashAlgo) -> Result<ObjectId> {
-    let oid = ObjectId::from_hex(bytes).map_err(|_| Error::Integrity("malformed object id"))?;
-    check_oid(oid, algo)?;
-    Ok(oid)
-}
-pub fn verify_object(
-    oid: ObjectId,
-    mut object: ObjectReader<'_>,
-    limits: GraphLimits,
-) -> Result<Node> {
-    if object.bytes > limits.object_bytes {
-        return Err(Error::Limit("object bytes"));
-    }
-    let structured = object.kind != ObjectKind::Blob;
-    if structured && object.bytes > limits.structured_bytes as u64 {
-        return Err(Error::Limit("structured object bytes"));
-    }
-    let mut data = Vec::new();
-    let mut sha1 = alt_hash::Sha1::new();
-    let mut sha256 = alt_hash::Sha256::new();
-    let header = format!("{} {}\0", object.kind, object.bytes);
-    sha1.update(header.as_bytes());
-    sha256.update(header.as_bytes());
-    let mut remaining = object.bytes;
-    let mut buffer = [0u8; 65536];
-    while remaining > 0 {
-        let n = object
-            .reader
-            .read(&mut buffer[..remaining.min(65536) as usize])?;
-        if n == 0 {
-            return Err(Error::Integrity("truncated object"));
-        }
-        let bytes = &buffer[..n];
-        match oid.algo() {
-            HashAlgo::Sha1 => sha1.update(bytes),
-            HashAlgo::Sha256 => sha256.update(bytes),
-        }
-        if structured {
-            data.extend_from_slice(bytes);
-        }
-        remaining -= n as u64;
-    }
-    if object.reader.read(&mut buffer[..1])? != 0 {
-        return Err(Error::Integrity("object size mismatch"));
-    }
-    let actual = match oid.algo() {
-        HashAlgo::Sha1 => ObjectId::Sha1(sha1.finalize()),
-        HashAlgo::Sha256 => ObjectId::Sha256(sha256.finalize()),
-    };
-    if actual != oid {
-        return Err(Error::Integrity("object hash mismatch"));
-    }
-    parse_node(object.kind, &data, oid.algo())
-}
-fn single_header<'a>(
-    headers: &'a [(alt_bytes::BString, alt_bytes::BString)],
-    name: &[u8],
-) -> Result<&'a [u8]> {
-    let mut values = headers
-        .iter()
-        .filter(|(key, _)| key.as_slice() == name)
-        .map(|(_, value)| value.as_slice());
-    let value = values
-        .next()
-        .ok_or(Error::Integrity("missing required header"))?;
-    if values.next().is_some() {
-        return Err(Error::Integrity("duplicate required header"));
-    }
-    Ok(value)
-}
-pub fn parse_node(kind: ObjectKind, data: &[u8], algo: HashAlgo) -> Result<Node> {
-    Ok(match kind {
-        ObjectKind::Blob => Node::Blob,
-        ObjectKind::Commit => {
-            let commit = Commit::parse(data).map_err(|_| Error::Integrity("commit encoding"))?;
-            let headers = commit.headers();
-            let tree = parse_oid(single_header(headers, b"tree")?, algo)?;
-            single_header(headers, b"author")?;
-            single_header(headers, b"committer")?;
-            let parents = headers
-                .iter()
-                .filter(|(key, _)| key.as_slice() == b"parent")
-                .map(|(_, value)| parse_oid(value, algo))
-                .collect::<Result<Vec<_>>>()?;
-            Node::Commit { tree, parents }
-        }
-        ObjectKind::Tag => {
-            let tag = Tag::parse(data).map_err(|_| Error::Integrity("tag encoding"))?;
-            let target = parse_oid(single_header(tag.headers(), b"object")?, algo)?;
-            let kind = ObjectKind::from_bytes(single_header(tag.headers(), b"type")?)
-                .map_err(|_| Error::Integrity("tag target kind"))?;
-            if single_header(tag.headers(), b"tag")?.is_empty() {
-                return Err(Error::Integrity("empty tag name"));
-            }
-            Node::Tag { target, kind }
-        }
-        ObjectKind::Tree => {
-            let tree = Tree::parse(data, algo).map_err(|_| Error::Integrity("tree encoding"))?;
-            let mut names = BTreeSet::new();
-            let mut entries = Vec::new();
-            for entry in tree.entries {
-                let name = entry.name.to_vec();
-                if name.is_empty()
-                    || name == b"."
-                    || name == b".."
-                    || name.contains(&b'/')
-                    || name.eq_ignore_ascii_case(b".git")
-                    || name.eq_ignore_ascii_case(b".alt")
-                    || !names.insert(name.clone())
-                {
-                    return Err(Error::Integrity("unsafe or duplicate tree name"));
-                }
-                let mode = entry.mode.value();
-                if !matches!(mode, 0o040000 | 0o100644 | 0o100755 | 0o120000 | 0o160000) {
-                    return Err(Error::Integrity("unsupported tree mode"));
-                }
-                check_oid(entry.oid, algo)?;
-                entries.push(TreeLink {
-                    name,
-                    mode,
-                    oid: entry.oid,
-                });
-            }
-            // Canonical Git tree order treats directories as if suffixed '/'.
-            let sort_key = |entry: &TreeLink| {
-                let mut key = entry.name.clone();
-                if entry.mode == 0o040000 {
-                    key.push(b'/');
-                }
-                key
-            };
-            if entries
-                .windows(2)
-                .any(|pair| sort_key(&pair[0]) >= sort_key(&pair[1]))
-            {
-                return Err(Error::Integrity("unsorted tree"));
-            }
-            Node::Tree(entries)
-        }
-    })
 }

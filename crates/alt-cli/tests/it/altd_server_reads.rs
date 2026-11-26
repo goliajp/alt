@@ -76,6 +76,7 @@ fn a_fetch_does_not_wait_for_a_push_that_is_writing_its_objects() {
         signed_in: None,
         sig_label: "none",
         told: &receive::told_whole,
+        gone: None,
     };
     let mut store = Store::open(alt_dir.clone()).unwrap();
     let during = std::cell::RefCell::new(String::new());
@@ -129,6 +130,7 @@ fn a_fetch_behind_requests_that_read_no_object_does_not_wait_for_a_push_either()
         signed_in: None,
         sig_label: "none",
         told: &receive::told_whole,
+        gone: None,
     };
     let mut store = Store::open(alt_dir.clone()).unwrap();
     let during = std::cell::RefCell::new(String::new());
@@ -171,6 +173,7 @@ fn the_requests_of_fetches_one_after_another_wait_for_no_push_either() {
         signed_in: None,
         sig_label: "none",
         told: &receive::told_whole,
+        gone: None,
     };
     let mut store = Store::open(alt_dir.clone()).unwrap();
     let rounds = std::cell::Cell::new(0);

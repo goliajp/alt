@@ -46,8 +46,12 @@ impl Link {
         }
         out.push(0);
         wire::finish(out, 0)?;
+        // as libpq's connect_timeout: the time to begin the session, its
+        // answers waited for within it too
+        link.stream.set_read_timeout(config.connect_timeout)?;
         link.stream.send(&link.out)?;
         link.authenticate(config)?;
+        link.stream.set_read_timeout(None)?;
         Ok(link)
     }
 

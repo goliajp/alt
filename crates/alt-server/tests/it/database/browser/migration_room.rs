@@ -5,13 +5,14 @@ use super::*;
 use alt_server::shares::Shares;
 use std::io::Read;
 
-const ROOM: u64 = 24 << 20;
+const ROOM: u64 = 48 << 20;
 const FILE: usize = 9_000_000;
 
-/// The room is twenty-four megabytes and the one file of the repository nine.
-/// An address that has another taker in the room is held to its quarter, for
-/// the archive and for the file alone, and told to come again; another
-/// address is given each, and the room is given back when they are sent.
+/// The room is forty-eight megabytes and the one file of the repository nine,
+/// within the quarter of an address. An address whose other takers have its
+/// quarter is held to it, for the archive and for the file alone, and told to
+/// come again; another address is given each, and the room is given back when
+/// they are sent.
 #[test]
 #[ignore = "requires isolated PostgreSQL and loopback HTTP; exercised by browser acceptance and closing gate"]
 fn the_archive_of_a_migration_and_a_file_of_it_take_of_the_room_and_an_address_a_quarter() {
@@ -21,7 +22,7 @@ fn the_archive_of_a_migration_and_a_file_of_it_take_of_the_room_and_an_address_a
     store
         .set_grants(admin, "repository", "browser", true, true, &grants())
         .unwrap();
-    let room = Shares::passed_by_one_alone(ROOM);
+    let room = Shares::passed_by_one_alone(ROOM, 1);
     let server = crate::database::sign_in_deadline::start(&mut f, |_, options| {
         options.sending = room.clone()
     });
@@ -68,10 +69,10 @@ fn the_archive_of_a_migration_and_a_file_of_it_take_of_the_room_and_an_address_a
     };
     let (one, other) = ("203.0.113.9", "203.0.113.10");
     let mut mine = room.share(Some(one.parse().unwrap()));
-    mine.take(1).unwrap();
+    mine.take(ROOM / 4).unwrap();
     let given_back = || {
         let began = std::time::Instant::now();
-        while room.held() > 1 {
+        while room.held() > ROOM / 4 {
             assert!(began.elapsed() < Duration::from_secs(30), "{}", room.held());
             std::thread::sleep(Duration::from_millis(20));
         }

@@ -5,7 +5,7 @@ use crate::Output;
 use alt_git_codec::{HashAlgo, ObjectId};
 use alt_pack_segment::{Oid, Segment, SegmentSet};
 use alt_remote_protocol::{Manifest, ObjectFormat, Publication, RefUpdate, RequestKey, VERSION};
-use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store};
+use alt_server_store::{Credential, Error, NewSegment, PackView, Result, Store, ancestor};
 use alt_wire::pkt;
 use std::{
     collections::BTreeSet,
@@ -33,6 +33,7 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
         E::Limit(reason) => Error::Limit(reason),
         E::Busy(reason) => Error::Busy(reason),
         E::GivenUp => Error::Busy("the request is waited for no longer"),
+        E::Unsafe(oid, what) => Error::Fsck(oid, what),
         E::Format(reason) | E::Corrupt(reason) => Error::Integrity(reason),
         E::Dangling(..) | E::MissingBase(_) | E::NotFound(_) => {
             Error::Integrity("pack references an unavailable object")
@@ -42,32 +43,6 @@ pub(crate) fn segment_error(error: alt_pack_segment::Error) -> Error {
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// whether `old` is an ancestor of `new`; generations prune everything older than `old`
-fn ancestor(set: &SegmentSet, old: &Oid, new: &Oid, remaining: &mut usize) -> Result<bool> {
-    let Some(floor) = set.commit(old).map(|commit| commit.generation) else {
-        return Ok(false);
-    };
-    let mut seen = alt_hash::KeyedIdSet::default();
-    let mut pending = vec![*new];
-    while let Some(oid) = pending.pop() {
-        *remaining = remaining
-            .checked_sub(1)
-            .ok_or(Error::Limit("Git fast-forward walk"))?;
-        if oid == *old {
-            return Ok(true);
-        }
-        if !seen.insert(oid) {
-            continue;
-        }
-        if let Some(commit) = set.commit(&oid)
-            && commit.generation > floor
-        {
-            pending.extend(commit.parents);
-        }
-    }
-    Ok(false)
 }
 
 pub(crate) fn receive(
@@ -181,19 +156,7 @@ pub(crate) fn receive(
         Ok(request) => (request, Ok(())),
         Err(error) => (None, Err(error)),
     };
-    let message = match &outcome {
-        Ok(()) => None,
-        Err(Error::OutcomeUnknown) => {
-            Some("outcome unknown; inspect remote refs and the server request".to_owned())
-        }
-        Err(Error::Unauthorized) => Some("access revoked".to_owned()),
-        // the operator can raise a limit; the pusher has to know which one it was
-        Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
-        Err(Error::Busy(_)) => {
-            Some("the packs of other pushes are being verified; push again".to_owned())
-        }
-        Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
-    };
+    let message = refused_for(&outcome);
     if !head.capabilities.iter().any(|cap| cap == "report-status") {
         outcome?;
         return Ok(Output::Bytes {
@@ -212,11 +175,24 @@ pub(crate) fn receive(
             None => alt_wire::push::CommandStatus::Ok(update.name.clone()),
         })
         .collect();
+    let refused = match &outcome {
+        Err(Error::Fsck(oid, what)) => Some(format!("error: object {}: {what}\n", hex(oid))),
+        _ => None,
+    };
+    let unpack = refused
+        .as_ref()
+        .map_or(Ok(()), |_| Err("index-pack abnormal exit"));
     let mut report = Vec::new();
-    alt_wire::push::encode_report_status(&mut report, Ok(()), &commands)?;
+    alt_wire::push::encode_report_status(&mut report, unpack, &commands)?;
     let body = if head.capabilities.iter().any(|cap| cap == "side-band-64k") {
-        // the report travels on band 1, closed by a flush packet
+        // what fsck says on band 2, which the client shows after `remote:`; the
+        // report on band 1, closed by a flush packet
         let mut framed = Vec::with_capacity(report.len() + 16);
+        if let Some(said) = &refused {
+            framed.extend_from_slice(format!("{:04x}", said.len() + 5).as_bytes());
+            framed.push(2);
+            framed.extend_from_slice(said.as_bytes());
+        }
         for chunk in report.chunks(65515) {
             framed.extend_from_slice(format!("{:04x}", chunk.len() + 5).as_bytes());
             framed.push(1);
@@ -238,3 +214,33 @@ pub(crate) fn receive(
         }),
     }
 }
+
+/// What a Git client is told a push was refused for, where it was.
+fn refused_for(outcome: &Result<()>) -> Option<String> {
+    match outcome {
+        Ok(()) => None,
+        Err(Error::OutcomeUnknown) => {
+            Some("outcome unknown; inspect remote refs and the server request".to_owned())
+        }
+        Err(Error::Unauthorized) => Some("access revoked".to_owned()),
+        // the operator can raise a limit; the pusher has to know which one it was
+        Err(Error::Limit(what)) => Some(format!("server limit exceeded: {what}")),
+        Err(Error::Busy(_)) => {
+            Some("the packs of other pushes are being verified; push again".to_owned())
+        }
+        // as Git answers a pack its fsck refuses
+        Err(Error::Fsck(..)) => Some("unpacker error".to_owned()),
+        // a ref was moved or deleted after the client read where it was
+        Err(Error::Repository(alt_repository_service::Error::Precondition(_)))
+        | Err(Error::Precondition(CHANGED | alt_server_store::REFS_MOVED)) => {
+            Some("a ref changed since it was read; fetch and push again".to_owned())
+        }
+        Err(Error::Precondition(alt_server_store::LOST_UNTOLD)) => Some(
+            "a ref changed since it was read, and what it led to is more than is looked through; fetch and push again".to_owned(),
+        ),
+        Err(_) => Some("publication rejected; inspect current refs and policy".to_owned()),
+    }
+}
+
+/// what a push is refused with where a ref it updates moved after it was read
+const CHANGED: &str = "reference changed since it was read";

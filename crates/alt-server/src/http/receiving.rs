@@ -10,12 +10,15 @@
 //! What is bounded instead is the receiving itself: how many bodies one caller has
 //! under way at once, and how many bytes of bodies the instance holds that no
 //! worker has taken yet, of which the bodies of one caller have a quarter between
-//! them: more only where the caller has one body alone. A caller is an account,
-//! or an address where nobody has signed in.
+//! them: more only where the caller has one body alone. A body that passes the
+//! quarter beside others is the one turned away only where it came after them:
+//! a body that says nothing of its length is begun beside one that is under the
+//! quarter, and the one that came first goes on as it would have alone. A caller
+//! is an account, or an address where nobody has signed in.
 
 use super::*;
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     sync::{
         Mutex,
         atomic::{AtomicU64, Ordering},
@@ -24,8 +27,10 @@ use std::{
 use tokio::sync::OwnedSemaphorePermit;
 
 pub(super) struct Receiving {
-    /// by caller: the bodies under way, and the bytes they hold between them
-    callers: Mutex<HashMap<String, (usize, u64)>>,
+    /// by caller: the bodies under way, in the order they came, and the bytes
+    /// they hold between them
+    callers: Mutex<HashMap<String, (BTreeSet<u64>, u64)>>,
+    came: AtomicU64,
     bytes: AtomicU64,
     each: usize,
     most: u64,
@@ -44,6 +49,7 @@ pub(super) enum Full {
 pub(super) struct Slot {
     of: Arc<Receiving>,
     caller: String,
+    came: u64,
     bytes: u64,
 }
 
@@ -51,6 +57,7 @@ impl Receiving {
     pub(super) fn new(each: usize, most: u64) -> Arc<Self> {
         Arc::new(Receiving {
             callers: Mutex::default(),
+            came: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             each,
             most,
@@ -63,18 +70,20 @@ impl Receiving {
             return Err(Full::Instance);
         }
         let mut callers = self.callers.lock().expect("receiving callers");
-        let (under_way, held) = callers.entry(caller.to_owned()).or_insert((0, 0));
-        let beside = *under_way > 0 && held.saturating_add(declared) > self.most / 4;
-        if *under_way >= self.each || beside {
-            if *under_way == 0 {
+        let (under_way, held) = callers.entry(caller.to_owned()).or_default();
+        let beside = !under_way.is_empty() && held.saturating_add(declared) > self.most / 4;
+        if under_way.len() >= self.each || beside {
+            if under_way.is_empty() {
                 callers.remove(caller);
             }
             return Err(Full::Caller);
         }
-        *under_way += 1;
+        let came = self.came.fetch_add(1, Ordering::Relaxed);
+        under_way.insert(came);
         Ok(Slot {
             of: self.clone(),
             caller: caller.to_owned(),
+            came,
             bytes: 0,
         })
     }
@@ -88,7 +97,8 @@ impl Slot {
         let mut callers = self.of.callers.lock().expect("receiving callers");
         let (under_way, theirs) = callers.get_mut(&self.caller).expect("a body under way");
         *theirs += bytes;
-        if *under_way > 1 && *theirs > self.of.most / 4 {
+        let first = under_way.first() == Some(&self.came);
+        if under_way.len() > 1 && *theirs > self.of.most / 4 && !first {
             return Err(Full::Caller);
         }
         if held.saturating_add(bytes) > self.of.most {
@@ -103,9 +113,9 @@ impl Drop for Slot {
         self.of.bytes.fetch_sub(self.bytes, Ordering::AcqRel);
         let mut callers = self.of.callers.lock().expect("receiving callers");
         if let Some((under_way, held)) = callers.get_mut(&self.caller) {
-            *under_way -= 1;
+            under_way.remove(&self.came);
             *held -= self.bytes;
-            if *under_way == 0 {
+            if under_way.is_empty() {
                 callers.remove(&self.caller);
             }
         }
@@ -261,10 +271,19 @@ mod tests {
             slot.took(80).unwrap();
         }
         assert_eq!(slow[3].took(11), Err(Full::Caller));
+        drop(slow);
+        // one that came first goes on past it beside one that came later, which
+        // is held to it
+        let mut first = receiving.begin("a", 0).unwrap();
+        first.took(200).unwrap();
+        let mut later = receiving.begin("a", 0).unwrap();
+        first.took(100).unwrap();
+        assert_eq!(later.took(1), Err(Full::Caller));
+        drop((first, later));
         // the others have what the instance holds beyond that
         let mut other = receiving.begin("b", 700).unwrap();
         other.took(700).unwrap();
-        drop((slow, other));
+        drop(other);
         assert!(receiving.callers.lock().unwrap().is_empty());
         assert_eq!(receiving.bytes.load(Ordering::Acquire), 0);
     }

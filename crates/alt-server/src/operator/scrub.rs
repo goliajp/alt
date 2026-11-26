@@ -41,6 +41,46 @@ pub fn read(
     Err(Error::Partly(told, unknown))
 }
 
+/// The trees of `repository`, or of every repository, that a push is now
+/// refused for. Where there are any, they are told and the command fails, as
+/// it does where a repository could not be read; nothing is changed. What is
+/// read of the database is what schema 21 already has.
+pub fn refused_trees(store: &mut Store, repository: Option<&str>) -> Result<Value> {
+    let repositories = match repository {
+        Some(repository) => vec![repository.to_owned()],
+        None => store.repositories()?,
+    };
+    let (mut refused, mut failed) = (Vec::new(), Vec::new());
+    let mut reading = super::reading::Reading::by("refused-trees");
+    let mut read = |repository: &str, read, all| reading.read(repository, read, all);
+    for repository in &repositories {
+        match store.refused_trees(repository, &mut read) {
+            Ok(found) => refused.extend(found.into_iter().map(|(segment, tree, why)| {
+                json!({"repository":repository,"segment":segment,"tree":tree,"reason":why})
+            })),
+            Err(error) => failed.push(json!({"repository":repository,"error":error.to_string()})),
+        }
+    }
+    let mut told =
+        json!({"repositories":repositories.len(),"refused_trees":refused.len(),"refused":refused});
+    if refused.is_empty() && failed.is_empty() {
+        return Ok(told);
+    }
+    told["failed"] = Value::Array(failed);
+    Err(Error::Partly(told, false))
+}
+
+/// A store of the instance of `config` as its schema is, where that is one this
+/// release upgrades from: for [`refused_trees`] before the instance is upgraded.
+pub fn opened_as_it_is(config: &super::Config) -> Result<Store> {
+    let factory = config.factory()?;
+    let mut database = factory.database.clone();
+    database.set_connect_timeout(factory.connect_timeout);
+    let client = database.connect().map_err(|_| Error::Database)?;
+    let (bytes, spec, key) = (factory.bytes, factory.instance, factory.signing_key);
+    Ok(Store::open_older(client, bytes, spec, key, factory.limits)?)
+}
+
 /// The memory the packs of segments are indexed anew in: what the service
 /// verifies the packs of pushes in, all of it for one pack at a time.
 pub fn memory(bytes: u64) -> &'static Memory {

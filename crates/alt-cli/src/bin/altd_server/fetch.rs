@@ -8,14 +8,17 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::time::Instant;
+use std::{net::IpAddr, sync::Arc, sync::atomic::AtomicBool};
 
-use alt_git_codec::{Commit, ObjectId, ObjectKind, Tag, Tree};
+use alt_git_codec::{ObjectId, ObjectKind};
 use alt_hash::KeyedIdSet;
 use alt_repo::Repository;
 use alt_wire::fetch::{
     FetchRequest, encode_acknowledgments, encode_fetch_response_packfile, encode_shallow_info,
 };
 
+use super::reached::{reached, unreached};
 use super::sending::{Room, Sent, Written};
 use super::shallow::{self, Shallow};
 pub(super) use super::until::{Stopped, Until};
@@ -32,102 +35,6 @@ fn read(repo: &Repository, oid: &ObjectId, until: &Until) -> Res<alt_git_codec::
     Ok(read.ok_or_else(|| format!("outgoing object {oid} missing from server odb"))?)
 }
 
-/// The first object `req` wants that no ref of `repo` reaches. An object
-/// that is in the store and under no ref is one of a push that was
-/// refused, or of a branch that was deleted: it is not served.
-///
-/// What a clone and a fetch ask for are the objects the refs point at,
-/// and those are told without a walk. The objects a partial clone left
-/// out are asked for one by one, and are looked for from the refs down.
-fn unreached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Option<ObjectId>> {
-    let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
-    let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
-    let mut sought: KeyedIdSet<ObjectId> = req.wants.iter().copied().collect();
-    sought.retain(|want| !seen.contains(want));
-    let algo = repo.algo()?;
-    let mut ahead = tips;
-    while let Some(oid) = ahead.pop() {
-        if sought.is_empty() {
-            break;
-        }
-        until.go_on()?;
-        let Some(object) = repo.read_object(&oid)? else {
-            continue;
-        };
-        let mut under = Vec::new();
-        match object.kind {
-            ObjectKind::Commit => {
-                let commit = Commit::parse(&object.data)?;
-                under.extend(commit.tree());
-                under.extend(commit.parents());
-            }
-            ObjectKind::Tag => under.extend(Tag::parse(&object.data)?.object()),
-            ObjectKind::Tree => {
-                for entry in Tree::parse(&object.data, algo)?.entries {
-                    match entry.mode.object_kind() {
-                        ObjectKind::Tree => under.push(entry.oid),
-                        // a file is not read to know that it is reached
-                        ObjectKind::Blob => drop(sought.remove(&entry.oid)),
-                        _ => {}
-                    }
-                }
-            }
-            ObjectKind::Blob => {}
-        }
-        for oid in under {
-            if seen.insert(oid) {
-                sought.remove(&oid);
-                ahead.push(oid);
-            }
-        }
-    }
-    Ok(req.wants.iter().find(|want| sought.contains(want)).copied())
-}
-
-/// Those of the commits `req` says its sender has that a ref of `repo`
-/// reaches. One that is in the store and under no ref is taken as one
-/// the server does not know: left out of the pack as a commit both
-/// sides have, it would tell its sender that it is there.
-fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<ObjectId>> {
-    let tips: Vec<ObjectId> = repo.list_refs()?.into_iter().map(|r| r.1).collect();
-    let mut seen: KeyedIdSet<ObjectId> = tips.iter().copied().collect();
-    let mut sought: KeyedIdSet<ObjectId> = req.haves.iter().copied().collect();
-    let mut reached: Vec<ObjectId> = Vec::new();
-    reached.extend(req.haves.iter().filter(|have| seen.contains(have)));
-    sought.retain(|have| !seen.contains(have));
-    // one the store lacks is found under no ref: it is not looked for
-    let mut held = Vec::new();
-    for have in sought {
-        until.go_on()?;
-        held.extend(repo.read_object(&have)?.map(|_| have));
-    }
-    let mut sought: KeyedIdSet<ObjectId> = held.into_iter().collect();
-    let mut ahead = tips;
-    while let Some(oid) = ahead.pop() {
-        if sought.is_empty() {
-            break;
-        }
-        until.go_on()?;
-        let Some(object) = repo.read_object(&oid)? else {
-            continue;
-        };
-        let under: Vec<ObjectId> = match object.kind {
-            ObjectKind::Commit => Commit::parse(&object.data)?.parents().collect(),
-            ObjectKind::Tag => Tag::parse(&object.data)?.object().into_iter().collect(),
-            _ => Vec::new(),
-        };
-        for oid in under {
-            if seen.insert(oid) {
-                if sought.remove(&oid) {
-                    reached.push(oid);
-                }
-                ahead.push(oid);
-            }
-        }
-    }
-    Ok(reached)
-}
-
 /// The response to `req`, in a file that has no name any more: the
 /// want/have closure of the request, less what its filter and the ends
 /// of its history leave out, as a pack in side-band frames. The pack is
@@ -140,56 +47,122 @@ fn reached(repo: &Repository, req: &FetchRequest, until: &Until) -> Res<Vec<Obje
 /// pack then leaves out what the commits acknowledged so far reach, which
 /// may be less than a longer negotiation would have found.
 ///
-/// The file is written within the room responses have between them, and has
-/// its part of it until it is sent. It is written for as long as `until`
-/// says, and the error is a [`Stopped`] where that is over.
+/// The file has its part of the room responses have until it is sent. A response that would be
+/// large and would wait for its turn is dropped with what it was built from, and built again
+/// once the turn is had, which is waited for with the worker given back meanwhile. It is written
+/// for as long as `until` says, and the error is a [`Stopped`] where that is over; one built
+/// again has as long again from when it has its turn.
 ///
 /// Once nothing is left that answers it otherwise than with a pack, what
 /// the file begins with up to the pack is given to `begun`: the pack is
-/// what takes long to make.
+/// what takes long to make. That is done once, and a response built again
+/// after it begins as it was told to.
 pub(super) fn response(
     repo: &Repository,
     req: &FetchRequest,
     room: &Room,
-    from: Option<std::net::IpAddr>,
+    from: (Option<IpAddr>, &Arc<AtomicBool>),
     until: &Until,
     begun: &mut dyn FnMut(Vec<u8>),
 ) -> Res<Sent> {
-    let dir = alt_os::temp::tempdir()?;
-    let path = dir.path().join("response");
-    let mut framed = BufWriter::new(room.writing(File::create(&path)?, from));
+    let mut aside = Some(super::workers::Workers::aside(Arc::clone(from.1), until.by));
+    let mut taken = None;
+    let time = until
+        .by
+        .map(|by| by.saturating_duration_since(Instant::now()));
+    let gone = until.gone;
+    let mut again = None;
+    let mut ahead = None;
+    loop {
+        let until = again.as_ref().unwrap_or(until);
+        let dir = alt_os::temp::tempdir()?;
+        let path = dir.path().join("response");
+        let file = File::create(&path)?;
+        let written = match taken.take() {
+            Some(taken) => Written::again(file, taken),
+            None => room.writing(file, from, until.by, aside.take()),
+        };
+        let mut framed = BufWriter::new(written);
+        let wrote = built(
+            repo,
+            req,
+            (dir.path(), &mut framed),
+            until,
+            (&mut ahead, begun),
+        );
+        if framed.get_ref().put_off() {
+            drop(wrote);
+            let (written, _) = framed.into_parts();
+            drop(dir);
+            taken = Some(written.turn()?);
+            again = Some(Until {
+                by: time.map(|time| Instant::now() + time),
+                gone,
+            });
+            continue;
+        }
+        wrote?;
+        let written = framed.into_inner().map_err(|failed| failed.into_error())?;
+        return Ok(written.sent_from(File::open(&path)?));
+    }
+}
+
+/// What a response that is to have a pack begins with, as it was given to
+/// `begun`: one built again after its turn begins with the same, so that
+/// what went out ahead of the pack still holds.
+struct Ahead {
+    common: Vec<ObjectId>,
+    shallow: Shallow,
+    before: Vec<u8>,
+}
+
+/// [`response`] written into `framed`, with what it is built from under
+/// `dir`. Where `ahead` was given to `begun` already it is not worked out
+/// again.
+fn built(
+    repo: &Repository,
+    req: &FetchRequest,
+    (dir, framed): (&std::path::Path, &mut BufWriter<Written>),
+    until: &Until,
+    (ahead, begun): (&mut Option<Ahead>, &mut dyn FnMut(Vec<u8>)),
+) -> Res<()> {
+    if let Some(ahead) = ahead {
+        framed.write_all(&ahead.before)?;
+        return pack(repo, req, ahead, dir, framed, until);
+    }
     let refused = |framed: &mut BufWriter<Written>, why: &str| {
         alt_wire::pkt::write_data(framed, format!("ERR upload-pack: {why}").as_bytes())
     };
     if let Some(oid) = unreached(repo, req, until)? {
-        refused(&mut framed, &format!("not our ref {oid}"))?;
-    } else {
-        let common = reached(repo, req, until)?;
-        let ready = !req.wait_for_done && !common.is_empty();
-        if !req.done && !ready {
-            encode_acknowledgments(&mut framed, &common, false)?;
-        } else {
-            match shallow::ends(repo, req, until)? {
-                Err(why) => refused(&mut framed, &why)?,
-                Ok(shallow) => {
-                    let mut before = Vec::new();
-                    if !req.done {
-                        encode_acknowledgments(&mut before, &common, true)?;
-                    }
-                    if let Some(told) = &shallow.told {
-                        encode_shallow_info(&mut before, told)?;
-                    }
-                    framed.write_all(&before)?;
-                    // the line the pack's frames come behind
-                    alt_wire::pkt::write_data(&mut before, b"packfile\n")?;
-                    begun(before);
-                    pack(repo, req, &shallow, &common, dir.path(), &mut framed, until)?;
-                }
-            }
-        }
+        return Ok(refused(framed, &format!("not our ref {oid}"))?);
     }
-    let written = framed.into_inner().map_err(|failed| failed.into_error())?;
-    Ok(written.sent_from(File::open(&path)?))
+    let common = reached(repo, req, until)?;
+    let ready = !req.wait_for_done && !common.is_empty();
+    if !req.done && !ready {
+        return Ok(encode_acknowledgments(framed, &common, false)?);
+    }
+    let shallow = match shallow::ends(repo, req, until)? {
+        Err(why) => return Ok(refused(framed, &why)?),
+        Ok(shallow) => shallow,
+    };
+    let mut before = Vec::new();
+    if !req.done {
+        encode_acknowledgments(&mut before, &common, true)?;
+    }
+    if let Some(told) = &shallow.told {
+        encode_shallow_info(&mut before, told)?;
+    }
+    framed.write_all(&before)?;
+    let mut head = before.clone();
+    // the line the pack's frames come behind
+    alt_wire::pkt::write_data(&mut head, b"packfile\n")?;
+    begun(head);
+    let ahead = ahead.insert(Ahead {
+        common,
+        shallow,
+        before,
+    });
+    pack(repo, req, ahead, dir, framed, until)
 }
 
 /// What a response looks for deltas with. It is the memory of one
@@ -203,23 +176,23 @@ const DELTAS: alt_git_pack::DeltaOptions = alt_git_pack::DeltaOptions {
     max_depth: 32,
 };
 
-/// The objects `req` asks for, as a pack written under `dir` and framed
-/// into `framed`.
+/// The objects `req` asks for beyond what is `ahead`, as a pack written
+/// under `dir` and framed into `framed`.
 fn pack(
     repo: &Repository,
     req: &FetchRequest,
-    shallow: &Shallow,
-    common: &[ObjectId],
+    ahead: &Ahead,
     dir: &std::path::Path,
-    framed: &mut impl Write,
+    framed: &mut BufWriter<Written>,
     until: &Until,
 ) -> Res<()> {
     #[cfg(debug_assertions)]
     failing()?;
     let mut roots = req.wants.clone();
-    roots.extend(&shallow.parents);
+    roots.extend(&ahead.shallow.parents);
     let go_on = || until.go_on().is_ok();
-    let outgoing = repo.reachable_named_while(&roots, common, &shallow.ends, &go_on);
+    let (common, ends) = (&ahead.common, &ahead.shallow.ends);
+    let outgoing = repo.reachable_named_while(&roots, common, ends, &go_on);
     // why it was stopped, where it was
     until.go_on()?;
     let outgoing = outgoing?;
@@ -253,6 +226,10 @@ fn pack(
     let pack = File::open(writer.finish()?.pack_path)?;
     // the file is this request's own and is not written to again
     let pack = unsafe { alt_os::map::Mmap::map(&pack)? };
+    // a large one has its turn before it is framed, or is put off: the side
+    // band adds five bytes to each packet of 65515
+    let framing = (pack.len() as u64 / 65515 + 2) * 5 + 64;
+    framed.get_mut().expect(pack.len() as u64 + framing)?;
     Ok(encode_fetch_response_packfile(framed, &pack)?)
 }
 
@@ -272,35 +249,4 @@ fn failing() -> Res<()> {
     }
     let gone = File::open(&file).expect_err("the file is removed");
     Err(format!("{}: {gone}", file.display()).into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A fetch names the commits its sender has, a quarter of a million at
-    /// the most, and each is looked for in the store before the refs are gone
-    /// down for it. A fetch whose time is over looks for none: with none of
-    /// them in the store there is nothing else it would have stopped at.
-    #[test]
-    fn what_a_fetch_says_it_has_is_looked_for_as_long_as_it_is_gone_on_with() {
-        let dir = alt_os::temp::tempdir().unwrap();
-        alt_testutil::make_repo(dir.path(), "sha1");
-        let repo = Repository::discover(dir.path()).unwrap();
-        let haves: Vec<ObjectId> = (1..=4u8)
-            .map(|n| ObjectId::from_bytes(repo.algo().unwrap(), &[n; 20]).unwrap())
-            .collect();
-        let req = FetchRequest {
-            haves,
-            ..FetchRequest::default()
-        };
-        assert_eq!(reached(&repo, &req, &Until::whenever()).unwrap(), []);
-        let over = Until {
-            by: Some(std::time::Instant::now()),
-            gone: None,
-        };
-        let stopped = reached(&repo, &req, &over).unwrap_err();
-        let late = super::super::until::Stopped::Late;
-        assert_eq!(stopped.downcast_ref(), Some(&late), "{stopped}");
-    }
 }

@@ -4,7 +4,7 @@ use super::raw_push::receive;
 use super::*;
 
 /// A pack of the objects `named` and of no others.
-fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
+pub(super) fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
     use std::io::Write;
     let ids: String = (named.iter())
         .map(|name| text(ok(directory, token, &["rev-parse", name])) + "\n")
@@ -17,9 +17,11 @@ fn packed(directory: &Path, token: &str, named: &[&str]) -> Vec<u8> {
         .spawn()
         .unwrap();
     let mut input = packing.stdin.take().unwrap();
-    input.write_all(ids.as_bytes()).unwrap();
+    let written = input.write_all(ids.as_bytes());
     drop(input);
-    packing.wait_with_output().unwrap().stdout
+    let packed = packing.wait_with_output().unwrap().stdout;
+    written.unwrap();
+    packed
 }
 
 /// A branch is pushed and deleted: the segments keep its commit, its tree and
@@ -218,4 +220,47 @@ fn what_the_refs_lead_to_is_found_from_what_they_led_to_before() {
     ok(&cloned, &token, &["fsck", "--strict", "--full"]);
     let listed = text(ok(&cloned, &token, &["rev-list", "--objects", "--all"]));
     assert_eq!(listed.lines().count(), whole.len());
+}
+
+/// A repository written down as holding all that its refs lead to has a
+/// branch another leads to pushed and deleted again: the next push goes on
+/// from what the push before found, and finds that every object is led to
+/// once more.
+#[test]
+#[ignore = "requires isolated PostgreSQL, loopback HTTP and real Git; exercised by server acceptance and closing gate"]
+fn a_walk_that_goes_on_from_one_that_found_all_finds_all_again() {
+    let mut f = Fixture::new();
+    let server = Running::start(&f);
+    let temp = alt_os::temp::tempdir().unwrap();
+    let work = temp.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let work = work.as_path();
+    let url = format!("{}/git/repository", server.url);
+    let token = f.token.clone();
+    let git = |args: &[&str]| text(ok(work, &token, args));
+    git(&["init", "-q", "--initial-branch=main"]);
+    identity(work, &token);
+    let commit = |n: usize| {
+        std::fs::write(work.join("file"), format!("{n}\n")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", &format!("revision {n}")]);
+        git(&["rev-parse", "HEAD"])
+    };
+    let unreachable = |f: &mut Fixture| {
+        f.store
+            .pack_view(&f.credential, "repository")
+            .unwrap()
+            .unreachable
+    };
+    let early: Vec<String> = (0..3).map(commit).collect();
+    for (n, below) in [(3, &early[1]), (4, &early[2])] {
+        git(&["branch", "below", below]);
+        git(&["push", "-q", &url, "main", "below"]);
+        git(&["push", "-q", &url, ":below"]);
+        git(&["branch", "-D", "below"]);
+        assert!(unreachable(&mut f), "{n}");
+        commit(n);
+        git(&["push", "-q", &url, "main"]);
+        assert!(!unreachable(&mut f), "{n}");
+    }
 }

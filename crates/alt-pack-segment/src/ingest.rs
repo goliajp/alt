@@ -1,10 +1,11 @@
 //! Verifies a received pack once and produces the index that makes it a segment.
 
+pub use crate::ingested::Ingested;
 pub(crate) use crate::settled::Meta;
 use crate::{
-    Error, Kind, Led, Limits, Oid, Record, SegmentSet,
+    Error, Kind, Led, Limits, Oid, SegmentSet,
     descend::Root,
-    format::{self, CommitRow},
+    format::CommitRow,
     object_id,
     passes::Passes,
     plain, room,
@@ -13,10 +14,9 @@ use crate::{
     told::Told,
 };
 use alt_git_pack::{
-    IndexWork, Wait,
+    Wait,
     walk::{Budget, Deltas, Of},
 };
-use std::io::Write;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering::Relaxed},
@@ -29,76 +29,6 @@ pub(crate) const KEEP: usize = 1 << 20;
 /// scan itself and inflated again where a delta needs it, so that the memory a pack
 /// takes does not grow with its size.
 pub(crate) const HELD: u64 = 256 << 20;
-
-pub struct Ingested {
-    records: Vec<Record>,
-    commits: Vec<CommitRow>,
-    flags: u32,
-    pack_len: u64,
-    work: IndexWork,
-    resolved: Resolved,
-}
-
-impl Ingested {
-    /// The work resolving the deltas took, and the most their bases took at once.
-    pub fn work(&self) -> IndexWork {
-        self.work
-    }
-
-    pub fn objects(&self) -> usize {
-        self.records.len()
-    }
-
-    pub fn flags(&self) -> u32 {
-        self.flags
-    }
-
-    pub fn contains(&self, oid: &Oid) -> bool {
-        self.find(oid).is_some()
-    }
-
-    fn find(&self, oid: &Oid) -> Option<usize> {
-        self.records
-            .binary_search_by(|record| record.oid.cmp(oid))
-            .ok()
-    }
-
-    pub fn kind(&self, oid: &Oid) -> Option<Kind> {
-        self.find(oid).map(|index| self.records[index].kind)
-    }
-
-    /// parents and tree of a commit carried by this pack
-    pub fn commit(&self, oid: &Oid) -> Option<(&Oid, &[Oid])> {
-        self.commits
-            .binary_search_by(|commit| commit.oid.cmp(oid))
-            .ok()
-            .map(|index| {
-                (
-                    &self.commits[index].tree,
-                    self.commits[index].parents.as_slice(),
-                )
-            })
-    }
-
-    /// Tells the segment of the pack anew, for being published behind
-    /// `existing` where it was verified behind other segments: how deep its
-    /// deltas of earlier segments lie, which of two ways an object is read
-    /// by, and whether it brings an object again are told of the segments
-    /// before it. No entry is inflated for this and no object hashed: what
-    /// each entry makes does not depend on the segments.
-    pub fn behind(&mut self, existing: &SegmentSet) -> Result<(), Error> {
-        let settled = self.resolved.settle(existing, |_| Ok(()))?;
-        self.records = settled.records;
-        self.commits = settled.commits;
-        self.flags = settled.flags;
-        Ok(())
-    }
-
-    /// appends the index; the caller has already written the `pack_len` pack bytes
-    pub fn write_index(&self, out: &mut impl Write) -> Result<(), Error> {
-        format::write_index(&self.records, &self.commits, self.flags, self.pack_len, out)
-    }
-}
 
 pub(crate) fn digest(kind: Kind, data: &[u8]) -> (Oid, [u8; 32]) {
     (
@@ -215,7 +145,7 @@ fn verified(
         metas[index] = Some(meta);
     }
     // thin pack: bases that live in earlier segments, numbered behind the entries
-    let (mut outside, mut below) = (Vec::new(), Vec::new());
+    let (mut outside, mut below, mut bases) = (Vec::new(), Vec::new(), Vec::new());
     let mut outer = Vec::new();
     for named in deltas.by_object() {
         let base = named[0].0;
@@ -232,6 +162,7 @@ fn verified(
                 way: Vec::new(),
             });
             outside.push(base);
+            bases.push((base, record.kind));
             below.push(record.depth);
             scanned.largest = scanned.largest.max(record.size);
         }
@@ -279,14 +210,25 @@ fn verified(
         commits,
         depth: limits.delta_depth,
     };
+    let mut flagged = std::mem::take(&mut *told.flagged.lock().expect("flagged"));
+    flagged.sort_unstable_by_key(|(tree, _)| *tree);
+    flagged.dedup_by_key(|(tree, _)| *tree);
     // every reference resolves inside the pack or in the segments already present
+    let (mut leans, mut leans_whole) = (Vec::new(), true);
     let settled = resolved.settle(existing, |carried| {
-        told.wanted
-            .check(carried, |from| resolved.metas[from as usize].oid)
+        let of = |from: u32| resolved.metas[from as usize].oid;
+        (leans, leans_whole) = told.wanted.check(carried, of)?;
+        Ok(())
     })?;
+    leans.extend(bases);
+    leans.sort_unstable_by_key(|(oid, _)| *oid);
+    leans.dedup_by_key(|(oid, _)| *oid);
     Ok(Ingested {
         records: settled.records,
         commits: settled.commits,
+        leans,
+        leans_whole,
+        flagged,
         flags: settled.flags,
         pack_len: pack.len() as u64,
         work,

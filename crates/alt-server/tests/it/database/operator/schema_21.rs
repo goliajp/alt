@@ -12,7 +12,9 @@ fn as_schema_21(db: &OperatorDb) {
     Client::connect(&db.dsn)
         .unwrap()
         .batch_execute(
-            "DELETE FROM alt_schema WHERE version=22;
+            "DELETE FROM alt_schema WHERE version>=22;
+             DROP INDEX IF EXISTS alt_requests_manifest_entries;
+             DROP INDEX IF EXISTS alt_archived_publications_manifest_entries;
              ALTER TABLE alt_requests DROP CONSTRAINT IF EXISTS alt_requests_settled_at;
              DROP INDEX IF EXISTS alt_requests_settled;
              DROP INDEX IF EXISTS alt_requests_unsettled;
@@ -79,6 +81,15 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     let p = publish(&mut store, &token);
     let key = p.publication.key.clone();
     drop(store);
+    // a repository nothing was pushed to, its directory not there, as an
+    // instance moved without its empty directories has it
+    let empty = ["repository-create", "empty", "--quota-bytes", "100000000"];
+    source.ok(&[&["--credential", &admin][..], &empty].concat());
+    let name = alt_hash::blake3::hash(b"empty").to_hex();
+    let segments_of_empty = source.root.path().join("bytes/packs").join(&name[..32]);
+    if segments_of_empty.exists() {
+        std::fs::remove_dir(&segments_of_empty).unwrap();
+    }
     let config = source.config.to_str().unwrap().to_owned();
     let (before, receipt) = observed(&source, &config, &admin, &key);
     let trust = source.ok(&["health"])["receipt_public_key"]
@@ -89,19 +100,30 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert_eq!(copies(&source.dsn), (21, 0, 0));
     assert_eq!(moments(&source.dsn), None);
     assert!(!source.run(&["health"]).status.success());
+    // the trees a push of this version refuses are listed before the upgrade,
+    // with no credential, and nothing is changed
+    let refused = source.ok(&["refused-trees"]);
+    assert_eq!(refused["refused_trees"], 0, "{refused}");
+    assert_eq!(refused["repositories"], 2, "{refused}");
+    assert_eq!(copies(&source.dsn), (21, 0, 0));
+    assert!(!segments_of_empty.exists());
 
     let offsite = alt_os::temp::tempdir().unwrap();
     let (identity, recipient) = encryption_key(offsite.path());
     let backup = source.path("backup");
-    let created = source.ok(&[
-        "backup",
-        "--schema",
-        "21",
-        "--recipient",
-        &recipient,
-        "--output",
-        &backup,
-    ]);
+    // what a backup writes on its way is beside it, and what a restore reads out
+    // is beside the bytes it restores: the temporary files of the host are not
+    // there to be written
+    let away = |db: &OperatorDb, args: &[&str]| {
+        let mut command = db.command();
+        command.env("TMPDIR", db.path("nowhere")).args(args);
+        let done = command.output().unwrap();
+        let said = String::from_utf8_lossy(&done.stderr);
+        assert!(done.status.success(), "{args:?}: {said}");
+        alt_json::from_slice::<alt_json::Value>(&done.stdout).unwrap()
+    };
+    let to = ["--recipient", &recipient, "--output", &backup];
+    let created = away(&source, &[&["backup", "--schema", "21"][..], &to].concat());
     assert_eq!(created["backup_created"], true);
 
     // in place, told the proxies in front of it as the package tells its container
@@ -114,8 +136,8 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
     assert!(migrated.status.success(), "{said}");
     let migrated: alt_json::Value = alt_json::from_slice(&migrated.stdout).unwrap();
     assert_eq!(migrated["migrated"], true);
-    assert_eq!(migrated["schema"], 22);
-    assert_eq!(copies(&source.dsn), (22, 0, 0));
+    assert_eq!(migrated["schema"], 23);
+    assert_eq!(copies(&source.dsn), (23, 0, 0));
     // The configuration from before had no memory for the packs of pushes told,
     // which is 4096 MiB. The next one has what goes with the memory of the
     // container of the package, which this process is told no other than.
@@ -157,24 +179,17 @@ fn a_schema_21_instance_upgrades_in_place_and_from_its_backup() {
         alt_json::from_slice(&std::fs::read(&target.config).unwrap()).unwrap();
     config["instance"]["runtime_generation"] = alt_json::json!(10);
     std::fs::write(&target.config, alt_json::to_vec(&config).unwrap()).unwrap();
-    let restored = target.ok(&[
-        "restore",
-        "--input",
-        &backup,
-        "--identity",
-        &identity,
-        "--trusted-receipt-key",
-        &trust,
-        "--maximum-bytes",
-        "100000000",
-        "--source-fenced",
-    ]);
+    let from = ["restore", "--input", &backup, "--identity", &identity];
+    let trusted = ["--trusted-receipt-key", &trust, "--source-fenced"];
+    let most = ["--maximum-bytes", "100000000"];
+    let restored = away(&target, &[&from[..], &trusted, &most].concat());
     assert_eq!(restored["restored"], true);
+    // the repositories in the order of their ids: `empty`, then the one pushed to
     assert_eq!(
-        restored["catalog"]["repositories"][0]["refs"]["refs/heads/main"],
+        restored["catalog"]["repositories"][1]["refs"]["refs/heads/main"],
         p.commit.to_string()
     );
-    assert_eq!(copies(&target.dsn), (22, 0, 0));
+    assert_eq!(copies(&target.dsn), (23, 0, 0));
     // the restore revoked every credential of the source, at its own moment
     assert_eq!(moments(&target.dsn).map(|(requests, _)| requests), Some(0));
     let health = target.ok(&["health"]);

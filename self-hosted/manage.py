@@ -88,6 +88,10 @@ def prepare(args):
         raise ValueError('installation destination must not exist')
     if not re.fullmatch(r'[a-z][a-z0-9_-]{0,48}', args.project):
         raise ValueError('project must be a lowercase Compose project identity')
+    # an edge that takes connections from anywhere would take what any of
+    # them says it forwards for, where they come through the gateway
+    if args.front_proxy and args.bind != '127.0.0.1':
+        raise ValueError('--front-proxy is for an edge only a proxy on this host connects to: keep --bind 127.0.0.1')
     origin = urlsplit(args.origin)
     if origin.scheme != 'https' or not origin.hostname or origin.username or origin.password or origin.path not in ['', '/'] or origin.query or origin.fragment:
         raise ValueError('public origin must be an explicit HTTPS origin')
@@ -147,24 +151,76 @@ def prepare(args):
     print(json.dumps({'prepared': str(target), 'initialized': False, 'installation_id': config['instance']['installation_id'], 'login': 'owner', 'password_file': str(target / 'operator/initial-password')}))
 
 
-def compose(directory, *args):
+def compose(directory, *args, image=None):
     directory = directory.resolve(strict=True)
     regular(directory / '.env')
     regular(directory / 'compose.yaml')
-    subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), *args], check=True)
+    # what the environment of Compose has is taken before the file of the installation
+    environment = {**os.environ, 'ALT_IMAGE': image} if image else None
+    subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), *args], check=True, env=environment)
 
 
-def operator(directory, arguments, mounts=()):
+def operator(directory, arguments, mounts=(), image=None):
     # This directory is mounted only for explicit operator jobs, never serve.
     options = ['run', '--rm', '--no-deps', '-v', f'{directory.resolve() / "operator"}:/operator:ro']
     for mount in mounts:
         options += ['-v', mount]
-    compose(directory, *options, 'app', '--credential', '/operator/admin.token', *arguments)
+    compose(directory, *options, 'app', '--credential', '/operator/admin.token', *arguments, image=image)
+
+
+def network_of(directory):
+    """The project, the subnet and gateway of its default network as the files of the installation have them, and the subnets and gateways of that network as Docker has them (None where there is none)."""
+    values = dict(line.split('=', 1) for line in regular(directory / '.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
+    project = values.get('COMPOSE_PROJECT_NAME') or directory.name
+    written = (values.get('ALT_SUBNET') or '172.30.91.0/24', values.get('ALT_GATEWAY') or '172.30.91.1')
+    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{json .IPAM.Config}}'], capture_output=True, text=True)
+    if found.returncode and 'not found' not in found.stderr and 'No such network' not in found.stderr:
+        raise ValueError(f'docker network inspect: {found.stderr.strip()}')
+    if found.returncode:
+        return project, written, None
+    configs = json.loads(found.stdout) or []
+    return project, written, [(config.get('Subnet'), config.get('Gateway')) for config in configs]
+
+
+def strangers_on(directory, project):
+    """The containers on the default network of the project that are not services of its Compose file: Compose cannot take the network down while they are on it, and one started by hand under the name of the project is not taken down with the services."""
+    listed = subprocess.run(['docker', 'compose', '--project-directory', str(directory), '--env-file', str(directory / '.env'), '-f', str(directory / 'compose.yaml'), 'config', '--services'], capture_output=True, text=True, check=True)
+    services = set(listed.stdout.split())
+    found = subprocess.run(['docker', 'network', 'inspect', f'{project}_default', '--format', '{{json .Containers}}'], capture_output=True, text=True, check=True)
+    strangers = []
+    for container, endpoint in (json.loads(found.stdout) or {}).items():
+        labels = subprocess.run(['docker', 'inspect', container, '--format', '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.service"}}'], capture_output=True, text=True)
+        of, _, service = labels.stdout.strip().partition(' ')
+        if labels.returncode or of != project or service not in services:
+            strangers.append(endpoint.get('Name') or container)
+    return strangers
+
+
+def start(directory, *services):
+    # Compose makes a network anew where its configuration changed only when
+    # the network carries the digest of the configuration it was made from:
+    # one an older Compose made is kept as it is, on a subnet Docker chose,
+    # and the gateway the edge and the application are told of is not where
+    # a proxy on the host connects from. Such a network is taken down first,
+    # and only where nothing but the services of the installation is on it: a
+    # stranger on it would stop the taking down half way, the services down,
+    # and nothing that is not a service is taken down with them.
+    project, written, found = network_of(directory)
+    if found is not None and written not in found:
+        strangers = strangers_on(directory.resolve(strict=True), project)
+        if strangers:
+            raise ValueError(f'the network of the edge is to be made anew, and containers that are not of the installation are on it: {", ".join(strangers)}; disconnect them first')
+        print(json.dumps({'network': found, 'written': written, 'taken_down': True}), file=sys.stderr)
+        compose(directory, 'down')
+    compose(directory, 'up', '-d', '--wait', *services)
+    project, written, found = network_of(directory)
+    if found is None or written not in found:
+        raise ValueError(f'the network of the edge is {found}, where {written} is written down')
 
 
 def initialize(args):
     directory = args.directory.resolve(strict=True)
-    compose(directory, 'up', '-d', '--wait', 'database', 'edge')
+    start(directory, 'database', 'edge')
     # Each operation uses the same server implementation as a standalone
     # operator. Failure preserves state for inspection; no destructive cleanup
     # or implicit retry is attempted.
@@ -194,11 +250,14 @@ def main():
     prep.add_argument('--subnet', default='172.30.91.0/24', help='private IPv4 network of the edge container; a second installation on one host needs another (default: %(default)s)')
     prep.add_argument('--uid', type=int)
     prep.add_argument('--gid', type=int)
+    up = sub.add_parser('start', help='start every service, the network of the edge made anew first where it is not the one written down (after an upgrade)')
+    up.add_argument('--directory', type=Path, required=True)
     init = sub.add_parser('initialize', help='initialize explicitly; never resume or migrate on restart')
     init.add_argument('--directory', type=Path, required=True)
     op = sub.add_parser('operator', help='run explicit server operator commands')
     op.add_argument('--directory', type=Path, required=True)
     op.add_argument('--mount', action='append', default=[], help='explicit Docker bind mount for input/output artifacts')
+    op.add_argument('--image', help='the application image to run the command with, in place of ALT_IMAGE of the installation (a loaded image of a newer bundle, before upgrading to it)')
     op.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command == 'load':
@@ -215,11 +274,14 @@ def main():
         prepare(args)
     elif args.command == 'initialize':
         initialize(args)
+    elif args.command == 'start':
+        start(args.directory.resolve(strict=True))
+        print(json.dumps({'started': True, 'network': network_of(args.directory.resolve(strict=True))[2]}))
     else:
         arguments = args.arguments[1:] if args.arguments[:1] == ['--'] else args.arguments
         if not arguments:
             raise ValueError('operator command is required')
-        operator(args.directory, arguments, args.mount)
+        operator(args.directory, arguments, args.mount, args.image)
 
 
 if __name__ == '__main__':

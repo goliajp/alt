@@ -114,7 +114,7 @@ impl Runtime {
         Ok(value.public_view())
     }
     pub fn refresh(&self, store: &mut Store, token: &str) -> Result<()> {
-        // Check that a local credential exists before admitting control traffic.
+        // check that a local credential exists before admitting control traffic
         store.cloud_refresh(token)?;
         // one that waited for another's asking goes by what that one was told
         let mut waited = false;
@@ -147,7 +147,7 @@ impl Runtime {
             }
             break;
         }
-        // Service refresh may have advanced the shared revocation generation.
+        // service refresh may have advanced the shared revocation generation
         let mut waited = false;
         loop {
             let descriptor = store.cloud_refresh(token)?;
@@ -156,16 +156,13 @@ impl Runtime {
             }
             let digest = &descriptor.credential_digest;
             // whoever has no turn to ask goes on as one whose asking failed
-            let asked = match self.asking.turn(Some(digest), !descriptor.serves) {
-                Asked::Look if !waited => {
+            let turn = (self.asking).turn_after(Some(digest), !descriptor.serves, waited);
+            let asked = match turn {
+                Asked::Look => {
                     waited = true;
                     continue;
                 }
-                Asked::Look | Asked::No => None,
-                Asked::Turn(turn) if waited => {
-                    turn.unasked();
-                    None
-                }
+                Asked::No => None,
                 Asked::Turn(turn) => {
                     let Ok(grant) = self.sealer.open(&descriptor.sealed_grant, digest) else {
                         // a grant that does not open is no silence of the platform

@@ -37,6 +37,7 @@ alt-cdc = { path = "crates/alt-cdc" }
 alt-diff = { path = "crates/alt-diff" }
 alt-git-codec = { path = "crates/alt-git-codec" }
 alt-git-config = { path = "crates/alt-git-config" }
+alt-git-fsck = { path = "crates/alt-git-fsck" }
 alt-store = { path = "crates/alt-store" }
 alt-git-index = { path = "crates/alt-git-index" }
 alt-git-pack = { path = "crates/alt-git-pack" }

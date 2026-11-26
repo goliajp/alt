@@ -9,9 +9,25 @@ pub fn parse_file(data: &[u8]) -> Result<Vec<Entry>, ConfigError> {
     Ok(located.into_iter().map(|(_, entry)| entry).collect())
 }
 
+/// The entries of a file up to the first that is not read, and the error
+/// there, where there is one: what git hands the reader of a file whose
+/// errors it is told to keep quiet of before it stops.
+pub fn parse_until_wrong(data: &[u8]) -> (Vec<Entry>, Option<ConfigError>) {
+    let mut located = Vec::new();
+    let wrong = parse_into(data, &mut located).err();
+    let entries = located.into_iter().map(|(_, entry)| entry).collect();
+    (entries, wrong.map(|(_, what)| ConfigError::Syntax(what)))
+}
+
 /// As [`parse_file`]; an entry and an error come with the number of the
 /// line they are on.
 pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<(usize, Entry)>, (usize, &'static str)> {
+    let mut located = Vec::new();
+    parse_into(data, &mut located)?;
+    Ok(located)
+}
+
+fn parse_into(data: &[u8], out: &mut Vec<(usize, Entry)>) -> Result<(), (usize, &'static str)> {
     // as git reads a file: no byte order mark, and a line may end in CR LF
     let data = data.strip_prefix(b"\xef\xbb\xbf").unwrap_or(data);
     let mut text = Vec::with_capacity(data.len());
@@ -24,7 +40,7 @@ pub(crate) fn parse_located(data: &[u8]) -> Result<Vec<(usize, Entry)>, (usize, 
         data: &text,
         pos: 0,
     };
-    parser.run().map_err(|error| {
+    parser.run(out).map_err(|error| {
         let ConfigError::Syntax(what) = error else {
             unreachable!("the parser reports syntax only")
         };
@@ -61,14 +77,13 @@ struct SectionCtx {
 }
 
 impl<'a> Parser<'a> {
-    fn run(&mut self) -> Result<Vec<(usize, Entry)>, ConfigError> {
-        let mut out = Vec::new();
+    fn run(&mut self, out: &mut Vec<(usize, Entry)>) -> Result<(), ConfigError> {
         let mut ctx: Option<SectionCtx> = None;
         let (mut line, mut counted) = (1, 0);
         loop {
             self.skip_ws_comments_and_newlines();
             let Some(byte) = self.peek() else {
-                return Ok(out);
+                return Ok(());
             };
             if byte == b'[' {
                 ctx = Some(self.parse_section_header()?);

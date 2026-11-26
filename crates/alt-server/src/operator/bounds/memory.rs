@@ -20,10 +20,38 @@ const PACKAGED: u64 = 2 << 30;
 const MEGABYTE: u64 = 1 << 20;
 
 /// What the control group of this process may take, where it has a limit: inside
-/// a container that is the limit of the container.
+/// a container that is the limit of the container, and in a service of systemd
+/// its `MemoryMax=`.
 pub(in crate::operator) fn of_the_container() -> Option<u64> {
-    let told = std::fs::read_to_string("/sys/fs/cgroup/memory.max").ok()?;
-    told.trim().parse().ok()
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    limit(std::path::Path::new("/sys/fs/cgroup"), &cgroup)
+}
+
+/// The least of the memory limits of the control group that `cgroup`, as
+/// `/proc/self/cgroup` reads, names and of the groups above it, with the groups
+/// under `root`: of version 2, or of the memory controller of version 1 where
+/// the host has that. A process is held to the limit of every group it is
+/// under, and in a container whose groups are the host's its own is not the
+/// first of them.
+fn limit(root: &std::path::Path, cgroup: &str) -> Option<u64> {
+    let (file, group) = cgroup.lines().find_map(|line| {
+        let mut parts = line.splitn(3, ':');
+        let (_, controllers, path) = (parts.next()?, parts.next()?, parts.next()?);
+        let path = path.trim_start_matches('/');
+        match controllers {
+            "" => Some(("memory.max", root.join(path))),
+            _ if controllers.split(',').any(|named| named == "memory") => {
+                Some(("memory.limit_in_bytes", root.join("memory").join(path)))
+            }
+            _ => None,
+        }
+    })?;
+    // version 1 says it has none with a number no machine has bytes of
+    let set = |told: String| Some(told.trim().parse::<u64>().ok()?).filter(|n| *n < 1 << 62);
+    (group.ancestors())
+        .take_while(|above| above.starts_with(root))
+        .filter_map(|above| std::fs::read_to_string(above.join(file)).ok().and_then(set))
+        .min()
 }
 
 /// A size as `ALT_MEMORY` and Docker write one: bytes, or a number with `k`,
@@ -139,6 +167,39 @@ mod tests {
         for text in ["", "g", "2t", "-2g", "2.5g", "2 g", "+2g"] {
             assert_eq!(written(text), None, "{text:?}");
         }
+    }
+
+    /// The limit of the group of the process and of those above it, the least of
+    /// them: of version 2, as a container sees its own group and as a service of
+    /// systemd is in one under the root; and of version 1.
+    #[test]
+    fn the_memory_of_a_process_is_the_least_limit_of_its_group_and_those_above() {
+        let root = alt_os::temp::tempdir().unwrap();
+        let at = |path: &str, file: &str, told: &str| {
+            let directory = root.path().join(path);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join(file), told).unwrap();
+        };
+        let v2 = "0::/system.slice/alt.service\n";
+        assert_eq!(limit(root.path(), v2), None);
+        at("", "memory.max", "max\n");
+        at("system.slice", "memory.max", "max\n");
+        at("system.slice/alt.service", "memory.max", "3221225472\n");
+        assert_eq!(limit(root.path(), v2), Some(3 << 30));
+        at("system.slice", "memory.max", "2147483648\n");
+        assert_eq!(limit(root.path(), v2), Some(2 << 30));
+        // a container sees its own group as the root
+        at("", "memory.max", "1073741824\n");
+        assert_eq!(limit(root.path(), "0::/\n"), Some(1 << 30));
+
+        let v1 = "12:cpu,cpuacct:/docker/one\n9:memory:/docker/one\n0::/docker/one\n";
+        let (v1_file, none) = ("memory.limit_in_bytes", "9223372036854771712\n");
+        at("memory/docker/one", v1_file, none);
+        at("memory/docker", v1_file, none);
+        assert_eq!(limit(root.path(), v1), None);
+        at("memory/docker/one", v1_file, "4294967296\n");
+        assert_eq!(limit(root.path(), v1), Some(4 << 30));
+        assert_eq!(limit(root.path(), "9:cpu:/x\n"), None);
     }
 
     #[test]

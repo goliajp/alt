@@ -91,6 +91,8 @@ CREATE TABLE alt_requests (
 CREATE INDEX alt_requests_settled ON alt_requests(settled_at) WHERE settled_at IS NOT NULL;
 CREATE INDEX alt_requests_unsettled ON alt_requests(expires_at) WHERE settled_at IS NULL AND state IN ('committed','rejected','expired');
 CREATE INDEX alt_requests_open ON alt_requests(expires_at) WHERE state IN ('receiving','ready');
+-- what a fetch by the digest of a content asks of the manifests of a repository
+CREATE INDEX alt_requests_manifest_entries ON alt_requests USING gin ((manifest->'entries') jsonb_path_ops) WHERE state='committed';
 -- State/verified updates of alt_blobs and alt_request_content do not change
 -- indexed keys. Their fillfactor reserves heap-page room for HOT updates rather
 -- than rewriting every index entry.
@@ -438,6 +440,7 @@ CREATE TABLE alt_archived_publications (
   original jsonb NOT NULL,
   PRIMARY KEY(repository,digest)
 );
+CREATE INDEX alt_archived_publications_manifest_entries ON alt_archived_publications USING gin ((manifest->'entries') jsonb_path_ops);
 CREATE TABLE alt_archived_records (
   repository text NOT NULL,
   digest text NOT NULL,

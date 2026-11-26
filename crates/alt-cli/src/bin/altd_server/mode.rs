@@ -236,9 +236,10 @@ impl ServeMode {
                 ));
             }
         }
-        // a users file that does not read is told now, not to each request
+        // a users file that does not read is told now, not to each request;
+        // one that is there as a name, a link to nothing among them, is one
         let users_path = root.join("users");
-        let users = users_path.is_file();
+        let users = users_path.symlink_metadata().is_ok();
         if users && let Err(why) = auth::users_read(&users_path) {
             die(&format!("{}: {why}", users_path.display()));
         }

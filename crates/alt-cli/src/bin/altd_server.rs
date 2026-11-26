@@ -28,6 +28,8 @@
 mod auth;
 #[path = "altd_server/check.rs"]
 mod check;
+#[path = "altd_server/dispatch.rs"]
+mod dispatch;
 #[path = "altd_server/fetch.rs"]
 mod fetch;
 #[path = "altd_server/http/mod.rs"]
@@ -42,18 +44,24 @@ mod mode;
 mod nonces;
 #[path = "altd_server/push.rs"]
 mod push;
+#[path = "altd_server/reached.rs"]
+mod reached;
 #[path = "altd_server/readers.rs"]
 mod readers;
 #[path = "altd_server/sending.rs"]
 mod sending;
 #[path = "altd_server/shallow.rs"]
 mod shallow;
+#[path = "altd_server/shutdown.rs"]
+mod shutdown;
 #[path = "altd_server/told.rs"]
 mod told;
 #[path = "altd_server/until.rs"]
 mod until;
 #[path = "altd_server/upload.rs"]
 mod upload;
+#[path = "altd_server/workers.rs"]
+mod workers;
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -128,7 +136,7 @@ fn main() {
         (None, Some(p)) => ServeMode::multi(PathBuf::from(p)),
     };
 
-    // N workers each call `server.recv()` in a loop, so that concurrent
+    // N workers each take requests in a loop, so that concurrent
     // clients do not queue behind a slow push
     let told = told::told();
     let workers = told.workers;
@@ -140,9 +148,9 @@ fn main() {
     // shutdown sequence. Installed before the listening line: a
     // supervisor may signal as soon as it sees it, and a signal landing
     // earlier would take the default action and skip the drain.
-    install_signal_handlers();
-
-    let server = Server::listen(&bind, told.io, told.connections, told.here, told.proxies);
+    shutdown::install_signal_handlers();
+    let most = (told.connections, workers / 2);
+    let server = Server::listen(&bind, told.io, most, told.here, told.proxies);
     let server = Arc::new(server.unwrap_or_else(|e| die(&format!("bind {bind}: {e}"))));
     eprintln!(
         "altd-server: listening on {} ({}, workers={workers})",
@@ -156,42 +164,21 @@ fn main() {
         );
     }
 
-    let mode = Arc::new(mode);
-    let mut handles = Vec::with_capacity(workers);
-    for _ in 0..workers {
-        let server = Arc::clone(&server);
-        let mode = Arc::clone(&mode);
-        handles.push(std::thread::spawn(move || {
-            loop {
-                let req = match server.recv() {
-                    Ok(r) => r,
-                    Err(_) => break, // unblocked or socket dead
-                };
-                serve_one(&mode, req);
-            }
-        }));
-    }
+    let workers = workers::Workers::start(Arc::clone(&server), Arc::new(mode), workers);
 
     // Poll the shutdown flag on the main thread. Once SIGTERM/SIGINT
-    // fires, unblock all worker `recv()` calls (pending recv → Err,
-    // in-flight responses keep going) and join. The poll is cheap
+    // fires, the workers take no request that is not there yet (in-flight
+    // responses keep going) and are waited for. The poll is cheap
     // (100 ms) and only the main thread runs it.
-    loop {
-        if SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
-            eprintln!("altd-server: shutdown signal received, unblocking workers");
-            // `unblock()` frees one blocked recv() per call
-            for _ in 0..workers {
-                server.unblock();
-            }
-            break;
-        }
+    while !shutdown::SHUTDOWN.load(std::sync::atomic::Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    eprintln!("altd-server: shutdown signal received, unblocking workers");
 
     // a stuck worker (long ingest_pack, a malicious slow
     // client, a deadlocked Mutex<Store>) must not pin the process
     // forever. Spawn a watchdog that hard-exits after the deadline if
-    // `handles.join()` hasn't returned by then. systemd / k8s see
+    // the workers have not ended by then. systemd / k8s see
     // exit 0 either way — graceful was the goal, the deadline is the
     // hard limit, both paths are an acceptable shutdown.
     let deadline_ms = told.shutdown.as_millis();
@@ -200,216 +187,8 @@ fn main() {
         eprintln!("altd-server: graceful shutdown timed out after {deadline_ms} ms; force-exiting");
         std::process::exit(0);
     });
-
-    for h in handles {
-        let _ = h.join();
-    }
+    workers.close();
     eprintln!("altd-server: all workers stopped, exiting cleanly");
-}
-
-/// Set when SIGINT or SIGTERM arrives. Read by the main thread to
-/// drive `Server::unblock()` and graceful worker drain.
-static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[cfg(unix)]
-extern "C" fn shutdown_handler(_sig: alt_os::sys::c_int) {
-    // Async-signal-safe: relaxed atomic store is the only thing we do
-    // inside the handler. The main thread does the actual work.
-    SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
-}
-
-#[cfg(unix)]
-fn install_signal_handlers() {
-    let handler = shutdown_handler as *const () as alt_os::sys::sighandler_t;
-    unsafe {
-        alt_os::sys::signal(alt_os::sys::SIGINT, handler);
-        alt_os::sys::signal(alt_os::sys::SIGTERM, handler);
-    }
-}
-
-#[cfg(not(unix))]
-fn install_signal_handlers() {
-    // Non-unix targets: no handler. The shutdown loop still runs but
-    // `SHUTDOWN` is never set externally, so the process exits when
-    // an operator hard-kills it.
-}
-
-/// One request through dispatch + access-log emission. Pulled out of
-/// the main loop so each worker thread runs the same path with no
-/// shared mutable state across workers (everything per-request is
-/// stack-local).
-fn serve_one(mode: &ServeMode, req: http::Request) {
-    let url = req.url().to_owned();
-    let method = req.method().clone();
-    let req_id = next_request_id();
-    let start = std::time::Instant::now();
-    let mut log = LogCtx {
-        bytes_in: req.body_length().map(|n| n as u64).unwrap_or(0),
-        ..LogCtx::default()
-    };
-    if let Err(e) = dispatch(mode, method.clone(), &url, req, &mut log) {
-        eprintln!("altd-server: handler error: {e} (req_id={req_id})");
-        if log.status == 0 {
-            log.status = 500;
-        }
-    }
-    if log.deferred {
-        return;
-    }
-    let duration_ms = start.elapsed().as_millis();
-    emit_access_log(&req_id, &method, &url, &log, duration_ms);
-}
-
-fn dispatch(
-    mode: &ServeMode,
-    method: Method,
-    url: &str,
-    req: http::Request,
-    log: &mut LogCtx,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // optional Basic auth in multi-repo mode. When the server
-    // root has a `users` file, every request must carry a valid
-    // Authorization header; absence / mismatch returns HTTP 401 with a
-    // WWW-Authenticate prompt so a real git client retries with creds.
-    // a scoped user (3-column line) hands back an ACL the
-    // dispatcher checks against the resolved repo + action below.
-    let mut auth_user: Option<String> = None;
-    let mut scoped_acl: Option<Vec<AclRule>> = None;
-    if let ServeMode::Multi { root, users, .. } = mode {
-        let users_path = root.join("users");
-        if *users || users_path.is_file() {
-            match check_auth(&req, &users_path) {
-                AuthOutcome::Allow { user, acl } => {
-                    auth_user = user;
-                    scoped_acl = acl;
-                }
-                AuthOutcome::Reject(reason) => {
-                    let mut resp = Response::from_string(reason).with_status_code(StatusCode(401));
-                    resp.add_header(header("WWW-Authenticate", "Basic realm=\"altd-server\""));
-                    respond_logged(req, resp, log)?;
-                    return Ok(());
-                }
-                AuthOutcome::Unread => {
-                    let unread = "the users file of the server does not read";
-                    let resp = Response::from_string(unread).with_status_code(StatusCode(500));
-                    respond_logged(req, resp, log)?;
-                    return Ok(());
-                }
-            }
-        }
-    }
-    log.principal = Some(auth_user.clone().unwrap_or_else(|| "anonymous".to_owned()));
-
-    let (path, query) = match url.split_once('?') {
-        Some((p, q)) => (p, q),
-        None => (url, ""),
-    };
-    // Multi-repo mode peels the first path segment as the repo name and
-    // hands back the remaining suffix; single-repo mode keeps the path
-    // intact. After resolve_repo, the suffix always ends in one of the
-    // smart-http endpoints if the URL was well-formed.
-    let (handle, suffix, repo_name) = match resolve_repo(mode, path) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("altd-server: {e}");
-            let r = Response::from_string("repository not found").with_status_code(StatusCode(404));
-            respond_logged(req, r, log)?;
-            return Ok(());
-        }
-    };
-    log.repo = Some(repo_name.clone());
-
-    // gate the resolved request against the scoped user's
-    // ACL. Trusted (no-ACL) users skip the check entirely; the request
-    // proceeds unscoped.
-    if let Some(acl) = &scoped_acl
-        && let Some(action) = action_from_request(&method, &suffix, query)
-        && !acl_allows(acl, &repo_name, action)
-    {
-        let r = Response::from_string(format!(
-            "forbidden: no {action:?} permission on repo '{repo_name}'"
-        ))
-        .with_status_code(StatusCode(403));
-        respond_logged(req, r, log)?;
-        return Ok(());
-    }
-
-    // fail-fast 413 when the client *advertised* a body
-    // larger than the cap. Lying Content-Length headers are caught
-    // at read time inside the handlers via `read_body_capped`.
-    if method == Method::Post
-        && let Some(advertised) = req.body_length()
-        && advertised as u64 > max_body_bytes()
-    {
-        let max = max_body_bytes();
-        let r = Response::from_string(format!(
-            "payload too large: Content-Length={advertised} exceeds cap {max}"
-        ))
-        .with_status_code(StatusCode(413));
-        respond_logged(req, r, log)?;
-        return Ok(());
-    }
-
-    // figure out which (allowed methods, endpoint)
-    // the suffix matches first, then check method. A path match with
-    // the wrong method returns 405 + Allow header; a real OPTIONS
-    // request returns 204 + Allow + (optionally) CORS preflight
-    // headers. This replaces the previous blanket-404 path that ate
-    // both signals.
-    let endpoint_allow: Option<&'static str> = if suffix.ends_with("/info/refs") {
-        Some("GET, OPTIONS")
-    } else if suffix.ends_with("/git-upload-pack") || suffix.ends_with("/git-receive-pack") {
-        Some("POST, OPTIONS")
-    } else {
-        None
-    };
-
-    if method == Method::Options {
-        let resp = build_options_response(endpoint_allow);
-        respond_logged(req, resp, log)?;
-        return Ok(());
-    }
-
-    if let Some(allow) = endpoint_allow {
-        // a body is received by the thread of its connection, and the
-        // request comes here again with it
-        if method == Method::Post && !req.received() {
-            log.deferred = true;
-            req.receive(limits::body_cap(&suffix));
-            return Ok(());
-        }
-        if method == Method::Get && suffix.ends_with("/info/refs") {
-            let repo = handle.open_repo()?;
-            return handle_info_refs(handle.writer.as_deref(), query, req, log, repo);
-        }
-        if method == Method::Post && suffix.ends_with("/git-upload-pack") {
-            let repo = handle.open_repo()?;
-            return handle_upload_pack(req, log, repo, auth_user.is_some());
-        }
-        if method == Method::Post && suffix.ends_with("/git-receive-pack") {
-            let repo = handle.open_repo()?;
-            let Some(writer) = handle.writer else {
-                let r = Response::from_string("repo is read-only (no .alt write store)")
-                    .with_status_code(StatusCode(403));
-                return Ok(repo.answer(req, r, log)?);
-            };
-            let answered = handle_receive_pack(&writer, auth_user.as_deref(), req, log, repo);
-            // a sync that failed is known of the repository from here on,
-            // though this request be the last to have its writer in hand
-            writer.remember();
-            return answered;
-        }
-        // Path matched but method didn't — 405 Method Not Allowed.
-        let mut r = Response::from_string(format!("method not allowed; allow={allow}"))
-            .with_status_code(StatusCode(405));
-        r.add_header(header("Allow", allow));
-        respond_logged(req, r, log)?;
-        return Ok(());
-    }
-
-    let r = Response::from_string("not found").with_status_code(StatusCode(404));
-    respond_logged(req, r, log)?;
-    Ok(())
 }
 
 fn die(msg: &str) -> ! {

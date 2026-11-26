@@ -49,4 +49,39 @@ pub struct HttpBounds {
     /// server starts where it is not given.
     #[json(default, skip_serializing_if = "Option::is_none")]
     pub sending_megabytes: Option<u64>,
+    /// How many KiB a second a response larger than the quarter of its address
+    /// is taken at, at the least, over each 30 seconds while another waits for
+    /// its turn to be large; it is let go of where it is taken slower. 1024
+    /// where it is not given.
+    #[json(default, skip_serializing_if = "Option::is_none")]
+    pub large_sending_kib: Option<u64>,
+}
+
+impl HttpBounds {
+    /// the bytes a second a large response another waits for is taken at
+    pub(super) fn large_pace(&self) -> u64 {
+        let told = self.large_sending_kib.map(|kib| kib.saturating_mul(1024));
+        told.unwrap_or(alt_shares::LARGE_RATE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::operator::Config;
+
+    #[test]
+    fn a_large_response_another_waits_for_is_taken_at_a_mebibyte_a_second_or_as_told() {
+        let text = include_str!("../../example-config.json");
+        let mut config: Config = alt_json::from_str(text).unwrap();
+        assert_eq!(config.http.large_sending_kib, None);
+        assert_eq!(config.http.large_pace(), 1 << 20);
+        let window = alt_shares::LARGE_WINDOW;
+        assert_eq!(config.http_options().sending.pace(), (1 << 20, window));
+        config.http.large_sending_kib = Some(256);
+        assert_eq!(config.http.large_pace(), 256 << 10);
+        assert_eq!(config.http_options().sending.pace(), (256 << 10, window));
+        let written = alt_json::to_vec(&config).unwrap();
+        let read: Config = alt_json::from_slice(&written).unwrap();
+        assert_eq!(read.http.large_sending_kib, Some(256));
+    }
 }

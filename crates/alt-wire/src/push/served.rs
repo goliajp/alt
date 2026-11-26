@@ -31,7 +31,7 @@ pub fn encode_v1_ref_advertisement<W: Write>(
     pkt::write_flush(w)?;
     let caps_blob = capabilities.join(" ");
     if refs.is_empty() {
-        // Empty repo: pseudo-ref `capabilities^{}` carries the cap list.
+        // empty repo: pseudo-ref `capabilities^{}` carries the cap list
         let zero = zero_oid(algo);
         let mut line = format!("{zero} capabilities^{{}}").into_bytes();
         line.push(0);
@@ -141,8 +141,11 @@ fn parse_push_head<R: Read>(
                 let new_s = parts
                     .next()
                     .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
+                // no ref name has a control character: a line in one would make the
+                // line of its update in a push certificate the lines of two
                 let name = parts
                     .next()
+                    .filter(|name| !name.bytes().any(|b| b < 0x20 || b == 0x7f))
                     .ok_or_else(|| PushError::BadRefLine(head.to_vec()))?;
                 let old_oid = old_s
                     .parse::<ObjectId>()

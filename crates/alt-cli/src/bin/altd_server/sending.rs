@@ -14,6 +14,8 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use super::http::{Share, Shares};
 
@@ -37,19 +39,40 @@ impl std::error::Error for Full {}
 pub(super) struct Room(Arc<Shares>);
 
 impl Room {
-    pub(super) fn of(most: u64) -> Self {
-        Room(Shares::passed_by_one_alone(most))
+    /// `most` bytes, of which `large` responses at once may have more than the
+    /// part of their address, taken at `rate` at the least while another waits.
+    pub(super) fn of(most: u64, large: usize, rate: u64) -> Self {
+        let window = alt_shares::LARGE_WINDOW;
+        Room(Shares::passed_by_one_alone(most, large).paced(rate, window))
     }
 
     /// The room all the responses of this server have.
     pub(super) fn shared() -> &'static Room {
         static ROOM: std::sync::OnceLock<Room> = std::sync::OnceLock::new();
-        ROOM.get_or_init(|| Room::of(super::told::told().sending_bytes))
+        let told = super::told::told();
+        let (most, large, rate) = (told.sending_bytes, told.workers / 2, told.large_rate);
+        ROOM.get_or_init(|| Room::of(most, large, rate))
     }
 
-    /// Has `file` written within the room, for a peer counted under `from`.
-    pub(super) fn writing(&self, file: File, from: Option<IpAddr>) -> Written {
-        let taken = self.0.share(from);
+    /// Has `file` written within the room, for a peer counted under `from`
+    /// that is gone where its mark is set: where it would be large, it is put
+    /// off to wait for its turn (see [`Written::put_off`]), which it then waits
+    /// for until `by` while the peer is there, with `aside` given back
+    /// meanwhile.
+    pub(super) fn writing(
+        &self,
+        file: File,
+        (from, gone): (Option<IpAddr>, &Arc<AtomicBool>),
+        by: Option<Instant>,
+        aside: Option<Box<dyn alt_shares::Aside>>,
+    ) -> Written {
+        let taken = (self.0.share(from))
+            .waiting(by, Some(Arc::clone(gone)))
+            .turn_first();
+        let taken = match aside {
+            Some(aside) => taken.aside(aside),
+            None => taken,
+        };
         Written { file, taken }
     }
 
@@ -80,6 +103,37 @@ impl Write for Written {
 }
 
 impl Written {
+    /// The file of a response written again, with what was taken for one that
+    /// was put off and has had its turn since.
+    pub(super) fn again(file: File, taken: Share) -> Self {
+        Written { file, taken }
+    }
+
+    /// The response is to be `bytes` more: where that makes it large, it has
+    /// its turn now, or is put off.
+    pub(super) fn expect(&mut self, bytes: u64) -> io::Result<()> {
+        match self.taken.expect(bytes) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(io::Error::new(io::ErrorKind::StorageFull, Full)),
+        }
+    }
+
+    /// Whether the response was put off where it would have waited for its
+    /// turn to be large: it is written again, with nothing it was built from
+    /// held meanwhile, once [`Written::turn`] is through.
+    pub(super) fn put_off(&self) -> bool {
+        self.taken.put_off()
+    }
+
+    /// What was taken, given back, and the turn of the response waited for.
+    pub(super) fn turn(self) -> io::Result<Share> {
+        let mut taken = self.taken;
+        match taken.take_turn() {
+            Ok(()) => Ok(taken),
+            Err(_) => Err(io::Error::new(io::ErrorKind::StorageFull, Full)),
+        }
+    }
+
     /// What was written, to be read out of `file`, which is the same file
     /// opened from its beginning.
     pub(super) fn sent_from(self, file: File) -> Sent {
@@ -103,8 +157,14 @@ impl Sent {
 }
 
 impl Read for Sent {
+    /// A large response another waits for its turn behind goes on only as fast
+    /// as such a one has to.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.file.read(buf)
+        let read = self.file.read(buf)?;
+        match self.taken.sent(read as u64) {
+            Ok(()) => Ok(read),
+            Err(slow) => Err(io::Error::new(io::ErrorKind::TimedOut, slow)),
+        }
     }
 }
 
@@ -123,14 +183,15 @@ mod tests {
 
     fn written_from(room: &Room, from: Option<u8>, bytes: usize) -> io::Result<Written> {
         let from = from.map(|from| IpAddr::from([192, 0, 2, from]));
-        let mut file = room.writing(alt_os::temp::tempfile()?, from);
+        let gone = Arc::new(AtomicBool::new(false));
+        let mut file = room.writing(alt_os::temp::tempfile()?, (from, &gone), None, None);
         file.write_all(&vec![7; bytes])?;
         Ok(file)
     }
 
     #[test]
     fn the_responses_there_are_take_no_more_than_their_room_and_one_alone_whatever_it_is() {
-        let room = Room::of(1000);
+        let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
         let first = written(&room, 600).unwrap();
         let second = written(&room, 400).unwrap();
         assert_eq!(room.held(), 1000);
@@ -156,7 +217,9 @@ mod tests {
 
     #[test]
     fn the_responses_to_one_address_take_a_quarter_of_the_room_and_leave_the_rest() {
-        let room = Room::of(1000);
+        let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
+        let paced = Room::of(1000, 1, 256 << 10).0.pace();
+        assert_eq!(paced, (256 << 10, alt_shares::LARGE_WINDOW));
         let slow: Vec<Written> = (0..5)
             .map(|_| written_from(&room, Some(1), 50).unwrap())
             .collect();
@@ -167,5 +230,21 @@ mod tests {
         assert_eq!(room.held(), 500);
         drop((slow, other));
         assert_eq!(room.held(), 0);
+    }
+
+    /// A response that is to grow past the part of its address, which the
+    /// others of the address have taken, is refused before it is: whoever
+    /// asked is told that the responses being sent leave it no room, whole.
+    #[test]
+    fn a_response_refused_as_it_is_expected_to_grow_is_told_to_come_again() {
+        let room = Room::of(1000, 1, alt_shares::LARGE_RATE);
+        let held: Vec<Written> = (0..5)
+            .map(|_| written_from(&room, Some(1), 50).unwrap())
+            .collect();
+        let mut growing = written_from(&room, Some(1), 0).unwrap();
+        let refused = growing.expect(300).unwrap_err();
+        let told = super::super::limits::fetch_refused(&refused, false, false);
+        assert_eq!(told, (503, FULL.to_owned(), false));
+        drop(held);
     }
 }

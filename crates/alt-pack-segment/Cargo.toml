@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 alt-deflate.workspace = true
+alt-git-codec.workspace = true
+alt-git-fsck.workspace = true
 alt-git-pack.workspace = true
 alt-hash.workspace = true
 alt-inflate.workspace = true

@@ -40,7 +40,7 @@ fn add(payload: &mut Payload, kind: ContentKind, raw: Vec<u8>) -> alt_task::Arti
     artifact
 }
 pub(super) fn task_payload_with_source(
-    request: &str,
+    (request, purpose): (&str, &str),
     source: Option<golia_change_link::RepairSource>,
 ) -> Payload {
     let mut payload = Payload::new(request, None);
@@ -48,7 +48,7 @@ pub(super) fn task_payload_with_source(
     let tree = payload.manifest.entries[0].git_oid.clone().unwrap();
     let mut task: alt_task::Task = alt_json::from_value(json!({
         "schema_version":1,"scope":{"repository":"original","workspace":"original-worktree"},
-        "spec":{"purpose":"publish selected task","authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
+        "spec":{"purpose":purpose,"authority":"owner","allowed_paths":["."],"auxiliary":[],"exclusions":[],
             "validation":{"commands":[["verify"]],"cwd":".","environment":{"values":{},"complete":true},"tools":[],"external":[],"validation":{}}},
         "baseline":{"head":payload.commit.to_string(),"tree":tree,"refs":{}},
         "target_expected":{"refs/heads/main":payload.commit.to_string()},"creator_request":"original-create"
@@ -401,7 +401,7 @@ fn background_worker_notifies_actual_task_once_and_retries_same_event_after_rest
     );
     let source = accept(&f, &c, &server);
     let request_digest = source.request.digest().unwrap();
-    let payload = task_payload_with_source("actual-task", Some(source));
+    let payload = task_payload_with_source(("actual-task", "publish selected task"), Some(source));
     let task = payload.publication.record_roots[0].id.clone();
     let (seen_tx, seen_rx) = std::sync::mpsc::channel();
     let peer_thread = std::thread::spawn(move || {

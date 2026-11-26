@@ -324,6 +324,7 @@ impl Config {
             limits: self.limits,
             connect_timeout: Duration::from_millis(self.http.database_connect_timeout_ms),
             statement_timeout: Duration::from_millis(self.http.database_statement_timeout_ms),
+            gate: Default::default(),
         })
     }
     /// Save the next configuration before the database commit. After a crash,

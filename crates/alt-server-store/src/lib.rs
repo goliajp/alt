@@ -15,11 +15,13 @@ mod pack_compaction;
 mod pack_native;
 mod pack_scrub;
 mod pack_sweep;
-pub use pack_compaction::PACK_RETIRED_GRACE_MS;
-pub use pack_scrub::{NO_REPOSITORY, Reading, Scrubbed, Unread};
+pub use pack_compaction::{MERGE_WRITTEN, MergeWritten, PACK_RETIRED_GRACE_MS};
+pub use pack_scrub::{NO_REPOSITORY, Read, Reading, Scrubbed, Unread};
 pub use pack_sweep::{Writing, writing};
 mod pack_view;
-pub use pack_view::{ARRAY_TIPS, DEFERRED_REFS, PackView, RefFilter, RefScope};
+pub use pack_view::{
+    ARRAY_TIPS, DEFERRED_REFS, FOUND_ALL, PackView, RefFilter, RefScope, led_left_behind_removed,
+};
 mod packs;
 pub use packs::*;
 mod provenance;
@@ -44,7 +46,7 @@ mod schema_v19;
 mod schema_v20;
 mod segments;
 mod serving;
-pub use serving::{SERVED, Serving};
+pub use serving::{SERVED, Serving, UNHEARD};
 mod store;
 mod tasks;
 pub use bytes::*;
@@ -60,6 +62,8 @@ pub enum Error {
     Repository(alt_repository_service::Error),
     Json(alt_json::Error),
     Integrity(&'static str),
+    /// an object of a pack `git fsck` refuses, and what it says of it
+    Fsck([u8; 20], &'static str),
     Limit(&'static str),
     /// what the request needs is taken by other requests, and was not given back
     /// in the time it had to wait
@@ -84,6 +88,7 @@ impl std::fmt::Display for Error {
             Self::Repository(e) => write!(f, "repository: {e}"),
             Self::Json(e) => write!(f, "encoding: {e}"),
             Self::Integrity(what) => write!(f, "integrity failure: {what}"),
+            Self::Fsck(oid, what) => write!(f, "object {}: {what}", alt_pack_segment::hex(oid)),
             Self::Limit(what) => write!(f, "storage limit exceeded: {what}"),
             Self::Busy(what) => write!(f, "busy with other requests: {what}"),
             Self::Precondition(what) => write!(f, "precondition failed: {what}"),
@@ -116,6 +121,7 @@ impl std::error::Error for Error {
             Self::Repository(e) => Some(e),
             Self::Json(e) => Some(e),
             Self::Integrity(_)
+            | Self::Fsck(..)
             | Self::Limit(_)
             | Self::Busy(_)
             | Self::Precondition(_)
@@ -184,7 +190,7 @@ pub use review::CurrentReviewAssessment;
 pub use workbench::*;
 
 /// Current persisted schema; runtime open validates all migration checksums.
-pub const SCHEMA_VERSION: u32 = 22;
+pub const SCHEMA_VERSION: u32 = 23;
 
 mod change_channel;
 mod link_history;

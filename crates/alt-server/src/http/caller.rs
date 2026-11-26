@@ -78,6 +78,14 @@ impl Network {
 /// host alone, so every connection comes from the proxy in front of it.
 pub(super) const UNNAMED: &str = "http.trusted_proxies names no proxy: every caller is taken for the peer of its connection, the proxy in front of this instance, and all callers share the sign-in attempts and the request bodies one address may have. Name the proxy, as in \"trusted_proxies\": [\"127.0.0.1\", \"::1\"].";
 
+/// What the log is told where most requests through a proxy name nobody past
+/// it: `quiet` of the `first`, the last of them taken to come from `proxy`.
+pub(super) fn nobody(proxy: IpAddr, quiet: usize, first: usize) -> String {
+    format!(
+        "{quiet} of the first {first} requests through a proxy were taken to come from the proxy at {proxy}, which named nobody past it in X-Forwarded-For: a proxy in front that names its callers is not trusted (ALT_FRONT_PROXY of the self-hosted edge, http.trusted_proxies), and all callers share the limits of one address"
+    )
+}
+
 /// An address as a proxy writes it: bare, in brackets, or with a port.
 fn written(text: &str) -> Option<IpAddr> {
     let text = text.trim();

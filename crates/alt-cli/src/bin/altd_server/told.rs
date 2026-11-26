@@ -47,6 +47,7 @@ ALT_SERVER_TEMP_DIR                     a directory on a disk for what is writte
   ALT_SERVER_IO_TIMEOUT_MS                for the head of a request to come (20000)
   ALT_SERVER_IO_WINDOW_MS                 in each of these a body or a response has to move (30000)
   ALT_SERVER_IO_MIN_BYTES_PER_SEC         by this much on average (1024)
+  ALT_SERVER_LARGE_MIN_BYTES_PER_SEC      a response larger than the quarter of an address, by this much in each 30 seconds while another waits for its turn (1048576)
   ALT_SERVER_SHUTDOWN_DEADLINE_MS         for requests under way when the server is stopped (30000)";
 
 pub(super) struct Told {
@@ -111,6 +112,9 @@ pub(super) struct Told {
     pub(super) origins: Vec<String>,
     /// `ALT_SERVER_SHUTDOWN_DEADLINE_MS`
     pub(super) shutdown: Duration,
+    /// `ALT_SERVER_LARGE_MIN_BYTES_PER_SEC`: what a large response another
+    /// waits for is taken at, at the least
+    pub(super) large_rate: u64,
 }
 
 /// The number `name` is set to, above zero; `otherwise` where it is not
@@ -146,6 +150,7 @@ impl Told {
         let index_wait = number(lookup, "ALT_SERVER_MAX_INDEX_WAIT_MS", 600_000u64)?;
         let fetch = number(lookup, "ALT_SERVER_MAX_FETCH_MS", 600_000u64)?;
         let keepalive = number(lookup, "ALT_SERVER_KEEPALIVE_MS", 5_000u64)?;
+        let large_rate = number(lookup, "ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", 1u64 << 20)?;
         let networks = |name: &str| match lookup(name) {
             None => Ok(super::http::LOOPBACK.to_vec()),
             Some(told) => {
@@ -195,17 +200,28 @@ impl Told {
             proxies: Vec::leak(proxies),
             origins,
             shutdown: Duration::from_millis(shutdown),
+            large_rate,
         })
     }
 }
+
+/// What is said where the peers of this host are told and the proxies are
+/// not: a deployment that named its proxy among those peers before the
+/// proxies could be told counts every request through it for no address.
+pub(super) const UNPROXIED: &str = "ALT_SERVER_LOCAL_PEERS is set and ALT_SERVER_TRUSTED_PROXIES is not: a request through a proxy among those peers counts for no address, and no limit of an address holds for it; name the proxy in ALT_SERVER_TRUSTED_PROXIES for it to count for whom it is";
 
 /// What the environment of this process tells; the process ends where
 /// it does not read.
 pub(super) fn told() -> &'static Told {
     static TOLD: OnceLock<Told> = OnceLock::new();
     TOLD.get_or_init(|| {
-        let mut told =
-            Told::read(&|name| std::env::var_os(name)).unwrap_or_else(|why| super::die(&why));
+        let lookup = |name: &str| std::env::var_os(name);
+        if lookup("ALT_SERVER_LOCAL_PEERS").is_some()
+            && lookup("ALT_SERVER_TRUSTED_PROXIES").is_none()
+        {
+            eprintln!("altd-server: {UNPROXIED}");
+        }
+        let mut told = Told::read(&lookup).unwrap_or_else(|why| super::die(&why));
         let made = work::open(std::env::var_os("ALT_SERVER_TEMP_DIR"))
             .and_then(|work| alt_git_pack::BaseFiles::open(&work.join("bases"), told.index_bytes));
         let unmade = |why| super::die(&format!("the directory for temporary files: {why}"));
@@ -313,20 +329,39 @@ mod tests {
         assert!(unset.origins.is_empty());
         let told = with(&[(
             "ALT_SERVER_ORIGINS",
-            "https://Alt.Example/, http://10.0.0.5:8090",
+            "https://Alt.Example/, http://10.0.0.5:8090,https://[::1]:443,http://[fe80::1]:81",
         )]);
-        let read = ["https://alt.example", "http://10.0.0.5:8090"];
+        let read = [
+            "https://alt.example",
+            "http://10.0.0.5:8090",
+            "https://[::1]",
+            "http://[fe80::1]:81",
+        ];
         assert_eq!(told.unwrap().origins, read);
         for value in [
             "",
             "alt.example",
             "https://a.example/alt",
             "https://a.example,",
+            // no client writes the host of an address so
+            "https://[0:0:0:0:0:0:0:1]",
+            "https://127.1",
+            "https://010.0.0.1",
+            "https://alt.example.",
+            "http://alt.example:0",
+            "http://alt.example:08090",
+            "http://alt.example:65536",
+            "http://alt..example",
         ] {
             let why = with(&[("ALT_SERVER_ORIGINS", value)]).err().expect(value);
             let named = format!("ALT_SERVER_ORIGINS={value:?}: ");
             assert!(why.starts_with(&named), "{why}");
         }
+        // a large response another waits for is taken at a mebibyte a second, or as told
+        assert_eq!(unset.large_rate, 1 << 20);
+        let told = with(&[("ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", "262144")]);
+        assert_eq!(told.unwrap().large_rate, 256 << 10);
+        assert!(with(&[("ALT_SERVER_LARGE_MIN_BYTES_PER_SEC", "0")]).is_err());
         // the largest number there is counts on without wrapping
         let most = with(&[("ALT_SERVER_MAX_PUSH_BYTES", "18446744073709551615")]).unwrap();
         assert_eq!((most.push_bytes, most.inflated_bytes), (u64::MAX, u64::MAX));

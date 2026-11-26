@@ -1,6 +1,22 @@
 //! Reading a backup back: its manifest, its signature and every file it names.
 use super::*;
 
+/// The identity of `identity`, resolved and validated here: age is not let invoke
+/// plugins or fetch an SSH identity as an implicit fallback.
+fn age_identity(identity: &Path) -> Result<Vec<u8>> {
+    let secret = read_regular(identity, 4096, true)?;
+    if !std::str::from_utf8(&secret).is_ok_and(|text| {
+        text.lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .all(|l| l.starts_with("AGE-SECRET-KEY-1"))
+    }) {
+        return Err(Error::Config(
+            "backup requires a private age X25519 identity file",
+        ));
+    }
+    Ok(secret)
+}
+
 pub struct VerifiedBackup {
     pub manifest: Manifest,
     pub manifest_digest: String,
@@ -11,8 +27,10 @@ impl VerifiedBackup {
         self.directory.path()
     }
 }
+/// Reads the backup at `input` and its files out into a directory of their own
+/// in `work`.
 pub fn verify(
-    input: &Path,
+    (input, work): (&Path, &Path),
     identity: &Path,
     trusted_key: [u8; 32],
     maximum_bytes: u64,
@@ -99,19 +117,8 @@ pub fn verify(
     {
         return Err(Error::Config("backup exceeds explicit restore size limit"));
     }
-    // Resolve and validate the identity locally; do not let age invoke plugins
-    // or fetch an SSH identity as an implicit fallback.
-    let secret = read_regular(identity, 4096, true)?;
-    if !std::str::from_utf8(&secret).is_ok_and(|text| {
-        text.lines()
-            .filter(|l| !l.starts_with('#') && !l.is_empty())
-            .all(|l| l.starts_with("AGE-SECRET-KEY-1"))
-    }) {
-        return Err(Error::Config(
-            "backup requires a private age X25519 identity file",
-        ));
-    }
-    let directory = alt_os::temp::tempdir().map_err(|_| Error::File)?;
+    let secret = age_identity(identity)?;
+    let directory = alt_os::temp::tempdir_in(work).map_err(|_| Error::File)?;
     let saved_identity = directory.path().join("age.identity");
     create_private(&saved_identity, &secret)?;
     let mut payload = regular(&input.join("payload.tar.age"))?;

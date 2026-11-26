@@ -20,15 +20,21 @@ impl Store {
     /// ([`crate::SEGMENTS_MOVED`]): the caller verifies the pack behind the
     /// segments as they are now. The file of the segment is looked for under
     /// that lock too, which a sweep holds while it removes files no row knows.
+    /// The refs the push was `read` with are held against them as they are
+    /// then ([`REFS_MOVED`](super::REFS_MOVED)).
     pub fn pack_publish(
         &mut self,
         credential: &Credential,
         publication: &Publication,
-        graph: &impl Graph,
+        graph: &SegmentGraph<'_>,
         segment: Option<NewSegment<'_>>,
-        behind: &[String],
+        (behind, read, leans): (&[String], &crate::Refs, &super::Leans),
     ) -> Result<Receipt> {
         let repository = &publication.key.scope.repository_instance_id;
+        super::still_led::push_verified(self.bytes.root());
+        let updated = super::still_led::updated(publication);
+        let led = self.led_now(repository, &updated, (read, leans), Some(graph.set))?;
+        super::still_led::push_found(self.bytes.root());
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
@@ -36,6 +42,7 @@ impl Store {
         if !live.iter().map(|(id, _)| id).eq(behind) {
             return Err(Error::Precondition(crate::SEGMENTS_MOVED));
         }
+        led.holds(&current, graph.set, self.limits.walk_steps)?;
         let held = (tx, &current, self.bytes.root());
         published(
             held,
@@ -54,13 +61,19 @@ impl Store {
     /// what is published behind them, the segments with the new one among them
     /// and that one. No push and no merge is published while it does: what it
     /// does is to be short. This is how a push is published that found the
-    /// segments moved time after time.
+    /// segments moved time after time. `updated` are the refs the publication
+    /// `made` gives updates and what each names after, as
+    /// [`super::still_led::updated`] has them: what the push may have lost is
+    /// found with them before the row is held.
     pub fn pack_publish_held(
         &mut self,
         credential: &Credential,
-        repository: &str,
+        (repository, read, leans): (&str, &crate::Refs, &super::Leans),
+        updated: &[(&str, Option<ObjectId>)],
         made: &mut dyn FnMut(&[String], &SegmentSet) -> Result<HeldPublication>,
     ) -> Result<Receipt> {
+        let led = self.led_now(repository, updated, (read, leans), None)?;
+        super::still_led::push_found(self.bytes.root());
         let mut tx = self.client.transaction()?;
         instance(&mut tx, &self.spec, &self.signing_key)?;
         let current = snapshot(&mut tx, &self.spec, repository)?;
@@ -74,6 +87,7 @@ impl Store {
         if publication.key.scope.repository_instance_id != repository {
             return Err(Error::Unauthorized);
         }
+        led.holds(&current, &set, self.limits.walk_steps)?;
         let graph = SegmentGraph {
             set: &set,
             limits: self.limits.into(),
@@ -96,6 +110,36 @@ impl Store {
             &graph,
             segment,
         )
+    }
+}
+
+impl Store {
+    /// What the refs `read` lead to now as far as a push of `updated` is
+    /// concerned (see [`super::still_led::found`]), found before the row of
+    /// `repository` is held: in `set` where no ref moved, and in the live
+    /// segments as they are now where one did, or where no set is given. The
+    /// refs are read before the segments: the segments hold what they name.
+    fn led_now(
+        &mut self,
+        repository: &str,
+        updated: &[(&str, Option<ObjectId>)],
+        (read, leans): (&crate::Refs, &super::Leans),
+        set: Option<&SegmentSet>,
+    ) -> Result<super::still_led::Led> {
+        let refs = self
+            .client
+            .query_one(crate::refs::REFS_TEXT, &[&repository])?;
+        let refs = crate::refs::map(refs.get::<_, Option<&str>>(0))?;
+        let moved = read.iter().any(|(name, old)| refs.get(name) != Some(&old));
+        let fresh;
+        let set = match (set, moved) {
+            (Some(set), false) => set,
+            _ => {
+                fresh = self.segments_now(repository)?.1;
+                &fresh
+            }
+        };
+        super::still_led::found(&refs, updated, (read, leans), set)
     }
 }
 

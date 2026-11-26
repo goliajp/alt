@@ -23,8 +23,13 @@ umask 077
 printf 'POSTGRES_PASSWORD=%s\n' "$password" > "$run/env"
 docker image inspect "$image" --format 'PostgreSQL image: {{.Id}} {{json .RepoDigests}}'
 # the table of locks is sized for tests that each make all the tables of a database
-# at once, as in with-test-postgres-native.sh
-container=$(docker run -d --rm --cpus 1 --memory 512m --env-file "$run/env" -p 127.0.0.1::5432 "$image" -c max_locks_per_transaction=512)
+# at once, and the connections for the tests of every thread, as in
+# with-test-postgres-native.sh
+. "$(dirname "$0")/test-postgres-threads.sh"
+connections=$((threads * 12 + 20))
+# a connection takes a few megabytes of its own beside what the server shares
+memory=$((256 + connections * 4))m
+container=$(docker run -d --rm --cpus 1 --memory "$memory" --env-file "$run/env" -p 127.0.0.1::5432 "$image" -c max_locks_per_transaction=512 -c max_connections=$connections)
 printf '%s\n' "$container" > "$run/container"
 attempt=0
 until docker exec "$container" pg_isready -U postgres >/dev/null 2>&1; do

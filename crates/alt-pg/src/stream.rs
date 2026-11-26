@@ -50,11 +50,46 @@ impl Stream {
         }
     }
 
+    pub fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_read_timeout(timeout),
+            Self::Unix(stream) => stream.set_read_timeout(timeout),
+        }
+    }
+
     fn receive(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Tcp(stream) => stream.read(buffer),
             Self::Unix(stream) => stream.read(buffer),
         }
+    }
+}
+
+/// The socket of a connection, to end it from another thread.
+pub enum Closer {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+impl Stream {
+    pub fn closer(&self) -> io::Result<Closer> {
+        Ok(match self {
+            Self::Tcp(stream) => Closer::Tcp(stream.try_clone()?),
+            Self::Unix(stream) => Closer::Unix(stream.try_clone()?),
+        })
+    }
+}
+
+impl Closer {
+    /// Ends the connection: a read that waits on it, here or in another
+    /// thread, ends with it. One the server ended already is ended.
+    pub fn close(&self) {
+        let ended = match self {
+            Self::Tcp(stream) => stream.shutdown(std::net::Shutdown::Both),
+            Self::Unix(stream) => stream.shutdown(std::net::Shutdown::Both),
+        };
+        // the one error is that the socket is no longer connected
+        drop(ended);
     }
 }
 

@@ -22,6 +22,22 @@ impl Connection {
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
     }
+    /// statements outside any transaction block, uncached
+    pub fn batch_execute(&mut self, sql: &str) -> Result<(), Error> {
+        self.client.batch_execute(sql)
+    }
+    /// how long a read of an answer waits; a read that waits longer closes the connection
+    pub fn set_read_timeout(&mut self, timeout: std::time::Duration) -> Result<(), Error> {
+        self.client.set_read_timeout(Some(timeout))
+    }
+    /// answers are waited for without end again
+    pub fn clear_read_timeout(&mut self) -> Result<(), Error> {
+        self.client.set_read_timeout(None)
+    }
+    /// what ends this connection from another thread
+    pub fn closer(&self) -> Result<alt_pg::Closer, Error> {
+        self.client.closer()
+    }
     /// one statement outside any transaction block, with the cached plan
     pub fn query_one(&mut self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, Error> {
         self.client.query_one(sql, params)
@@ -95,7 +111,7 @@ impl<'a> Transaction<'a> {
         self.reading
     }
     pub fn raw_mut(&mut self) -> &mut alt_pg::Transaction<'a> {
-        // Raw schema operations may change statement result types or settings.
+        // raw schema operations may change statement result types or settings
         if self.cached {
             self.inner.clear_statements();
         }
@@ -188,7 +204,7 @@ mod tests {
             tx.execute("UPDATE cache_test SET value=$1", &[&99i64])
                 .unwrap();
             assert!(tx.query_one("SELECT 1 / $1::integer", &[&0i32]).is_err());
-            // Drop rolls back. No failed write is retried by the cache.
+            // drop rolls back; no failed write is retried by the cache
         }
         let mut tx = connection.transaction().unwrap();
         assert_eq!(tx.query_one(sql, &[]).unwrap().get::<_, i64>(0), 2);

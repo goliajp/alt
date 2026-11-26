@@ -11,7 +11,7 @@ use crate::altd_server_untrusted::repository;
 
 /// A repository of four thousand files that have nothing in common, and its
 /// head: a fetch of it reads and packs each of them.
-fn of_many_files(origin: &Path) -> String {
+pub(crate) fn of_many_files(origin: &Path) -> String {
     repository(origin);
     let all = noise(4000 * 8192);
     for (n, file) in all.chunks(8192).enumerate() {

@@ -47,6 +47,7 @@ pub fn take_in<T>(
     recorded: impl Recorded<T>,
     told: &Told,
 ) -> Res<Report<T>> {
+    let gone = pack.as_ref().and_then(|(_, limits, _)| limits.given_up);
     // a pack that fails to index is reported as the unpack error; one
     // that was not looked at for want of memory is no failed push
     let prepared = match pack.map(|(path, limits, bases)| prepare_pack(path, &limits, bases)) {
@@ -58,7 +59,8 @@ pub fn take_in<T>(
         Some(Ok(prepared)) => Some(prepared),
         None => None,
     };
-    // the memory of the pack is kept until its objects are written
+    // the memory of the pack, and the room of what was appended to it, are
+    // kept until its objects are written
     let (prepared, _memory) = prepared.unzip();
     // nothing would name the objects
     if updates.is_empty() {
@@ -72,7 +74,7 @@ pub fn take_in<T>(
         (trust, _) => trust,
     };
     let checked = match trust {
-        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref())?),
+        Some(trust) => Some(signed::check_pack(trust, prepared.as_ref(), gone)?),
         None => None,
     };
     let push = Push {
@@ -83,6 +85,7 @@ pub fn take_in<T>(
         signed_in: signed_in.as_ref(),
         sig_label,
         told,
+        gone,
     };
     let mut store = store.take();
     Ok(match land(&mut store, &push)? {

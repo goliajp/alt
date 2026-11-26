@@ -62,7 +62,7 @@ pub(super) fn resolve(
     let deltas = Deltas::new(entries.iter().map(|entry| match &entry.form {
         Form::Plain(_) => Of::Nothing,
         Form::Ofs(base) => Of::Entry(*base),
-        Form::Ref(base) => Of::Object(*base),
+        Form::Ref(base, _) => Of::Object(*base),
     }));
     let mut budget = Budget::new(
         (limits.object_bytes, limits.inflated_bytes),

@@ -49,11 +49,17 @@ fn head_of(reader: &mut std::io::BufReader<std::net::TcpStream>) -> (String, Str
 }
 
 /// Whether a request that was to stay unanswered was answered, or let go of.
-fn answered_already(socket: &std::net::TcpStream) -> bool {
+/// What the service answered on `socket` already, as far as it came: none
+/// where nothing came.
+fn answered_already(socket: &std::net::TcpStream) -> Option<String> {
     socket.set_nonblocking(true).unwrap();
-    let come = socket.peek(&mut [0]);
+    let mut come = [0; 64];
+    let read = socket.peek(&mut come);
     socket.set_nonblocking(false).unwrap();
-    !matches!(come, Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    match read {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
+        read => Some(String::from_utf8_lossy(&come[..read.unwrap_or(0)]).into_owned()),
+    }
 }
 
 #[test]
@@ -82,7 +88,9 @@ fn an_address_a_proxy_names_has_so_many_requests_under_way_and_no_more() {
     while alive(&server, Some("203.0.113.9")) != crowded {
         assert!(std::time::Instant::now() < until, "a third is answered");
         for one in &mut under_way {
-            if answered_already(&one.0) {
+            // refused for its place, and for nothing else
+            if let Some(answer) = answered_already(&one.0) {
+                assert!(answer.starts_with("HTTP/1.1 429 "), "{answer:?}");
                 *one = held();
             }
         }

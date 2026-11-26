@@ -42,6 +42,11 @@ def main():
              '-keyout', work / 'key.pem', '-out', work / 'cert.pem', '-days', '2', '-subj', '/CN=alt.smoke.test',
              '-addext', 'subjectAltName=DNS:alt.smoke.test,IP:127.0.0.1'])
         run(['python3', manage, 'load', '--bundle', bundle])
+        public = subprocess.run(['python3', manage, 'prepare', '--bundle', bundle, '--directory', work / 'public', '--project', project,
+                                 '--origin', 'https://alt.smoke.test', '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem',
+                                 '--front-proxy', '--bind', '0.0.0.0'], capture_output=True, text=True)
+        assert public.returncode != 0 and 'keep --bind 127.0.0.1' in public.stderr and not (work / 'public').exists(), public
+        report['checks'].append('prepare refuses a front proxy for an edge that takes connections from anywhere')
         run(['python3', manage, 'prepare', '--bundle', bundle, '--directory', directory, '--project', project,
              '--origin', 'https://alt.smoke.test', '--https-port', args.port,
              '--certificate', work / 'cert.pem', '--private-key', work / 'key.pem',
@@ -55,9 +60,19 @@ def main():
         report['checks'].append('prepare names the edge and its gateway to the application, and a front proxy to the edge only when told of one')
         run(['python3', manage, 'initialize', '--directory', directory])
         report['checks'].append('load, prepare and initialize')
-        network = run(['docker', 'network', 'inspect', project + '_default', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{end}}']).strip()
-        assert network == f'{written["ALT_SUBNET"]} {gateway}', network
+        network = lambda: run(['docker', 'network', 'inspect', project + '_default', '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{end}}']).strip()
+        assert network() == f'{written["ALT_SUBNET"]} {gateway}', network()
         report['checks'].append('the network of the edge has the subnet and the gateway that were written down')
+        # an installation of an earlier bundle, brought up by an earlier Compose: a
+        # network on a subnet Docker chose, with no digest of its configuration
+        run(['docker', 'compose', '--project-directory', directory, '--env-file', directory / '.env', '-f', directory / 'compose.yaml', 'down'])
+        run(['docker', 'network', 'create', '--label', 'com.docker.compose.network=default', '--label', f'com.docker.compose.project={project}',
+             '--label', 'com.docker.compose.version=2.20.2', project + '_default'])
+        earlier = network()
+        assert earlier != f'{written["ALT_SUBNET"]} {gateway}', earlier
+        run(['python3', manage, 'start', '--directory', directory])
+        assert network() == f'{written["ALT_SUBNET"]} {gateway}', (earlier, network())
+        report['checks'].append(f'start makes anew a network an earlier Compose left on {earlier}')
 
         def operator(*arguments):
             out = run(['python3', manage, 'operator', '--directory', directory, '--', *arguments])

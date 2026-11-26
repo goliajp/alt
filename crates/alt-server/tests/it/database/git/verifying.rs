@@ -68,13 +68,19 @@ fn a_pack_that_needs_more_memory_than_packs_are_verified_in_is_refused_and_told_
 
 /// A process in a group of its own with what it runs. The group is ended when this
 /// is let go of, however the test ends: a push that waits would be left waiting.
-struct Group(std::process::Child);
+/// It is ended once: once its first process is waited for, its number may be
+/// another group's.
+struct Group(Option<std::process::Child>);
 
 impl Group {
-    /// ends every process of the group
-    fn end(&self) -> bool {
-        let group = format!("-{}", self.0.id());
+    /// ends every process of the group, and waits for the first of them
+    fn end(&mut self) -> bool {
+        let Some(mut first) = self.0.take() else {
+            return false;
+        };
+        let group = format!("-{}", first.id());
         let killed = Command::new("kill").args(["-KILL", "--", &group]).status();
+        let _ = first.wait();
         killed.is_ok_and(|killed| killed.success())
     }
 }
@@ -82,7 +88,6 @@ impl Group {
 impl Drop for Group {
     fn drop(&mut self) {
         self.end();
-        let _ = self.0.wait();
     }
 }
 
@@ -119,7 +124,7 @@ fn a_push_that_waits_for_memory_leaves_the_line_once_its_client_is_gone() {
         .process_group(0)
         .spawn()
         .unwrap();
-    let mut pushing = Group(pushing);
+    let mut pushing = Group(Some(pushing));
     let until = |waiting: usize, within: Duration| {
         let began = std::time::Instant::now();
         while memory.waiting().0 != waiting {
@@ -129,7 +134,6 @@ fn a_push_that_waits_for_memory_leaves_the_line_once_its_client_is_gone() {
     };
     until(1, Duration::from_secs(60));
     assert!(pushing.end());
-    pushing.0.wait().unwrap();
     until(0, Duration::from_secs(30));
     drop(others);
     assert_eq!(f.counts().0, 0);

@@ -13,6 +13,8 @@ const LIFE: Duration = Duration::from_secs(24 * 60 * 60);
 /// The nonces kept as used at once: those of the signed pushes of a day.
 /// A push more is refused, not taken with a nonce forgotten.
 const MOST: usize = 1 << 20;
+/// what the log is told where a push is refused for a table that is full
+const FULL: &str = "altd-server: a signed push is refused: the 1048576 nonces used within a day are kept, and no more";
 
 /// What tells a nonce from the others of its table: when it was given, in
 /// milliseconds since the table was made, and eight bytes of chance.
@@ -113,15 +115,22 @@ impl NonceTable {
     /// meanwhile, or the table keeps as many as it may: the push that is
     /// signed over it is not taken.
     pub(super) fn spend(&self, given: Given) -> bool {
-        self.spend_at(given, Instant::now())
+        self.spend_at(given, Instant::now(), &mut std::io::stderr())
     }
 
-    fn spend_at(&self, given: Given, now: Instant) -> bool {
+    /// [`Self::spend`] at `now`, saying to `log` why a push is refused for a
+    /// table that keeps as many as it may.
+    fn spend_at(&self, given: Given, now: Instant, log: &mut dyn std::io::Write) -> bool {
         let mut inner = self.inner.take();
         // those that are good no longer are told from the used by their age
         let oldest = self.at(now).saturating_sub(LIFE.as_millis() as u64);
         inner.used = inner.used.split_off(&Given(oldest, [0; 8]));
-        inner.used.len() < MOST && inner.used.insert(given)
+        if inner.used.len() >= MOST {
+            // a log that cannot be written to keeps the refusal no less
+            let _ = writeln!(log, "{FULL}");
+            return false;
+        }
+        inner.used.insert(given)
     }
 
     /// Whether no nonce of the table is good any more: the table may be
@@ -211,11 +220,11 @@ mod tests {
         assert!(other.iter().all(|other| *other != new && other.len() == 64));
         assert!(other.iter().all(|other| t.good_at(other, before).is_none()));
         let given = t.good_at(&new, before).unwrap();
-        assert!(t.spend_at(given, before));
+        assert!(t.spend_at(given, before, &mut Vec::new()));
         assert_eq!(t.inner.take().used.len(), 1);
         // past its day it is told by its age, and kept no more
         let other = Given(t.at(after), [7; 8]);
-        assert!(t.spend_at(other, after));
+        assert!(t.spend_at(other, after, &mut Vec::new()));
         assert_eq!(t.inner.take().used.iter().collect::<Vec<_>>(), [&other]);
     }
 
@@ -229,10 +238,15 @@ mod tests {
             .map(|n| Given(1, n.to_be_bytes()))
             .collect();
         let more = Given(2, [0xff; 8]);
-        assert!(!t.spend_at(more, now + Duration::from_secs(1)));
+        let mut log = Vec::new();
+        assert!(!t.spend_at(more, now + Duration::from_secs(1), &mut log));
+        assert_eq!(String::from_utf8(log).unwrap(), format!("{FULL}\n"));
+        assert!(FULL.contains(&MOST.to_string()));
         assert_eq!(t.inner.take().used.len(), MOST);
         // a day on, those are no longer good and there is room
-        assert!(t.spend_at(more, now + LIFE + Duration::from_secs(1)));
+        let mut log = Vec::new();
+        assert!(t.spend_at(more, now + LIFE + Duration::from_secs(1), &mut log));
+        assert!(log.is_empty());
         assert_eq!(t.inner.take().used.len(), 1);
     }
 }

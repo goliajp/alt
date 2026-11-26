@@ -16,6 +16,13 @@ use alt_wire::pkt;
 
 const UPLOAD_RESULT: &str = "application/x-git-upload-pack-result";
 
+/// What a read is answered with: the response, or the share of the room for
+/// responses of one put off to wait for its turn, to be read again with.
+pub(crate) enum Answer {
+    Done(Output),
+    Turn(alt_shares::Share),
+}
+
 fn peel(set: &SegmentSet, mut oid: Oid, remaining: &mut usize) -> Result<Option<Oid>> {
     let mut peeled = None;
     while set.kind(&oid).map_err(segment_error)? == Some(Kind::Tag) {
@@ -61,17 +68,17 @@ fn listed(
     sending: Option<alt_shares::Share>,
     content_type: &'static str,
     write: impl FnOnce(&mut Spill) -> Result<()>,
-) -> Result<Output> {
+) -> Result<Answer> {
     let mut body = Spill::within(sending);
     let written = write(&mut body);
-    body.into_output(content_type, written)
+    body.into_answer(content_type, written)
 }
 
 fn advertisement(
     receive: bool,
     view: &PackView,
     sending: Option<alt_shares::Share>,
-) -> Result<Output> {
+) -> Result<Answer> {
     if receive {
         let refs: Vec<_> = view
             .refs
@@ -111,10 +118,10 @@ fn advertisement(
         pkt::write_data(&mut output, line.as_bytes())?;
     }
     pkt::write_flush(&mut output)?;
-    Ok(Output::Bytes {
+    Ok(Answer::Done(Output::Bytes {
         content_type: "application/x-git-upload-pack-advertisement",
         bytes: output,
-    })
+    }))
 }
 
 fn references(
@@ -123,7 +130,7 @@ fn references(
     view: &PackView,
     sending: Option<alt_shares::Share>,
     mut remaining: usize,
-) -> Result<Output> {
+) -> Result<Answer> {
     let prefixes = request.prefixes();
     let wanted = |name: &str| alt_wire::ls_refs::LsRefsRequest::listed(&prefixes, name);
     let head = view.refs.get(&view.default_branch);
@@ -157,26 +164,28 @@ fn references(
     })
 }
 
+/// The answer to `command` from `view`. A response the share `sending` puts
+/// off is dropped with what it was built from, and the share is answered with.
 pub(crate) fn read(
     limits: alt_remote_protocol::Limits,
     receive: bool,
     command: &Command,
-    view: PackView,
-    sending: Option<alt_shares::Share>,
+    view: &PackView,
+    mut sending: Option<alt_shares::Share>,
     gone: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<Output> {
+) -> Result<Answer> {
     let bytes = |content_type, bytes| {
-        Ok(Output::Bytes {
+        Ok(Answer::Done(Output::Bytes {
             content_type,
             bytes,
-        })
+        }))
     };
     let mut output = Vec::new();
     let mut remaining = limits.walk_steps;
     match command {
-        Command::Advertisement => return advertisement(receive, &view, sending),
+        Command::Advertisement => return advertisement(receive, view, sending),
         Command::Refs(request, unborn) => {
-            return references(request, *unborn, &view, sending, remaining);
+            return references(request, *unborn, view, sending, remaining);
         }
         Command::Fetch(_) => {}
     }
@@ -221,8 +230,11 @@ pub(crate) fn read(
     if everything {
         // nothing is computed per object: the stored bytes go out as they are read
         let (pieces, checksum) = set.whole().map_err(segment_error)?;
-        return Ok(Output::WholePack(pieces, checksum));
+        return Ok(Answer::Done(Output::WholePack(pieces, checksum)));
     }
+    // counted while the objects are chosen and written, and not while the
+    // response waits for its turn
+    let _building = sending.as_ref().map(alt_shares::Share::building);
     // the trees a fetch may read are as many as any walk may take steps; one
     // nobody waits for any more ends at the next
     let select = |wants: &[Oid]| set.select_while(wants, &haves, limits.walk_steps, gone);
@@ -244,6 +256,17 @@ pub(crate) fn read(
             selection = select(&more).map_err(segment_error)?;
         }
     }
+    // a large one has its turn before it is written, or is put off to wait
+    // for it with nothing of this held
+    if let Some(share) = sending.as_mut() {
+        let bytes = set.selected_bytes(&selection).map_err(segment_error)?;
+        if share.expect(bytes).is_err() {
+            return match share.put_off() {
+                true => Ok(Answer::Turn(sending.expect("a share"))),
+                false => Err(Error::Busy("responses to fetches")),
+            };
+        }
+    }
     // the pack is framed as it is written; a large one is not kept in memory
     let mut body = Spill::within(sending);
     let written = (|| {
@@ -254,5 +277,5 @@ pub(crate) fn read(
         band.finish()?;
         Ok(pkt::write_flush(&mut body)?)
     })();
-    body.into_output(UPLOAD_RESULT, written)
+    body.into_answer(UPLOAD_RESULT, written)
 }

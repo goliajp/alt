@@ -331,7 +331,12 @@ ended where it stood leaves its directory behind, and the next one to start
 under the same parent removes it. Of that room, and of the room for request bodies being
 received, the peers of one address that is not the host itself have a
 quarter between them; a single response or body of an address may pass the
-quarter as far as the room goes. These numbers, and those for the size of a push and the
+quarter as far as the room goes. A response does so one at a time for each
+address and as many at once as half the workers; one that would while those
+are taken waits for its turn as long as its fetch may take, and while one
+waits a response that passed the quarter is taken at
+`ALT_SERVER_LARGE_MIN_BYTES_PER_SEC` (a mebibyte a second) at the least in each
+30 seconds, or is let go of. These numbers, and those for the size of a push and the
 memory and disk requests may take, are set through the environment;
 `altd-server --help` lists them with their defaults. Two more that it lists
 bound what the server holds at once: `ALT_SERVER_MAX_OPEN_REPOS`, the
@@ -344,12 +349,13 @@ indexed; pushes that find no memory wait in the order they came, for
 stays, and are then answered `503` with `Retry-After`. The response to a
 fetch is made for `ALT_SERVER_MAX_FETCH_MS` at the longest, ten minutes by
 default, and no longer than its client stays; a fetch that takes longer is
-answered `503`. A fetch whose pack is still being made, and a push that asked
-for the side band whose pack is still being taken in, are sent the head of
-their answer once `ALT_SERVER_KEEPALIVE_MS` went by, five seconds by default,
-and a keepalive each time it goes by again, as Git's `upload-pack` and
-`receive-pack` send them; what refuses one of them from then on, the waits
-above among it, is told as an error in the side band instead of a `503`.
+answered `503`. A fetch whose pack is still being made or waits for its turn,
+and a push that asked for the side band whose pack is still being taken in,
+are sent the head of their answer once `ALT_SERVER_KEEPALIVE_MS` went by, five
+seconds by default, and a keepalive each time it goes by again, as Git's
+`upload-pack` and `receive-pack` send them; what refuses one of them from then
+on, the waits above among it, is told as an error in the side band instead of a
+`503`.
 An error of the server is told as it is to a client that signed in, and to
 another only as the step that failed and, where it is known, the kind of
 error of the system it came of: the error itself, which may name files of the

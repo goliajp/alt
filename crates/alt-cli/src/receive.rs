@@ -73,8 +73,12 @@ pub const ATTEMPTS: usize = 4;
 pub type PreparedPack = (alt_git_pack::IndexedPack, Vec<(u64, u32)>);
 
 /// The memory a pack took to be indexed, which it keeps for as long as its
-/// objects are read out of it.
-pub type PackMemory = Option<alt_git_pack::Taken<'static>>;
+/// objects are read out of it, and the room on the disk of the bases
+/// appended to it, which it keeps for as long as it is there.
+pub type PackMemory = (
+    Option<alt_git_pack::Taken<'static>>,
+    Vec<alt_git_pack::Taken<'static>>,
+);
 
 /// Indexes the pack on disk at `path`, which may hold what `limits`
 /// allows. A push is sent thin, its deltas made of objects the server
@@ -94,7 +98,7 @@ pub fn prepare_pack(
         .map(|i| (idx.offset_at(i).expect("idx in range"), i))
         .collect();
     order.sort_unstable();
-    Ok(((ip, order), indexed.memory))
+    Ok(((ip, order), (indexed.memory, indexed.appended)))
 }
 
 /// The objects a push may name: those the odb holds and those of its
@@ -150,6 +154,16 @@ pub struct Push<'a> {
     pub sig_label: &'a str,
     /// what the pusher is told of an error of the server
     pub told: &'a Told,
+    /// set once nobody waits for the push: its objects are written no further
+    pub gone: Option<&'a std::sync::atomic::AtomicBool>,
+}
+
+/// What reading the objects of a push ends in once nobody waits for it.
+pub(crate) fn gone_on(gone: Option<&std::sync::atomic::AtomicBool>) -> Res<()> {
+    match gone.is_some_and(|gone| gone.load(std::sync::atomic::Ordering::Relaxed)) {
+        true => Err("the peer of the push is gone".into()),
+        false => Ok(()),
+    }
 }
 
 /// What became of a push.
@@ -237,7 +251,7 @@ fn attempt(
     };
     let mut batch = Batch::begin(odb)?;
     if let Some(added) = &added
-        && let Err(e) = batch.write(push.pack, added)
+        && let Err(e) = batch.write(push.pack, added, push.gone)
     {
         return Ok(Some(Landed::Unpack(told::unpack_told(push.told, &*e))));
     }

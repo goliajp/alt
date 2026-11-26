@@ -144,6 +144,36 @@ fn the_commands_of_a_request_have_a_cap_of_their_own() {
     assert_eq!(post("git-upload-pack", &fetch), "413");
 }
 
+/// A name with a line in it is no ref name, and a push of one is refused as a
+/// whole: its line of a push certificate would be the lines of two updates.
+#[test]
+fn a_push_to_a_ref_name_with_a_line_in_it_is_refused() {
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    repository(&origin);
+    let server = spawn_server(&origin);
+    let zero = "0".repeat(40);
+    let post = |name: &str| {
+        let mut push = pkt(&format!("{zero} {zero} {name}\0report-status\n"));
+        push.extend_from_slice(b"0000");
+        let sent = tmp.path().join("push");
+        fs::write(&sent, push).unwrap();
+        status(&[
+            "--data-binary",
+            &format!("@{}", sent.display()),
+            &format!("http://{}/git-receive-pack", server.addr),
+        ])
+    };
+    assert_eq!(post("refs/heads/one"), "200");
+    for name in [
+        format!("refs/heads/one\n{zero} {zero} refs/heads/two"),
+        "refs/heads/a\tb".to_owned(),
+        "refs/heads/a\x7fb".to_owned(),
+    ] {
+        assert_eq!(post(&name), "400", "{name:?}");
+    }
+}
+
 /// The most memory of its own the process `pid` had while `during` ran.
 #[cfg(target_os = "linux")]
 fn most_memory(pid: u32, during: impl FnOnce()) -> u64 {

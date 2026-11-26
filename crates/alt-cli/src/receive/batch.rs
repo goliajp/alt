@@ -30,16 +30,19 @@ impl<'a> Batch<'a> {
         })
     }
 
-    /// Writes those of the pack's objects that are among `added`.
+    /// Writes those of the pack's objects that are among `added`, while
+    /// `gone` is not set.
     pub(super) fn write(
         &mut self,
         pack: Option<&PreparedPack>,
         added: &KeyedIdSet<ObjectId>,
+        gone: Option<&std::sync::atomic::AtomicBool>,
     ) -> Res<()> {
         let Some((ip, order)) = pack else {
             return Ok(());
         };
         for &(offset, i) in order {
+            super::gone_on(gone)?;
             let oid = ip.idx().oid_at(i);
             if added.contains(&oid) {
                 self.wrote = true;

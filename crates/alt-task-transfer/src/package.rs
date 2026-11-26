@@ -5,7 +5,7 @@ use alt_remote_protocol::{
 };
 use alt_repository_service::{ObjectReader, ObjectSource};
 use alt_task::Artifact;
-use alt_task_service::{ArtifactSource, TaskLimits, VerifiedPublication};
+use alt_task_service::{ArtifactSource, TaskLimits};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -235,9 +235,9 @@ impl Draft {
 }
 
 pub struct Package {
-    directory: PathBuf,
+    pub(crate) directory: PathBuf,
     request: BeginRequest,
-    limits: Limits,
+    pub(crate) limits: Limits,
     objects: BTreeMap<ObjectId, usize>,
 }
 impl Package {
@@ -291,19 +291,6 @@ impl Package {
             return Err(Error::Invalid("content length"));
         }
         Ok(file)
-    }
-    pub fn verify(&self, task_limits: TaskLimits) -> Result<VerifiedPublication> {
-        for entry in &self.request.manifest.entries {
-            verify_file(&self.directory.join("content").join(&entry.blake3), entry)?;
-        }
-        Ok(VerifiedPublication::verify(
-            &self.request.publication,
-            &self.request.manifest,
-            self,
-            self,
-            self.limits,
-            task_limits,
-        )?)
     }
 }
 impl ArtifactSource for Package {
@@ -360,7 +347,7 @@ fn regular(path: &Path) -> Result<File> {
     }
     Ok(file)
 }
-fn verify_file(path: &Path, entry: &ContentEntry) -> Result<()> {
+pub(crate) fn verify_file(path: &Path, entry: &ContentEntry) -> Result<()> {
     let mut file = regular(path)?;
     if file.metadata()?.len() != entry.bytes {
         return Err(Error::Invalid("content size"));

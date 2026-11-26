@@ -46,6 +46,8 @@ struct Waiting {
     requests: VecDeque<Request>,
     /// the calls of `recv` that are to return without a request
     unblocked: usize,
+    /// every call that finds no request returns without one
+    closed: bool,
 }
 
 struct Shared {
@@ -119,11 +121,12 @@ impl Shared {
 impl Server {
     /// Listens at `address` for `most` connections at once, whose peers are
     /// given `limits`; those of the networks `here` are of this host, and
-    /// those of `proxies` among them say whose their requests are.
+    /// those of `proxies` among them say whose their requests are. `large`
+    /// bodies at once may pass the part of their address.
     pub(crate) fn listen(
         address: &str,
         limits: Limits,
-        most: usize,
+        (most, large): (usize, usize),
         here: &'static [Network],
         proxies: &'static [Network],
     ) -> io::Result<Server> {
@@ -133,7 +136,7 @@ impl Server {
             arrived: Condvar::new(),
             open: AtomicUsize::new(0),
             from: Mutex::default(),
-            held: Shares::of(limits.spool),
+            held: Shares::of(limits.spool, large),
             limits,
             here,
             proxies,
@@ -174,7 +177,8 @@ impl Server {
     }
 
     /// The next request whose head was read, or an error for a call that
-    /// [`Server::unblock`] lets go of.
+    /// [`Server::unblock`] lets go of, or that finds none once the server is
+    /// [closed](Server::close).
     pub(crate) fn recv(&self) -> io::Result<Request> {
         let mut waiting = self.shared.waiting.lock().expect("requests");
         loop {
@@ -185,6 +189,9 @@ impl Server {
                 waiting.unblocked -= 1;
                 return Err(io::ErrorKind::Interrupted.into());
             }
+            if waiting.closed {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
             waiting = self.shared.arrived.wait(waiting).expect("requests");
         }
     }
@@ -192,6 +199,12 @@ impl Server {
     /// Has one call of [`Server::recv`] that finds no request return.
     pub(crate) fn unblock(&self) {
         self.shared.waiting.lock().expect("requests").unblocked += 1;
+        self.shared.arrived.notify_all();
+    }
+
+    /// Has every call of [`Server::recv`] that finds no request return.
+    pub(crate) fn close(&self) {
+        self.shared.waiting.lock().expect("requests").closed = true;
         self.shared.arrived.notify_all();
     }
 }

@@ -218,6 +218,25 @@ fn a_segment_is_read_through_with_each_delta_applied_once() {
     );
 }
 
+/// A base at the end of a chain with many deltas made of it and of nothing
+/// more, read with room for no more than one object beside the one that is
+/// read: the base is kept for them all, and each delta is applied once.
+#[test]
+fn the_base_of_many_deltas_is_kept_while_they_are_read_whatever_room_there_is() {
+    use alt_pack_segment::unread_holding;
+    const DEPTH: usize = 10;
+    const MADE: usize = 100;
+    let work = alt_os::temp::tempdir().unwrap();
+    let none = SegmentSet::default();
+    let mut entries = vec![(0, Of::Nothing)];
+    entries.extend((1..=DEPTH).map(|n| (n, Of::Entry(n - 1))));
+    entries.extend((DEPTH + 1..=DEPTH + MADE).map(|n| (n, Of::Entry(DEPTH))));
+    let segment = super::segment(work.path(), "made.seg", &pack(&entries), &none);
+    let (lost, applied) = unread_holding(&segment, &none, 1500).unwrap();
+    assert!(lost.is_empty(), "{lost:?}");
+    assert_eq!(applied, (DEPTH + MADE) as u64);
+}
+
 /// The counts a segment ends with are not under the sum of its index. Counts
 /// that add up, with a length of the pack that no file has, to where the
 /// index ends are those of no segment: the file is refused, and nothing of it

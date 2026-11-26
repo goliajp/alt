@@ -4,6 +4,7 @@ mod content;
 mod execute;
 mod input;
 mod login;
+mod portable;
 use super::*;
 use crate::web_route::{self, WebRoute};
 use alt_browser_auth::PublicOrigin;
@@ -134,7 +135,7 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     if request.headers().contains_key(header::AUTHORIZATION) {
         return unauthenticated();
     }
-    // Neither bearer credentials nor proxy headers can become browser identity.
+    // neither bearer credentials nor proxy headers can become browser identity
     let token = match headers(request.headers(), "cookie").and_then(|values| {
         browser
             .origin
@@ -205,6 +206,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
     };
     let claim = Arc::new(login::Claim::default());
     let waiting = crate::git::Waiting::default();
+    let worker = worker::Slot::new(permit, &state.workers);
+    let done = worker.until_done();
     let call = execute::Call {
         factory: state.factory.clone(),
         options: state.options.native.clone(),
@@ -214,21 +217,20 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
         claim: claim.clone(),
         attempt,
         reviews: state.reviews.clone(),
-        sending: state.options.sending.share(alt_shares::address(peer)),
+        sending: (state.options.sending.share(alt_shares::address(peer)))
+            .waiting(None, Some(waiting.0.clone()))
+            .aside(worker.aside(waiting.0.clone())),
         gone: waiting.0.clone(),
     };
-    let outcome = tokio::time::timeout(
-        state.options.work_timeout,
-        crate::http::spawn_observed(Phase::Execute, move || {
-            let _permit = permit;
-            let _password_permit = password_permit;
-            call.run(route, source)
-        }),
-    )
-    .await;
-    let unopened = login && outcome.is_err() && claim.abandon();
+    let executed = crate::http::spawn_observed(Phase::Execute, move || {
+        let _done = done;
+        let _password_permit = password_permit;
+        call.run(route, source)
+    });
+    let outcome = worker.within(state.options.work_timeout, executed).await;
+    let unopened = login && outcome.is_none() && claim.abandon();
     match outcome {
-        Ok(Ok(Ok((output, cookie)))) => {
+        Some(Ok(Ok((output, cookie)))) => {
             // what was written out to be sent is a file where it is long, and
             // bytes where it is not
             const DOWNLOADS: [&str; 2] = ["application/octet-stream", crate::portable::ARCHIVE];
@@ -258,8 +260,8 @@ async fn handle_inner(request: Request, state: Arc<App>, peer: IpAddr) -> Respon
             }
             response
         }
-        Ok(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
-        Ok(Ok(Err(error))) => store_failure(error, None),
+        Some(Ok(Err(Error::Unauthorized))) if login || session_request => unauthenticated(),
+        Some(Ok(Err(error))) => store_failure(error, None),
         _ => login::unfinished(writing, unopened),
     }
 }

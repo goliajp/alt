@@ -31,7 +31,7 @@ fn lands(
     let pack = Some(&prepared.1);
     let principal = pusher("anonymous");
     let trust = receive::signed::trust_for(&store, &principal).unwrap();
-    let checked = trust.map(|trust| receive::signed::check_pack(trust, pack).unwrap());
+    let checked = trust.map(|trust| receive::signed::check_pack(trust, pack, None).unwrap());
     let push = Push {
         pack,
         checked: checked.as_ref(),
@@ -40,6 +40,7 @@ fn lands(
         signed_in: None,
         sig_label: "none",
         told: &receive::told_whole,
+        gone: None,
     };
     let at = |step| {
         (step == Step::Recorded).then(recorded);

@@ -15,6 +15,8 @@ pub(crate) use tokens::{insert_known_token, token_digest, validate_token};
 mod instance;
 use instance::mode;
 pub(crate) use instance::{instance, instance_unlocked};
+mod numbers;
+pub(crate) use numbers::{integer, now, unsigned};
 
 #[derive(Clone, Debug, PartialEq, Eq, alt_json::ToJson, alt_json::FromJson)]
 #[json(deny_unknown_fields)]
@@ -25,7 +27,7 @@ pub struct InstanceSpec {
     pub runtime_generation: u64,
 }
 impl InstanceSpec {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         Scope {
             installation_id: self.installation_id.clone(),
             repository_instance_id: self.workspace_id.clone(),
@@ -60,6 +62,13 @@ pub struct Store {
     pub(crate) spec: InstanceSpec,
     pub(crate) signing_key: SigningKey,
     pub(crate) limits: Limits,
+    /// set while a request that may stop being waited for is served, for the
+    /// walks it asks of the refs
+    pub(crate) waited: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// set while a request is served, for the objects stored as deltas it reads
+    pub(crate) restoring: Option<alt_pack_segment::Restoring>,
+    /// what the owner of the store has it hold for as long as it is told
+    pub(crate) held: Option<Box<dyn std::any::Any + Send>>,
 }
 impl Store {
     /// Explicit first initialization, never invoked as a fallback from open.
@@ -126,7 +135,35 @@ impl Store {
             spec,
             signing_key,
             limits,
+            waited: None,
+            restoring: None,
+            held: None,
         })
+    }
+    /// What the walks of the refs this store is asked for look at to end
+    /// early, until it is told none again: a request that is waited for no
+    /// longer.
+    pub fn waited_for(&mut self, gone: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>) {
+        self.waited = gone;
+    }
+    /// The memory the objects stored as deltas that this store reads whole are
+    /// restored in, until it is told none again.
+    pub fn restoring_within(&mut self, room: Option<alt_pack_segment::Restoring>) {
+        self.restoring = room;
+    }
+    /// Holds `held` in the place of what it held, until it is told again or
+    /// dropped: for an owner that counts the stores in use.
+    pub fn holding(&mut self, held: Option<Box<dyn std::any::Any + Send>>) {
+        self.held = held;
+    }
+    /// How long an answer of the database is waited for, without end where
+    /// none; one that waits longer fails, and the connection with it.
+    pub fn answers_within(&mut self, timeout: Option<std::time::Duration>) -> Result<()> {
+        match timeout {
+            Some(timeout) => self.client.set_read_timeout(timeout)?,
+            None => self.client.clear_read_timeout()?,
+        }
+        Ok(())
     }
     pub fn spec(&self) -> &InstanceSpec {
         &self.spec
@@ -443,23 +480,4 @@ impl Store {
         )?;
         tx.commit().map_err(|_| Error::OutcomeUnknown)
     }
-}
-pub(crate) fn integer(value: u64) -> Result<i64> {
-    value
-        .try_into()
-        .map_err(|_| Error::Limit("database integer range"))
-}
-pub(crate) fn unsigned(value: i64) -> Result<u64> {
-    value
-        .try_into()
-        .map_err(|_| Error::Integrity("negative database counter"))
-}
-pub(crate) fn now(tx: &mut Transaction<'_>) -> Result<u64> {
-    unsigned(
-        tx.query_one(
-            "SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint",
-            &[],
-        )?
-        .get(0),
-    )
 }

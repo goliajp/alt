@@ -221,12 +221,12 @@ pub fn tree(
     store: &mut Store,
     credential: &Credential,
     repository: &str,
-    commit: ObjectId,
+    (commit, gone): (ObjectId, Option<&std::sync::atomic::AtomicBool>),
     path: &str,
     after: usize,
 ) -> Result<TreePage> {
     let raw_path = path_bytes(path)?;
-    reached::led_to(store, credential, repository, commit)?;
+    reached::led_to(store, credential, repository, (commit, gone))?;
     let mut reader = Reader {
         store,
         credential,
@@ -272,11 +272,11 @@ pub fn shown(
     store: &mut Store,
     credential: &Credential,
     repository: &str,
-    oid: ObjectId,
+    (oid, gone): (ObjectId, Option<&std::sync::atomic::AtomicBool>),
     within: &Within,
 ) -> Result<()> {
     let raw_path = path_bytes(&within.path)?;
-    reached::led_to(store, credential, repository, within.commit)?;
+    reached::led_to(store, credential, repository, (within.commit, gone))?;
     let mut reader = Reader {
         store,
         credential,
@@ -293,10 +293,10 @@ pub fn blob(
     store: &mut Store,
     credential: &Credential,
     repository: &str,
-    oid: ObjectId,
+    (oid, gone): (ObjectId, Option<&std::sync::atomic::AtomicBool>),
     within: &Within,
 ) -> Result<BlobPreview> {
-    shown(store, credential, repository, oid, within)?;
+    shown(store, credential, repository, (oid, gone), within)?;
     let (kind, size, file) = store.open_published_object(credential, repository, oid)?;
     if kind != ObjectKind::Blob {
         return Err(Error::Precondition("selected object is not a blob"));

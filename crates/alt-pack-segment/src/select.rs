@@ -199,6 +199,9 @@ impl SegmentSet {
     /// exactly what the client holds
     fn sends_large_blob(&self, found: &Found<'_>) -> Result<bool, Error> {
         for (oid, blob) in &found.objects {
+            if found.trees.gone() {
+                return Err(Error::GivenUp);
+            }
             if *blob
                 && !found.known.contains(oid)
                 && self.record(oid)?.ok_or(Error::NotFound(*oid))?.size >= EXACT_FROM
@@ -207,6 +210,13 @@ impl SegmentSet {
             }
         }
         Ok(false)
+    }
+
+    /// the trees of the commits left in `heap` the client holds
+    fn held_trees(&self, heap: BinaryHeap<(u32, Oid)>, flags: &OidMap<u8>) -> Vec<Oid> {
+        let held = heap.into_iter().filter(|(_, oid)| flags[oid] & HAVE != 0);
+        let trees = held.filter_map(|(_, oid)| Some(self.commit(&oid)?.tree));
+        trees.collect()
     }
 
     /// objects reachable from `wants` and not from `haves`; unknown haves are ignored
@@ -262,14 +272,8 @@ impl SegmentSet {
         }
         for have in haves {
             if let Some(commit) = self.commit(have) {
-                mark(
-                    &mut flags,
-                    &mut heap,
-                    &mut open,
-                    *have,
-                    HAVE,
-                    commit.generation,
-                );
+                let generation = commit.generation;
+                mark(&mut flags, &mut heap, &mut open, *have, HAVE, generation);
             }
         }
         // children always carry a higher generation than their parents, so a commit's flags
@@ -277,6 +281,7 @@ impl SegmentSet {
         let mut commits = Vec::new();
         let mut boundary = Vec::new();
         while open > 0 {
+            found.trees.step()?;
             let Some((_, oid)) = heap.pop() else { break };
             let state = flags[&oid];
             let commit = self.commit(&oid).ok_or(Error::Corrupt("commit graph"))?;
@@ -291,23 +296,11 @@ impl SegmentSet {
                     .commit(parent)
                     .ok_or(Error::Corrupt("commit graph"))?
                     .generation;
-                mark(
-                    &mut flags,
-                    &mut heap,
-                    &mut open,
-                    *parent,
-                    if state & HAVE != 0 { HAVE } else { WANT },
-                    generation,
-                );
+                let bit = if state & HAVE != 0 { HAVE } else { WANT };
+                mark(&mut flags, &mut heap, &mut open, *parent, bit, generation);
             }
         }
-        for (_, oid) in heap {
-            if flags[&oid] & HAVE != 0
-                && let Some(commit) = self.commit(&oid)
-            {
-                boundary.push(commit.tree);
-            }
-        }
+        boundary.extend(self.held_trees(heap, &flags));
         // A parent is either held by the client or wanted, and then sent in full by this
         // same rule, so whatever a commit shares with its first parent need not be sent.
         boundary.sort_unstable();

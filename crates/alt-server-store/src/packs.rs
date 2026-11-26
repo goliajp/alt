@@ -13,7 +13,11 @@ use alt_repository_service::{Graph, validate_publication};
 use std::{path::PathBuf, sync::Arc};
 
 mod published;
+mod still_led;
 pub use published::{HeldPublication, HeldSegment};
+pub use still_led::{
+    LOST_UNTOLD, LOST_WALK, Leans, PUSH_FOUND, PUSH_VERIFIED, PushVerified, REFS_MOVED, ancestor,
+};
 
 /// segments up to this size are stored with their row instead of being flushed to disk
 pub const INLINE_SEGMENT_BYTES: usize = 65536;
@@ -189,8 +193,8 @@ impl Store {
         let key: [u8; 20] = oid.as_bytes().try_into().map_err(|_| Error::Unauthorized)?;
         let (kind, size, stream) = view
             .segments
-            .open(&key)
-            .map_err(|_| Error::Integrity("published object bytes"))?
+            .open_within(&key, self.restoring.as_ref())
+            .map_err(crate::transport::restoring_error)?
             .ok_or(Error::Unauthorized)?;
         if size > self.limits.object_bytes {
             return Err(Error::Limit("published object read bytes"));
@@ -232,6 +236,16 @@ impl Store {
         ids: &[(String, bool)],
     ) -> Result<SegmentSet> {
         self.pack_directory(repository)?;
+        self.segments_as_they_are(repository, ids)
+    }
+
+    /// [`Self::open_segments`] with no directory made where there is none:
+    /// for one who only reads.
+    pub(crate) fn segments_as_they_are(
+        &mut self,
+        repository: &str,
+        ids: &[(String, bool)],
+    ) -> Result<SegmentSet> {
         let client = &mut self.client;
         opened(self.bytes.root(), repository, ids, &mut |id| {
             Ok(client.query_one(INLINE, &[&repository, &id])?.get(0))

@@ -10,7 +10,7 @@ use crate::{
     format::Delta,
     scan::{self, Form},
 };
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::AtomicBool;
 use std::{cmp::Ordering, collections::HashMap, rc::Rc};
 
 /// how many sets of trees the client has are remembered with what they hold
@@ -24,6 +24,10 @@ pub(crate) struct Below(pub HashMap<Vec<u8>, Rc<[Oid]>>);
 /// The bytes of trees one walk keeps: what a fetch takes in memory beside the
 /// tables of what it found.
 const KEPT: usize = 16 << 20;
+
+/// what a tree that is kept takes beside its bytes: its place and itself among
+/// those kept, and the counts of who has it
+const EACH: usize = size_of::<(Place, Rc<Vec<u8>>)>() + size_of::<(usize, usize, Vec<u8>)>();
 
 /// an entry of a tree that names an object of this repository
 pub(crate) struct Entry<'a> {
@@ -128,8 +132,8 @@ pub(crate) struct Trees<'a> {
     /// what was worked out of sets of trees the client has
     held: HashMap<Rc<[Oid]>, Rc<Below>>,
     /// the trees that may still be read, and the mark that nobody waits for them
-    left: usize,
-    gone: Option<&'a AtomicBool>,
+    pub(crate) left: usize,
+    pub(crate) gone: Option<&'a AtomicBool>,
 }
 
 impl<'a> Trees<'a> {
@@ -160,10 +164,8 @@ impl<'a> Trees<'a> {
             for entry in entries(&data)? {
                 known.insert(entry.oid);
                 if entry.tree {
-                    trees
-                        .entry(entry.name.to_vec())
-                        .or_default()
-                        .push(entry.oid);
+                    let name = entry.name.to_vec();
+                    trees.entry(name).or_default().push(entry.oid);
                 }
             }
         }
@@ -190,24 +192,22 @@ impl<'a> Trees<'a> {
     }
 
     fn keep(&mut self, at: Place, data: Rc<Vec<u8>>) {
+        let bytes = data.len() + EACH;
         // one tree is not to be most of what is kept
-        if data.len() > KEPT / 8 {
+        if bytes > KEPT / 8 {
             return;
         }
-        if self.late_bytes + data.len() > KEPT / 2 {
+        if self.late_bytes + bytes > KEPT / 2 {
             self.before = std::mem::take(&mut self.late);
             self.late_bytes = 0;
         }
-        self.late_bytes += data.len();
+        self.late_bytes += bytes;
         self.late.insert(at, data);
     }
 
     /// the canonical bytes of the tree `oid`
     pub fn read(&mut self, oid: &Oid) -> Result<Rc<Vec<u8>>, Error> {
-        self.left = (self.left.checked_sub(1)).ok_or(Error::Limit("trees of a fetch"))?;
-        if self.gone.is_some_and(|gone| gone.load(Relaxed)) {
-            return Err(Error::GivenUp);
-        }
+        self.step()?;
         let mut at = self.set.place(oid).ok_or(Error::NotFound(*oid))?;
         let mut deltas = Vec::new();
         let mut data = loop {
@@ -261,6 +261,20 @@ mod tests {
             oid: [oid; 20],
             tree,
         }
+    }
+
+    /// Trees of few bytes, or none, are kept as many as what each takes beside
+    /// its bytes allows, and no more.
+    #[test]
+    fn what_is_kept_of_trees_counts_what_each_takes_beside_its_bytes() {
+        let set = SegmentSet::default();
+        let mut trees = Trees::new(&set, usize::MAX, None);
+        let empty = Rc::new(Vec::new());
+        for at in 0..1_000_000 {
+            trees.keep((0, at), empty.clone());
+        }
+        assert!(trees.late.len() <= KEPT / 2 / EACH, "{}", trees.late.len());
+        assert!(trees.late.len() + trees.before.len() <= KEPT / EACH);
     }
 
     #[test]

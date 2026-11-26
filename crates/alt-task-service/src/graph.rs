@@ -189,4 +189,37 @@ impl PreparedTaskGraph {
         }
         Ok(roots.into_iter().collect())
     }
+    /// The tree of each candidate with the trees it was made from, of those
+    /// the selection holds: the tree of the candidate it follows, and that of
+    /// the baseline of its task.
+    pub fn trees_made_from(&self) -> Result<Vec<alt_repository_service::MadeFrom>> {
+        let oid = |value: &str| -> Result<ObjectId> {
+            (value.parse()).map_err(|_| Error::Integrity("task Git object id"))
+        };
+        let record = |kind, id: &str| {
+            self.records.get(&RecordKey {
+                kind,
+                id: id.into(),
+            })
+        };
+        let mut made = Vec::new();
+        for candidate in self.records.values() {
+            let TaskRecord::Candidate(candidate) = candidate else {
+                continue;
+            };
+            let mut from = Vec::new();
+            let parent = candidate.parent.as_deref();
+            if let Some(TaskRecord::Candidate(parent)) =
+                parent.and_then(|parent| record(RecordKind::Candidate, parent))
+            {
+                from.push(oid(&parent.tree)?);
+            }
+            if let Some(TaskRecord::Task(task)) = record(RecordKind::Task, &candidate.task) {
+                from.push(oid(&task.baseline.tree)?);
+            }
+            let tree = oid(&candidate.tree)?;
+            made.push(alt_repository_service::MadeFrom { tree, from });
+        }
+        Ok(made)
+    }
 }

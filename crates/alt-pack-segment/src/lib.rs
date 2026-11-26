@@ -14,6 +14,7 @@ mod descend;
 mod format;
 mod generation;
 mod ingest;
+mod ingested;
 mod led;
 mod limits;
 mod mend;
@@ -31,9 +32,11 @@ mod select;
 mod send;
 mod set;
 mod settled;
+mod steps;
 mod stream;
 mod told;
 mod trees;
+mod unsafe_names;
 mod wanted;
 
 pub use alt_git_pack::{BASE_FILES, BaseFiles, IndexWork, Memory, SPILL_FILES, Wait};
@@ -42,7 +45,7 @@ pub use format::{CommitInfo, Delta, Record, Segment};
 pub use ingest::{Ingested, ingest, ingest_holding, ingest_led, ingest_while_waited_for};
 pub use led::Led;
 pub use limits::Limits;
-pub use mend::{indexed_anew, unread, unread_holding, unread_telling};
+pub use mend::{indexed_anew, refused_trees, unread, unread_holding, unread_telling};
 pub use merge::{merge, stands_on};
 pub use readback::UNREADABLE;
 pub use room::least_memory;
@@ -50,7 +53,8 @@ pub use room::{DELTA_BYTES, ENTRY_BYTES};
 pub use select::Selection;
 pub use send::{Piece, build_pack};
 pub use set::SegmentSet;
-pub use stream::ObjectStream;
+pub use stream::{ObjectStream, Restoring};
+pub use unsafe_names::refused_anew;
 
 pub type Oid = [u8; 20];
 /// Tables keyed by ids a peer chooses.
@@ -106,6 +110,8 @@ pub enum Error {
     Busy(&'static str),
     /// whoever asked for the pack waits for it no longer
     GivenUp,
+    /// a tree whose names `git fsck` refuses, and what it says of them
+    Unsafe(Oid, &'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -125,6 +131,7 @@ impl std::fmt::Display for Error {
             Self::NotFound(v) => write!(f, "object {} not found", hex(v)),
             Self::Busy(v) => write!(f, "pack waits: {v}"),
             Self::GivenUp => f.write_str("pack given up"),
+            Self::Unsafe(oid, what) => write!(f, "object {}: {what}", hex(oid)),
         }
     }
 }

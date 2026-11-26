@@ -2,11 +2,18 @@
 //!
 //! This crate validates a snapshot. The transaction adapter must lock and recheck
 //! scope, authorization, policy, refs and object pins before committing it.
+mod fsck;
 mod graph;
+mod object;
 mod publication;
+mod verify;
 
 pub use graph::*;
+pub use object::{parse_node, verify_object};
 pub use publication::*;
+pub use verify::{
+    MadeFrom, verify_graph, verify_graph_made_from, verify_graph_to_send, verify_new_graph,
+};
 
 #[derive(Debug)]
 pub enum Error {

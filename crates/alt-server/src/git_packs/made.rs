@@ -181,6 +181,11 @@ impl Push<'_> {
             }
         }
         let set = SegmentSet::new(segments);
+        if let Some(ingested) = &self.verified {
+            let (before, steps) = (behind.1, limits.walk_steps);
+            alt_pack_segment::refused_anew(ingested, (before, &set), steps)
+                .map_err(segment_error)?;
+        }
         let refs = self.updates(&set)?;
         let key = RequestKey {
             scope: view.scope.clone(),

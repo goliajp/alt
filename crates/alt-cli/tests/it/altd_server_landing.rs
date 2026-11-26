@@ -79,7 +79,7 @@ pub(crate) fn land_held_to(
     let prepared = pack.map(prepared);
     let pack = prepared.as_ref().map(|(_, pack)| pack);
     let trust = receive::signed::trust_for(&store, principal).unwrap();
-    let checked = trust.map(|trust| receive::signed::check_pack(trust, pack).unwrap());
+    let checked = trust.map(|trust| receive::signed::check_pack(trust, pack, None).unwrap());
     let push = Push {
         pack,
         checked: checked.as_ref(),
@@ -88,6 +88,7 @@ pub(crate) fn land_held_to(
         signed_in,
         sig_label: "none",
         told: &receive::told_whole,
+        gone: None,
     };
     let written = |step| {
         (step == Step::Written).then(written);

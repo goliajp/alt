@@ -87,6 +87,7 @@ pub(super) fn handle_upload_pack(
                 by: Some(std::time::Instant::now() + super::told::told().fetch),
                 gone: Some(req.given_up()),
             };
+            let from = (from, req.given_up());
             let mut begun = |body| req.begin(result_headers(), body, super::told::told().keepalive);
             let sent = match fetch::response(&repo, &fetch_req, room, from, &until, &mut begun) {
                 Ok(sent) => sent,

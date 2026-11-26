@@ -10,12 +10,24 @@ use crate::{EntryKind, Pack, PackError};
 /// of nothing.
 const ENTRY_MIN: usize = 9;
 
+/// What indexing keeps of `entries` entries at once.
+pub(super) fn held(entries: usize) -> u64 {
+    (entries as u64).saturating_mul(super::HELD_FOR_AN_INDEXED_ENTRY)
+}
+
+/// [`held`] of the entries a pack that says it has `count` may have: no
+/// more than its body holds.
+pub(super) fn held_by(pack: &Pack, count: u32) -> u64 {
+    let body = pack.bytes().len() - pack.algo().raw_len();
+    held((count as usize).min(body / ENTRY_MIN))
+}
+
 pub(super) enum Form {
     Plain(ObjectKind),
     /// a delta of the entry at this index
     Ofs(u32),
-    /// a delta of the object with this id
-    Ref(ObjectId),
+    /// a delta of the object with this id, which it says has so many bytes
+    Ref(ObjectId, u64),
 }
 
 pub(super) struct Entry {
@@ -63,6 +75,7 @@ pub(super) fn scan(
     let mut room = None;
     let mut pos = 12usize;
     for _ in 0..count {
+        limits.going_on()?;
         if pos >= body_end {
             return Err(PackError::Format("pack header count exceeds body"));
         }
@@ -97,7 +110,10 @@ pub(super) fn scan(
                     .map_err(|_| PackError::Format("ofs-delta base offset not found"))?;
                 (Form::Ofs(base as u32), None)
             }
-            EntryKind::RefDelta { base } => (Form::Ref(base), None),
+            EntryKind::RefDelta { base } => {
+                let size = crate::delta::source_size(&payload)?;
+                (Form::Ref(base, size), None)
+            }
         };
         entries.push(Entry {
             offset: pos as u64,

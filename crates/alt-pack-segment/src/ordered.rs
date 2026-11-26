@@ -3,9 +3,9 @@
 //! Reading the objects one by one makes each of its whole chain: a chain of
 //! four thousand deltas is eight million deltas applied. Here the deltas of a
 //! segment are gone through from their bases downwards, and an object is kept
-//! while the deltas made of it are read. What is kept at once has a bound; a
-//! base let go for it is read again, by its chain, where a delta of it is come
-//! to after that.
+//! while the deltas made of it are read. What is kept at once has a bound,
+//! beside the object read and its base; a base let go for it is read again,
+//! by its chain, where a delta of it is come to after that.
 
 use crate::{
     Error, Oid, Record, SegmentSet,
@@ -208,7 +208,9 @@ impl<F: FnMut(&Record, Result<&[u8], Error>)> Reading<'_, F> {
             data,
             failed,
         });
-        while self.kept > self.held && self.let_go + 1 < self.way.len() {
+        // the one read and the one it is made of are kept: the deltas beside
+        // it are made of the same, and most are made of nothing more
+        while self.kept > self.held && self.let_go + 2 < self.way.len() {
             let gone = self.way[self.let_go].data.take();
             self.kept -= gone.map_or(0, |data| data.len());
             self.let_go += 1;
@@ -266,5 +268,6 @@ fn again(error: &Error) -> Error {
         Error::NotFound(oid) => Error::NotFound(*oid),
         Error::Busy(what) => Error::Busy(what),
         Error::GivenUp => Error::GivenUp,
+        Error::Unsafe(oid, what) => Error::Unsafe(*oid, what),
     }
 }

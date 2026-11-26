@@ -28,6 +28,9 @@ impl Call {
         route: WebRoute,
         source: alt_os::temp::NamedTempFile,
     ) -> Result<(Output, Option<String>)> {
+        if let WebRoute::Portable(selected) = &route {
+            return Ok((self.portable(selected.clone(), source)?, None));
+        }
         let Self {
             factory,
             options,
@@ -42,27 +45,8 @@ impl Call {
         } = self;
         let mut source = source;
         source.as_file_mut().rewind()?;
-        let mut store = factory.open()?;
+        let mut store = factory.open_for(None, &gone)?;
         store.check_browser_binding(Some(&browser.origin))?;
-        if let WebRoute::Portable(selected) = &route {
-            let token = token.as_deref().ok_or(Error::Unauthorized)?;
-            let credential = factory.authenticate(&mut store, token)?;
-            store.browser_session(&credential, &browser.origin)?;
-            let output = crate::portable::execute(
-                &mut store,
-                &credential,
-                &options,
-                selected.clone(),
-                source.as_file_mut(),
-                &mut |store| {
-                    let current = factory.authenticate(store, token)?;
-                    store.browser_session(&current, &browser.origin)?;
-                    Ok(current)
-                },
-                Some(sending),
-            )?;
-            return Ok((output, None));
-        }
         let mut raw = Vec::new();
         source.as_file_mut().read_to_end(&mut raw)?;
         if route == WebRoute::Config {
@@ -174,8 +158,11 @@ impl Call {
                 ))
             }
             WebRoute::Object(repository, oid, within, true) => {
-                crate::browse::shown(&mut store, &credential, &repository, oid, &within)?;
+                let asked = (oid, Some(&*gone));
+                crate::browse::shown(&mut store, &credential, &repository, asked, &within)?;
                 let found = store.open_published_object(&credential, &repository, oid)?;
+                // a response that waits for its turn holds no connection of the database
+                drop(store);
                 let (mut file, mut body) = (found.2, Spill::within(Some(sending)));
                 let written = std::io::copy(&mut file, &mut body).map(drop);
                 let sent =
@@ -232,14 +219,14 @@ fn execute(
             store,
             credential,
             &repository,
-            after,
+            (after, Some(gone)),
             40,
         )?),
         WebRoute::Tree(repository, commit, path, after) => output(crate::browse::tree(
             store,
             credential,
             &repository,
-            commit,
+            (commit, Some(gone)),
             &path,
             after,
         )?),
@@ -247,7 +234,7 @@ fn execute(
             store,
             credential,
             &repository,
-            oid,
+            (oid, Some(gone)),
             &within,
         )?),
         WebRoute::Content(repository, digest) => {

@@ -7,7 +7,7 @@
 //! is read, or round in a circle, and ends in an error. The pack still has what
 //! makes the object: the index is written again from it.
 
-use crate::{Error, Limits, Memory, Oid, Segment, SegmentSet, ingest, object_id};
+use crate::{Error, Kind, Limits, Memory, Oid, Segment, SegmentSet, ingest, object_id};
 use std::sync::Arc;
 
 /// the bytes of objects kept at once while the deltas made of them are read
@@ -40,6 +40,29 @@ pub fn unread_holding(
     kept: usize,
 ) -> Result<(Vec<(Oid, Error)>, u64), Error> {
     read_through(segment, older, kept, &mut || ())
+}
+
+/// The trees of `segment`, read behind `older`, that a push is now refused
+/// for, each with why in the words of `git fsck`. A tree that is not read is
+/// none of them: [`unread`] tells of it.
+pub fn refused_trees(
+    segment: &Arc<Segment>,
+    older: &SegmentSet,
+    each: &mut dyn FnMut(),
+) -> Result<Vec<(Oid, &'static str)>, Error> {
+    let mut all = older.segments().to_vec();
+    all.push(Arc::clone(segment));
+    let mut refused = Vec::new();
+    SegmentSet::new(all).each_of_the_newest(KEPT, |record, read| {
+        if let (Kind::Tree, Ok(data)) = (record.kind, read)
+            && let Some(why) = crate::unsafe_names::refused(data)
+        {
+            refused.push((record.oid, why));
+        }
+        each();
+    })?;
+    refused.sort_unstable_by_key(|(oid, _)| *oid);
+    Ok(refused)
 }
 
 fn read_through(

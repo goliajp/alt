@@ -113,6 +113,47 @@ fn the_entries_of_an_object_are_gone_through_once_for_all_the_deltas_made_of_it_
     assert_eq!(work.ranged, before + 1);
 }
 
+/// An object X stored once and ten thousand times a delta of that entry by
+/// where it is; a thousand objects Z, each stored twice as a delta of X by its
+/// id, and each once more a delta of itself by its id. Each read of that last
+/// comes to Z twice, and to X under each: the second time X is under another
+/// entry than the one it was found in, and it is no reason to go through all
+/// the entries of X again. Every entry read from the pack opened once goes
+/// through no more entries of ids than twice the entries there are, where it
+/// once went through the entries of X for each Z.
+#[test]
+fn an_object_two_entries_of_another_are_made_of_is_gone_through_once_for_all_the_reads() {
+    let _ended = ended_within(900);
+    let (made, by_place) = (1000, 10_000);
+    let x = object(0);
+    let mut entries = vec![plain_entry(&x)];
+    let mut at = entries[0].len();
+    for _ in 0..by_place {
+        let entry = ofs_entry(at, &of(0, 0));
+        at += entry.len();
+        entries.push(entry);
+    }
+    for z in 1..=made {
+        entries.push(ref_entry(&blob(&x), &of(0, z)));
+        entries.push(ref_entry(&blob(&x), &of(0, z)));
+        entries.push(ref_entry(&blob(&object(z)), &of(z, z)));
+    }
+    let dir = alt_os::temp::tempdir().unwrap();
+    let path = written(&dir, &entries);
+    index_pack(&path, HashAlgo::Sha1, false).unwrap();
+    let pack = IndexedPack::open(&path, HashAlgo::Sha1).unwrap();
+    let mut work = ReadWork::default();
+    for i in 0..entries.len() as u32 {
+        let (oid, offset) = (pack.idx().oid_at(i), pack.idx().offset_at(i).unwrap());
+        let read = pack.read_at_counting(offset, &mut work).unwrap();
+        assert_eq!(
+            ObjectId::hash_object(HashAlgo::Sha1, read.kind, &read.data),
+            oid
+        );
+    }
+    assert!(work.ranged <= 2 * entries.len(), "{work:?}");
+}
+
 /// Packs of thousands of entries made at random: of how many objects, how
 /// often each is there again, and how long the chains are differ from pack
 /// to pack. Those `index_pack` takes are read within the bounds.

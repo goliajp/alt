@@ -28,5 +28,6 @@ pub use error::{Error, Result, ServerError};
 pub use generic::GenericClient;
 pub use row::{Column, Row, RowIndex};
 pub use statement::STATEMENT_LIMIT;
+pub use stream::Closer;
 pub use transaction::Transaction;
 pub use types::{FromSql, IsNull, Oid, ToSql, WRONG_TYPE, oid};

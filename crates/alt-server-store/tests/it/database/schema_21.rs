@@ -83,7 +83,7 @@ fn an_older_instance_loses_the_foreign_key_and_keeps_its_refs() {
         assert!(f.store.check_connection().is_err());
 
         super::schema_20::migrate(&mut f, from).unwrap();
-        assert_eq!(version(&f), (22, 2), "from schema {from}");
+        assert_eq!(version(&f), (23, 2), "from schema {from}");
         assert_eq!(foreign_keys(&f), Vec::<String>::new());
         assert_eq!(refs(&f), before);
         f.store.check_connection().unwrap();

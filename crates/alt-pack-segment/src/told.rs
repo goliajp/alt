@@ -6,10 +6,17 @@ use crate::{
     object::{self, Parsed},
     wanted::Wanted,
 };
-use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use alt_git_fsck::Flagged;
+use std::sync::{
+    Mutex,
+    atomic::{AtomicUsize, Ordering::Relaxed},
+};
 
 pub(crate) struct Told<'a> {
     pub wanted: Wanted<'a>,
+    /// the trees `git fsck` looks at again, with what it looks at: whether
+    /// the push brings it anew is told once the pack is a segment
+    pub flagged: Mutex<Vec<(Oid, Flagged<Oid>)>>,
     parents: AtomicUsize,
     most_parents: usize,
 }
@@ -25,6 +32,7 @@ impl<'a> Told<'a> {
     ) -> Self {
         Told {
             wanted: Wanted::new(existing, led, entries),
+            flagged: Mutex::default(),
             parents: AtomicUsize::new(0),
             most_parents: entries.saturating_mul(2).saturating_add(parents_beside),
         }
@@ -42,6 +50,9 @@ impl<'a> Told<'a> {
         let want = |to, kind| self.wanted.want(index, oid, to, kind);
         if kind == Kind::Tree {
             object::tree(data, &mut { want })?;
+            if let Some(flagged) = crate::unsafe_names::flagged(data) {
+                self.flagged.lock().expect("flagged").push((*oid, flagged));
+            }
             return Ok(None);
         }
         match object::parse(kind, data)? {

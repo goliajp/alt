@@ -93,3 +93,157 @@ fn a_base_the_store_lacks_too_leaves_the_pack_refused_and_what_is_appended_is_co
         }
     }
 }
+
+/// A pack nobody waits for any more is scanned no further, and made whole no
+/// further: where the peer is gone once the first base is read, the second
+/// is not asked for.
+#[test]
+fn a_pack_nobody_waits_for_is_scanned_and_made_whole_no_further() {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    let dir = TempDir::new().unwrap();
+    let gone = AtomicBool::new(true);
+    let limits = IndexLimits {
+        given_up: Some(&gone),
+        ..IndexLimits::default()
+    };
+    let plain = written(&dir, &[plain_entry(&object(0))]);
+    let scanned = index_pack_within(&plain, HashAlgo::Sha1, false, &limits);
+    assert!(matches!(scanned, Err(PackError::GivenUp)), "{scanned:?}");
+
+    // deltas of two objects the pack leaves out
+    let (one, two) = (object(7), object(5));
+    let entries = [
+        ref_entry(&blob(&one), &delta(one.len(), 18, &object(8))),
+        ref_entry(&blob(&two), &delta(two.len(), 18, &object(6))),
+    ];
+    let pack = written(&dir, &entries);
+    gone.store(false, Relaxed);
+    let (held, asked) = ([one, two], Cell::new(0));
+    let found = store(&held, &asked);
+    let bases = |oid: &ObjectId| {
+        gone.store(true, Relaxed);
+        found(oid)
+    };
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&bases));
+    assert!(matches!(made, Err(PackError::GivenUp)), "{made:?}");
+    assert_eq!(asked.get(), 1);
+}
+
+/// Object 8 as a delta of a base of `bytes` bytes the pack leaves out, which
+/// starts as object 7 does.
+fn of_a_base(dir: &TempDir, bytes: usize) -> (std::path::PathBuf, Vec<u8>) {
+    let mut base = object(7);
+    base.resize(bytes, b'x');
+    let entry = ref_entry(&blob(&base), &delta(base.len(), 18, &object(8)));
+    (written(dir, &[entry]), base)
+}
+
+/// A base is read whole into memory: room for it is taken before it is read,
+/// as large as the deltas of it say it is, and a pack that has no room for
+/// it does not read it.
+#[test]
+fn a_base_appended_has_its_memory_taken_before_it_is_read() {
+    let dir = TempDir::new().unwrap();
+    let asked = Cell::new(0);
+    let objects_taken = Cell::new(0);
+    for (all, fits) in [(200_000, false), (1 << 20, true)] {
+        let memory: &'static alt_git_pack::Memory =
+            Box::leak(Box::new(alt_git_pack::Memory::new(all)));
+        let limits = IndexLimits {
+            each_bytes: 0,
+            memory: Some(memory),
+            ..IndexLimits::default()
+        };
+        let (pack, base) = of_a_base(&dir, 100_000);
+        let held = [base];
+        let found = store(&held, &asked);
+        asked.set(0);
+        let bases = |oid: &ObjectId| {
+            objects_taken.set(memory.taken().1);
+            found(oid)
+        };
+        let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&bases));
+        match fits {
+            false => {
+                assert!(
+                    matches!(made, Err(PackError::Limit("index memory"))),
+                    "{made:?}"
+                );
+                assert_eq!(asked.get(), 0);
+            }
+            true => {
+                assert_eq!(made.unwrap().objects, 2);
+                assert_eq!(asked.get(), 1);
+                assert!(objects_taken.get() >= 100_000, "{}", objects_taken.get());
+            }
+        }
+    }
+    // an object of the store that is not as large as the delta says is not
+    // appended
+    let (pack, _) = of_a_base(&dir, 100_000);
+    let other = |_: &ObjectId| Ok(Some((ObjectKind::Blob, vec![b'x'; 100_001])));
+    let limits = IndexLimits::default();
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&other));
+    assert!(
+        matches!(made, Err(PackError::Format("delta source size mismatch"))),
+        "{made:?}"
+    );
+}
+
+/// The bases appended to a pack take of the room on the disk the files of
+/// bases have, from before they are written for as long as the pack is held.
+#[test]
+fn a_base_appended_takes_of_the_room_on_the_disk_and_one_there_is_none_for_is_not_written() {
+    use std::time::{Duration, Instant};
+    let dir = TempDir::new().unwrap();
+    let files: &'static alt_git_pack::BaseFiles = Box::leak(Box::new(
+        alt_git_pack::BaseFiles::open(&dir.path().join("bases"), 4096).unwrap(),
+    ));
+    let limits = |by| IndexLimits {
+        files: Some(files),
+        memory_by: Some(by),
+        ..IndexLimits::default()
+    };
+    let asked = Cell::new(0);
+    let (pack, base) = of_a_base(&dir, 2000);
+    let held = [base];
+    let bases = store(&held, &asked);
+    // others have all but ten bytes of it
+    let others = files.occupy(4086).unwrap();
+    let soon = Instant::now() + Duration::from_millis(300);
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits(soon), Some(&bases));
+    assert!(
+        matches!(made, Err(PackError::Busy("index disk"))),
+        "{made:?}"
+    );
+    drop(others);
+
+    let (pack, base) = of_a_base(&dir, 2000);
+    let came = std::fs::metadata(&pack).unwrap().len();
+    let held = [base];
+    let bases = store(&held, &asked);
+    let soon = Instant::now() + Duration::from_millis(300);
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits(soon), Some(&bases)).unwrap();
+    let appended = std::fs::metadata(&pack).unwrap().len() - came;
+    assert!(appended > 0);
+    assert_eq!(files.taken().0, appended);
+    drop(made);
+    assert_eq!(files.taken().0, 0);
+
+    // one there is no room for at all refuses the pack
+    let small: &'static alt_git_pack::BaseFiles = Box::leak(Box::new(
+        alt_git_pack::BaseFiles::open(&dir.path().join("small"), 10).unwrap(),
+    ));
+    let (pack, base) = of_a_base(&dir, 2000);
+    let held = [base];
+    let bases = store(&held, &asked);
+    let limits = IndexLimits {
+        files: Some(small),
+        ..IndexLimits::default()
+    };
+    let made = index_pack_thin(&pack, HashAlgo::Sha1, false, &limits, Some(&bases));
+    assert!(
+        matches!(made, Err(PackError::Limit("index disk"))),
+        "{made:?}"
+    );
+}
