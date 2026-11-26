@@ -3,7 +3,7 @@
 use std::io::{self, Cursor, Read};
 
 use super::head::Header;
-use super::kept::chunk;
+use super::kept::piece;
 use super::paced::{Sent, Source};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,27 +151,32 @@ impl Outgoing {
     }
 
     /// Writes the rest of a response whose head and first `begun` bytes
-    /// went out in chunks, as the chunks behind them. A response of
-    /// another status than 200 goes out as an error in the side band
-    /// of a pack.
-    pub(super) fn send_rest(mut self, source: &mut Source, begun: u64) -> io::Result<()> {
+    /// went out, in chunks where it is `chunked`, as the pieces behind them.
+    /// A response of another status than 200 goes out as an error in the
+    /// side band of a pack.
+    pub(super) fn send_rest(
+        mut self,
+        source: &mut Source,
+        begun: u64,
+        chunked: bool,
+    ) -> io::Result<()> {
         let mut sent = Sent::new();
         let mut out = Vec::new();
         if self.status == 200 {
             // the bytes that went out are the ones the body begins with
             io::copy(&mut (&mut self.body).take(begun), &mut io::sink())?;
-            let mut piece = vec![0u8; 64 * 1024];
+            let mut read = vec![0u8; 64 * 1024];
             let mut left = self.length - begun;
             while left > 0 {
-                let most = piece.len().min(usize::try_from(left).unwrap_or(usize::MAX));
-                let read = self.body.read(&mut piece[..most])?;
-                if read == 0 {
+                let most = read.len().min(usize::try_from(left).unwrap_or(usize::MAX));
+                let count = self.body.read(&mut read[..most])?;
+                if count == 0 {
                     return Err(io::ErrorKind::UnexpectedEof.into());
                 }
                 out.clear();
-                chunk(&mut out, &piece[..read]);
+                piece(&mut out, &read[..count], chunked);
                 source.send(&mut sent, &out)?;
-                left -= read as u64;
+                left -= count as u64;
             }
         } else {
             let mut said = b"\x03error: ".to_vec();
@@ -180,9 +185,12 @@ impl Outgoing {
                 .read_to_end(&mut said)?;
             let mut band = Vec::new();
             alt_wire::pkt::write_data(&mut band, &said)?;
-            chunk(&mut out, &band);
+            piece(&mut out, &band, chunked);
             source.send(&mut sent, &out)?;
         }
-        source.send(&mut sent, b"0\r\n\r\n")
+        match chunked {
+            true => source.send(&mut sent, b"0\r\n\r\n"),
+            false => Ok(()),
+        }
     }
 }

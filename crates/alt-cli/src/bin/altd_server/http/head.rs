@@ -74,6 +74,8 @@ pub(super) struct Head {
     pub(super) framing: Framing,
     /// the connection is not used for another request
     pub(super) last: bool,
+    /// of HTTP/1.0, whose peer reads no body sent in chunks
+    pub(super) old: bool,
     /// the peer waits to be told to send the body
     pub(super) expects: bool,
 }
@@ -215,6 +217,7 @@ impl Head {
             url,
             framing,
             last: said("close") || (old && !said("keep-alive")),
+            old,
             expects: expect.eq_ignore_ascii_case("100-continue"),
             headers,
         })

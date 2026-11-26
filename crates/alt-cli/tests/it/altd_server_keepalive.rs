@@ -78,6 +78,8 @@ fn the_head_of_a_fetch_goes_out_and_keepalives_follow_while_its_pack_is_made() {
     ]);
     let (told, body) = chunked(&answer(asked(&server.addr, &head)));
     assert!(told.starts_with("HTTP/1.1 200 OK\r\n"), "{told}");
+    // the request said that the connection ends behind it
+    assert!(told.contains("\r\nConnection: close\r\n"), "{told}");
     assert!(
         told.contains("application/x-git-upload-pack-result"),
         "{told}"
@@ -97,6 +99,55 @@ fn the_head_of_a_fetch_goes_out_and_keepalives_follow_while_its_pack_is_made() {
     assert!(pack.starts_with(b"PACK"));
     assert_eq!(lines.last(), Some(&None));
     assert_eq!(lines.iter().filter(|l| l.is_none()).count(), 1);
+}
+
+/// A peer of HTTP/1.0 reads no body sent in chunks: the head that goes out
+/// before the pack is made says no length, the body is sent as it is, and
+/// it ends where the connection does.
+#[test]
+fn the_head_of_a_fetch_of_http_1_0_goes_out_with_a_body_that_ends_with_the_connection() {
+    use std::io::Write;
+    let tmp = alt_os::temp::tempdir().unwrap();
+    let origin = tmp.path().join("origin");
+    let head = of_files(&origin, 400);
+    let server = spawn_server_with_env(&[
+        ("ALT_SERVER_REPO", origin.to_str().unwrap()),
+        ("ALT_SERVER_KEEPALIVE_MS", "1"),
+    ]);
+    let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4);
+    let want = pkt(&format!("want {head}\n"));
+    let command = [
+        &pkt("command=fetch\n"),
+        "0001",
+        &want,
+        &pkt("done\n"),
+        "0000",
+    ]
+    .concat();
+    // keep-alive asked for, which a body without a length cannot give
+    let request = format!(
+        "POST /git-upload-pack HTTP/1.0\r\nHost: h\r\nGit-Protocol: version=2\r\nConnection: keep-alive\r\nContent-Length: {}\r\n\r\n{command}",
+        command.len()
+    );
+    let mut socket = std::net::TcpStream::connect(&server.addr).unwrap();
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(60)))
+        .unwrap();
+    socket.write_all(request.as_bytes()).unwrap();
+    let got = answer(socket);
+    let ended = got.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+    let (told, body) = got.split_at(ended);
+    let told = String::from_utf8_lossy(told);
+    assert!(told.starts_with("HTTP/1.1 200 OK\r\n"), "{told}");
+    assert!(!told.contains("Transfer-Encoding"), "{told}");
+    assert!(!told.contains("Content-Length"), "{told}");
+    assert!(told.contains("\r\nConnection: close\r\n"), "{told}");
+    let lines = lines(body);
+    assert_eq!(lines[0], Some(&b"packfile\n"[..]));
+    assert_eq!(lines[1], Some(&b"\x01"[..]), "no keepalive before the pack");
+    let pack = lines.iter().flatten().find(|l| l.len() > 1 && l[0] == 1);
+    assert!(pack.is_some_and(|l| l[1..].starts_with(b"PACK")));
+    assert_eq!(lines.last(), Some(&None));
 }
 
 /// What takes longer than a fetch may once its head went out is told in

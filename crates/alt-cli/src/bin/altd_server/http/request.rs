@@ -167,7 +167,7 @@ impl Body {
 }
 
 pub(crate) struct Request {
-    head: Head,
+    pub(super) head: Head,
     /// nothing once the request is answered
     body: Option<Body>,
     /// to the thread of the connection
@@ -218,8 +218,15 @@ impl Request {
     /// Whether the body is there to be read without a wait for the peer:
     /// received, or none.
     pub(crate) fn received(&self) -> bool {
-        let body = self.body.as_ref().expect("a request not yet answered");
-        body.spool.is_some() || body.over()
+        self.body.as_ref().is_some_and(|body| body.spool.is_some()) || self.over()
+    }
+
+    /// Whether the body was taken off the wire to its end.
+    pub(super) fn over(&self) -> bool {
+        self.body
+            .as_ref()
+            .expect("a request not yet answered")
+            .over()
     }
 
     /// Hands the request to the thread of its connection, to come to a

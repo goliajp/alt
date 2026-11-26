@@ -258,10 +258,10 @@ fn connection(open: Open, stream: TcpStream) {
             }
         };
         source = back;
-        let last = answer.last;
+        let last = answer.last || kept.as_ref().is_some_and(|kept| kept.sent && kept.last());
         let sent = match &kept {
             Some(kept) if kept.broken => return source.close(),
-            Some(kept) if kept.sent => answer.send_rest(&mut source, kept.begun()),
+            Some(kept) if kept.sent => answer.send_rest(&mut source, kept.begun(), kept.chunked()),
             _ => answer.send(&mut source),
         };
         if sent.is_err() || last {

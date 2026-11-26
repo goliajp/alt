@@ -11,7 +11,9 @@
 //! comes in that time it goes out as any answer does. Where it does not,
 //! the head goes out with what begins the body, in chunks, and the
 //! keepalive of `upload-pack`, a packet of the pack's side band with no
-//! bytes in it, follows each `every` until the rest is there. What would
+//! bytes in it, follows each `every` until the rest is there. A peer of
+//! HTTP/1.0 reads no chunks: its body goes out as it is, and ends where the
+//! connection does. What would
 //! have answered with another status from then on is told in the side
 //! band of errors, as `upload-pack` tells what stopped it.
 
@@ -31,6 +33,10 @@ pub(crate) struct Begun {
     headers: Vec<Header>,
     body: Vec<u8>,
     every: Duration,
+    /// the body goes out in chunks; where not, it ends where the connection does
+    chunked: bool,
+    /// the connection ends behind the answer
+    last: bool,
 }
 
 impl Request {
@@ -42,6 +48,8 @@ impl Request {
             headers,
             body,
             every,
+            chunked: !self.head.old,
+            last: self.head.last || self.head.old || !self.over(),
         };
         self.back.send(Back::Begun(Box::new(begun)));
     }
@@ -78,6 +86,16 @@ impl Kept {
         self.begun.body.len() as u64
     }
 
+    /// Whether the body goes out in chunks.
+    pub(super) fn chunked(&self) -> bool {
+        self.begun.chunked
+    }
+
+    /// Whether the connection ends behind the answer, once its head went out.
+    pub(super) fn last(&self) -> bool {
+        self.begun.last
+    }
+
     /// Sends a keepalive on `watched`, behind the head and what begins
     /// the body where those did not go out yet, each write within `window`.
     pub(super) fn beat(&mut self, watched: &TcpStream, window: Duration) {
@@ -88,18 +106,31 @@ impl Kept {
                 let line = format!("{}: {}\r\n", header.field.as_str(), header.value);
                 out.extend_from_slice(line.as_bytes());
             }
-            out.extend_from_slice(b"Transfer-Encoding: chunked\r\n\r\n");
-            // a chunk of nothing would end the body
-            if !self.begun.body.is_empty() {
-                chunk(&mut out, &self.begun.body);
+            if self.begun.chunked {
+                out.extend_from_slice(b"Transfer-Encoding: chunked\r\n");
             }
+            if self.begun.last {
+                out.extend_from_slice(b"Connection: close\r\n");
+            }
+            out.extend_from_slice(b"\r\n");
+            piece(&mut out, &self.begun.body, self.begun.chunked);
             self.sent = true;
         }
-        chunk(&mut out, KEEPALIVE);
+        piece(&mut out, KEEPALIVE, self.begun.chunked);
         let mut to = watched;
         let wrote = watched.set_write_timeout(Some(window));
         self.broken = wrote.and_then(|()| to.write_all(&out)).is_err();
         self.next = Instant::now() + self.begun.every;
+    }
+}
+
+/// `bytes` as a piece of a body, a chunk where it is `chunked`. Nothing
+/// where there are none: a chunk of nothing would end the body.
+pub(super) fn piece(out: &mut Vec<u8>, bytes: &[u8], chunked: bool) {
+    match chunked {
+        _ if bytes.is_empty() => {}
+        true => chunk(out, bytes),
+        false => out.extend_from_slice(bytes),
     }
 }
 
