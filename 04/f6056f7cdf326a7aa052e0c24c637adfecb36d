@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: perf
+summary: the fetch example tells what a response holds in memory where it would stop to wait
+author-type: human
+author: doracawl
+touched: crates/alt-pack-segment/examples/fetch.rs
