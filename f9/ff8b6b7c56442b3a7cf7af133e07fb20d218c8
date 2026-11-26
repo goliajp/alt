@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: refactor
+summary: the walk that verifies what roots reach has a module of its own
+author-type: human
+author: doracawl
+touched: crates/alt-repository-service/src/graph.rs
+touched: crates/alt-repository-service/src/lib.rs
+touched: crates/alt-repository-service/src/verify.rs
