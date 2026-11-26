@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: end the answers of the wire shim as their service ended and end the service of a client gone
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/wire_test_server.rs
+touched: crates/alt-cli/tests/it/wire_test_server/ended.rs
+touched: crates/alt-cli/tests/it/wire_test_server/held.rs
