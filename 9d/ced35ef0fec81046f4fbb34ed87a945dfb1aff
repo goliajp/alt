@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: plant the segment of the fsck tests at the sequence of a repository transaction
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/git/fsck_anew.rs
