@@ -1,0 +1,8 @@
+schema: alt-meta/1
+type: test
+summary: keep the server process whose log is read in a module of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/observability.rs
+touched: crates/alt-server/tests/it/database/operator/observed.rs
