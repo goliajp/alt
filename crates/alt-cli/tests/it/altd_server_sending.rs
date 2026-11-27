@@ -15,6 +15,16 @@ pub(crate) fn asked(address: &str, head: &str) -> TcpStream {
 
 /// The same, where `from` as a proxy that says whose the request is.
 pub(crate) fn asked_for(address: &str, head: &str, from: Option<&str>) -> TcpStream {
+    asked_waiting(address, head, from, Duration::from_secs(60))
+}
+
+/// The same, where a read waits up to `wait` for the server to say anything.
+pub(crate) fn asked_waiting(
+    address: &str,
+    head: &str,
+    from: Option<&str>,
+    wait: Duration,
+) -> TcpStream {
     let pkt = |line: &str| format!("{:04x}{line}", line.len() + 4);
     let want = pkt(&format!("want {head}\n"));
     let command = [
@@ -31,8 +41,7 @@ pub(crate) fn asked_for(address: &str, head: &str, from: Option<&str>) -> TcpStr
         command.len()
     );
     let mut socket = TcpStream::connect(address).unwrap();
-    let wait = Some(Duration::from_secs(60));
-    socket.set_read_timeout(wait).unwrap();
+    socket.set_read_timeout(Some(wait)).unwrap();
     socket.write_all(request.as_bytes()).unwrap();
     socket
 }

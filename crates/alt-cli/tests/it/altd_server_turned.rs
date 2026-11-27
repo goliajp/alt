@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::altd_server::spawn_server_with_env;
 use crate::altd_server_fetch_time::of_many_files;
-use crate::altd_server_sending::{answer, asked_for};
+use crate::altd_server_sending::{answer, asked_for, asked_waiting};
 
 /// the bytes of an answer after its head
 fn body(answer: &[u8]) -> &[u8] {
@@ -61,9 +61,13 @@ fn a_fetch_put_off_for_its_turn_is_built_again_in_a_time_of_its_own() {
     kept.read_exact(&mut begun).unwrap();
     assert_eq!(&begun, b"HTTP/1.1 200");
     let began = Instant::now();
+    // nothing is sent to it while it waits for its turn and while its pack
+    // is built again, which the server lets take up to `time` each
+    let silent = time * 2 + Duration::from_secs(60);
     let waiter = {
         let (address, head) = (server.addr.clone(), head.clone());
-        std::thread::spawn(move || answer(asked_for(&address, &head, Some("203.0.113.10"))))
+        let from = Some("203.0.113.10");
+        std::thread::spawn(move || answer(asked_waiting(&address, &head, from, silent)))
     };
     // its pack is built by then, and less is left of its time than that took
     std::thread::sleep(time - alone / 2);
