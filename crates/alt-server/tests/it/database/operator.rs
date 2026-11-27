@@ -3,6 +3,7 @@ mod maintenance;
 mod observability;
 mod observed;
 mod provision;
+mod quiet_proxy;
 mod schema_21;
 mod scrubbed;
 mod serving;

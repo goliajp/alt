@@ -4,7 +4,6 @@ mod caller_bytes;
 mod held_places;
 mod large_turns;
 mod listed_refs;
-mod quiet_proxy;
 mod sending;
 mod slow_bodies;
 mod slow_readers;
