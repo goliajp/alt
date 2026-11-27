@@ -81,14 +81,30 @@ fn a_task_of_a_history_with_a_name_git_fsck_refuses_is_taken_and_received_where_
     let scratch = alt_os::temp::tempdir_in(std::env::var_os("HOME").unwrap()).unwrap();
     let alice = root.path().join("alice");
     let aw = root.path().join("alice-work");
-    std::fs::create_dir(&alice).unwrap();
-    ok(&alice, &server.token, &["init", "."]);
-    base::write(&alice);
-    // read as `.alt` on some file systems
-    std::fs::create_dir(alice.join("ALT~1")).unwrap();
-    std::fs::write(alice.join("ALT~1/kept"), "kept\n").unwrap();
-    ok(&alice, &server.token, &["add", "."]);
-    ok(&alice, &server.token, &["commit", "-m", "base"]);
+    // the history is made by git, to which `ALT~1` is a name like any
+    // other, and imported: alt neither stages nor checks out a path that
+    // some file systems read as `.alt`, so the name is left out of the
+    // commit a workspace is made at, as git leaves `git~1` out
+    let alice_git = root.path().join("alice-git");
+    std::fs::create_dir(&alice_git).unwrap();
+    let identity = ["-c", "user.name=alice", "-c", "user.email=alice@test"];
+    let commit = |message: &str| {
+        let args = [&identity[..], &["commit", "-q", "-m", message]].concat();
+        git(&alice_git, &server.token, &args);
+    };
+    git(&alice_git, &server.token, &["init", "-q", "-b", "main"]);
+    base::write(&alice_git);
+    std::fs::create_dir(alice_git.join("ALT~1")).unwrap();
+    std::fs::write(alice_git.join("ALT~1/kept"), "kept\n").unwrap();
+    git(&alice_git, &server.token, &["add", "-A"]);
+    commit("base");
+    git(&alice_git, &server.token, &["rm", "-q", "-r", "ALT~1"]);
+    commit("leave the name out");
+    ok(
+        &alice_git,
+        &server.token,
+        &["import", alice.to_str().unwrap()],
+    );
     let baseline_git = root.path().join("baseline-git");
     let exported = baseline_git.to_str().unwrap();
     ok(&alice, &server.token, &["export", exported]);
@@ -198,4 +214,9 @@ fn a_task_of_a_history_with_a_name_git_fsck_refuses_is_taken_and_received_where_
     // the repository the history is from
     let received = value(&aw, &server.token, &receive);
     assert_eq!(received["state"], "received", "{received}");
+    // the repository holds the commit with the name, which is not checked out
+    let refused = run(&alice, &server.token, &["switch", "-c", "held", "HEAD~1"]);
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success(), "{said}");
+    assert!(said.contains("invalid path 'ALT~1/kept'"), "{said}");
 }
