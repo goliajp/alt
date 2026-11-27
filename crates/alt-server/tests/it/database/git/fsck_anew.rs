@@ -42,10 +42,19 @@ pub(super) fn planted(f: &Fixture, objects: &[(alt_pack_segment::Kind, &[u8])], 
     let bytes = built.out.into_inner();
     std::fs::write(f.store.pack_path("repository", id).unwrap(), &bytes).unwrap();
     let mut client = f.client();
+    // of a transaction of the repository, as the segment of a push is: one
+    // pushed after it is read behind it, whatever their ids
+    let sequence: i64 = client
+        .query_one(
+            "UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1 WHERE id='repository' RETURNING transaction_sequence",
+            &[],
+        )
+        .unwrap()
+        .get(0);
     client
         .execute(
-            "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state) VALUES('repository',$1,1,$2,$3,0,'live')",
-            &[&id, &(built.objects as i64), &(bytes.len() as i64)],
+            "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state) VALUES('repository',$1,$2,$3,$4,0,'live')",
+            &[&id, &sequence, &(built.objects as i64), &(bytes.len() as i64)],
         )
         .unwrap();
     client
