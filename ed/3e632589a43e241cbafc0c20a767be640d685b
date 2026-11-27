@@ -1,0 +1,7 @@
+schema: alt-meta/1
+type: test
+summary: let the fetch waiting for its turn hear nothing for as long as the server may take
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/altd_server_sending.rs
+touched: crates/alt-cli/tests/it/altd_server_turned.rs
