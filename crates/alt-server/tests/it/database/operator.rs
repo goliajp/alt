@@ -1,6 +1,7 @@
 mod change_links;
 mod maintenance;
 mod observability;
+mod observed;
 mod provision;
 mod schema_21;
 mod scrubbed;
@@ -9,19 +10,12 @@ mod unread;
 mod upgrade;
 use super::*;
 use alt_server::operator::{Config, HttpBounds};
+use observed::{ObservedServer, ServerProcess};
 use std::{
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Command, Output, Stdio},
 };
-
-struct ServerProcess(std::process::Child);
-impl Drop for ServerProcess {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
 
 struct OperatorDb {
     admin: String,
