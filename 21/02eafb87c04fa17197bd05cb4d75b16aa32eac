@@ -1,0 +1,9 @@
+schema: alt-meta/1
+type: test
+summary: read what the log says of a quiet proxy from a server process of its own
+author-type: human
+author: doracawl
+touched: crates/alt-server/tests/it/database/connections.rs
+touched: crates/alt-server/tests/it/database/connections/quiet_proxy.rs
+touched: crates/alt-server/tests/it/database/operator.rs
+touched: crates/alt-server/tests/it/database/operator/quiet_proxy.rs
