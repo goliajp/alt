@@ -1,0 +1,6 @@
+schema: alt-meta/1
+type: test
+summary: plant the segment of the unsafe history test at the sequence of a repository transaction
+author-type: human
+author: doracawl
+touched: crates/alt-cli/tests/it/task_remote/unsafe_history.rs
