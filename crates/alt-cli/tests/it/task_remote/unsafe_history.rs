@@ -54,10 +54,19 @@ fn planted(server: &Server, git: &Path) {
     let mut config: alt_pg::Config = server.admin_dsn.parse().unwrap();
     config.set_dbname(&server.database);
     let mut client = config.connect().unwrap();
+    // of a transaction of the repository, as the segment of a publication is:
+    // one published after it is read behind it, whatever their ids
+    let sequence: i64 = client
+        .query_one(
+            "UPDATE alt_repositories SET transaction_sequence=transaction_sequence+1 WHERE id='repository' RETURNING transaction_sequence",
+            &[],
+        )
+        .unwrap()
+        .get(0);
     client
         .execute(
-            "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state) VALUES('repository',$1,1,$2,$3,0,'live')",
-            &[&id, &(built.objects as i64), &(bytes.len() as i64)],
+            "INSERT INTO alt_pack_segments(repository,segment_id,sequence,objects,bytes,flags,state) VALUES('repository',$1,$2,$3,$4,0,'live')",
+            &[&id, &sequence, &(built.objects as i64), &(bytes.len() as i64)],
         )
         .unwrap();
     let refs = String::from_utf8(read(&["for-each-ref", "--format=%(objectname) %(refname)"]));
